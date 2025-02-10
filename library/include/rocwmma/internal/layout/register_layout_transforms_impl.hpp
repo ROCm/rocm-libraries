@@ -37,122 +37,132 @@ namespace rocwmma
         using RegisterLayout::Format;
 
         // Specific transform from one format to another
-        template<RegisterLayout::Format Src, RegisterLayout::Format Dst, typename RegisterLayoutTraits>
+        template <RegisterLayout::Format Src, RegisterLayout::Format Dst, typename... Traits>
         struct register_layout_transform_impl;
 
         // Non-interleaved formats
         // SOA <-> AOS
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                return Transforms::
-                            SoaToAos<LayoutTraits::BlockDim, LayoutTraits::MaxVectorWidth>::exec(
-                                forward<VecT>(v));
+                return Transforms::SoaToAos<LayoutTraits::BlockDim,
+                                            LayoutTraits::MaxVectorWidth>::exec(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::AOS, Format::SOA, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                return Transforms::
-                            AosToSoa<LayoutTraits::BlockDim, LayoutTraits::MaxVectorWidth>::exec(
-                                forward<VecT>(v));
+                return Transforms::AosToSoa<LayoutTraits::BlockDim,
+                                            LayoutTraits::MaxVectorWidth>::exec(forward<VecT>(v));
             }
         };
 
         // Non-interleaved gfx11 formats
         // SOA, AOS <-> WMMA input
         // SOA, AOS <-> WMMA acc
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::SOA, Format::WMMA_INPUT_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::to_wmma_input_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::AOS, Format::WMMA_INPUT_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::AOS, Format::SOA, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA, Format::WMMA_INPUT_GFX11, LayoutTraits>;
+                using xform0
+                    = register_layout_transform_impl<Format::AOS, Format::SOA, LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::SOA,
+                                                              Format::WMMA_INPUT_GFX11,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::SOA, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::from_wmma_input_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::AOS, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::SOA, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::WMMA_INPUT_GFX11,
+                                                              Format::SOA,
+                                                              LayoutTraits>;
+                using xform1
+                    = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::SOA, Format::WMMA_ACC_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::to_wmma_acc_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::AOS, Format::WMMA_ACC_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::AOS, Format::SOA, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA, Format::WMMA_ACC_GFX11, LayoutTraits>;
+                using xform0
+                    = register_layout_transform_impl<Format::AOS, Format::SOA, LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::SOA,
+                                                              Format::WMMA_ACC_GFX11,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::SOA, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::from_wmma_acc_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::AOS, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::SOA, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11,
+                                                              Format::SOA,
+                                                              LayoutTraits>;
+                using xform1
+                    = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
@@ -161,83 +171,124 @@ namespace rocwmma
         // SOA_INT <-> AOS_INT
         // SOA_INT, AOS_INT <-> A-major acc fmt
         // SOA_INT, AOS_INT <-> B-major acc fmt
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::SOA_INT, Format::AOS_INT, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::soa_int_to_aos_int<LayoutTraits::KPerThread>(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::AOS_INT, Format::SOA_INT, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::aos_int_to_soa_int<LayoutTraits::DimPerThread>(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::SOA_INT, Format::ACC_INT_A_MAJOR, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::SOA_INT,
+                                              Format::ACC_INT_A_MAJOR,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MmaBlocksA = LayoutTraits::BlockK / LayoutTraits::MmaDim;
-                constexpr uint32_t MaxVW = LayoutTraits::MaxVectorWidth;
+                constexpr uint32_t AccVecSize
+                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / LayoutTraits::MmaDim;
 
-                return Transforms::soa_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, MaxVW>(forward<VecT>(v));
+                // Note: Retrieve VW of native accumulator
+                constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
+                                                                    LayoutTraits::BlockDim,
+                                                                    LayoutTraits::KDim,
+                                                                    typename LayoutTraits::DataT,
+                                                                    void>::Result;
+
+                return Transforms::soa_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, AccMaxVW>(
+                    forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::AOS_INT, Format::ACC_INT_A_MAJOR, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::AOS_INT,
+                                              Format::ACC_INT_A_MAJOR,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MmaBlocksA = LayoutTraits::BlockK / LayoutTraits::MmaDim;
+                constexpr uint32_t AccVecSize
+                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / LayoutTraits::MmaDim;
                 constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / LayoutTraits::MmaDim;
-                constexpr uint32_t MaxVW = LayoutTraits::MaxVectorWidth;
 
-                return Transforms::aos_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, MmaBlocksB, MaxVW>(forward<VecT>(v));
+                // Note: Retrieve VW of native accumulator
+                constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
+                                                                    LayoutTraits::BlockDim,
+                                                                    LayoutTraits::KDim,
+                                                                    typename LayoutTraits::DataT,
+                                                                    void>::Result;
+
+                return Transforms::
+                    aos_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, MmaBlocksB, AccMaxVW>(
+                        forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::SOA_INT, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                              Format::SOA_INT,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t AccVecSize
+                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
                 constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / LayoutTraits::MmaDim;
-                constexpr uint32_t MaxVW = LayoutTraits::MaxVectorWidth;
 
-                return Transforms::mma_acc_int_a_major_to_soa_int<AccVecSize, MmaBlocksB, MaxVW>(forward<VecT>(v));
+                // Note: Retrieve VW of native accumulator
+                constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
+                                                                    LayoutTraits::BlockDim,
+                                                                    LayoutTraits::KDim,
+                                                                    typename LayoutTraits::DataT,
+                                                                    void>::Result;
+
+                return Transforms::mma_acc_int_a_major_to_soa_int<AccVecSize, MmaBlocksB, AccMaxVW>(
+                    forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::AOS_INT, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                              Format::AOS_INT,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MaxVW = LayoutTraits::MaxVectorWidth;
+                constexpr uint32_t AccVecSize
+                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
 
-                return Transforms::mma_acc_int_a_major_to_aos_int<AccVecSize, MaxVW>(forward<VecT>(v));
+                // Note: Retrieve VW of native accumulator
+                constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
+                                                                    LayoutTraits::BlockDim,
+                                                                    LayoutTraits::KDim,
+                                                                    typename LayoutTraits::DataT,
+                                                                    void>::Result;
+
+                return Transforms::mma_acc_int_a_major_to_aos_int<AccVecSize, AccMaxVW>(
+                    forward<VecT>(v));
             }
         };
 
@@ -246,120 +297,156 @@ namespace rocwmma
         // SOA_INT, AOS_INT <-> WMMA acc
         // A-major acc fmt <-> WMMA acc
         // B-major acc fmt <-> WMMA acc
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::SOA_INT, Format::WMMA_INPUT_GFX11, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::SOA_INT,
+                                              Format::WMMA_INPUT_GFX11,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::to_wmma_input_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::AOS_INT, Format::WMMA_INPUT_GFX11, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::AOS_INT,
+                                              Format::WMMA_INPUT_GFX11,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::AOS_INT, Format::SOA_INT, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA_INT, Format::WMMA_INPUT_GFX11, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::AOS_INT,
+                                                              Format::SOA_INT,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::SOA_INT,
+                                                              Format::WMMA_INPUT_GFX11,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::SOA_INT, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11,
+                                              Format::SOA_INT,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::from_wmma_input_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::AOS_INT, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::WMMA_INPUT_GFX11,
+                                              Format::AOS_INT,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::WMMA_INPUT_GFX11, Format::SOA_INT, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::SOA_INT, Format::AOS_INT, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::WMMA_INPUT_GFX11,
+                                                              Format::SOA_INT,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::SOA_INT,
+                                                              Format::AOS_INT,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::SOA_INT, Format::WMMA_ACC_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::SOA_INT, Format::ACC_INT_A_MAJOR, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::WMMA_ACC_GFX11, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::SOA_INT,
+                                                              Format::ACC_INT_A_MAJOR,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                                              Format::WMMA_ACC_GFX11,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::AOS_INT, Format::WMMA_ACC_GFX11, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::AOS_INT, Format::ACC_INT_A_MAJOR, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::WMMA_ACC_GFX11, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::AOS_INT,
+                                                              Format::ACC_INT_A_MAJOR,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                                              Format::WMMA_ACC_GFX11,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::SOA_INT, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::ACC_INT_A_MAJOR, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::SOA_INT, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11,
+                                                              Format::ACC_INT_A_MAJOR,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                                              Format::SOA_INT,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
+        template <typename LayoutTraits>
         struct register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::AOS_INT, LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
-                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::ACC_INT_A_MAJOR, LayoutTraits>;
-                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::AOS_INT, LayoutTraits>;
+                using xform0 = register_layout_transform_impl<Format::WMMA_ACC_GFX11,
+                                                              Format::ACC_INT_A_MAJOR,
+                                                              LayoutTraits>;
+                using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                                              Format::AOS_INT,
+                                                              LayoutTraits>;
                 return xform1::exec(xform0(forward<VecT>(v)));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR, Format::WMMA_ACC_GFX11, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
+                                              Format::WMMA_ACC_GFX11,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::to_wmma_acc_gfx11(forward<VecT>(v));
             }
         };
 
-        template<typename LayoutTraits>
-        struct register_layout_transform_impl<Format::WMMA_ACC_GFX11, Format::ACC_INT_A_MAJOR, LayoutTraits>
+        template <typename LayoutTraits>
+        struct register_layout_transform_impl<Format::WMMA_ACC_GFX11,
+                                              Format::ACC_INT_A_MAJOR,
+                                              LayoutTraits>
         {
-            template<typename VecT>
+            template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 return Transforms::from_wmma_acc_gfx11(forward<VecT>(v));
             }
         };
 
-// Keeps things a bit more tidy. Quick access to register layout traits.
-using LayoutTraits_impl::register_layout_traits;
+        // Keeps things a bit more tidy. Quick access to register layout traits.
+        using LayoutTraits_impl::register_layout_traits;
 #define traits_lhs register_layout_traits<RegisterLayoutLhs>
 #define traits_rhs register_layout_traits<RegisterLayoutRhs>
 
@@ -423,8 +510,11 @@ using LayoutTraits_impl::register_layout_traits;
             {
                 // Extract traits for functional implementation
                 using RegisterLayout::Format;
-                using storage_traits = conditional_t<traits_lhs::is_storage, traits_lhs, traits_rhs>;
-                using transform_impl = register_layout_transform_impl<traits_lhs::Format, traits_rhs::Format, storage_traits>;
+                using storage_traits
+                    = conditional_t<traits_lhs::is_storage, traits_lhs, traits_rhs>;
+                using transform_impl = register_layout_transform_impl<traits_lhs::Format,
+                                                                      traits_rhs::Format,
+                                                                      storage_traits>;
 
                 // Forward to functional implementation
                 return transform_impl::exec(forward<VecT>(v));

@@ -33,14 +33,14 @@ namespace rocwmma
 {
     namespace Transforms
     {
-        template<uint32_t KPerThread, typename VecT>
+        template <uint32_t KPerThread, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_aos_int(VecT&& v)
         {
             // interleave<1, KPT, VecSize>
             return interleave<1u, KPerThread>(forward<VecT>(v));
         }
 
-        template<uint32_t DimPerThread, typename VecT>
+        template <uint32_t DimPerThread, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_soa_int(VecT&& v)
         {
             // interleave<1, DPT, VecSize>
@@ -48,14 +48,15 @@ namespace rocwmma
             return interleave<GatherSize, DimPerThread>(forward<VecT>(v));
         }
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MaxVW, typename VecT>
-        ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_mma_acc_int_a_major(VecT&& v)
+        template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MaxVW, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto)
+            soa_int_to_mma_acc_int_a_major(VecT&& v)
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
             if constexpr((bool)ROCWMMA_ARCH_GFX9)
             {
-                if constexpr (MaxVW == 1u)
+                if constexpr(MaxVW == 1u)
                 {
                     // First, interleave full vector
                     // interleave<1, MmaBlocksA, VecSize>
@@ -63,21 +64,18 @@ namespace rocwmma
 
                     // For each subvector of AccVecSize:
                     // unpackLoHi16 + unpackLoHi32
-                    return vector_for_each<AccVecSize>(
-                        result,
-                        [](auto&& v, uint32_t idx)
-                        {
-                            return unpackLoHi32(unpackLoHi16(v));
-                        });
+                    return vector_for_each<AccVecSize>(result, [](auto&& v, uint32_t idx) {
+                        return unpackLoHi32(unpackLoHi16(v));
+                    });
                 }
-                else if constexpr (MaxVW == 4u)
+                else if constexpr(MaxVW == 4u)
                 {
                     // Interleave full vector
                     return interleave<1u, MmaBlocksA>(forward<VecT>(v));
                 }
                 else
                 {
-                    static_assert(0, "Shouldn't get here");
+                    //static_assert(0, "Shouldn't get here");
                     return forward<VecT>(v);
                 }
             }
@@ -88,16 +86,14 @@ namespace rocwmma
 
                 // First perform combined interleave on full vector
                 // interleave<1, MmaBlocksA, VecSize> + interleave<1, 2, AccVecSize>
-                auto result = interleave_combine<interleave_idx0, interleave_idx1>(forward<VecT>(v));
+                auto result
+                    = interleave_combine<interleave_idx0, interleave_idx1>(forward<VecT>(v));
 
                 // For each subvector of AccVecSize:
                 // unpackLoHi16
-                return vector_for_each<AccVecSize>(
-                    result,
-                    [](auto&& v, uint32_t idx)
-                    {
-                        return unpackLoHi16(extractLo(v), extractHi(v));
-                    });
+                return vector_for_each<AccVecSize>(result, [](auto&& v, uint32_t idx) {
+                    return unpackLoHi16(extractLo(v), extractHi(v));
+                });
             }
             else if constexpr((bool)ROCWMMA_ARCH_GFX12)
             {
@@ -106,34 +102,35 @@ namespace rocwmma
             }
             else
             {
-                static_assert(0, "Shouldn't get here");
+                //static_assert(0, "Shouldn't get here");
                 return forward<VecT>(v);
             }
         }
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t MaxVW, typename VecT>
-        ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_soa_int(VecT&& v)
+        template <uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t MaxVW, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto)
+            mma_acc_int_a_major_to_soa_int(VecT&& v)
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
             if constexpr((bool)ROCWMMA_ARCH_GFX9)
             {
-                if constexpr (MaxVW == 1u)
+                if constexpr(MaxVW == 1u)
                 {
                     // unpackLoHi16 on entire vector
                     // unpackLoHi32 on entire vector
                     // interleave entire vector
-                    return interleave<1u, MaxVW * MmaBlocksB>(unpackLoHi32(unpackLoHi16(forward<VecT>(v))));
-
+                    return interleave<1u, MaxVW * MmaBlocksB>(
+                        unpackLoHi32(unpackLoHi16(forward<VecT>(v))));
                 }
-                else if constexpr (MaxVW == 4u)
+                else if constexpr(MaxVW == 4u)
                 {
                     // Interleave full vector
-                    return interleave<1u,  MaxVW * MmaBlocksB>(forward<VecT>(v));
+                    return interleave<1u, MaxVW * MmaBlocksB>(forward<VecT>(v));
                 }
                 else
                 {
-                    static_assert(0, "Shouldn't get here");
+                    //static_assert(0, "Shouldn't get here");
                     return forward<VecT>(v);
                 }
             }
@@ -141,12 +138,10 @@ namespace rocwmma
             {
                 // For each subvector of AccVecSize:
                 // unpackLoHi16
-                auto result = vector_for_each<AccVecSize>(
-                    forward<VecT>(v),
-                    [](auto&& v, uint32_t idx)
-                    {
-                        return unpackLoHi16(extractLo(v), extractHi(v));
-                    });
+                auto result
+                    = vector_for_each<AccVecSize>(forward<VecT>(v), [](auto&& v, uint32_t idx) {
+                          return unpackLoHi16(extractLo(v), extractHi(v));
+                      });
 
                 // Perform combined interleave on full vector
                 using interleave_idx0 = interleave_idx<1u, 4u, AccVecSize>;
@@ -155,23 +150,27 @@ namespace rocwmma
             }
             else if constexpr((bool)ROCWMMA_ARCH_GFX12)
             {
-
             }
             else
             {
-                static_assert(0, "Shouldn't get here");
+                //static_assert(0, "Shouldn't get here");
                 return forward<VecT>(v);
             }
         }
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MmaBlocksB, uint32_t MaxVW, typename VecT>
-        ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_mma_acc_int_a_major(VecT&& v)
+        template <uint32_t AccVecSize,
+                  uint32_t MmaBlocksA,
+                  uint32_t MmaBlocksB,
+                  uint32_t AccMaxVW,
+                  typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto)
+            aos_int_to_mma_acc_int_a_major(VecT&& v)
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
             if constexpr((bool)ROCWMMA_ARCH_GFX9)
             {
-                if constexpr (MaxVW == 1u)
+                if constexpr(AccMaxVW == 1u)
                 {
                     // First, interleave full vector
                     // interleave<1, MmaBlocksA, VecSize>
@@ -179,75 +178,70 @@ namespace rocwmma
 
                     // For each subvector of AccVecSize:
                     // unpackLoHi16 + unpackLoHi32
-                    return vector_for_each<AccVecSize>(
-                        result,
-                        [](auto&& v, uint32_t idx)
-                        {
-                            return unpackLoHi32(unpackLoHi16(v));
-                        });
+                    return vector_for_each<AccVecSize>(result, [](auto&& v, uint32_t idx) {
+                        return unpackLoHi32(unpackLoHi16(v));
+                    });
                 }
-                else if constexpr (MaxVW == 4u)
+                else if constexpr(AccMaxVW == 4u)
                 {
                     // Interleave full vector
                     return interleave<1u, MmaBlocksA * MmaBlocksB>(forward<VecT>(v));
                 }
                 else
                 {
-                    static_assert(0, "Shouldn't get here");
+                    //static_assert(0, "Shouldn't get here");
                     return forward<VecT>(v);
                 }
             }
             else if constexpr((bool)ROCWMMA_ARCH_GFX11)
             {
-                using interleave_idx0 = interleave_idx<1u, MmaBlocksA * MmaBlocksB, VecTraits::size()>;
+                using interleave_idx0
+                    = interleave_idx<1u, MmaBlocksA * MmaBlocksB, VecTraits::size()>;
                 using interleave_idx1 = interleave_idx<1u, 2u, AccVecSize>;
 
                 // First perform combined interleave on full vector
                 // interleave<1, MmaBlocksA, VecSize> + interleave<1, 2, AccVecSize>
-                auto result = interleave_combine<interleave_idx0, interleave_idx1>(forward<VecT>(v));
+                auto result
+                    = interleave_combine<interleave_idx0, interleave_idx1>(forward<VecT>(v));
 
                 // For each subvector of AccVecSize:
                 // unpackLoHi16
-                return vector_for_each<AccVecSize>(
-                    result,
-                    [](auto&& v, uint32_t idx)
-                    {
-                        return unpackLoHi16(extractLo(v), extractHi(v));
-                    });
+                return vector_for_each<AccVecSize>(result, [](auto&& v, uint32_t idx) {
+                    return unpackLoHi16(extractLo(v), extractHi(v));
+                });
             }
             else if constexpr((bool)ROCWMMA_ARCH_GFX12)
             {
-
             }
             else
             {
-                static_assert(0, "Shouldn't get here");
+                //static_assert(0, "Shouldn't get here");
                 return forward<VecT>(v);
             }
         }
 
-        template<uint32_t AccVecSize, uint32_t MaxVW, typename VecT>
-        ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_aos_int(VecT&& v)
+        template <uint32_t AccVecSize, uint32_t MaxVW, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto)
+            mma_acc_int_a_major_to_aos_int(VecT&& v)
         {
             using VecTraits = VecTraits<decay_t<VecT>>;
 
             if constexpr((bool)ROCWMMA_ARCH_GFX9)
             {
-                if constexpr (MaxVW == 1u)
+                if constexpr(MaxVW == 1u)
                 {
                     // unpackLoHi16 on entire vector
                     // unpackLoHi32 on entire vector
                     return unpackLoHi32(unpackLoHi16(forward<VecT>(v)));
-
                 }
-                else if constexpr (MaxVW == 4u)
+                else if constexpr(MaxVW == 4u)
                 {
                     // Interleave full vector
-                    return interleave<1u,  MaxVW>(forward<VecT>(v));
+                    return interleave<1u, MaxVW>(forward<VecT>(v));
                 }
                 else
                 {
-                    static_assert(0, "Shouldn't get here");
+                    //static_assert(0, "Shouldn't get here");
                     return forward<VecT>(v);
                 }
             }
@@ -255,12 +249,10 @@ namespace rocwmma
             {
                 // For each subvector of AccVecSize:
                 // unpackLoHi16
-                auto result = vector_for_each<AccVecSize>(
-                    forward<VecT>(v),
-                    [](auto&& v, uint32_t idx)
-                    {
-                        return unpackLoHi16(extractLo(v), extractHi(v));
-                    });
+                auto result
+                    = vector_for_each<AccVecSize>(forward<VecT>(v), [](auto&& v, uint32_t idx) {
+                          return unpackLoHi16(extractLo(v), extractHi(v));
+                      });
 
                 // Perform combined interleave on full vector
                 using interleave_idx0 = interleave_idx<1u, 4u, AccVecSize>;
@@ -274,7 +266,7 @@ namespace rocwmma
             }
             else
             {
-                static_assert(0, "Shouldn't get here");
+                //static_assert(0, "Shouldn't get here");
                 return forward<VecT>(v);
             }
         }
@@ -284,4 +276,3 @@ namespace rocwmma
 } // namespace rocwmma
 
 #endif // ROCWMMA_LAYOUT_TRANSFORMS_INT_IMPL_HPP
-
