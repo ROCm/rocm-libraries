@@ -53,8 +53,7 @@ adequately represent all the values that can affect the performance
 of the function.
 
 Internal API logging outputs information like the GEMM backend used for a particular GEMM call.
-Not all internal APIs are logged. The log output goes to the same stream as trace logging, but the
-output can be controlled.
+Not all internal APIs are logged. The log output goes to the same stream as trace logging.
 
 The default stream for logging output is standard error. Three
 environment variables can set the full path name for a log file:

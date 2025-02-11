@@ -5,10 +5,10 @@
 .. _windows-install:
 
 ********************************************************************
-Installing and building for Windows
+Installing and building for Microsoft Windows
 ********************************************************************
 
-This topic discusses how to install rocBLAS on Windows from a prebuilt package or from source.
+This topic discusses how to install rocBLAS on Microsoft Windows from a prebuilt package or from source.
 
 =====================================
 Prerequisites
@@ -90,7 +90,7 @@ Download rocBLAS
 ----------------
 
 The rocBLAS source code, which is the same as the ROCm Linux version, is available at the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
-The version of the ROCm HIP SDK might appear in the default installation path,
+The ROCm HIP SDK version might appear in the default installation path,
 but you can run the HIP SDK compiler to display the version from the ``bin/`` folder:
 
 ::

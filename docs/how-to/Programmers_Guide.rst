@@ -656,7 +656,7 @@ Level-1 BLAS subprograms have only quick-return-success.
 rocBLAS
 --------
 
-rocBLAS has five types of argument checking:
+For a full list of error return codes, see the ``rocblas_status`` enumeration in :ref:`api-datatypes`.
 
 *  ``rocblas_status_invalid_handle``: If the handle is a NULL pointer.
 *  ``rocblas_status_invalid_size``: For an invalid size, increment, or leading dimension argument.

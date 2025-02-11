@@ -55,7 +55,7 @@ The kernels are asynchronous unless:
 
 In both cases above, the launch can be made asynchronous by:
 
-*  Using ``rocblas_pointer_mode_device`` to keep the scalar result on the device. Only the following Level-1 BLAS functions return a scalar result: ``Xdot``, ``Xdotu``, ``Xnrm2``, ``Xasum``, ``iXamax``, and ``iXamin``.
+*  Using ``rocblas_pointer_mode_device`` to keep the scalar result on the device. Only the following Level-1 BLAS functions return a scalar result: ``Xdot``, ``Xdotu``, ``Xdotc``, ``Xnrm2``, ``Xasum``, ``iXamax``, and ``iXamin``.
 *  Using the device memory functions provided to allocate persistent device memory in the handle. Note that most rocBLAS functions do not allocate temporary device memory.
 
 Before calling a rocBLAS function, arrays must be copied to the device. Integer scalars like m, n, and k are stored on the host. Floating point scalars like alpha and beta can be on the host or device.
@@ -86,7 +86,7 @@ Rules for obtaining the rocBLAS API from legacy BLAS functions
    *  When legacy BLAS functions have return values, the return value is
       instead added as the last function argument. It is returned by
       reference on either the host or the device. This applies to the
-      following functions: ``xDOT``, ``xDOTU``, ``xNRM2``, ``xASUM``, ``IxAMAX``, and ``IxAMIN``.
+      following functions: ``xDOT``, ``xDOTU``, ``xDOTC``, ``xNRM2``, ``xASUM``, ``IxAMAX``, and ``IxAMIN``.
 
 #. The return value of all functions is ``rocblas_status``, which is defined in
    ``rocblas_types.h``. It is used to check for errors.
@@ -164,7 +164,7 @@ The rocBLAS library default implementations are LP64, so ``rocblas_int`` argumen
 ILP64 interface
 ---------------
 
-The rocBLAS library Level-1 functions are also available with ILP64 interfaces. With these interfaces,
+The rocBLAS library functions are also available with ILP64 interfaces. With these interfaces,
 all ``rocblas_int`` arguments are replaced by the type name
 ``int64_t``.  These ILP64 function names all end with the suffix ``_64``. The only output arguments that change are for
 ``xMAX`` and ``xMIN``, where the index is now ``int64_t``. Performance should match the LP64 API when problem sizes don't require the additional
@@ -197,7 +197,7 @@ scalar parameters must be allocated on the device.
 
 There are two types of scalar parameters:
 
-*  Scaling parameters like alpha and beta used in functions like ``axpy``, ``gemv``, and ``gemm 2``
+*  Scaling parameters like alpha and beta used in functions like ``axpy``, ``gemv``, and ``gemm``
 *  Scalar results from the functions ``amax``, ``amin``, ``asum``, ``dot``, and ``nrm2``
 
 Scalar parameters like alpha and beta can be allocated on the host heap or
@@ -397,6 +397,10 @@ Functions using atomic operations
  :any:`rocblas_cgemm`
 
 =======================
+
+.. note::
+
+   This list also includes all Level-3 functions.
 
 MI100 (gfx908) considerations
 -----------------------------
