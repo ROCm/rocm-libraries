@@ -23,10 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
-// UNSUPPORTED: gcc-6
-// UNSUPPORTED: nvcc-11.1
-
 // TODO: there's multiple failures that appear to be all about overload resolution and SFINAE,
 // and they will require further debugging to pinpoint the root cause of (almost certainly a
 // compiler bug)
@@ -683,9 +679,7 @@ __host__ __device__ void call_operator_noexcept_test()
     auto ret = cuda::std::not_fn(value);
     (void) ret;
     LIBCPP_STATIC_ASSERT(noexcept(!_CUDA_VSTD::__invoke(value)), "");
-#if TEST_STD_VER > 2014
     static_assert(noexcept(!cuda::std::invoke(value)), "");
-#endif
 // TODO: nvcc gets this wrong, investigate
 #if !(defined(__CUDACC__) || defined(__HIPCC__))
     static_assert(noexcept(ret()), "call should be noexcept");

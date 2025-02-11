@@ -94,9 +94,9 @@ using ::time_t;
 #if !_CCCL_COMPILER(NVRTC)  && !defined(_CCCL_COMPILER_HIPRTC)
 
 using ::tm;
-#  if _CCCL_STD_VER >= 2017 && !_CCCL_COMPILER(MSVC)
+#  if !_CCCL_COMPILER(MSVC)
 using ::timespec;
-#  endif // _CCCL_STD_VER >= 2017 && !_CCCL_COMPILER(MSVC)
+#  endif // !_CCCL_COMPILER(MSVC)
 using ::clock;
 using ::difftime;
 using ::mktime;
@@ -106,11 +106,9 @@ using ::asctime;
 using ::ctime;
 using ::gmtime;
 using ::localtime;
-#  endif
+#  endif // _LIBCUDACXX_HAS_NO_THREAD_UNSAFE_C_FUNCTIONS
 using ::strftime;
-#  if _CCCL_STD_VER >= 2017
 using ::timespec_get;
-#  endif // _CCCL_STD_VER >= 2017
 #endif // _CCCL_COMPILER(NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 
 _LIBCUDACXX_END_NAMESPACE_STD

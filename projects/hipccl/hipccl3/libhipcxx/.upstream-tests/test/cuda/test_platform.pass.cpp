@@ -27,8 +27,6 @@
 
 // UNSUPPORTED: hipcc, hiprtc
 
-// UNSUPPORTED: c++03
-
 #include "test_macros.h"
 #include <nv/target>
 

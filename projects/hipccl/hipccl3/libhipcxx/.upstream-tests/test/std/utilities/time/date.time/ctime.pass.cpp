@@ -38,7 +38,7 @@
 #  endif
 #endif
 
-#if TEST_STD_VER > 2014 && defined(TEST_HAS_C11_FEATURES)
+#if defined(TEST_HAS_C11_FEATURES)
 #  ifndef TIME_UTC
 #    error TIME_UTC not defined
 #  endif
@@ -63,10 +63,10 @@ int main(int, char**)
   char str[3];
   unused(tm); // Prevent unused warning
   unused(str); // Prevent unused warning
-#  if TEST_STD_VER > 2014 && defined(TEST_HAS_C11_FEATURES)
+#  if defined(TEST_HAS_C11_FEATURES)
   cuda::std::timespec tmspec = {};
   unused(tmspec); // Prevent unused warning
-#  endif
+#  endif // TEST_HAS_C11_FEATURES
 
 //FIXME(HIP): clock() is declared as extern clock_t clock (void) __THROW; in <time.h>. clock_t is a typedef to long.
 //The below test doesn't work for HIP, as the clock() function is defined in /opt/rocm/include/hip/amd_detail/amd_device_functions.h
@@ -77,9 +77,9 @@ int main(int, char**)
   static_assert((cuda::std::is_same<decltype(cuda::std::difftime(t, t)), double>::value), "");
   static_assert((cuda::std::is_same<decltype(cuda::std::mktime(&tm)), cuda::std::time_t>::value), "");
   static_assert((cuda::std::is_same<decltype(cuda::std::time(&t)), cuda::std::time_t>::value), "");
-#  if TEST_STD_VER > 2014 && defined(TEST_HAS_TIMESPEC_GET)
+#  if defined(TEST_HAS_TIMESPEC_GET)
   static_assert((cuda::std::is_same<decltype(cuda::std::timespec_get(&tmspec, 0)), int>::value), "");
-#  endif
+#  endif // TEST_HAS_TIMESPEC_GET
 #  ifndef _LIBCUDACXX_HAS_NO_THREAD_UNSAFE_C_FUNCTIONS
   static_assert((cuda::std::is_same<decltype(cuda::std::asctime(&tm)), char*>::value), "");
   static_assert((cuda::std::is_same<decltype(cuda::std::ctime(&t)), char*>::value), "");

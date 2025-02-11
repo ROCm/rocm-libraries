@@ -109,7 +109,6 @@ __host__ __device__ constexpr bool can_swap()
   return cuda::std::is_same<decltype(can_swap_test<Tp>(0)), void>::value;
 }
 
-#if TEST_STD_VER >= 2014
 __host__ __device__ constexpr bool test_swap_constexpr()
 {
   int i = 1;
@@ -117,7 +116,6 @@ __host__ __device__ constexpr bool test_swap_constexpr()
   cuda::std::swap(i, j);
   return i == 2 && j == 1;
 }
-#endif // TEST_STD_VER >= 2014
 
 template <class T>
 struct swap_with_friend
@@ -213,9 +211,7 @@ int main(int, char**)
     static_assert(noexcept(cuda::std::swap(nm, nm)), "");
   }
 
-#if TEST_STD_VER >= 2014
   static_assert(test_swap_constexpr(), "");
-#endif // TEST_STD_VER >= 2014
 
   test_ambiguous_std<cuda::std::pair<int, int>>(); // has cuda::std::swap overload
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
@@ -227,10 +223,10 @@ int main(int, char**)
   test_ambiguous_std<swap_with_friend<::std::pair<int, int>>>();
 #endif // !TEST_COMPILER_NVRTC
 
-#if !defined(TEST_COMPILER_NVRTC) && TEST_STD_VER >= 2014 && !defined(TEST_COMPILER_HIPRTC)
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   static_assert(cuda::std::is_swappable<cuda::std::pair<::std::pair<int, int>, int>>::value, "");
   static_assert(cuda::std::is_swappable<swap_with_friend<::std::pair<int, int>>>::value, "");
-#endif // !defined(TEST_COMPILER_NVRTC) && TEST_STD_VER >= 2014
+#endif // !defined(TEST_COMPILER_NVRTC)
 
   return 0;
 }

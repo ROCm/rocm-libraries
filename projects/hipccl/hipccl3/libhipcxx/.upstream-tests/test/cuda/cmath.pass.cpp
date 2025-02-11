@@ -6,7 +6,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
-// UNSUPPORTED: c++03, c++11, c++14
 
 // Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -146,8 +145,6 @@ __host__ __device__ TEST_CONSTEXPR_CXX14 bool test()
 int main(int arg, char** argv)
 {
   test();
-#if TEST_STD_VER >= 2014
   static_assert(test(), "");
-#endif // TEST_STD_VER >= 2014
   return 0;
 }

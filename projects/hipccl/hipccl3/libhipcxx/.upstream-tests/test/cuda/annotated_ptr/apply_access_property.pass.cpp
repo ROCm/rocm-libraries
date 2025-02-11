@@ -28,7 +28,6 @@
 // UNSUPPORTED: pre-sm-70
 // UNSUPPORTED: !nvcc
 // UNSUPPORTED: nvrtc, hiprtc
-// UNSUPPORTED: c++98, c++03
 
 #include "utils.h"
 

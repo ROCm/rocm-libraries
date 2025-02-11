@@ -24,8 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: c++03, c++11
-
 // template<class T>
 // struct iterator_traits;
 

@@ -30,8 +30,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// UNSUPPORTED: c++03, c++11
-
 // TODO(HIP/AMD): in the current ROCm version this test fails (TheRock January 12th 2026)
 // We therefore unsupport this test for now. 
 // See Issue https://github.com/ROCm/libhipcxx/issues/15

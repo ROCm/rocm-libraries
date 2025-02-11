@@ -59,16 +59,16 @@ _CCCL_DIAG_SUPPRESS_CLANG("-Wmismatched-tags")
 // This is a workaround for the fact that structured bindings require that the specializations of
 // `tuple_size` and `tuple_element` reside in namespace std (https://eel.is/c++draft/dcl.struct.bind#4).
 // See https://github.com/NVIDIA/libcudacxx/issues/316 for a short discussion
-#if _CCCL_STD_VER >= 2017
+
 namespace std
 {
-#  if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
+#if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 template <class... _Tp>
 struct tuple_size;
 
 template <size_t _Ip, class... _Tp>
 struct tuple_element;
-#  endif // _CCCL_COMPILER(NVRTC)
+#endif // _CCCL_COMPILER(NVRTC)
 
 template <class _Tp, size_t _Size>
 struct tuple_size<_CUDA_VSTD::array<_Tp, _Size>> : _CUDA_VSTD::tuple_size<_CUDA_VSTD::array<_Tp, _Size>>
@@ -223,7 +223,6 @@ struct tuple_element<_Idx, const volatile _CUDA_VRANGES::subrange<_Ip, _Sp, _Kp>
     : _CUDA_VSTD::tuple_element<_Idx, const volatile _CUDA_VRANGES::subrange<_Ip, _Sp, _Kp>>
 {};
 } // namespace std
-#endif // _CCCL_STD_VER >= 2017
 
 _CCCL_DIAG_POP
 

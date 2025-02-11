@@ -24,11 +24,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: c++11
 // UNSUPPORTED: msvc && c++14, msvc && c++17
 
 // No CTAD in C++14 or earlier
-// UNSUPPORTED: c++14
 
 #include <cuda/std/cassert>
 #include <cuda/std/mdspan>

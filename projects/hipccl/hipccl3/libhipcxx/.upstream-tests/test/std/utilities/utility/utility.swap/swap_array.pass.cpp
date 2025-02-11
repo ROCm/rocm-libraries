@@ -93,7 +93,6 @@ __host__ __device__ constexpr bool can_swap()
   return cuda::std::is_same<decltype(can_swap_test<Tp>(0)), void>::value;
 }
 
-#if TEST_STD_VER >= 2014
 __host__ __device__ constexpr bool test_swap_constexpr()
 {
   int i[3] = {1, 2, 3};
@@ -101,7 +100,6 @@ __host__ __device__ constexpr bool test_swap_constexpr()
   cuda::std::swap(i, j);
   return i[0] == 4 && i[1] == 5 && i[2] == 6 && j[0] == 1 && j[1] == 2 && j[2] == 3;
 }
-#endif // TEST_STD_VER >= 2014
 
 __host__ __device__ void test_ambiguous_std()
 {
@@ -162,9 +160,7 @@ int main(int, char**)
     static_assert(noexcept(cuda::std::swap(ma, ma)), "");
   }
 
-#if TEST_STD_VER >= 2014
   static_assert(test_swap_constexpr(), "");
-#endif // TEST_STD_VER >= 2014
 
   test_ambiguous_std();
 

@@ -24,7 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: c++03, c++11
 // UNSUPPORTED: msvc-19.16
 // UNSUPPORTED: nvrtc, hiprtc
 
@@ -148,7 +147,7 @@ struct non_neq_comparable
   }
 };
 static_assert(!cuda::mr::resource<non_neq_comparable>, "");
-#endif // TEST_STD_VER <20
+#endif // TEST_STD_VER < 2020
 
 int main(int, char**)
 {
