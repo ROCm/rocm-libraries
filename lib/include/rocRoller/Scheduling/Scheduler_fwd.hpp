@@ -23,8 +23,8 @@ namespace rocRoller
             VCC,
             Branch,
             Unlock,
-            Count,
-            M0
+            M0,
+            Count
         };
 
         class Scheduler;

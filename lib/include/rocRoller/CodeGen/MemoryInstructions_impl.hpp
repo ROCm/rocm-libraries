@@ -75,7 +75,7 @@ namespace rocRoller
         case Buffer:
             AssertFatal(bufDesc);
             // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadLocal
+            // of addr + offset and pass it to loadBuffer
             if(offset && offset->regType() != Register::Type::Literal)
             {
                 newAddr
@@ -90,7 +90,7 @@ namespace rocRoller
         case Buffer2LDS:
             AssertFatal(bufDesc);
             // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to loadLocal
+            // of addr + offset and pass it to bufferLoad2LDS
             if(offset && offset->regType() != Register::Type::Literal)
             {
                 newAddr

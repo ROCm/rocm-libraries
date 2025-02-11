@@ -183,7 +183,7 @@ namespace rocRoller
                 auto baseTag = m_baseOffsets[offsetTag];
                 if(direct2LDS)
                 {
-                    auto tmp = m_context->registerTagManager()->getRegister(offsetTag);
+                    auto tmp = m_context->registerTagManager()->getRegister(baseTag);
                     co_yield generate(info.data, info.data->expression() + tmp->expression());
                     m_context->getScopeManager()->addRegister(offsetTag);
                     m_context->registerTagManager()->addRegister(offsetTag, info.data);
@@ -838,7 +838,8 @@ namespace rocRoller
             {
                 co_yield m_context->copier()->ensureType(
                     info.data, info.data, Register::Type::Vector);
-                co_yield getOffset(info, coords, tag, !allStridesAreLiteral && info.m > 1, true);
+                co_yield getOffset(
+                    info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
             }
 
             if(allStridesAreLiteral)

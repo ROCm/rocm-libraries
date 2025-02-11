@@ -1498,8 +1498,6 @@ namespace MemoryInstructionsTest
                 co_yield Instruction::Comment("Set buffer option");
                 co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
 
-                auto sgprSrd = bufDesc->allRegisters();
-
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
                 bufInstOpts.lds  = true;
 

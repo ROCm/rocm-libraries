@@ -275,10 +275,12 @@ namespace rocRoller
         {
             // If this assertion starts failing, it's likely one of these classes has had a member added.
             static_assert(
-                std::same_as<
+                CIsAnyOf<
                     Op,
+                    KernelGraph::ControlGraph::LoadVGPR,
+                    KernelGraph::ControlGraph::LoadSGPR,
                     KernelGraph::ControlGraph::
-                        LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadTileDirect2LDS> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
+                        LoadTileDirect2LDS> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
 
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
