@@ -231,7 +231,7 @@ set_target_properties(
 target_link_libraries(rocroller PRIVATE spdlog::spdlog_header_only)
 
 if(ROCROLLER_EMBED_ARCH_DEF)
-    target_link_libraries(rocroller PRIVATE rocRoller::GPUArchitecture_def)
+    target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocRoller::GPUArchitecture_def>)
 else()
     target_compile_definitions(rocroller PRIVATE ROCROLLER_NO_EMBED_ARCH_DEF)
 endif()
@@ -261,7 +261,7 @@ target_include_directories(
 
 # Header only, not exposed in any public headers, system package not required
 rocroller_add_dependency(libdivide VERSION 5.1)
-target_link_libraries(rocroller PRIVATE libdivide)
+target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:libdivide>)
 
 # LLVM has RTTI disabled by default and ROCm's LLVM also has RTTI disabled.
 # RTTI is enabled for rocRoller, except for the compilation units below.
