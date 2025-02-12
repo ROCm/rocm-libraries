@@ -33,6 +33,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, Basic)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -76,7 +77,7 @@ namespace rocRollerTest
 
         auto inst3 = Instruction("s_load_dword", {dst3}, {src2, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0, ""));
         m_context->schedule(inst3);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -184,6 +185,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, CorrectQueueBehavior)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -238,7 +240,7 @@ namespace rocRollerTest
 
         auto inst4 = Instruction("buffer_load_dword", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LoadCnt(arch, 2));
         m_context->schedule(inst4);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -260,6 +262,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, BarrierLGKMWait)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Float, 1);
@@ -274,7 +277,9 @@ namespace rocRollerTest
 
         auto inst4 = Instruction("s_barrier", {}, {}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        auto kmDsCount{rocRoller::WaitCount::KMCnt(arch, 0)};
+        kmDsCount.combine(rocRoller::WaitCount::DSCnt(arch, 0));
+        EXPECT_EQ(peeked.waitCount, kmDsCount);
         m_context->schedule(inst4);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -297,6 +302,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, MixedInstructionTypes)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -364,7 +370,7 @@ namespace rocRollerTest
 
         auto inst5 = Instruction("global_load_dword", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount(0, -1, -1, -1));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount(arch, 0, -1, -1, -1, -1, -1));
         m_context->schedule(inst5);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -391,6 +397,7 @@ namespace rocRollerTest
     {
         rocRoller::Scheduling::InstructionStatus peeked;
         auto                                     expectedWaitLengths = peeked.waitLengths;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -437,38 +444,38 @@ namespace rocRollerTest
         auto inst1 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst1);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::LGKMSmemQueue] = 1;
+        expectedWaitLengths[GPUWaitQueueType::SMemQueue] = 1;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst1);
 
         auto inst2 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst2);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::LGKMSmemQueue] = 2;
+        expectedWaitLengths[GPUWaitQueueType::SMemQueue] = 2;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst2);
 
         auto inst3 = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 1;
+        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 1;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst3);
 
         auto inst4 = Instruction("buffer_load_dwordx2", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 2;
+        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 2;
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst4);
 
         auto inst5 = Instruction("buffer_load_dwordx2", {dst1}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0));
 
-        auto inst5Expected                             = expectedWaitLengths;
-        inst5Expected[GPUWaitQueueType::LGKMSmemQueue] = 0;
-        inst5Expected[GPUWaitQueueType::VMQueue]       = 3;
+        auto inst5Expected                         = expectedWaitLengths;
+        inst5Expected[GPUWaitQueueType::SMemQueue] = 0;
+        inst5Expected[GPUWaitQueueType::LoadQueue] = 3;
         EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         // Peek at an unrelated instruction, no wait should be needed
@@ -494,7 +501,7 @@ namespace rocRollerTest
 
         // Back to the original instruction, shouldn't change.
         peeked = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0));
         EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         // Peek at an unrelated instruction, no wait should be needed
@@ -520,7 +527,7 @@ namespace rocRollerTest
 
         // Back to the original instruction, shouldn't change.
         peeked = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0));
         EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         m_context->schedule(inst5);
@@ -528,8 +535,8 @@ namespace rocRollerTest
 
         auto inst6 = Instruction("buffer_load_dword", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst6);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
-        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 3; // We wait for 1 but then add 1.
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LoadCnt(arch, 2));
+        expectedWaitLengths[GPUWaitQueueType::LoadQueue] = 3; // We wait for 1 but then add 1.
         EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst6);
 
@@ -559,6 +566,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, ManualWaitCountsHandled)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -606,7 +614,7 @@ namespace rocRollerTest
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst2);
 
-        auto inst_wait = Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+        auto inst_wait = Instruction::Wait(WaitCount::Zero(arch));
         peeked         = m_context->observer()->peek(inst_wait);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst_wait);
@@ -644,6 +652,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, ManualWaitCountsIgnoredByWaitZero)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1
             = std::make_shared<Register::Value>(m_context,
@@ -691,7 +700,7 @@ namespace rocRollerTest
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst2);
 
-        auto inst_wait = Instruction::Wait(WaitCount::LGKMCnt(1));
+        auto inst_wait = Instruction::Wait(WaitCount::KMCnt(arch, 1));
         peeked         = m_context->observer()->peek(inst_wait);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst_wait);
@@ -703,7 +712,7 @@ namespace rocRollerTest
 
         auto inst4 = Instruction("s_load_dword", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0));
         m_context->schedule(inst4);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
@@ -726,24 +735,25 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, SaturatedWaitCounts)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
-        auto inst_wait_lgkm = Instruction::Wait(WaitCount::LGKMCnt(20));
+        auto inst_wait_lgkm = Instruction::Wait(WaitCount::KMCnt(arch, 20));
         peeked              = m_context->observer()->peek(inst_wait_lgkm);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
 
         m_context->schedule(inst_wait_lgkm);
 
-        auto inst_wait_exp = Instruction::Wait(WaitCount::EXPCnt(20));
+        auto inst_wait_exp = Instruction::Wait(WaitCount::EXPCnt(arch, 20));
         peeked             = m_context->observer()->peek(inst_wait_exp);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst_wait_exp);
 
-        auto inst_wait_vm = Instruction::Wait(WaitCount::VMCnt(80));
+        auto inst_wait_vm = Instruction::Wait(WaitCount::LoadCnt(arch, 80));
         peeked            = m_context->observer()->peek(inst_wait_vm);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst_wait_vm);
 
-        auto inst_wait = Instruction::Wait(WaitCount(80, -1, 20, 20));
+        auto inst_wait = Instruction::Wait(WaitCount(arch, 80, -1, -1, 20, -1, 20));
         peeked         = m_context->observer()->peek(inst_wait);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
         m_context->schedule(inst_wait);
@@ -859,9 +869,9 @@ namespace rocRollerTest
             {
                 expected += R"(//
                     // Wait Queue State:
-                    // --Queue: VMQueue
+                    // --Queue: LoadQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : VMQueue
+                    // ----Type In Queue : LoadQueue
                     // ----Registers :
                     // ------Dst: {v[0:1], }
                 )";
@@ -882,9 +892,9 @@ namespace rocRollerTest
             {
                 expected += R"(//
                     // Wait Queue State:
-                    // --Queue: VMQueue
+                    // --Queue: LoadQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : VMQueue
+                    // ----Type In Queue : LoadQueue
                     // ----Registers :
                     // ------Dst: {v[0:1], }
                     // ------Dst: {v[2:3], }
@@ -896,7 +906,7 @@ namespace rocRollerTest
         {
             auto inst   = Instruction("buffer_load_dword", {dst4}, {src1, zero}, {}, "");
             auto peeked = m_context->observer()->peek(inst);
-            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LoadCnt(arch, 2));
             m_context->schedule(inst);
 
             auto        newOutput = getNewOutput();
@@ -906,7 +916,7 @@ namespace rocRollerTest
 
             if(logLevel >= LogLevel::Verbose)
             {
-                expected += "// WaitCnt Needed: Intersects with registers in 'VMQueue', at 0 and "
+                expected += "// WaitCnt Needed: Intersects with registers in 'LoadQueue', at 0 and "
                             "the queue size is 3, so a waitcnt of 2 is required.";
             }
             if(logLevel >= LogLevel::Debug)
@@ -914,9 +924,9 @@ namespace rocRollerTest
                 expected += R"(
                     //
                     // Wait Queue State:
-                    // --Queue: VMQueue
+                    // --Queue: LoadQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : VMQueue
+                    // ----Type In Queue : LoadQueue
                     // ----Registers :
                     // ------Dst: {v[0:1], }
                     // ------Dst: {v[2:3], }
@@ -956,9 +966,9 @@ namespace rocRollerTest
             {
                 expected += R"( //
                     // Wait Queue State:
-                    // --Queue: VMQueue
+                    // --Queue: LoadQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : VMQueue
+                    // ----Type In Queue : LoadQueue
                     // ----Registers :
                     // ------Dst: {v[2:3], }
                     // ------Dst: {v[4:5], }
@@ -977,7 +987,7 @@ namespace rocRollerTest
             }
             else
             {
-                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(0));
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LoadCnt(arch, 0));
             }
             m_context->schedule(inst);
 
@@ -996,17 +1006,18 @@ namespace rocRollerTest
             {
                 if(logLevel >= LogLevel::Verbose)
                 {
-                    expected += " // WaitCnt Needed: Intersects with registers in 'VMQueue', at 2 "
-                                "and the queue size is 3, so a waitcnt of 0 is required.\n";
+                    expected
+                        += " // WaitCnt Needed: Intersects with registers in 'LoadQueue', at 2 "
+                           "and the queue size is 3, so a waitcnt of 0 is required.\n";
                 }
 
                 if(logLevel >= LogLevel::Debug)
                 {
                     expected += R"( //
                     // Wait Queue State:
-                    // --Queue: VMQueue
+                    // --Queue: LoadQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : VMQueue
+                    // ----Type In Queue : LoadQueue
                     // ----Registers :
                     // ------Dst: {v[2:3], }
                     // ------Dst: {v[4:5], }
@@ -1028,9 +1039,9 @@ namespace rocRollerTest
                 expected += R"(
                     //
                     // Wait Queue State:
-                    // --Queue: LGKMQueue
+                    // --Queue: KMQueue
                     // ----Needs Wait Zero: True
-                    // ----Type In Queue : LGKMSmemQueue
+                    // ----Type In Queue : SMemQueue
                     // ----Registers :
                     // ------Dst: {v[0:1], }
                 )";
@@ -1061,7 +1072,9 @@ namespace rocRollerTest
             }
             else
             {
-                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+                auto waitcnt = rocRoller::WaitCount::KMCnt(arch, 0);
+                waitcnt.combine(rocRoller::WaitCount::DSCnt(arch, 0));
+                EXPECT_EQ(peeked.waitCount, waitcnt);
             }
 
             m_context->schedule(inst_barrier);
@@ -1088,8 +1101,8 @@ namespace rocRollerTest
                 }
                 else
                 {
-                    expected += "// WaitCnt Needed: lgkmcnt(0) before an s_barrier since the lgkm "
-                                "queue is not empty.\n";
+                    expected += "// WaitCnt Needed: kmcnt(0) & dscnt(0) before an s_barrier since "
+                                "the km & ds queue are not empty.\n";
                 }
             }
 
@@ -1097,9 +1110,9 @@ namespace rocRollerTest
             {
                 expected += R"( //
                     // Wait Queue State:
-                    // --Queue: LGKMQueue
+                    // --Queue: DSQueue
                     // ----Needs Wait Zero: False
-                    // ----Type In Queue : LGKMDSQueue
+                    // ----Type In Queue : DSQueue
                     // ----Registers :
                     // ------Dst: {v[2:3], }
                 )";
@@ -1131,9 +1144,9 @@ namespace rocRollerTest
             {
                 expected += R"( //
                     // Wait Queue State:
-                    // --Queue: LGKMQueue
+                    // --Queue: KMQueue
                     // ----Needs Wait Zero: True
-                    // ----Type In Queue : LGKMSmemQueue
+                    // ----Type In Queue : SMemQueue
                     // ----Registers :
                     // ------Dst: {v1, }
                 )";
@@ -1157,6 +1170,7 @@ namespace rocRollerTest
         EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto const&                              arch = m_context->targetArchitecture();
 
         auto src1 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
@@ -1195,7 +1209,7 @@ namespace rocRollerTest
         //This instruction causes  wait, which clears the queue states.
         auto inst3 = Instruction("s_load_dword", {dst3}, {src2, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0, ""));
         m_context->schedule(inst3);
 
         //That means that here, the queue state is different from when the label was encountered.
@@ -1211,6 +1225,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertGoodCase)
     {
         EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+        auto const& arch = m_context->targetArchitecture();
 
         rocRoller::Scheduling::InstructionStatus peeked;
 
@@ -1251,7 +1266,7 @@ namespace rocRollerTest
         //This instruction causes  wait, which clears the queue states.
         auto inst3 = Instruction("s_add", {dst3}, {src2, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::KMCnt(arch, 0, ""));
         m_context->schedule(inst3);
 
         //These 2 instructions recreate the same queue state.
@@ -1336,7 +1351,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase2)
     {
         // This test is similar to LoopWaitCntStateAssertGoodCase2, except that
-        // it uses flat stores. These require the waitcount to always be set
+        // it uses global stores. These require the waitcount to always be set
         // to zero, so the mismatch at the branches causes an error.
         EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
 
@@ -1368,17 +1383,17 @@ namespace rocRollerTest
 
         // Instructions
 
-        auto inst1 = Instruction("flat_store_dwordx2", {}, {dst1, src1}, {}, "");
+        auto inst1 = Instruction("global_store_dwordx2", {}, {dst1, src1}, {}, "");
         m_context->schedule(inst1);
 
         auto instbranch
             = Instruction("s_branch", {}, {Register::Value::Label("test_label")}, {}, "");
         m_context->schedule(instbranch);
 
-        auto inst2 = Instruction("flat_store_dwordx2", {}, {dst2, src2}, {}, "");
+        auto inst2 = Instruction("global_store_dwordx2", {}, {dst2, src2}, {}, "");
         m_context->schedule(inst2);
 
-        auto inst3 = Instruction("flat_store_dwordx2", {}, {dst3, src3}, {}, "");
+        auto inst3 = Instruction("global_store_dwordx2", {}, {dst3, src3}, {}, "");
         m_context->schedule(inst3);
 
         auto instlabel = Instruction::Label("test_label");

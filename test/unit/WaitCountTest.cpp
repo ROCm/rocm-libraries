@@ -2,7 +2,7 @@
 #include <rocRoller/Utilities/Logging.hpp>
 
 #include "SimpleFixture.hpp"
-#include "SourceMatcher.hpp"
+#include <common/SourceMatcher.hpp>
 
 using namespace rocRoller;
 
@@ -12,10 +12,13 @@ class WaitCountTest : public SimpleFixture
 
 TEST_F(WaitCountTest, Basic)
 {
-    auto wc = WaitCount::LGKMCnt(2);
+    GPUArchitecture arch{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
+    auto            wc = WaitCount::KMCnt(arch, 2);
 
-    EXPECT_EQ(2, wc.lgkmcnt());
-    EXPECT_EQ(-1, wc.vmcnt());
+    EXPECT_EQ(2, wc.kmcnt());
+    EXPECT_EQ(-1, wc.dscnt());
+    EXPECT_EQ(-1, wc.loadcnt());
+    EXPECT_EQ(-1, wc.storecnt());
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
@@ -24,50 +27,65 @@ TEST_F(WaitCountTest, Basic)
 
 TEST_F(WaitCountTest, Combine)
 {
-    auto wc = WaitCount::LGKMCnt(2);
+    GPUArchitecture arch{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
+    auto            wc = WaitCount::KMCnt(arch, 2);
 
-    wc.combine(WaitCount::VMCnt(4));
+    wc.combine(WaitCount::LoadCnt(arch, 4));
 
-    EXPECT_EQ(2, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(2, wc.kmcnt());
+    EXPECT_EQ(4, wc.loadcnt());
+    EXPECT_EQ(-1, wc.storecnt());
+    EXPECT_EQ(-1, wc.dscnt());
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
-    wc.combine(WaitCount::LGKMCnt(4));
+    wc.combine(WaitCount::KMCnt(arch, 4));
 
-    EXPECT_EQ(2, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(2, wc.kmcnt());
+    EXPECT_EQ(4, wc.loadcnt());
+    EXPECT_EQ(-1, wc.storecnt());
+    EXPECT_EQ(-1, wc.dscnt());
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
-    wc.combine(WaitCount::LGKMCnt(1, "Wait for LDS"));
+    wc.combine(WaitCount::KMCnt(arch, 1, "Wait for LDS"));
+    wc.combine(WaitCount::DSCnt(arch, 1, "Wait for LDS"));
 
-    EXPECT_EQ(1, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(1, wc.kmcnt());
+    EXPECT_EQ(1, wc.dscnt());
+    EXPECT_EQ(4, wc.loadcnt());
+    EXPECT_EQ(-1, wc.storecnt());
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
     // -1 is no wait, shouldn't affect the value.
-    wc.combine(WaitCount::LGKMCnt(-1));
+    wc.combine(WaitCount::KMCnt(arch, -1));
+    wc.combine(WaitCount::DSCnt(arch, -1));
 
-    EXPECT_EQ(1, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(1, wc.kmcnt());
+    EXPECT_EQ(1, wc.dscnt());
+    EXPECT_EQ(4, wc.loadcnt());
+    EXPECT_EQ(-1, wc.storecnt());
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
-    wc.combine(WaitCount::VSCnt(2, "Wait for store"));
+    wc.combine(WaitCount::VSCnt(arch, 2, "Wait for store"));
 
-    EXPECT_EQ(1, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(1, wc.kmcnt());
+    EXPECT_EQ(1, wc.dscnt());
+    EXPECT_EQ(4, wc.loadcnt());
     EXPECT_EQ(2, wc.vscnt());
+    EXPECT_EQ(-1, wc.storecnt());
     EXPECT_EQ(-1, wc.expcnt());
 
-    wc.combine(WaitCount::EXPCnt(20));
+    wc.combine(WaitCount::EXPCnt(arch, 20));
 
-    EXPECT_EQ(1, wc.lgkmcnt());
-    EXPECT_EQ(4, wc.vmcnt());
+    EXPECT_EQ(1, wc.kmcnt());
+    EXPECT_EQ(1, wc.dscnt());
+    EXPECT_EQ(4, wc.loadcnt());
     EXPECT_EQ(2, wc.vscnt());
     EXPECT_EQ(20, wc.expcnt());
+    EXPECT_EQ(-1, wc.storecnt());
 
     auto stringValue = wc.toString(LogLevel::Debug);
 
@@ -102,7 +120,7 @@ TEST_F(WaitCountTest, Combine)
  **/
 TEST_F(WaitCountTest, VSCnt)
 {
-    GPUArchitecture TestWithVSCnt;
+    GPUArchitecture TestWithVSCnt{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     TestWithVSCnt.AddCapability(GPUCapability::SupportedISA, 0);
     TestWithVSCnt.AddCapability(GPUCapability::SeparateVscnt, 0);
     EXPECT_EQ(TestWithVSCnt.HasCapability(GPUCapability::SupportedISA), true);
@@ -110,8 +128,10 @@ TEST_F(WaitCountTest, VSCnt)
 
     auto wcWithVSCnt = WaitCount::Zero(TestWithVSCnt);
 
-    EXPECT_EQ(0, wcWithVSCnt.lgkmcnt());
-    EXPECT_EQ(0, wcWithVSCnt.vmcnt());
+    EXPECT_EQ(0, wcWithVSCnt.kmcnt());
+    EXPECT_EQ(0, wcWithVSCnt.dscnt());
+    EXPECT_EQ(0, wcWithVSCnt.loadcnt());
+    EXPECT_EQ(0, wcWithVSCnt.storecnt());
     EXPECT_EQ(0, wcWithVSCnt.vscnt());
     EXPECT_EQ(0, wcWithVSCnt.expcnt());
 
@@ -123,15 +143,17 @@ TEST_F(WaitCountTest, VSCnt)
     EXPECT_EQ(NormalizedSource(wcWithVSCnt.toString(LogLevel::Debug)),
               NormalizedSource(expectedWithVSCnt));
 
-    GPUArchitecture TestNoVSCnt;
+    GPUArchitecture TestNoVSCnt{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     TestNoVSCnt.AddCapability(GPUCapability::SupportedISA, 0);
     EXPECT_EQ(TestNoVSCnt.HasCapability(GPUCapability::SupportedISA), true);
     EXPECT_EQ(TestNoVSCnt.HasCapability(GPUCapability::SeparateVscnt), false);
 
     auto wcNoVSCnt = WaitCount::Zero(TestNoVSCnt);
 
-    EXPECT_EQ(0, wcNoVSCnt.lgkmcnt());
-    EXPECT_EQ(0, wcNoVSCnt.vmcnt());
+    EXPECT_EQ(0, wcNoVSCnt.kmcnt());
+    EXPECT_EQ(0, wcNoVSCnt.dscnt());
+    EXPECT_EQ(0, wcNoVSCnt.loadcnt());
+    EXPECT_EQ(0, wcNoVSCnt.storecnt());
     EXPECT_EQ(-1, wcNoVSCnt.vscnt());
     EXPECT_EQ(0, wcNoVSCnt.expcnt());
 
@@ -145,7 +167,7 @@ TEST_F(WaitCountTest, VSCnt)
 
 TEST_F(WaitCountTest, SaturatedValues)
 {
-    GPUArchitecture testArch;
+    GPUArchitecture testArch{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     testArch.AddCapability(GPUCapability::MaxExpcnt, 7);
     testArch.AddCapability(GPUCapability::MaxLgkmcnt, 15);
     testArch.AddCapability(GPUCapability::MaxVmcnt, 63);
@@ -155,30 +177,38 @@ TEST_F(WaitCountTest, SaturatedValues)
 
     auto wcZero = WaitCount::Zero(testArch).getAsSaturatedWaitCount(testArch);
 
-    EXPECT_EQ(0, wcZero.lgkmcnt());
-    EXPECT_EQ(0, wcZero.vmcnt());
+    EXPECT_EQ(0, wcZero.kmcnt());
+    EXPECT_EQ(0, wcZero.dscnt());
+    EXPECT_EQ(0, wcZero.loadcnt());
+    EXPECT_EQ(0, wcZero.storecnt());
     EXPECT_EQ(-1, wcZero.vscnt());
     EXPECT_EQ(0, wcZero.expcnt());
 
-    auto wcExp = WaitCount::EXPCnt(20);
-    EXPECT_EQ(-1, wcExp.lgkmcnt());
-    EXPECT_EQ(-1, wcExp.vmcnt());
+    auto wcExp = WaitCount::EXPCnt(testArch, 20);
+    EXPECT_EQ(-1, wcExp.kmcnt());
+    EXPECT_EQ(-1, wcExp.dscnt());
+    EXPECT_EQ(-1, wcExp.loadcnt());
+    EXPECT_EQ(-1, wcExp.storecnt());
     EXPECT_EQ(-1, wcExp.vscnt());
     EXPECT_EQ(20, wcExp.expcnt());
 
     auto wcSatExp = wcExp.getAsSaturatedWaitCount(testArch);
-    EXPECT_EQ(-1, wcSatExp.lgkmcnt());
-    EXPECT_EQ(-1, wcSatExp.vmcnt());
+    EXPECT_EQ(-1, wcSatExp.kmcnt());
+    EXPECT_EQ(-1, wcSatExp.dscnt());
+    EXPECT_EQ(-1, wcSatExp.loadcnt());
+    EXPECT_EQ(-1, wcSatExp.storecnt());
     EXPECT_EQ(-1, wcSatExp.vscnt());
     EXPECT_EQ(7, wcSatExp.expcnt());
 
-    auto wcVm = WaitCount::VMCnt(100);
-    EXPECT_EQ(100, wcVm.vmcnt());
+    auto wcVm = WaitCount::LoadCnt(testArch, 100);
+    EXPECT_EQ(100, wcVm.loadcnt());
 
     wcVm.combine(wcExp);
     auto wcComb = wcVm.getAsSaturatedWaitCount(testArch);
-    EXPECT_EQ(-1, wcComb.lgkmcnt());
-    EXPECT_EQ(63, wcComb.vmcnt());
+    EXPECT_EQ(-1, wcComb.kmcnt());
+    EXPECT_EQ(-1, wcComb.dscnt());
+    EXPECT_EQ(63, wcComb.loadcnt());
+    EXPECT_EQ(-1, wcComb.storecnt());
     EXPECT_EQ(-1, wcComb.vscnt());
     EXPECT_EQ(7, wcComb.expcnt());
 }

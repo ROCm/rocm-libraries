@@ -283,7 +283,6 @@ namespace MemoryInstructionsTest
     TEST_P(MemoryInstructionsTest, GPU_GlobalTestOffset)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasGlobalOffset);
-        REQUIRE_NOT_ARCH_CAP(GPUCapability::HasExplicitNC);
 
         auto k = m_context->kernel();
 
@@ -389,14 +388,6 @@ namespace MemoryInstructionsTest
             auto kb = [&]() -> Generator<Instruction> {
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
-
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                auto gpu = m_context->targetArchitecture().target();
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
 
                 auto v_result
                     = Register::Value::Placeholder(m_context,
@@ -633,14 +624,6 @@ namespace MemoryInstructionsTest
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result;
             co_yield m_context->argLoader()->getValue("result", s_result);
-
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            auto gpu = m_context->targetArchitecture().target();
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,
@@ -959,13 +942,7 @@ namespace MemoryInstructionsTest
             auto kb = [&]() -> Generator<Instruction> {
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                auto gpu = m_context->targetArchitecture().target();
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
+
                 auto workitemIndex = k->workitemIndex();
 
                 auto lds3 = Register::Value::AllocateLDS(m_context, DataType::Int32, workItemCount);

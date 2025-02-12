@@ -215,17 +215,29 @@ namespace rocRoller
             auto maxLgkmcnt = arch.GetCapability(GPUCapability::MaxLgkmcnt);
 
             float vmcnt = 0;
-            if(status.waitCount.vmcnt() >= 0)
-                vmcnt = 1 + maxVmcnt - status.waitCount.vmcnt();
+            if(status.waitCount.loadcnt() >= 0 || status.waitCount.storecnt() >= 0)
+            {
+                auto loadcnt  = status.waitCount.loadcnt();
+                auto storecnt = status.waitCount.storecnt();
+                auto cnt      = WaitCount::CombineValues(loadcnt, storecnt);
+                vmcnt         = 1 + maxVmcnt - cnt;
+            }
 
             float lgkmcnt = 0;
-            if(status.waitCount.lgkmcnt() >= 0)
-                lgkmcnt = 1 + maxLgkmcnt - status.waitCount.lgkmcnt();
+            if(status.waitCount.kmcnt() >= 0 || status.waitCount.dscnt() >= 0)
+            {
+                auto kmcnt = status.waitCount.kmcnt();
+                auto dscnt = status.waitCount.dscnt();
+                auto cnt   = WaitCount::CombineValues(kmcnt, dscnt);
+                lgkmcnt    = 1 + maxLgkmcnt - cnt;
+            }
 
-            float vectorQueueSat = std::max(
-                status.waitLengths.at(GPUWaitQueueType::VMQueue) - m_weights.vmQueueLen, 0);
-            float ldsQueueSat = std::max(
-                status.waitLengths.at(GPUWaitQueueType::LGKMDSQueue) - m_weights.lgkmQueueLen, 0);
+            int vmQueueLen = status.waitLengths.at(GPUWaitQueueType::LoadQueue)
+                             + status.waitLengths.at(GPUWaitQueueType::StoreQueue);
+            float vectorQueueSat = std::max(vmQueueLen - m_weights.vmQueueLen, 0);
+            int   kmQueueLen     = status.waitLengths.at(GPUWaitQueueType::SMemQueue)
+                             + status.waitLengths.at(GPUWaitQueueType::DSQueue);
+            float ldsQueueSat = std::max(kmQueueLen - m_weights.lgkmQueueLen, 0);
 
             float newSGPRs
                 = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));

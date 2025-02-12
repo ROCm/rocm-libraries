@@ -316,7 +316,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
     inline Generator<Instruction> MemoryInstructions::storeGlobal(
@@ -386,7 +386,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterStore)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
     inline Generator<Instruction> MemoryInstructions::loadScalar(
@@ -413,7 +413,7 @@ namespace rocRoller
         auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
     inline Generator<Instruction> MemoryInstructions::storeScalar(
@@ -440,7 +440,7 @@ namespace rocRoller
         auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitAfterStore)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
     inline Generator<Instruction> MemoryInstructions::genLocalAddr(Register::ValuePtr& addr) const
@@ -513,7 +513,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
     inline Generator<Instruction> MemoryInstructions::storeLocal(Register::ValuePtr addr,
@@ -589,7 +589,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterStore)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
     inline Generator<Instruction>
@@ -696,7 +696,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
 
     inline Generator<Instruction>
@@ -755,7 +755,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(WaitCount::Zero(
-                "DEBUG: Wait after direct buffer load to lds", ctx->targetArchitecture()));
+                ctx->targetArchitecture(), "DEBUG: Wait after direct buffer load to lds"));
     }
 
     inline Generator<Instruction>
@@ -884,7 +884,7 @@ namespace rocRoller
 
         if(ctx->kernelOptions().alwaysWaitAfterStore)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
 
     inline Generator<Instruction> MemoryInstructions::barrier()

@@ -95,6 +95,8 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::UnalignedVGPRs, {"v_add_f64 v[0:1], v[0:1], v[3:4]", ""}},
             {rocRoller::GPUCapability::UnalignedSGPRs, {"s_cmp_eq_u64 s[0:1], s[0:1], s[3:4]", ""}},
+            {rocRoller::GPUCapability::SeparateVscnt, {"s_waitcnt_vscnt 0", ""}},
+
     };
 
     // GPUCapability -> <Vector of ISAs That Support It>
@@ -187,6 +189,17 @@ namespace GPUArchitectureGenerator
         return retval;
     }
 
+    inline std::vector<rocRoller::GPUArchitectureTarget> gfx12ISAs()
+    {
+        std::vector<rocRoller::GPUArchitectureTarget> retval;
+        std::copy_if(
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
+            std::back_inserter(retval),
+            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isRDNA4GPU(); });
+        return retval;
+    }
+
     inline std::vector<rocRoller::GPUArchitectureTarget> cdnaISAs_1_2()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
@@ -216,9 +229,6 @@ namespace GPUArchitectureGenerator
                              std::function<bool(const rocRoller::GPUArchitectureTarget&)>,
                              rocRoller::GPUCapability::Hash>
         PredicateCaps = {
-            {rocRoller::GPUCapability::SeparateVscnt,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isRDNAGPU(); }},
-
             {rocRoller::GPUCapability::CMPXWritesSGPR,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return !x.isRDNAGPU(); }},
 
@@ -241,177 +251,13 @@ namespace GPUArchitectureGenerator
                                             std::vector<rocRoller::GPUWaitQueueType>,
                                             unsigned int>>>
         GroupedInstructionInfos = {
-            {gfx908ISAs(),
-             {{
-                  // clang-format off
-                 "image_gather4",
-                 "image_gather4_b",
-                 "image_gather4_b_cl",
-                 "image_gather4_b_cl_o",
-                 "image_gather4_b_o",
-                 "image_gather4_c",
-                 "image_gather4_c_b",
-                 "image_gather4_c_b_cl",
-                 "image_gather4_c_b_cl_o",
-                 "image_gather4_c_b_o",
-                 "image_gather4_c_cl",
-                 "image_gather4_c_cl_o",
-                 "image_gather4_c_l",
-                 "image_gather4_c_l_o",
-                 "image_gather4_c_lz",
-                 "image_gather4_c_lz_o",
-                 "image_gather4_c_o",
-                 "image_gather4_cl",
-                 "image_gather4_cl_o",
-                 "image_gather4_l",
-                 "image_gather4_l_o",
-                 "image_gather4_lz",
-                 "image_gather4_lz_o",
-                 "image_gather4_o",
-                 "image_get_lod",
-                 "image_sample_b",
-                 "image_sample_b_cl",
-                 "image_sample_b_cl_o",
-                 "image_sample_b_o",
-                 "image_sample_c",
-                 "image_sample_c_b",
-                 "image_sample_c_b_cl",
-                 "image_sample_c_b_cl_o",
-                 "image_sample_c_b_o",
-                 "image_sample_c_cd",
-                 "image_sample_c_cd_cl",
-                 "image_sample_c_cd_cl_o",
-                 "image_sample_c_cd_o",
-                 "image_sample_c_cl",
-                 "image_sample_c_cl_o",
-                 "image_sample_c_d",
-                 "image_sample_c_d_cl",
-                 "image_sample_c_d_cl_o",
-                 "image_sample_c_d_o",
-                 "image_sample_c_l",
-                 "image_sample_c_l_o",
-                 "image_sample_c_lz",
-                 "image_sample_c_lz_o",
-                 "image_sample_c_o",
-                 "image_sample_cd",
-                 "image_sample_cd_cl",
-                 "image_sample_cd_cl_o",
-                 "image_sample_cd_o",
-                 "image_sample_cl",
-                 "image_sample_cl_o",
-                 "image_sample_d",
-                 "image_sample_d_cl",
-                 "image_sample_d_cl_o",
-                 "image_sample_d_o",
-                 "image_sample_l",
-                 "image_sample_l_o",
-                 "image_sample_lz",
-                 "image_sample_lz_o",
-                 "image_sample_o", // clang-format on
-              },
-              1,
-              {rocRoller::GPUWaitQueueType::VMQueue},
-              0}},
-            {cdnaISAs_1_2(),
-             {{
-                  // clang-format off
-                 "image_atomic_add",
-                 "image_atomic_and",
-                 "image_atomic_cmpswap",
-                 "image_atomic_dec",
-                 "image_atomic_inc",
-                 "image_atomic_or",
-                 "image_atomic_smax",
-                 "image_atomic_smin",
-                 "image_atomic_sub",
-                 "image_atomic_swap",
-                 "image_atomic_umax",
-                 "image_atomic_umin",
-                 "image_atomic_xor",
-                 "image_get_resinfo",
-                 "image_load",
-                 "image_load_mip",
-                 "image_load_mip_pck",
-                 "image_load_mip_pck_sgn",
-                 "image_load_pck",
-                 "image_load_pck_sgn",
-                 "image_sample",
-                 "image_store",
-                 "image_store_mip",
-                 "image_store_mip_pck",
-                 "image_store_pck" // clang-format on
-              },
-              1,
-              {rocRoller::GPUWaitQueueType::VMQueue},
-              0}},
-            {cdnaISAs_1_2(),
-             {{
-                  // clang-format off
-                 "buffer_store_lds_dword",
-                 "buffer_wbinvl1",
-                 "buffer_wbinvl1_vol" // clang-format on
-              },
-              1,
-              {rocRoller::GPUWaitQueueType::VMQueue},
-              0}},
             {gfx9ISAs(),
              {{
                   // clang-format off
-                 "tbuffer_load_format_d16_x",
-                 "tbuffer_load_format_d16_xy",
-                 "tbuffer_load_format_d16_xyz",
-                 "tbuffer_load_format_d16_xyzw",
-                 "tbuffer_load_format_x",
-                 "tbuffer_load_format_xy",
-                 "tbuffer_load_format_xyz",
-                 "tbuffer_load_format_xyzw",
-                 "tbuffer_store_format_d16_x",
-                 "tbuffer_store_format_d16_xy",
-                 "tbuffer_store_format_d16_xyz",
-                 "tbuffer_store_format_d16_xyzw",
-                 "tbuffer_store_format_x",
-                 "tbuffer_store_format_xy",
-                 "tbuffer_store_format_xyz",
-                 "tbuffer_store_format_xyzw",
-                 "buffer_atomic_add",
-                 "buffer_atomic_add_x2",
-                 "buffer_atomic_and",
-                 "buffer_atomic_and_x2",
-                 "buffer_atomic_cmpswap",
-                 "buffer_atomic_cmpswap_x2",
-                 "buffer_atomic_dec",
-                 "buffer_atomic_dec_x2",
-                 "buffer_atomic_inc",
-                 "buffer_atomic_inc_x2",
-                 "buffer_atomic_or",
-                 "buffer_atomic_or_x2",
-                 "buffer_atomic_smax",
-                 "buffer_atomic_smax_x2",
-                 "buffer_atomic_smin",
-                 "buffer_atomic_smin_x2",
-                 "buffer_atomic_sub",
-                 "buffer_atomic_sub_x2",
-                 "buffer_atomic_swap",
-                 "buffer_atomic_swap_x2",
-                 "buffer_atomic_umax",
-                 "buffer_atomic_umax_x2",
-                 "buffer_atomic_umin",
-                 "buffer_atomic_umin_x2",
-                 "buffer_atomic_xor",
-                 "buffer_atomic_xor_x2",
                  "buffer_load_dword",
                  "buffer_load_dwordx2",
                  "buffer_load_dwordx3",
                  "buffer_load_dwordx4",
-                 "buffer_load_format_d16_hi_x",
-                 "buffer_load_format_d16_x",
-                 "buffer_load_format_d16_xy",
-                 "buffer_load_format_d16_xyz",
-                 "buffer_load_format_d16_xyzw",
-                 "buffer_load_format_x",
-                 "buffer_load_format_xy",
-                 "buffer_load_format_xyz",
-                 "buffer_load_format_xyzw",
                  "buffer_load_sbyte",
                  "buffer_load_sbyte_d16",
                  "buffer_load_sbyte_d16_hi",
@@ -422,84 +268,27 @@ namespace GPUArchitectureGenerator
                  "buffer_load_ubyte_d16",
                  "buffer_load_ubyte_d16_hi",
                  "buffer_load_ushort",
+                  // clang-format on
+              },
+              1,
+              {rocRoller::GPUWaitQueueType::LoadQueue},
+              (1 << 12) - 1}},
+            {gfx9ISAs(),
+             {{
+                  // clang-format off
                  "buffer_store_byte",
                  "buffer_store_byte_d16_hi",
                  "buffer_store_dword",
                  "buffer_store_dwordx2",
                  "buffer_store_dwordx3",
                  "buffer_store_dwordx4",
-                 "buffer_store_format_d16_hi_x",
-                 "buffer_store_format_d16_x",
-                 "buffer_store_format_d16_xy",
-                 "buffer_store_format_d16_xyz",
-                 "buffer_store_format_d16_xyzw",
-                 "buffer_store_format_x",
-                 "buffer_store_format_xy",
-                 "buffer_store_format_xyz",
-                 "buffer_store_format_xyzw",
                  "buffer_store_short",
                  "buffer_store_short_d16_hi",
                   // clang-format on
               },
               1,
-              {rocRoller::GPUWaitQueueType::VMQueue},
+              {rocRoller::GPUWaitQueueType::StoreQueue},
               (1 << 12) - 1}},
-            {gfx9ISAs(),
-             {{
-                  // clang-format off
-                 "flat_atomic_add",
-                 "flat_atomic_add_x2",
-                 "flat_atomic_and",
-                 "flat_atomic_and_x2",
-                 "flat_atomic_cmpswap",
-                 "flat_atomic_cmpswap_x2",
-                 "flat_atomic_dec",
-                 "flat_atomic_dec_x2",
-                 "flat_atomic_inc",
-                 "flat_atomic_inc_x2",
-                 "flat_atomic_or",
-                 "flat_atomic_or_x2",
-                 "flat_atomic_smax",
-                 "flat_atomic_smax_x2",
-                 "flat_atomic_smin",
-                 "flat_atomic_smin_x2",
-                 "flat_atomic_sub",
-                 "flat_atomic_sub_x2",
-                 "flat_atomic_swap",
-                 "flat_atomic_swap_x2",
-                 "flat_atomic_umax",
-                 "flat_atomic_umax_x2",
-                 "flat_atomic_umin",
-                 "flat_atomic_umin_x2",
-                 "flat_atomic_xor",
-                 "flat_atomic_xor_x2",
-                 "flat_load_dword",
-                 "flat_load_dwordx2",
-                 "flat_load_dwordx3",
-                 "flat_load_dwordx4",
-                 "flat_load_sbyte",
-                 "flat_load_sbyte_d16",
-                 "flat_load_sbyte_d16_hi",
-                 "flat_load_short_d16",
-                 "flat_load_short_d16_hi",
-                 "flat_load_sshort",
-                 "flat_load_ubyte",
-                 "flat_load_ubyte_d16",
-                 "flat_load_ubyte_d16_hi",
-                 "flat_load_ushort",
-                 "flat_store_byte",
-                 "flat_store_byte_d16_hi",
-                 "flat_store_dword",
-                 "flat_store_dwordx2",
-                 "flat_store_dwordx3",
-                 "flat_store_dwordx4",
-                 "flat_store_short",
-                 "flat_store_short_d16_hi",
-                  // clang-format on
-              },
-              0,
-              {rocRoller::GPUWaitQueueType::VMQueue, rocRoller::GPUWaitQueueType::LGKMDSQueue},
-              (1 << 13) - 1}},
             // single-address LDS instructions
             {gfx9ISAs(),
              {{
@@ -531,7 +320,7 @@ namespace GPUArchitectureGenerator
                   // clang-format on
               },
               1,
-              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+              {rocRoller::GPUWaitQueueType::DSQueue},
               (1 << 16) - 1}},
             // two-address LDS instructions
             {gfx9ISAs(),
@@ -548,37 +337,11 @@ namespace GPUArchitectureGenerator
                   // clang-format on
               },
               1,
-              {rocRoller::GPUWaitQueueType::LGKMDSQueue},
+              {rocRoller::GPUWaitQueueType::DSQueue},
               (1 << 8) - 1}},
             {gfx9ISAs(),
              {{
                   // clang-format off
-                 "global_atomic_add",
-                 "global_atomic_add_x2",
-                 "global_atomic_and",
-                 "global_atomic_and_x2",
-                 "global_atomic_cmpswap",
-                 "global_atomic_cmpswap_x2",
-                 "global_atomic_dec",
-                 "global_atomic_dec_x2",
-                 "global_atomic_inc",
-                 "global_atomic_inc_x2",
-                 "global_atomic_or",
-                 "global_atomic_or_x2",
-                 "global_atomic_smax",
-                 "global_atomic_smax_x2",
-                 "global_atomic_smin",
-                 "global_atomic_smin_x2",
-                 "global_atomic_sub",
-                 "global_atomic_sub_x2",
-                 "global_atomic_swap",
-                 "global_atomic_swap_x2",
-                 "global_atomic_umax",
-                 "global_atomic_umax_x2",
-                 "global_atomic_umin",
-                 "global_atomic_umin_x2",
-                 "global_atomic_xor",
-                 "global_atomic_xor_x2",
                  "global_load_dword",
                  "global_load_dwordx2",
                  "global_load_dwordx3",
@@ -593,14 +356,6 @@ namespace GPUArchitectureGenerator
                  "global_load_ubyte_d16",
                  "global_load_ubyte_d16_hi",
                  "global_load_ushort",
-                 "global_store_byte",
-                 "global_store_byte_d16_hi",
-                 "global_store_dword",
-                 "global_store_dwordx2",
-                 "global_store_dwordx3",
-                 "global_store_dwordx4",
-                 "global_store_short",
-                 "global_store_short_d16_hi",
                  "scratch_load_dword",
                  "scratch_load_dwordx2",
                  "scratch_load_dwordx3",
@@ -615,6 +370,22 @@ namespace GPUArchitectureGenerator
                  "scratch_load_ubyte_d16",
                  "scratch_load_ubyte_d16_hi",
                  "scratch_load_ushort",
+                  // clang-format on
+              },
+              0,
+              {rocRoller::GPUWaitQueueType::LoadQueue},
+              (1 << 12) - 1}}, // the offset is a `signed` 13-bit  (i.e., -4096..4095)
+            {gfx9ISAs(),
+             {{
+                  // clang-format off
+                 "global_store_byte",
+                 "global_store_byte_d16_hi",
+                 "global_store_dword",
+                 "global_store_dwordx2",
+                 "global_store_dwordx3",
+                 "global_store_dwordx4",
+                 "global_store_short",
+                 "global_store_short_d16_hi",
                  "scratch_store_byte",
                  "scratch_store_byte_d16_hi",
                  "scratch_store_dword",
@@ -626,7 +397,155 @@ namespace GPUArchitectureGenerator
                   // clang-format on
               },
               0,
-              {rocRoller::GPUWaitQueueType::VMQueue},
+              {rocRoller::GPUWaitQueueType::StoreQueue},
+              (1 << 12) - 1}}, // the offset is a `signed` 13-bit  (i.e., -4096..4095)
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "buffer_load_dword",
+                 "buffer_load_dwordx2",
+                 "buffer_load_dwordx3",
+                 "buffer_load_dwordx4",
+                 "buffer_load_sbyte",
+                 "buffer_load_sbyte_d16",
+                 "buffer_load_sbyte_d16_hi",
+                 "buffer_load_short_d16",
+                 "buffer_load_short_d16_hi",
+                 "buffer_load_sshort",
+                 "buffer_load_ubyte",
+                 "buffer_load_ubyte_d16",
+                 "buffer_load_ubyte_d16_hi",
+                 "buffer_load_ushort",
+                  // clang-format on
+              },
+              1,
+              {rocRoller::GPUWaitQueueType::LoadQueue},
+              (1 << 12) - 1}},
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "buffer_store_byte",
+                 "buffer_store_byte_d16_hi",
+                 "buffer_store_dword",
+                 "buffer_store_dwordx2",
+                 "buffer_store_dwordx3",
+                 "buffer_store_dwordx4",
+                 "buffer_store_short",
+                 "buffer_store_short_d16_hi",
+                  // clang-format on
+              },
+              1,
+              {rocRoller::GPUWaitQueueType::StoreQueue},
+              (1 << 12) - 1}},
+            // single-address LDS instructions
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "ds_read_addtid_b32",
+                 "ds_read_b128",
+                 "ds_read_b32",
+                 "ds_read_b64",
+                 "ds_read_b96",
+                 "ds_read_i16",
+                 "ds_read_i8",
+                 "ds_read_i8_d16",
+                 "ds_read_i8_d16_hi",
+                 "ds_read_u16",
+                 "ds_read_u8",
+                 "ds_read_u16_d16",
+                 "ds_read_u16_d16_hi",
+                 "ds_read_u8_d16",
+                 "ds_read_u8_d16_hi",
+                 "ds_write_addtid_b32",
+                 "ds_write_b128",
+                 "ds_write_b16",
+                 "ds_write_b16_d16_hi",
+                 "ds_write_b32",
+                 "ds_write_b64",
+                 "ds_write_b8",
+                 "ds_write_b8_d16_hi",
+                 "ds_write_b96",
+                  // clang-format on
+              },
+              1,
+              {rocRoller::GPUWaitQueueType::DSQueue},
+              (1 << 16) - 1}},
+            // two-address LDS instructions
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "ds_read2_b32",
+                 "ds_read2_b64",
+                 "ds_read2st64_b32",
+                 "ds_read2st64_b64",
+                 "ds_write2_b32",
+                 "ds_write2_b64",
+                 "ds_write2st64_b32",
+                 "ds_write2st64_b64",
+                  // clang-format on
+              },
+              1,
+              {rocRoller::GPUWaitQueueType::DSQueue},
+              (1 << 8) - 1}},
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "global_load_dword",
+                 "global_load_dwordx2",
+                 "global_load_dwordx3",
+                 "global_load_dwordx4",
+                 "global_load_sbyte",
+                 "global_load_sbyte_d16",
+                 "global_load_sbyte_d16_hi",
+                 "global_load_short_d16",
+                 "global_load_short_d16_hi",
+                 "global_load_sshort",
+                 "global_load_ubyte",
+                 "global_load_ubyte_d16",
+                 "global_load_ubyte_d16_hi",
+                 "global_load_ushort",
+                 "scratch_load_dword",
+                 "scratch_load_dwordx2",
+                 "scratch_load_dwordx3",
+                 "scratch_load_dwordx4",
+                 "scratch_load_sbyte",
+                 "scratch_load_sbyte_d16",
+                 "scratch_load_sbyte_d16_hi",
+                 "scratch_load_short_d16",
+                 "scratch_load_short_d16_hi",
+                 "scratch_load_sshort",
+                 "scratch_load_ubyte",
+                 "scratch_load_ubyte_d16",
+                 "scratch_load_ubyte_d16_hi",
+                 "scratch_load_ushort",
+                  // clang-format on
+              },
+              0,
+              {rocRoller::GPUWaitQueueType::LoadQueue},
+              (1 << 12) - 1}}, // the offset is a `signed` 13-bit  (i.e., -4096..4095)
+            {gfx12ISAs(),
+             {{
+                  // clang-format off
+                 "global_store_byte",
+                 "global_store_byte_d16_hi",
+                 "global_store_dword",
+                 "global_store_dwordx2",
+                 "global_store_dwordx3",
+                 "global_store_dwordx4",
+                 "global_store_short",
+                 "global_store_short_d16_hi",
+                 "scratch_store_byte",
+                 "scratch_store_byte_d16_hi",
+                 "scratch_store_dword",
+                 "scratch_store_dwordx2",
+                 "scratch_store_dwordx3",
+                 "scratch_store_dwordx4",
+                 "scratch_store_short",
+                 "scratch_store_short_d16_hi",
+                  // clang-format on
+              },
+              0,
+              {rocRoller::GPUWaitQueueType::StoreQueue},
               (1 << 12) - 1}}, // the offset is a `signed` 13-bit  (i.e., -4096..4095)
     };
 
@@ -644,175 +563,67 @@ namespace GPUArchitectureGenerator
             {gfx9ISAs(),
              {
                  rocRoller::GPUInstructionInfo(
-                     "s_atc_probe", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_load_dword", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atc_probe_buffer", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_load_dwordx16", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_load_dwordx8", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_store_dword", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_buffer_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_discard", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_discard_x2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_inv", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_inv_vol", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_wb", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_dcache_wb_vol", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_load_dword", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_load_dwordx16", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_load_dwordx2", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_load_dwordx4", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_load_dwordx8", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_memrealtime", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_memtime", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_load_dword", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_store_dword", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_scratch_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_store_dword", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_store_dwordx2", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
+                     "s_store_dwordx4", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx16", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx8", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_discard", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_discard_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_inv", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_inv_vol", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_wb", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_dcache_wb_vol", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_load_dword", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx16", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx8", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_memrealtime", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_memtime", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_store_dword", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_store_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_store_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_sendmsg", 1, {rocRoller::GPUWaitQueueType::LGKMSendMsgQueue}),
+                     "s_sendmsg", 1, {rocRoller::GPUWaitQueueType::SendMsgQueue}),
                  rocRoller::GPUInstructionInfo("v_dot2_f32_f16", 0, {}, 1),
                  rocRoller::GPUInstructionInfo("v_dot2_i32_i16", 0, {}, 1),
                  rocRoller::GPUInstructionInfo("v_dot4_i32_i8", 0, {}, 1),
@@ -821,6 +632,31 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo("v_accvgpr_read_b32", 0, {}, 1),
                  rocRoller::GPUInstructionInfo("v_accvgpr_write", 0, {}, 2),
                  rocRoller::GPUInstructionInfo("v_accvgpr_write_b32", 0, {}, 2),
+             }},
+            {gfx12ISAs(),
+             {
+                 rocRoller::GPUInstructionInfo(
+                     "s_buffer_load_dword", 1, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_buffer_load_dwordx16", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_buffer_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_buffer_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_buffer_load_dwordx8", 2, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_load_dword", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_load_dwordx16", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_load_dwordx2", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_load_dwordx4", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_load_dwordx8", 0, {rocRoller::GPUWaitQueueType::SMemQueue}),
+                 rocRoller::GPUInstructionInfo(
+                     "s_sendmsg", 1, {rocRoller::GPUWaitQueueType::SendMsgQueue}),
              }},
             {gfx908ISAs(),
              {

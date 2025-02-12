@@ -252,7 +252,11 @@ namespace GPUArchitectureGenerator
                 }
             }
 
-            if(TryAssembler(hipcc, isaVersion, "s_waitcnt vmcnt(63)", ""))
+            if(TryAssembler(hipcc, isaVersion, "s_waitcnt_loadcnt 63", ""))
+            {
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxVmcnt, 63);
+            }
+            else if(TryAssembler(hipcc, isaVersion, "s_waitcnt vmcnt(63)", ""))
             {
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxVmcnt, 63);
             }
@@ -264,7 +268,19 @@ namespace GPUArchitectureGenerator
             {
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxVmcnt, 0);
             }
-            AddCapability(isaVersion, rocRoller::GPUCapability::MaxLgkmcnt, 15);
+
+            if(TryAssembler(hipcc, isaVersion, "s_waitcnt_kmcnt 31", ""))
+            {
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxLgkmcnt, 31);
+            }
+            else if(TryAssembler(hipcc, isaVersion, "s_waitcnt lgkmcnt(15)", ""))
+            {
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxLgkmcnt, 15);
+            }
+            else
+            {
+                AddCapability(isaVersion, rocRoller::GPUCapability::MaxLgkmcnt, 0);
+            }
             AddCapability(isaVersion, rocRoller::GPUCapability::MaxExpcnt, 7);
             AddCapability(isaVersion, rocRoller::GPUCapability::SupportedSource, 0);
 

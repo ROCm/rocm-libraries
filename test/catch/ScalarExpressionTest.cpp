@@ -57,14 +57,6 @@ namespace ExpressionTest
                 co_yield m_context->argLoader()->getValue("a", s_a);
                 co_yield m_context->argLoader()->getValue("b", s_b);
 
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                auto gpu = m_context->targetArchitecture().target();
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
-
                 auto a = s_a->expression();
                 auto b = s_b->expression();
 

@@ -27,6 +27,7 @@ namespace rocRollerTest
         Instruction inst;
         auto        cost
             = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::WaitCntNop, m_context);
+        auto const& arch = m_context->targetArchitecture();
         {
             auto status = Scheduling::InstructionStatus();
             EXPECT_NEAR(cost->cost(inst, status), 0.0, 1e-12);
@@ -36,15 +37,15 @@ namespace rocRollerTest
             EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
-            auto status = Scheduling::InstructionStatus::Wait(WaitCount::VMCnt(3));
+            auto status = Scheduling::InstructionStatus::Wait(WaitCount::LoadCnt(arch, 3));
             EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
-            auto status = Scheduling::InstructionStatus::Wait(WaitCount::EXPCnt(3));
+            auto status = Scheduling::InstructionStatus::Wait(WaitCount::EXPCnt(arch, 3));
             EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
-            auto status = Scheduling::InstructionStatus::Wait(WaitCount::LGKMCnt(3));
+            auto status = Scheduling::InstructionStatus::Wait(WaitCount::KMCnt(arch, 3));
             EXPECT_GT(cost->cost(inst, status), 0.0);
         }
     }

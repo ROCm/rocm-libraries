@@ -111,13 +111,6 @@ namespace ArithmeticTest
                 co_yield m_context->argLoader()->getValue("b", bArg);
                 co_yield m_context->argLoader()->getValue("shift", shiftArg);
 
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
-
                 auto resultPtr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, {dataType, PointerType::PointerGlobal}, 1);
                 auto resultReg
@@ -532,13 +525,6 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
 
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
-
             auto v_result
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
@@ -777,13 +763,6 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
 
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
-
             auto v_result
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
@@ -905,13 +884,6 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("b", s_b);
             co_yield m_context->argLoader()->getValue("c", s_c);
 
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
-
             auto v_result
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
@@ -956,13 +928,6 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(vcPtr, s_c, "Move Pointer");
             co_yield m_context->mem()->loadGlobal(v_b, vbPtr, 0, 4);
             co_yield m_context->mem()->loadGlobal(v_c, vcPtr, 0, 8);
-
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
 
             // fp32 = fp32 * fp16 + fp32
             co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_c);
@@ -1130,13 +1095,6 @@ namespace ArithmeticTest
             co_yield m_context->argLoader()->getValue("cond_result", s_cond_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
-
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
 
             auto v_result
                 = Register::Value::Placeholder(m_context,

@@ -294,10 +294,11 @@ namespace rocRollerTest
     // Can be run with the --gtest_also_run_disabled_tests option
     TEST_F(SchedulerTest, DISABLED_SchedulerWaitStressTest)
     {
-        auto generator = []() -> Generator<Instruction> {
+        auto const& arch      = m_context->targetArchitecture();
+        auto        generator = [arch]() -> Generator<Instruction> {
             for(size_t i = 0; i < 1000000; i++)
             {
-                co_yield Instruction::Wait(WaitCount::VMCnt(1, "Comment"));
+                co_yield Instruction::Wait(WaitCount::LoadCnt(arch, 1, "Comment"));
             }
         };
 

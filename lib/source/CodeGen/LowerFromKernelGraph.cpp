@@ -391,7 +391,7 @@ namespace rocRoller
                 //       used within the loop. If there are, the wait count observer never releases
                 //       the registers.
                 co_yield Instruction::Wait(
-                    WaitCount::Zero("DEBUG: Wait after branch", m_context->targetArchitecture()));
+                    WaitCount::Zero(m_context->targetArchitecture(), "DEBUG: Wait after branch"));
                 co_yield Instruction::Unlock("Unlock DoWhile");
             }
 
@@ -452,7 +452,7 @@ namespace rocRoller
                 //       used within the loop. If there are, the wait count observer never releases
                 //       the registers.
                 co_yield Instruction::Wait(
-                    WaitCount::Zero("DEBUG: Wait after branch", m_context->targetArchitecture()));
+                    WaitCount::Zero(m_context->targetArchitecture(), "DEBUG: Wait after branch"));
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 
@@ -940,8 +940,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int, WaitZero const&, Transformer)
             {
-                co_yield Instruction::Wait(WaitCount::Zero("Explicit WaitZero operation",
-                                                           m_context->targetArchitecture()));
+                co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture(),
+                                                           "Explicit WaitZero operation"));
             }
 
             Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG, Transformer coords)

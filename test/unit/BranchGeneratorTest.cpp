@@ -93,11 +93,6 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-        {
-            GTEST_SKIP() << "Skipping BranchGenerator tests for " << GetParam();
-        }
-
         std::vector<char> assembledKernel = m_context->instructions()->assemble();
         EXPECT_GT(assembledKernel.size(), 0);
     }
@@ -120,16 +115,18 @@ namespace rocRollerTest
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
                                + std::string("\n") + std::string("s_branch");
+        if(m_context->targetArchitecture().target().isRDNA4GPU())
+        {
+            expected = std::string("s_wait_loadcnt 0\ns_wait_storecnt 0\ns_wait_kmcnt "
+                                   "0\ns_wait_dscnt 0\ns_wait_expcnt 0")
+                       + std::string("\n") + std::string("s_branch");
+        }
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::Sequential, Scheduling::CostFunction::None, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-        {
-            GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
-        }
         auto found = NormalizedSource(output()).find(expected) != std::string::npos;
         EXPECT_EQ(found, true);
     }
@@ -151,16 +148,18 @@ namespace rocRollerTest
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
                                + std::string("\n") + std::string("s_branch");
+        if(m_context->targetArchitecture().target().isRDNA4GPU())
+        {
+            expected = std::string("s_wait_loadcnt 0\ns_wait_storecnt 0\ns_wait_kmcnt "
+                                   "0\ns_wait_dscnt 0\ns_wait_expcnt 0")
+                       + std::string("\n") + std::string("s_branch");
+        }
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::Sequential, Scheduling::CostFunction::None, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-        {
-            GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
-        }
         auto found = NormalizedSource(output()).find(expected) != std::string::npos;
         EXPECT_EQ(found, false);
     }

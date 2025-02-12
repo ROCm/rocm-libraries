@@ -96,8 +96,10 @@ namespace rocRoller
 
     inline std::unordered_map<std::string, GPUWaitQueue::Value> GPUWaitQueue::m_stringMap = {
         {"None", Value::None},
-        {"VMQueue", Value::VMQueue},
-        {"LGKMQueue", Value::LGKMQueue},
+        {"LoadQueue", Value::LoadQueue},
+        {"StoreQueue", Value::StoreQueue},
+        {"DSQueue", Value::DSQueue},
+        {"KMQueue", Value::KMQueue},
         {"EXPQueue", Value::EXPQueue},
         {"VSQueue", Value::VSQueue},
         {"Count", Value::Count},
@@ -123,10 +125,11 @@ namespace rocRoller
     inline const std::unordered_map<std::string, GPUWaitQueueType::Value>
         GPUWaitQueueType::m_stringMap = {
             {"None", Value::None},
-            {"VMQueue", Value::VMQueue},
-            {"LGKMSendMsgQueue", Value::LGKMSendMsgQueue},
-            {"LGKMDSQueue", Value::LGKMDSQueue},
-            {"LGKMSmemQueue", Value::LGKMSmemQueue},
+            {"LoadQueue", Value::LoadQueue},
+            {"StoreQueue", Value::StoreQueue},
+            {"SendMsgQueue", Value::SendMsgQueue},
+            {"SMemQueue", Value::SMemQueue},
+            {"DSQueue", Value::DSQueue},
             {"EXPQueue", Value::EXPQueue},
             {"VSQueue", Value::VSQueue},
             {"FinalInstruction", Value::FinalInstruction},

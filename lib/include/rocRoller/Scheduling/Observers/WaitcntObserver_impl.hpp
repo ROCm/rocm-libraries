@@ -72,7 +72,7 @@ namespace rocRoller
         inline void WaitcntObserver::modify(Instruction& inst) const
         {
             auto        context      = m_context.lock();
-            const auto& architecture = context->targetArchitecture();
+            auto const& architecture = context->targetArchitecture();
 
             // Handle if manually specified waitcnts are over the sat limits.
             inst.addWaitCount(inst.getWaitCount().getAsSaturatedWaitCount(architecture));
@@ -131,14 +131,18 @@ namespace rocRoller
                     return WaitCount::Zero(architecture);
                 }
 
-                if(!m_instructionQueues.at(GPUWaitQueue::LGKMQueue).empty())
+                if(!m_instructionQueues.at(GPUWaitQueue::KMQueue).empty()
+                   || !m_instructionQueues.at(GPUWaitQueue::DSQueue).empty())
                 {
                     if(explanation != nullptr)
                     {
-                        *explanation += "WaitCnt Needed: lgkmcnt(0) before an s_barrier since the "
-                                        "lgkm queue is not empty.";
+                        *explanation
+                            += "WaitCnt Needed: kmcnt(0) & dscnt(0) before an s_barrier since the "
+                               "km & ds queue are not empty.";
                     }
-                    return WaitCount::LGKMCnt(0);
+                    auto kmdscnt = WaitCount::KMCnt(architecture, 0);
+                    kmdscnt.combine(WaitCount::DSCnt(architecture, 0));
+                    return kmdscnt;
                 }
             }
 
@@ -156,7 +160,7 @@ namespace rocRoller
                         {
                             if(m_needsWaitZero.at(waitQueue))
                             {
-                                retval.combine(WaitCount(waitQueue, 0));
+                                retval.combine(WaitCount(architecture, waitQueue, 0));
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
@@ -168,7 +172,7 @@ namespace rocRoller
                             {
                                 int waitval
                                     = m_instructionQueues.at(waitQueue).size() - (queue_i + 1);
-                                retval.combine(WaitCount(waitQueue, waitval));
+                                retval.combine(WaitCount(architecture, waitQueue, waitval));
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"

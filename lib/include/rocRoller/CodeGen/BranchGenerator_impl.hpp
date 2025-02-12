@@ -31,7 +31,7 @@ namespace rocRoller
         auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitBeforeBranch)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait before Branch", ctx->targetArchitecture()));
+                WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait before Branch"));
 
         co_yield_(Instruction("s_branch", {}, {destLabel}, {}, comment));
     }
@@ -77,7 +77,7 @@ namespace rocRoller
         }
         if(context->kernelOptions().alwaysWaitBeforeBranch)
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait before Branch", context->targetArchitecture()));
+                WaitCount::Zero(context->targetArchitecture(), "DEBUG: Wait before Branch"));
         co_yield_(Instruction(concatenate("s_cbranch_", conditionLocation, conditionType),
                               {},
                               {destLabel},

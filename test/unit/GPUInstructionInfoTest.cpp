@@ -12,17 +12,12 @@ class GPUInstructionInfoTest : public SimpleFixture
 
 TEST_F(GPUInstructionInfoTest, BasicTest)
 {
-    GPUInstructionInfo Test("test",
-                            0,
-                            {GPUWaitQueueType::LGKMDSQueue, GPUWaitQueueType::VMQueue},
-                            16,
-                            true,
-                            false,
-                            8192);
+    GPUInstructionInfo Test(
+        "test", 0, {GPUWaitQueueType::DSQueue, GPUWaitQueueType::LoadQueue}, 16, true, false, 8192);
     EXPECT_EQ(Test.getInstruction(), "test");
     EXPECT_EQ(Test.getWaitQueues().size(), 2);
-    EXPECT_EQ(Test.getWaitQueues()[0], GPUWaitQueueType::LGKMDSQueue);
-    EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::VMQueue);
+    EXPECT_EQ(Test.getWaitQueues()[0], GPUWaitQueueType::DSQueue);
+    EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::LoadQueue);
     EXPECT_EQ(Test.getWaitCount(), 0);
     EXPECT_EQ(Test.getLatency(), 16);
     EXPECT_EQ(Test.maxOffsetValue(), 8192);
@@ -30,12 +25,11 @@ TEST_F(GPUInstructionInfoTest, BasicTest)
 
 TEST_F(GPUInstructionInfoTest, BasicTestLatency)
 {
-    GPUInstructionInfo Test(
-        "test", 0, {GPUWaitQueueType::LGKMDSQueue, GPUWaitQueueType::VMQueue}, 8);
+    GPUInstructionInfo Test("test", 0, {GPUWaitQueueType::DSQueue, GPUWaitQueueType::LoadQueue}, 8);
     EXPECT_EQ(Test.getInstruction(), "test");
     EXPECT_EQ(Test.getWaitQueues().size(), 2);
-    EXPECT_EQ(Test.getWaitQueues()[0], GPUWaitQueueType::LGKMDSQueue);
-    EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::VMQueue);
+    EXPECT_EQ(Test.getWaitQueues()[0], GPUWaitQueueType::DSQueue);
+    EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::LoadQueue);
     EXPECT_EQ(Test.getWaitCount(), 0);
     EXPECT_EQ(Test.getLatency(), 8);
 }
