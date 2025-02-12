@@ -662,9 +662,12 @@ namespace rocRoller
                 else
                     opEnd += "ushort";
             }
+            const auto& gpu = ctx->targetArchitecture().target();
+            const auto  soffset
+                = gpu.isGFX12GPU() ? Register::Value::NullLiteral() : Register::Value::Literal(0);
             co_yield_(Instruction("buffer_load_" + opEnd,
                                   {dest},
-                                  {addr, sgprSrd, Register::Value::Literal(0)},
+                                  {addr, sgprSrd, soffset},
                                   {"offen", offsetModifier, glc, slc, lds},
                                   "Load value"));
         }
@@ -673,15 +676,18 @@ namespace rocRoller
             int              numWords       = numBytes / m_wordSize;
             std::vector<int> potentialWords = {4, 3, 2, 1};
             int              count          = 0;
+            const auto&      gpu            = ctx->targetArchitecture().target();
             while(count < numWords)
             {
                 auto width = chooseWidth(
                     numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
-                auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
+                auto       offsetModifier = genOffsetModifier(offset + count * m_wordSize);
+                const auto soffset        = gpu.isGFX12GPU() ? Register::Value::NullLiteral()
+                                                             : Register::Value::Literal(0);
                 co_yield_(Instruction(
                     concatenate("buffer_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
                     {dest->subset(Generated(iota(count, count + width)))},
-                    {addr, sgprSrd, Register::Value::Literal(0)},
+                    {addr, sgprSrd, soffset},
                     {"offen", offsetModifier, glc, slc, lds},
                     "Load value"));
                 count += width;
@@ -738,9 +744,12 @@ namespace rocRoller
             opEnd += "dword";
         }
 
+        const auto& gpu = ctx->targetArchitecture().target();
+        const auto  soffset
+            = gpu.isGFX12GPU() ? Register::Value::NullLiteral() : Register::Value::Literal(0);
         co_yield_(Instruction("buffer_load_" + opEnd,
                               {},
-                              {data, sgprSrd, Register::Value::Literal(0)},
+                              {data, sgprSrd, soffset},
                               {"offen", offsetModifier, glc, slc, lds},
                               "Load value direct to lds"));
 
@@ -826,9 +835,12 @@ namespace rocRoller
                 if(high)
                     opEnd += "_d16_hi";
             }
+            const auto& gpu = ctx->targetArchitecture().target();
+            const auto  soffset
+                = gpu.isGFX12GPU() ? Register::Value::NullLiteral() : Register::Value::Literal(0);
             co_yield_(Instruction("buffer_store_" + opEnd,
                                   {},
-                                  {data, addr, sgprSrd, Register::Value::Literal(0)},
+                                  {data, addr, sgprSrd, soffset},
                                   {"offen", offsetModifier, glc, slc, sc1, lds},
                                   "Store value"));
         }
@@ -837,6 +849,7 @@ namespace rocRoller
             int              numWords       = numBytes / m_wordSize;
             std::vector<int> potentialWords = {4, 3, 2, 1};
             int              count          = 0;
+            const auto&      gpu            = ctx->targetArchitecture().target();
             while(count < numWords)
             {
                 auto width = chooseWidth(
@@ -857,10 +870,12 @@ namespace rocRoller
                 {
                     dataSubset = data->subset(Generated(iota(count, count + width)));
                 }
+                const auto soffset = gpu.isGFX12GPU() ? Register::Value::NullLiteral()
+                                                      : Register::Value::Literal(0);
                 co_yield_(Instruction(concatenate("buffer_store_dword",
                                                   width == 1 ? "" : "x" + std::to_string(width)),
                                       {},
-                                      {dataSubset, addr, sgprSrd, Register::Value::Literal(0)},
+                                      {dataSubset, addr, sgprSrd, soffset},
                                       {"offen", offsetModifier, glc, slc, sc1, lds},
                                       "Store value"));
                 count += width;

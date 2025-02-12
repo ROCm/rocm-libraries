@@ -125,6 +125,8 @@ namespace rocRoller
 
             static ValuePtr Label(const std::string& label);
 
+            static ValuePtr NullLiteral();
+
             /**
              * Placeholder value to be filled in later.
              */

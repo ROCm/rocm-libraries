@@ -120,6 +120,21 @@ namespace rocRoller
             return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU();
         }
 
+        constexpr bool isGFX9GPU() const
+        {
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU();
+        }
+
+        constexpr bool isGFX10GPU() const
+        {
+            return isRDNA1GPU() || isRDNA2GPU();
+        }
+
+        constexpr bool isGFX12GPU() const
+        {
+            return isRDNA4GPU();
+        }
+
         auto operator<=>(const GPUArchitectureTarget&) const = default;
 
     private:

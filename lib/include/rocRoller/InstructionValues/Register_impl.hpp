@@ -133,6 +133,8 @@ namespace rocRoller
                 return "Literal";
             case Type::Label:
                 return "Label";
+            case Type::NullLiteral:
+                return "NullLiteral";
             case Type::Scalar:
                 return "SGPR";
             case Type::Vector:
@@ -306,6 +308,15 @@ namespace rocRoller
             auto v       = std::make_shared<Value>();
             v->m_regType = Type::Label;
             v->m_label   = label;
+
+            return v;
+        }
+
+        inline ValuePtr Value::NullLiteral()
+        {
+            auto v       = std::make_shared<Value>();
+            v->m_regType = Type::NullLiteral;
+            v->m_label   = "null";
 
             return v;
         }
@@ -603,6 +614,7 @@ namespace rocRoller
                 gprString(os);
                 return;
             case Type::Label:
+            case Type::NullLiteral:
                 os << m_label;
                 return;
             case Type::M0:
