@@ -30,11 +30,13 @@
 struct StockhamGeneratorSpecs
 {
     StockhamGeneratorSpecs(const std::vector<unsigned int>& factors,
+                           const std::vector<unsigned int>& factors_pp,
                            const std::vector<unsigned int>& factors2d,
                            const std::vector<unsigned int>& precisions,
                            unsigned int                     workgroup_size,
                            const std::string&               scheme)
         : factors(factors)
+        , factors_pp(factors_pp)
         , factors2d(factors2d)
         , precisions(precisions)
         , length(product(factors.begin(), factors.end()))
@@ -45,6 +47,7 @@ struct StockhamGeneratorSpecs
     }
 
     std::vector<unsigned int> factors;
+    std::vector<unsigned int> factors_pp;
     std::vector<unsigned int> factors2d;
     std::vector<unsigned int> precisions; // mapped from rocfft_precision
     unsigned int              length;

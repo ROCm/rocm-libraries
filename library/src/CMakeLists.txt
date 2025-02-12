@@ -158,9 +158,11 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rr.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen_rr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/bluestein_generator.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_compile.cpp
      ${CMAKE_SOURCE_DIR}/library/src/include/rtc_stockham_gen.h

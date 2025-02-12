@@ -33,6 +33,8 @@ using namespace std::placeholders;
 #include "stockham_gen_cr.h"
 #include "stockham_gen_rc.h"
 #include "stockham_gen_rr.h"
+#include "stockham_pp_gen_cc.h"
+#include "stockham_pp_gen_rr.h"
 
 #include "stockham_gen_2d.h"
 
@@ -323,14 +325,14 @@ int main()
         ++arg;
         factors = parse_uints_csv(*arg);
 
-        StockhamGeneratorSpecs specs(factors, factors2d, precisions, workgroup_size, scheme);
+        StockhamGeneratorSpecs specs(factors, {}, factors2d, precisions, workgroup_size, scheme);
         specs.half_lds           = half_lds;
         specs.direct_to_from_reg = direct_to_from_reg;
 
         specs.threads_per_transform = threads_per_transform.front();
 
         // second dimension for 2D_SINGLE
-        StockhamGeneratorSpecs specs2d(factors2d, factors, precisions, workgroup_size, scheme);
+        StockhamGeneratorSpecs specs2d(factors2d, {}, factors, precisions, workgroup_size, scheme);
         if(!threads_per_transform.empty())
             specs2d.threads_per_transform = threads_per_transform.back();
 

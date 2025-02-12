@@ -225,8 +225,9 @@ void build_stockham_function_pool(CompileQueue& queue)
     // build everything in the function pool
     function_pool& fp = function_pool::get_function_pool();
 
-    // fused Bluestein kernels are always built at runtime
+    // fused Bluestein and partial-pass kernels are always built at runtime
     auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
 
     for(const auto& i : fp.get_map())
     {
@@ -242,6 +243,7 @@ void build_stockham_function_pool(CompileQueue& queue)
         std::copy(i.second.factors.begin(), i.second.factors.end(), std::back_inserter(factors));
 
         StockhamGeneratorSpecs specs{factors,
+                                     {},
                                      {},
                                      {static_cast<unsigned int>(precision)},
                                      static_cast<unsigned int>(i.second.workgroup_size),
@@ -298,11 +300,13 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             sbrc_trans_type,
                                                             cbtype,
                                                             fuseBlue,
+                                                            ppType,
                                                             {},
                                                             {});
                 std::function<std::string(const std::string&)> generate_src
                     = [=](const std::string& kernel_name) -> std::string {
                     StockhamGeneratorSpecs specs{factors,
+                                                 {},
                                                  {},
                                                  {static_cast<unsigned int>(precision)},
                                                  static_cast<unsigned int>(i.second.workgroup_size),
@@ -330,6 +334,7 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         sbrc_trans_type,
                                         cbtype,
                                         fuseBlue,
+                                        ppType,
                                         {},
                                         {});
                 };
@@ -616,8 +621,9 @@ void build_solution_kernels(CompileQueue& queue)
     std::vector<SolutionNode> kernel_nodes;
     solmap.get_all_kernels(kernel_nodes, true);
 
-    // fused Bluestein kernels are always built at runtime
+    // fused Bluestein and partial-pass kernels are always built at runtime
     auto fuseBlue = BluesteinFuseType::BFT_NONE;
+    auto ppType   = PartialPassType::PPT_NONE;
 
     for(const SolutionNode& kernel_sol : kernel_nodes)
     {
@@ -664,6 +670,7 @@ void build_solution_kernels(CompileQueue& queue)
 
                 StockhamGeneratorSpecs specs{factors,
                                              {},
+                                             {},
                                              {static_cast<unsigned int>(precision)},
                                              static_cast<unsigned int>(config.workgroup_size),
                                              PrintScheme(scheme)};
@@ -693,6 +700,7 @@ void build_solution_kernels(CompileQueue& queue)
                                                             sbrc_trans_type,
                                                             cbtype,
                                                             fuseBlue,
+                                                            ppType,
                                                             {},
                                                             {});
 
@@ -718,6 +726,7 @@ void build_solution_kernels(CompileQueue& queue)
                                         sbrc_trans_type,
                                         cbtype,
                                         fuseBlue,
+                                        ppType,
                                         {},
                                         {});
                 };

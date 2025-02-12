@@ -887,7 +887,7 @@ def list_large_kernels():
         NS(length=60,  factors=[6, 10],      use_3steps_large_twd={
            'sp': 'false',  'dp': 'false'}),
         NS(length=64,  factors=[8, 8],       use_3steps_large_twd={
-           'sp': 'true',  'dp': 'false'}, workgroup_size=256),
+           'sp': 'true',  'dp': 'false'}, workgroup_size=256, direct_to_from_reg=False),
         NS(length=72,  factors=[8, 3, 3],    use_3steps_large_twd={
            'sp': 'true',  'dp': 'false'}),
         NS(length=80,  factors=[10, 8],      use_3steps_large_twd={

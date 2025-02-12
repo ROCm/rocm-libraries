@@ -35,6 +35,8 @@ using namespace std::placeholders;
 #include "device/generator/stockham_gen_cr.h"
 #include "device/generator/stockham_gen_rc.h"
 #include "device/generator/stockham_gen_rr.h"
+#include "device/generator/stockham_pp_gen_cc.h"
+#include "device/generator/stockham_pp_gen_rr.h"
 
 #include "device/generator/stockham_gen_2d.h"
 
@@ -59,6 +61,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
                                      SBRC_TRANSPOSE_TYPE           transpose_type,
                                      CallbackType                  cbtype,
                                      BluesteinFuseType             fuseBlue,
+                                     PartialPassType               ppType,
                                      const LoadOps&                loadOps,
                                      const StoreOps&               storeOps)
 {
@@ -68,6 +71,15 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
         kernel_name += "_fwd";
     else
         kernel_name += "_back";
+
+    switch(ppType)
+    {
+    case PPT_NONE:
+        break;
+    case PPT_SBCC:
+    case PPT_SBRR:
+        kernel_name += "_pp";
+    }
 
     kernel_name += "_len";
     kernel_name += std::to_string(specs.length);
@@ -256,10 +268,13 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
                          SBRC_TRANSPOSE_TYPE           transpose_type,
                          CallbackType                  cbtype,
                          const BluesteinFuseType&      fuseBlue,
+                         const PartialPassType&        ppType,
                          const LoadOps&                loadOps,
                          const StoreOps&               storeOps)
 {
     std::unique_ptr<Function> lds2reg, reg2lds, device;
+    std::unique_ptr<Function> lds2reg_pp_steps, reg2lds_pp_steps;
+    std::unique_ptr<Function> local_transpose_pp;
     std::unique_ptr<Function> lds2reg1, reg2lds1, device1;
     std::unique_ptr<Function> bluestein_load, bluestein_intrinsic_load;
     std::unique_ptr<Function> bluestein_store, bluestein_intrinsic_store;
@@ -297,10 +312,21 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
     {
         std::unique_ptr<StockhamKernel> kernel;
         if(scheme == CS_KERNEL_STOCKHAM)
-            kernel = std::make_unique<StockhamKernelRR>(specs);
+        {
+            if(ppType == PartialPassType::PPT_SBRR)
+                kernel = std::make_unique<StockhamPartialPassKernelRR>(specs);
+            else
+                kernel = std::make_unique<StockhamKernelRR>(specs);
+        }
         else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-            kernel = std::make_unique<StockhamKernelCC>(
-                specs, largeTwdBatchIsTransformCount, fuseBluestein);
+        {
+            if(ppType == PartialPassType::PPT_SBCC)
+                kernel = std::make_unique<StockhamPartialPassKernelCC>(
+                    specs, largeTwdBatchIsTransformCount);
+            else
+                kernel = std::make_unique<StockhamKernelCC>(
+                    specs, largeTwdBatchIsTransformCount, fuseBluestein);
+        }
         else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CR)
             kernel = std::make_unique<StockhamKernelCR>(specs);
         else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
@@ -315,9 +341,41 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
             throw std::runtime_error("unhandled scheme");
         if(transforms_per_block)
             *transforms_per_block = kernel->transforms_per_block;
-        lds2reg = std::make_unique<Function>(kernel->generate_lds_to_reg_input_function());
-        reg2lds = std::make_unique<Function>(kernel->generate_lds_from_reg_output_function());
-        device  = std::make_unique<Function>(kernel->generate_device_function());
+
+        switch(ppType)
+        {
+        case PPT_NONE:
+        {
+            lds2reg = std::make_unique<Function>(kernel->generate_lds_to_reg_input_function());
+            reg2lds = std::make_unique<Function>(kernel->generate_lds_from_reg_output_function());
+            device  = std::make_unique<Function>(kernel->generate_device_function());
+            break;
+        }
+        case PPT_SBCC:
+        {
+            auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
+
+            lds2reg
+                = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_pp_function());
+            reg2lds
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_pp_function());
+            lds2reg_pp_steps = std::make_unique<Function>(
+                kernel_pp->generate_lds_to_reg_input_step_1_2_function());
+            reg2lds_pp_steps = std::make_unique<Function>(
+                kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
+            local_transpose_pp
+                = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
+            device = std::make_unique<Function>(kernel_pp->generate_device_function());
+            break;
+        }
+        case PPT_SBRR:
+        {
+            lds2reg = std::make_unique<Function>(kernel->generate_lds_to_reg_input_function());
+            reg2lds = std::make_unique<Function>(kernel->generate_lds_from_reg_output_function());
+            device  = std::make_unique<Function>(kernel->generate_device_function());
+            break;
+        }
+        }
 
         if(fuseBluestein)
         {
@@ -384,6 +442,10 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         src += large_twiddles_h;
     // append the neccessary functions only
     append_radix_h(src, all_factors);
+
+    if(ppType != PPT_NONE)
+        append_radix_h(src, specs.factors_pp);
+
     // SBCCs don't need this
     if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC)
         src += real2complex_device_h;
@@ -391,6 +453,15 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
     src += lds2reg->render();
     src += reg2lds->render();
     src += device->render();
+
+    // TODO: remove null pointer check
+    if(ppType != PPT_NONE && lds2reg_pp_steps && reg2lds_pp_steps && local_transpose_pp)
+    {
+        src += lds2reg_pp_steps->render();
+        src += reg2lds_pp_steps->render();
+        src += local_transpose_pp->render();
+    }
+
     if(lds2reg1)
         src += lds2reg1->render();
     if(reg2lds1)
