@@ -45,6 +45,7 @@
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Utilities/Comparison.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
@@ -213,6 +214,44 @@ namespace rocRoller
 
         // cppcheck doesn't seem to notice that Throw<>() is marked [[noreturn]] so it will
         // complain if this isn't here.
+        return DataType::None;
+    }
+
+    // Case insensitive and with special cases
+    template <>
+    inline DataType fromString<DataType>(std::string const& str)
+    {
+        using myInt   = std::underlying_type_t<DataType>;
+        auto maxValue = static_cast<myInt>(DataType::Count);
+        for(myInt i = 0; i < maxValue; ++i)
+        {
+            auto        val     = static_cast<DataType>(i);
+            std::string testStr = toString(val);
+
+            if(std::equal(
+                   str.begin(), str.end(), testStr.begin(), testStr.end(), [](auto a, auto b) {
+                       return std::tolower(a) == std::tolower(b);
+                   }))
+                return val;
+        }
+
+        // Special cases
+        std::string strCopy = str;
+        std::transform(strCopy.begin(), strCopy.end(), strCopy.begin(), ::tolower);
+
+        if(strCopy == "fp16")
+        {
+            return DataType::Half;
+        }
+        if(strCopy == "bf16")
+        {
+            return DataType::BFloat16;
+        }
+
+        Throw<FatalError>(
+            "Invalid fromString: type name: ", typeName<DataType>(), ", string input: ", str);
+
+        // Unreachable code
         return DataType::None;
     }
 

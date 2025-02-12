@@ -165,6 +165,7 @@ set(
     catch/CommandTest.cpp
     catch/CustomAssertionTest.cpp
     catch/CustomMatcherTest.cpp
+    catch/DataTypesTest.cpp
     catch/ExpressionContainsSubExpressionTest.cpp
     catch/ExpressionIdenticalTest.cpp
     catch/ExpressionSerializationTest.cpp

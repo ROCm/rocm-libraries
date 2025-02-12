@@ -283,7 +283,7 @@ endif()
 
 target_link_libraries(
     rocroller
-    PRIVATE ${llvm_libs} lldELF
+    PRIVATE ${llvm_libs} ${llvm_yaml_libs} lldELF
     PUBLIC msgpackc-cxx
 )
 target_include_directories(rocroller SYSTEM PUBLIC ${LLD_INCLUDE_DIRS})

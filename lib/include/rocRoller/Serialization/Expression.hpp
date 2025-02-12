@@ -18,18 +18,21 @@ namespace rocRoller
         struct MappingTraits<Expression::ExpressionPtr, IO, Context>
             : public SharedPointerMappingTraits<Expression::ExpressionPtr, IO, Context, true>
         {
+            static const bool flow = true;
         };
 
         template <typename IO, typename Context>
         struct MappingTraits<Expression::Expression, IO, Context>
             : public DefaultVariantMappingTraits<Expression::Expression, IO, Context>
         {
+            static const bool flow = true;
         };
 
         template <Expression::CBinary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, TExp& exp, Context& ctx)
             {
@@ -49,7 +52,8 @@ namespace rocRoller
         template <Expression::CUnary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, TExp& exp, Context& ctx)
             {
@@ -68,12 +72,13 @@ namespace rocRoller
         template <typename IO, typename Context>
         struct MappingTraits<Expression::Convert, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, Expression::Convert& exp, Context& ctx)
             {
                 iot::mapRequired(io, "arg", exp.arg, ctx);
-                iot::mapRequired(io, "dataType", exp.destinationType, ctx);
+                iot::mapRequired(io, "dataType", exp.destinationType);
             }
 
             static void mapping(IO& io, Expression::Convert& val)
@@ -85,10 +90,34 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::BitFieldExtract, IO, Context>
+        {
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::BitFieldExtract& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "arg", exp.arg, ctx);
+                iot::mapRequired(io, "dataType", exp.outputDataType);
+                iot::mapRequired(io, "width", exp.width);
+                iot::mapRequired(io, "offset", exp.offset);
+            }
+
+            static void mapping(IO& io, Expression::BitFieldExtract& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
         template <Expression::CTernary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, TExp& exp, Context& ctx)
             {

@@ -32,10 +32,10 @@ namespace rocRoller
                 {
                     auto command = std::make_shared<Command>();
 
-                    auto typeA = getDataTypeFromString(solutionParams.typeA);
-                    auto typeB = getDataTypeFromString(solutionParams.typeB);
-                    auto typeC = getDataTypeFromString(solutionParams.typeC);
-                    auto typeD = getDataTypeFromString(solutionParams.typeD);
+                    auto typeA = fromString<DataType>(solutionParams.typeA);
+                    auto typeB = fromString<DataType>(solutionParams.typeB);
+                    auto typeC = fromString<DataType>(solutionParams.typeC);
+                    auto typeD = fromString<DataType>(solutionParams.typeD);
 
                     //TODO: Handle transposed matrices more elegantly
                     switch(solutionParams.transA)
@@ -120,10 +120,10 @@ namespace rocRoller
 
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
-                    auto typeA = getDataTypeFromString(solutionParams.typeA);
-                    auto typeB = getDataTypeFromString(solutionParams.typeB);
-                    auto typeC = getDataTypeFromString(solutionParams.typeC);
-                    auto typeD = getDataTypeFromString(solutionParams.typeD);
+                    auto typeA = fromString<DataType>(solutionParams.typeA);
+                    auto typeB = fromString<DataType>(solutionParams.typeB);
+                    auto typeC = fromString<DataType>(solutionParams.typeC);
+                    auto typeD = fromString<DataType>(solutionParams.typeD);
 
                     if(typeA == DataType::Float && typeB == DataType::Float)
                     {
@@ -271,17 +271,17 @@ namespace rocRoller
                     size_t N = problemParams.n;
                     size_t K = problemParams.k;
 
-                    TensorDescriptor descA(getDataTypeFromString(problemParams.typeA),
+                    TensorDescriptor descA(fromString<DataType>(problemParams.typeA),
                                            {M, K},
                                            problemParams.transA == TransposeType::T ? "T" : "N");
-                    TensorDescriptor descB(getDataTypeFromString(problemParams.typeB),
+                    TensorDescriptor descB(fromString<DataType>(problemParams.typeB),
                                            {K, N},
                                            problemParams.transB == TransposeType::T ? "T" : "N");
 
                     setCommandTensorArg(commandArgs, m_tagTensorA, descA, (float*)nullptr);
                     setCommandTensorArg(commandArgs, m_tagTensorB, descB, (float*)nullptr);
 
-                    TensorDescriptor descC(getDataTypeFromString(problemParams.typeC), {M, N}, "N");
+                    TensorDescriptor descC(fromString<DataType>(problemParams.typeC), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorC, descC, (float*)nullptr);
 
                     commandArgs.setArgument(
@@ -289,7 +289,7 @@ namespace rocRoller
                     commandArgs.setArgument(
                         m_tagScalarBeta, ArgumentType::Value, problemParams.beta);
 
-                    TensorDescriptor descD(getDataTypeFromString(problemParams.typeD), {M, N}, "N");
+                    TensorDescriptor descD(fromString<DataType>(problemParams.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
 
                     return commandArgs;

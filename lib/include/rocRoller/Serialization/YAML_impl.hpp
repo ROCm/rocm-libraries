@@ -75,7 +75,13 @@ namespace rocRoller
             T rv;
 
 #ifdef ROCROLLER_USE_LLVM
-            auto              reader = llvm::MemoryBuffer::getFile(filename);
+            auto reader = llvm::MemoryBuffer::getFile(filename);
+
+            if(!reader || !*reader)
+            {
+                Throw<FatalError>("Can not read YAML file!", ShowValue(filename));
+            }
+
             llvm::yaml::Input yin(**reader);
 
             yin >> rv;

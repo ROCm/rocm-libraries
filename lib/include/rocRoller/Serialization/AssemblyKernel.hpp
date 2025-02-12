@@ -68,14 +68,15 @@ namespace rocRoller
                 std::string symbol = kern.kernelName() + ".kd";
                 iot::mapRequired(io, ".symbol", symbol);
 
-                int kernarg_segment_size;
-                int group_segment_fixed_size;
-                int private_segment_fixed_size;
-                int kernarg_segment_align;
-                int sgpr_count;
-                int vgpr_count;
-                int agpr_count;
-                int max_flat_workgroup_size;
+                int                       kernarg_segment_size;
+                int                       group_segment_fixed_size;
+                int                       private_segment_fixed_size;
+                int                       kernarg_segment_align;
+                int                       sgpr_count;
+                int                       vgpr_count;
+                int                       agpr_count;
+                int                       max_flat_workgroup_size;
+                std::vector<unsigned int> workgroupSize;
 
                 if(iot::outputting(io))
                 {
@@ -87,6 +88,11 @@ namespace rocRoller
                     vgpr_count                 = kern.vgpr_count();
                     agpr_count                 = kern.agpr_count();
                     max_flat_workgroup_size    = kern.max_flat_workgroup_size();
+                    workgroupSize              = {
+                        kern.m_workgroupSize[0],
+                        kern.m_workgroupSize[1],
+                        kern.m_workgroupSize[2],
+                    };
                 }
 
                 iot::mapRequired(io, ".kernarg_segment_size", kernarg_segment_size);
@@ -97,12 +103,12 @@ namespace rocRoller
                 iot::mapRequired(io, ".vgpr_count", vgpr_count);
                 iot::mapRequired(io, ".agpr_count", agpr_count);
                 iot::mapRequired(io, ".max_flat_workgroup_size", max_flat_workgroup_size);
+                iot::mapRequired(io, ".workgroup_size", workgroupSize);
 
                 //
                 // Serialized and de-serialized
                 //
                 iot::mapRequired(io, ".kernel_dimensions", kern.m_kernelDimensions);
-                iot::mapRequired(io, ".workgroup_size", kern.m_workgroupSize);
                 iot::mapRequired(io, ".wavefront_size", kern.m_wavefrontSize);
                 iot::mapRequired(io, ".workitem_count", kern.m_workitemCount);
                 iot::mapRequired(io, ".dynamic_sharedmemory_bytes", kern.m_dynamicSharedMemBytes);
@@ -132,6 +138,9 @@ namespace rocRoller
                 else
                 {
                     iot::mapRequired(io, ".kernel_graph", kern.m_kernelGraph);
+
+                    AssertFatal(workgroupSize.size() == 3);
+                    kern.m_workgroupSize = {workgroupSize[0], workgroupSize[1], workgroupSize[2]};
                 }
 
                 iot::mapRequired(io, ".command", kern.m_command);
@@ -151,9 +160,22 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernels& kern)
             {
-                auto hsa_version = kern.hsa_version();
+                std::vector<int> hsa_version;
+
+                if(iot::outputting(io))
+                {
+                    AssertFatal(kern.hsa_version().size() == 2);
+                    hsa_version = {kern.hsa_version()[0], kern.hsa_version()[1]};
+                }
+
                 iot::mapRequired(io, "amdhsa.version", hsa_version);
                 iot::mapRequired(io, "amdhsa.kernels", kern.kernels);
+
+                if(!iot::outputting(io))
+                {
+                    AssertFatal(hsa_version.size() == 2);
+                    // TODO: Set hsa_version from YAML input
+                }
             }
 
             static void mapping(IO& io, AssemblyKernels& kern, EmptyContext& ctx)

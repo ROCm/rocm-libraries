@@ -73,11 +73,25 @@ namespace rocRoller
                 return concatenate(
                     ExpressionInfo<Expr>::name(), "(", call(expr.lhs), ", ", call(expr.rhs), ")");
             }
+
             template <CUnary Expr>
             std::string operator()(Expr const& expr) const
             {
                 return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
             }
+
+            std::string operator()(BitFieldExtract const& expr) const
+            {
+                return concatenate(ExpressionInfo<BitFieldExtract>::name(),
+                                   "(",
+                                   call(expr.arg),
+                                   ", width:",
+                                   expr.width,
+                                   ", offset:",
+                                   expr.offset,
+                                   ")");
+            }
+
             std::string operator()(Register::ValuePtr const& expr) const
             {
                 // This allows an unallocated register value to be rendered into a string which
@@ -93,6 +107,7 @@ namespace rocRoller
                 // value from the type.
                 return tostr + ":";
             }
+
             std::string operator()(CommandArgumentPtr const& expr) const
             {
                 if(expr)
