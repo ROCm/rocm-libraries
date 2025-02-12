@@ -67,50 +67,44 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_trace)
                 {
                     rocblas_internal_ostream alphass, betass;
-                    if(rocblas_internal_log_trace_alpha_beta_ex(
-                           alpha_type, alpha, nullptr, alphass, betass)
-                       == rocblas_status_success)
-                    {
-                        logger.log_trace(handle,
-                                         ROCBLAS_API_STR(rocblas_axpy_ex),
-                                         n,
-                                         alphass.str(),
-                                         alpha_type_str,
-                                         x,
-                                         x_type_str,
-                                         incx,
-                                         y,
-                                         y_type_str,
-                                         incy,
-                                         ex_type_str);
-                    }
+                    (void)rocblas_internal_log_trace_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphass, betass);
+                    logger.log_trace(handle,
+                                     ROCBLAS_API_STR(rocblas_axpy_ex),
+                                     n,
+                                     alphass.str(),
+                                     alpha_type_str,
+                                     x,
+                                     x_type_str,
+                                     incx,
+                                     y,
+                                     y_type_str,
+                                     incy,
+                                     ex_type_str);
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
-                    if(rocblas_internal_log_bench_alpha_beta_ex(
-                           alpha_type, alpha, nullptr, alphas, betas)
-                       == rocblas_status_success)
-                    {
-                        logger.log_bench(handle,
-                                         ROCBLAS_API_BENCH " -f axpy_ex",
-                                         "-n",
-                                         n,
-                                         alphas,
-                                         "--a_type",
-                                         alpha_type_str,
-                                         "--b_type",
-                                         x_type_str,
-                                         "--incx",
-                                         incx,
-                                         "--c_type",
-                                         y_type_str,
-                                         "--incy",
-                                         incy,
-                                         "--compute_type",
-                                         ex_type_str);
-                    }
+                    (void)rocblas_internal_log_bench_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphas, betas);
+                    logger.log_bench(handle,
+                                     ROCBLAS_API_BENCH " -f axpy_ex",
+                                     "-n",
+                                     n,
+                                     alphas,
+                                     "--a_type",
+                                     alpha_type_str,
+                                     "--b_type",
+                                     x_type_str,
+                                     "--incx",
+                                     incx,
+                                     "--c_type",
+                                     y_type_str,
+                                     "--incy",
+                                     incy,
+                                     "--compute_type",
+                                     ex_type_str);
                 }
             }
             else if(layer_mode & rocblas_layer_mode_log_trace)

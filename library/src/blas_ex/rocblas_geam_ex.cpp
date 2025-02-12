@@ -80,79 +80,73 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_trace)
                 {
                     rocblas_internal_ostream alphass, betass;
-                    if(rocblas_internal_log_trace_alpha_beta_ex(
-                           compute_type, alpha, beta, alphass, betass)
-                       == rocblas_status_success)
-                    {
-                        logger.log_trace(handle,
-                                         "rocblas_geam_ex",
-                                         transA,
-                                         transB,
-                                         m,
-                                         n,
-                                         k,
-                                         alphass.str(),
-                                         A,
-                                         a_type_string,
-                                         lda,
-                                         B,
-                                         b_type_string,
-                                         ldb,
-                                         betass.str(),
-                                         C,
-                                         c_type_string,
-                                         ldc,
-                                         D,
-                                         d_type_string,
-                                         ldd,
-                                         compute_type_string,
-                                         geam_ex_op);
-                    }
+                    (void)rocblas_internal_log_trace_alpha_beta_ex(
+                        compute_type, alpha, beta, alphass, betass);
+                    logger.log_trace(handle,
+                                     "rocblas_geam_ex",
+                                     transA,
+                                     transB,
+                                     m,
+                                     n,
+                                     k,
+                                     alphass.str(),
+                                     A,
+                                     a_type_string,
+                                     lda,
+                                     B,
+                                     b_type_string,
+                                     ldb,
+                                     betass.str(),
+                                     C,
+                                     c_type_string,
+                                     ldc,
+                                     D,
+                                     d_type_string,
+                                     ldd,
+                                     compute_type_string,
+                                     geam_ex_op);
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
-                    if(rocblas_internal_log_bench_alpha_beta_ex(
-                           compute_type, alpha, beta, alphas, betas)
-                       == rocblas_status_success)
-                    {
+                    (void)rocblas_internal_log_bench_alpha_beta_ex(
+                        compute_type, alpha, beta, alphas, betas);
 
-                        logger.log_bench(handle,
-                                         "./rocblas-bench -f geam_ex",
-                                         "--transposeA",
-                                         trans_a_letter,
-                                         "--transposeB",
-                                         trans_b_letter,
-                                         "-m",
-                                         m,
-                                         "-n",
-                                         n,
-                                         "-k",
-                                         k,
-                                         alphas,
-                                         "--a_type",
-                                         a_type_string,
-                                         "--lda",
-                                         lda,
-                                         "--b_type",
-                                         b_type_string,
-                                         "--ldb",
-                                         ldb,
-                                         betas,
-                                         "--c_type",
-                                         c_type_string,
-                                         "--ldc",
-                                         ldc,
-                                         "--d_type",
-                                         d_type_string,
-                                         "--ldd",
-                                         ldd,
-                                         "--compute_type",
-                                         compute_type_string,
-                                         "--geam_ex_op",
-                                         geam_ex_op);
-                    }
+                    logger.log_bench(handle,
+                                     "./rocblas-bench -f geam_ex",
+                                     "--transposeA",
+                                     trans_a_letter,
+                                     "--transposeB",
+                                     trans_b_letter,
+                                     "-m",
+                                     m,
+                                     "-n",
+                                     n,
+                                     "-k",
+                                     k,
+                                     alphas,
+                                     "--a_type",
+                                     a_type_string,
+                                     "--lda",
+                                     lda,
+                                     "--b_type",
+                                     b_type_string,
+                                     "--ldb",
+                                     ldb,
+                                     betas,
+                                     "--c_type",
+                                     c_type_string,
+                                     "--ldc",
+                                     ldc,
+                                     "--d_type",
+                                     d_type_string,
+                                     "--ldd",
+                                     ldd,
+                                     "--compute_type",
+                                     compute_type_string,
+                                     "--geam_ex_op",
+                                     geam_ex_op);
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_profile)

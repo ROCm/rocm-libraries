@@ -98,88 +98,83 @@ namespace
                 {
                     rocblas_internal_ostream alphass, betass;
 
-                    if(rocblas_internal_log_trace_alpha_beta_ex(
-                           compute_type, alpha, beta, alphass, betass)
-                       == rocblas_status_success)
-                    {
-                        logger.log_trace(handle,
-                                         ROCBLAS_API_STR(rocblas_gemm_batched_ex),
-                                         trans_a,
-                                         trans_b,
-                                         m,
-                                         n,
-                                         k,
-                                         alphass.str(),
-                                         a,
-                                         a_type_string,
-                                         lda,
-                                         b,
-                                         b_type_string,
-                                         ldb,
-                                         betass.str(),
-                                         c,
-                                         c_type_string,
-                                         ldc,
-                                         d,
-                                         d_type_string,
-                                         ldd,
-                                         batch_count,
-                                         compute_type_string,
-                                         algo,
-                                         solution_index,
-                                         rocblas_gemm_flags(flags));
-                    }
+                    (void)rocblas_internal_log_trace_alpha_beta_ex(
+                        compute_type, alpha, beta, alphass, betass);
+                    logger.log_trace(handle,
+                                     ROCBLAS_API_STR(rocblas_gemm_batched_ex),
+                                     trans_a,
+                                     trans_b,
+                                     m,
+                                     n,
+                                     k,
+                                     alphass.str(),
+                                     a,
+                                     a_type_string,
+                                     lda,
+                                     b,
+                                     b_type_string,
+                                     ldb,
+                                     betass.str(),
+                                     c,
+                                     c_type_string,
+                                     ldc,
+                                     d,
+                                     d_type_string,
+                                     ldd,
+                                     batch_count,
+                                     compute_type_string,
+                                     algo,
+                                     solution_index,
+                                     rocblas_gemm_flags(flags));
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
 
-                    if(rocblas_internal_log_bench_alpha_beta_ex(
-                           compute_type, alpha, beta, alphas, betas)
-                       == rocblas_status_success)
-                    {
-                        logger.log_bench(handle,
-                                         ROCBLAS_API_BENCH " -f gemm_batched_ex",
-                                         "--transposeA",
-                                         trans_a_letter,
-                                         "--transposeB",
-                                         trans_b_letter,
-                                         "-m",
-                                         m,
-                                         "-n",
-                                         n,
-                                         "-k",
-                                         k,
-                                         alphas,
-                                         "--a_type",
-                                         a_type_string,
-                                         "--lda",
-                                         lda,
-                                         "--b_type",
-                                         b_type_string,
-                                         "--ldb",
-                                         ldb,
-                                         betas,
-                                         "--c_type",
-                                         c_type_string,
-                                         "--ldc",
-                                         ldc,
-                                         "--d_type",
-                                         d_type_string,
-                                         "--ldd",
-                                         ldd,
-                                         "--batch_count",
-                                         batch_count,
-                                         "--compute_type",
-                                         compute_type_string,
-                                         "--algo",
-                                         algo,
-                                         "--solution_index",
-                                         solution_index,
-                                         "--flags",
-                                         flags);
-                    }
+                    (void)rocblas_internal_log_bench_alpha_beta_ex(
+                        compute_type, alpha, beta, alphas, betas);
+
+                    logger.log_bench(handle,
+                                     ROCBLAS_API_BENCH " -f gemm_batched_ex",
+                                     "--transposeA",
+                                     trans_a_letter,
+                                     "--transposeB",
+                                     trans_b_letter,
+                                     "-m",
+                                     m,
+                                     "-n",
+                                     n,
+                                     "-k",
+                                     k,
+                                     alphas,
+                                     "--a_type",
+                                     a_type_string,
+                                     "--lda",
+                                     lda,
+                                     "--b_type",
+                                     b_type_string,
+                                     "--ldb",
+                                     ldb,
+                                     betas,
+                                     "--c_type",
+                                     c_type_string,
+                                     "--ldc",
+                                     ldc,
+                                     "--d_type",
+                                     d_type_string,
+                                     "--ldd",
+                                     ldd,
+                                     "--batch_count",
+                                     batch_count,
+                                     "--compute_type",
+                                     compute_type_string,
+                                     "--algo",
+                                     algo,
+                                     "--solution_index",
+                                     solution_index,
+                                     "--flags",
+                                     flags);
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_profile)

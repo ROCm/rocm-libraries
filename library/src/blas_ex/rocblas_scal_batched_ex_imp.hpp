@@ -61,42 +61,36 @@ namespace
                 if(layer_mode & rocblas_layer_mode_log_trace)
                 {
                     rocblas_internal_ostream alphass, betass;
-                    if(rocblas_internal_log_trace_alpha_beta_ex(
-                           alpha_type, alpha, nullptr, alphass, betass)
-                       == rocblas_status_success)
-                    {
-                        logger.log_trace(handle,
-                                         ROCBLAS_API_STR(rocblas_scal_batched_ex),
-                                         n,
-                                         alphass.str(),
-                                         alpha_type_str,
-                                         x,
-                                         x_type_str,
-                                         incx,
-                                         batch_count,
-                                         ex_type_str);
-                    }
+                    (void)rocblas_internal_log_trace_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphass, betass);
+                    logger.log_trace(handle,
+                                     ROCBLAS_API_STR(rocblas_scal_batched_ex),
+                                     n,
+                                     alphass.str(),
+                                     alpha_type_str,
+                                     x,
+                                     x_type_str,
+                                     incx,
+                                     batch_count,
+                                     ex_type_str);
                 }
 
                 if(layer_mode & rocblas_layer_mode_log_bench)
                 {
                     std::string alphas, betas;
-                    if(rocblas_internal_log_bench_alpha_beta_ex(
-                           alpha_type, alpha, nullptr, alphas, betas)
-                       == rocblas_status_success)
-                    {
-                        logger.log_bench(handle,
-                                         ROCBLAS_API_BENCH " -f scal_batched_ex",
-                                         "-n",
-                                         n,
-                                         alphas,
-                                         "--incx",
-                                         incx,
-                                         "--batch_count",
-                                         batch_count,
-                                         rocblas_internal_log_bench_ex_precisions(
-                                             alpha_type, x_type, execution_type));
-                    }
+                    (void)rocblas_internal_log_bench_alpha_beta_ex(
+                        alpha_type, alpha, nullptr, alphas, betas);
+                    logger.log_bench(handle,
+                                     ROCBLAS_API_BENCH " -f scal_batched_ex",
+                                     "-n",
+                                     n,
+                                     alphas,
+                                     "--incx",
+                                     incx,
+                                     "--batch_count",
+                                     batch_count,
+                                     rocblas_internal_log_bench_ex_precisions(
+                                         alpha_type, x_type, execution_type));
                 }
             }
             else
