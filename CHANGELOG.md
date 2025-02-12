@@ -5,6 +5,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Hybrid computation support for existing routines:
+    - STERF
+
 ### Changed
 ### Removed
 ### Optimized

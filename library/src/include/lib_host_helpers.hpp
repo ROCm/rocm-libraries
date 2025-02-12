@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,6 +30,8 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/core.h>
+#include <fmt/ostream.h>
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
@@ -168,6 +170,21 @@ static double imag_part(std::complex<double> z)
 static double imag_part(rocblas_complex_num<double> z)
 {
     return (z.imag());
+}
+
+static bool is_device_pointer(void* ptr)
+{
+    hipPointerAttribute_t dev_attributes;
+    if(ptr == nullptr)
+        return false;
+
+    auto istat = hipPointerGetAttributes(&dev_attributes, ptr);
+    if(istat != hipSuccess)
+        fmt::print(stderr, "is_device_pointer: istat = {} {}\n", static_cast<std::int32_t>(istat),
+                   hipGetErrorName(istat));
+
+    assert(istat == hipSuccess);
+    return (dev_attributes.type == hipMemoryTypeDevice);
 }
 
 #ifdef ROCSOLVER_VERIFY_ASSUMPTIONS

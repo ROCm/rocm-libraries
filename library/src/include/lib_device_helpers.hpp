@@ -98,7 +98,7 @@ __device__ void
 /** FIND_MAX_TRIDIAG finds the element with the largest magnitude in the
     tridiagonal matrix **/
 template <typename T>
-__device__ T find_max_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E)
+__device__ __host__ T find_max_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E)
 {
     T anorm = abs(D[end]);
     for(int i = start; i < end; i++)
@@ -109,7 +109,8 @@ __device__ T find_max_tridiag(const rocblas_int start, const rocblas_int end, T*
 /** SCALE_TRIDIAG scales the elements of the tridiagonal matrix by a given
     scale factor **/
 template <typename T>
-__device__ void scale_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E, T scale)
+__device__ __host__ void
+    scale_tridiag(const rocblas_int start, const rocblas_int end, T* D, T* E, T scale)
 {
     D[end] *= scale;
     for(int i = start; i < end; i++)
@@ -117,6 +118,457 @@ __device__ void scale_tridiag(const rocblas_int start, const rocblas_int end, T*
         D[i] *= scale;
         E[i] *= scale;
     }
+}
+
+template <typename S, typename I>
+__device__ static void shell_sort_ascending(const I n, S* a, I* map = nullptr)
+{
+    // -----------------------------------------------
+    // Sort array a[0...(n-1)] and generate permutation vector
+    // in map[] if map[] is available
+    // Note: performs in a single thread block
+    // -----------------------------------------------
+    if((n <= 0) || (a == nullptr))
+    {
+        return;
+    };
+
+    bool const is_root_thread
+        = (hipThreadIdx_x == 0) && (hipThreadIdx_y == 0) && (hipThreadIdx_z == 0);
+
+    int constexpr ngaps = 8;
+    int const gaps[ngaps] = {701, 301, 132, 57, 23, 10, 4, 1}; // # Ciura gap sequence
+
+    auto const k_start = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+
+    auto const k_inc = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    bool const has_map = (map != nullptr);
+
+    __syncthreads();
+    if(has_map)
+    {
+        for(auto k = k_start; k < n; k += k_inc)
+        {
+            map[k] = k;
+        };
+    };
+    __syncthreads();
+
+    if(is_root_thread)
+    {
+        for(auto igap = 0; igap < ngaps; igap++)
+        {
+            auto const gap = gaps[igap];
+
+            for(I i = gap; i < n; i += 1)
+            {
+                {
+                    S const temp = a[i];
+                    auto const itemp = (has_map) ? map[i] : 0;
+
+                    auto j = i;
+
+                    while((j >= gap) && (a[j - gap] > temp))
+                    {
+                        a[j] = a[j - gap];
+                        if(has_map)
+                        {
+                            map[j] = map[j - gap];
+                        };
+                        j -= gap;
+                    };
+
+                    a[j] = temp;
+                    if(has_map)
+                    {
+                        map[j] = itemp;
+                    };
+                };
+            };
+        };
+    };
+    __syncthreads();
+#ifdef NDEBUG
+#else
+    if(n >= 2)
+    {
+        for(auto k = k_start; k < (n - 1); k += k_inc)
+        {
+            assert(a[k] <= a[k + 1]);
+        };
+    };
+    __syncthreads();
+#endif
+}
+
+template <typename S, typename I>
+__device__ static void shell_sort_descending(const I n, S* a, I* map = nullptr)
+{
+    // -----------------------------------------------
+    // Sort array a[0...(n-1)] and generate permutation vector
+    // in map[] if map[] is available
+    // Note: performs in a single thread block
+    // -----------------------------------------------
+
+    if((n <= 0) || (a == nullptr))
+    {
+        return;
+    };
+
+    bool const is_root_thread
+        = (hipThreadIdx_x == 0) && (hipThreadIdx_y == 0) && (hipThreadIdx_z == 0);
+
+    int constexpr ngaps = 8;
+    int const gaps[ngaps] = {701, 301, 132, 57, 23, 10, 4, 1}; // # Ciura gap sequence
+
+    auto const k_start = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+
+    auto const k_inc = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    bool const has_map = (map != nullptr);
+
+    __syncthreads();
+    if(has_map)
+    {
+        for(auto k = k_start; k < n; k += k_inc)
+        {
+            map[k] = k;
+        };
+    };
+    __syncthreads();
+
+    if(is_root_thread)
+    {
+        for(auto igap = 0; igap < ngaps; igap++)
+        {
+            auto const gap = gaps[igap];
+
+            for(rocblas_int i = gap; i < n; i += 1)
+            {
+                {
+                    S const temp = a[i];
+                    auto const itemp = (has_map) ? map[i] : 0;
+
+                    auto j = i;
+
+                    while((j >= gap) && (a[j - gap] < temp))
+                    {
+                        a[j] = a[j - gap];
+                        if(has_map)
+                        {
+                            map[j] = map[j - gap];
+                        };
+                        j -= gap;
+                    };
+
+                    a[j] = temp;
+                    if(has_map)
+                    {
+                        map[j] = itemp;
+                    };
+                };
+            };
+        };
+    };
+    __syncthreads();
+#ifdef NDEBUG
+#else
+    if(n >= 2)
+    {
+        for(auto k = k_start; k < (n - 1); k += k_inc)
+        {
+            assert(a[k] >= a[k + 1]);
+        };
+    };
+    __syncthreads();
+#endif
+}
+
+template <typename S, typename I>
+__device__ static void shell_sort(const I n, S* a, I* map = nullptr, const bool is_ascending = true)
+{
+    if((n <= 0) || (a == nullptr))
+    {
+        return;
+    };
+
+    if(is_ascending)
+    {
+        shell_sort_ascending(n, a, map);
+    }
+    else
+    {
+        shell_sort_descending(n, a, map);
+    };
+}
+
+template <typename S, typename I>
+__device__ static void selection_sort_ascending(const I n, S* D, I* map = nullptr)
+{
+    // ---------------------------------------------------
+    // Sort entries in D[0...(n-1)]
+    // generates permutation vector in map[] if map[] is available
+    // Note: performs in a single thread block
+    // ---------------------------------------------------
+    if((n <= 0) || (D == nullptr))
+    {
+        return;
+    };
+
+    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+
+    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    auto const k_start = tid;
+    auto const k_inc = nthreads;
+    bool const is_root_thread = (tid == 0);
+
+    bool const has_map = (map != nullptr);
+
+    __syncthreads();
+
+    if(has_map)
+    {
+        for(auto k = k_start; k < n; k += k_inc)
+        {
+            map[k] = k;
+        };
+    };
+
+    __syncthreads();
+
+    if(is_root_thread)
+    {
+        for(I ii = 1; ii < n; ii++)
+        {
+            auto l = ii - 1;
+            auto m = l;
+            auto p = D[l];
+            auto ip = (has_map) ? map[l] : 0;
+
+            for(auto j = ii; j < n; j++)
+            {
+                if(D[j] < p)
+                {
+                    m = j;
+                    p = D[j];
+                    if(has_map)
+                    {
+                        ip = map[j];
+                    };
+                }
+            }
+            if(m != l)
+            {
+                D[m] = D[l];
+                D[l] = p;
+
+                if(has_map)
+                {
+                    map[m] = map[l];
+                    map[l] = ip;
+                };
+            }
+        }
+    }
+    __syncthreads();
+#ifdef NDEBUG
+#else
+    if(n >= 2)
+    {
+        for(auto k = k_start; k < (n - 1); k += k_inc)
+        {
+            assert(D[k] <= D[k + 1]);
+        };
+    };
+    __syncthreads();
+#endif
+}
+
+template <typename S, typename I>
+__device__ static void selection_sort_descending(const I n, S* D, I* map = nullptr)
+{
+    // ---------------------------------------------------
+    // Sort entries in D[0...(n-1)]
+    // generates permutation vector in map[] if map[] is available
+    // Note: performs in a single thread block
+    // ---------------------------------------------------
+    if((n <= 0) || (D == nullptr))
+    {
+        return;
+    };
+
+    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+
+    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    auto const k_start = tid;
+    auto const k_inc = nthreads;
+    bool const is_root_thread = (tid == 0);
+
+    bool const has_map = (map != nullptr);
+
+    __syncthreads();
+
+    if(has_map)
+    {
+        for(auto k = k_start; k < n; k += k_inc)
+        {
+            map[k] = k;
+        };
+    };
+
+    __syncthreads();
+
+    if(is_root_thread)
+    {
+        for(I ii = 1; ii < n; ii++)
+        {
+            auto l = ii - 1;
+            auto m = l;
+            auto p = D[l];
+            auto ip = (has_map) ? map[l] : 0;
+
+            for(auto j = ii; j < n; j++)
+            {
+                if(D[j] > p)
+                {
+                    m = j;
+                    p = D[j];
+                    if(has_map)
+                    {
+                        ip = map[j];
+                    };
+                }
+            }
+            if(m != l)
+            {
+                D[m] = D[l];
+                D[l] = p;
+
+                if(has_map)
+                {
+                    map[m] = map[l];
+                    map[l] = ip;
+                };
+            }
+        }
+    }
+    __syncthreads();
+#ifdef NDEBUG
+#else
+    if(n >= 2)
+    {
+        for(auto k = k_start; k < (n - 1); k += k_inc)
+        {
+            assert(D[k] >= D[k + 1]);
+        };
+    };
+    __syncthreads();
+#endif
+}
+
+template <typename S, typename I>
+__device__ static void selection_sort(const I n, S* a, I* map = nullptr, const bool is_ascending = true)
+{
+    if((n <= 0) || (a == nullptr))
+    {
+        return;
+    };
+
+    if(is_ascending)
+    {
+        selection_sort_ascending(n, a, map);
+    }
+    else
+    {
+        selection_sort_descending(n, a, map);
+    };
+}
+
+template <typename T, typename I>
+__device__ static void permute_swap(const I n, T* C, I ldc, I* map, const I nev = -1)
+{
+    // --------------------------------------------
+    // perform swaps to implement permutation vector
+    // the permutation vector will be restored to the
+    // identity permutation 0,1,2,...
+    //
+    // Note: performs in a thread block
+    // --------------------------------------------
+    {
+        bool const has_work = (n >= 1) && (C != nullptr) && (ldc >= 1) && (map != nullptr);
+        if(!has_work)
+        {
+            return;
+        }
+    }
+
+    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
+        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
+
+    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
+
+    auto const k_start = tid;
+    auto const k_inc = nthreads;
+
+    bool const is_root_thread = (tid == 0);
+
+    auto const nn = (nev >= 0) ? nev : n;
+
+    for(I i = 0; i < nn; i++)
+    {
+        __syncthreads();
+
+        while(map[i] != i)
+        {
+            auto const map_i = map[i];
+            auto const map_ii = map[map[i]];
+
+            __syncthreads();
+
+            if(is_root_thread)
+            {
+                map[map_i] = map_i;
+                map[i] = map_ii;
+            }
+
+            __syncthreads();
+
+            // ---------------------------------------
+            // swap columns C( 0:(n-1),map_i) and C( 0:(n-1),map_ii)
+            // ---------------------------------------
+
+            for(auto k = k_start; k < n; k += k_inc)
+            {
+                auto const k_map_i = k + (map_i * static_cast<int64_t>(ldc));
+                auto const k_map_ii = k + (map_ii * static_cast<int64_t>(ldc));
+
+                auto const ctemp = C[k_map_i];
+                C[k_map_i] = C[k_map_ii];
+                C[k_map_ii] = ctemp;
+            }
+
+            __syncthreads();
+        }
+    }
+#ifdef NDEBUG
+#else
+    // ----------------------------------------------------------
+    // extra check that map[] is restored to identity permutation
+    // ----------------------------------------------------------
+    __syncthreads();
+    for(auto k = k_start; k < nn; k += k_inc)
+    {
+        assert(map[k] == k);
+    }
+    __syncthreads();
+#endif
 }
 
 // **********************************************************
@@ -129,8 +581,8 @@ enum copymat_direction
     copymat_from_buffer
 };
 
-/** A mask that is always true. Typically used to make the mask optional,
-    by acting as the default when no other mask is provided. **/
+/** A mask that is always true. Typically used to make the mask optional, by acting as the default when
+    no other mask is provided. **/
 struct no_mask
 {
     __device__ constexpr bool operator[](rocblas_int) const noexcept
@@ -139,7 +591,9 @@ struct no_mask
     }
 };
 
-/** An mask defined by an integer array (e.g., the info array) **/
+/** An mask defined by an integer array (e.g., the info array). By default, a non-zero value for the ith integer
+    indicates that the data for batch i should be copied over. Data will not be copied if the mask value is zero.
+    This behaviour is reversed if the negate transform is passed to the constructor. **/
 struct info_mask
 {
     enum mask_transform
@@ -784,457 +1238,6 @@ ROCSOLVER_KERNEL void check_singularity(const rocblas_int n,
 
     if(hipThreadIdx_y == 0)
         info[b] = _info;
-}
-
-template <typename S, typename I>
-__device__ static void shell_sort_ascending(const I n, S* a, I* map = nullptr)
-{
-    // -----------------------------------------------
-    // Sort array a[0...(n-1)] and generate permutation vector
-    // in map[] if map[] is available
-    // Note: performs in a single thread block
-    // -----------------------------------------------
-    if((n <= 0) || (a == nullptr))
-    {
-        return;
-    };
-
-    bool const is_root_thread
-        = (hipThreadIdx_x == 0) && (hipThreadIdx_y == 0) && (hipThreadIdx_z == 0);
-
-    int constexpr ngaps = 8;
-    int const gaps[ngaps] = {701, 301, 132, 57, 23, 10, 4, 1}; // # Ciura gap sequence
-
-    auto const k_start = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
-        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
-
-    auto const k_inc = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
-
-    bool const has_map = (map != nullptr);
-
-    __syncthreads();
-    if(has_map)
-    {
-        for(auto k = k_start; k < n; k += k_inc)
-        {
-            map[k] = k;
-        };
-    };
-    __syncthreads();
-
-    if(is_root_thread)
-    {
-        for(auto igap = 0; igap < ngaps; igap++)
-        {
-            auto const gap = gaps[igap];
-
-            for(I i = gap; i < n; i += 1)
-            {
-                {
-                    S const temp = a[i];
-                    auto const itemp = (has_map) ? map[i] : 0;
-
-                    auto j = i;
-
-                    while((j >= gap) && (a[j - gap] > temp))
-                    {
-                        a[j] = a[j - gap];
-                        if(has_map)
-                        {
-                            map[j] = map[j - gap];
-                        };
-                        j -= gap;
-                    };
-
-                    a[j] = temp;
-                    if(has_map)
-                    {
-                        map[j] = itemp;
-                    };
-                };
-            };
-        };
-    };
-    __syncthreads();
-#ifdef NDEBUG
-#else
-    if(n >= 2)
-    {
-        for(auto k = k_start; k < (n - 1); k += k_inc)
-        {
-            assert(a[k] <= a[k + 1]);
-        };
-    };
-    __syncthreads();
-#endif
-}
-
-template <typename S, typename I>
-__device__ static void shell_sort_descending(const I n, S* a, I* map = nullptr)
-{
-    // -----------------------------------------------
-    // Sort array a[0...(n-1)] and generate permutation vector
-    // in map[] if map[] is available
-    // Note: performs in a single thread block
-    // -----------------------------------------------
-
-    if((n <= 0) || (a == nullptr))
-    {
-        return;
-    };
-
-    bool const is_root_thread
-        = (hipThreadIdx_x == 0) && (hipThreadIdx_y == 0) && (hipThreadIdx_z == 0);
-
-    int constexpr ngaps = 8;
-    int const gaps[ngaps] = {701, 301, 132, 57, 23, 10, 4, 1}; // # Ciura gap sequence
-
-    auto const k_start = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
-        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
-
-    auto const k_inc = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
-
-    bool const has_map = (map != nullptr);
-
-    __syncthreads();
-    if(has_map)
-    {
-        for(auto k = k_start; k < n; k += k_inc)
-        {
-            map[k] = k;
-        };
-    };
-    __syncthreads();
-
-    if(is_root_thread)
-    {
-        for(auto igap = 0; igap < ngaps; igap++)
-        {
-            auto const gap = gaps[igap];
-
-            for(rocblas_int i = gap; i < n; i += 1)
-            {
-                {
-                    S const temp = a[i];
-                    auto const itemp = (has_map) ? map[i] : 0;
-
-                    auto j = i;
-
-                    while((j >= gap) && (a[j - gap] < temp))
-                    {
-                        a[j] = a[j - gap];
-                        if(has_map)
-                        {
-                            map[j] = map[j - gap];
-                        };
-                        j -= gap;
-                    };
-
-                    a[j] = temp;
-                    if(has_map)
-                    {
-                        map[j] = itemp;
-                    };
-                };
-            };
-        };
-    };
-    __syncthreads();
-#ifdef NDEBUG
-#else
-    if(n >= 2)
-    {
-        for(auto k = k_start; k < (n - 1); k += k_inc)
-        {
-            assert(a[k] >= a[k + 1]);
-        };
-    };
-    __syncthreads();
-#endif
-}
-
-template <typename S, typename I>
-__device__ static void shell_sort(const I n, S* a, I* map = nullptr, const bool is_ascending = true)
-{
-    if((n <= 0) || (a == nullptr))
-    {
-        return;
-    };
-
-    if(is_ascending)
-    {
-        shell_sort_ascending(n, a, map);
-    }
-    else
-    {
-        shell_sort_descending(n, a, map);
-    };
-}
-
-template <typename S, typename I>
-__device__ static void selection_sort_ascending(const I n, S* D, I* map = nullptr)
-{
-    // ---------------------------------------------------
-    // Sort entries in D[0...(n-1)]
-    // generates permutation vector in map[] if map[] is available
-    // Note: performs in a single thread block
-    // ---------------------------------------------------
-    if((n <= 0) || (D == nullptr))
-    {
-        return;
-    };
-
-    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
-        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
-
-    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
-
-    auto const k_start = tid;
-    auto const k_inc = nthreads;
-    bool const is_root_thread = (tid == 0);
-
-    bool const has_map = (map != nullptr);
-
-    __syncthreads();
-
-    if(has_map)
-    {
-        for(auto k = k_start; k < n; k += k_inc)
-        {
-            map[k] = k;
-        };
-    };
-
-    __syncthreads();
-
-    if(is_root_thread)
-    {
-        for(I ii = 1; ii < n; ii++)
-        {
-            auto l = ii - 1;
-            auto m = l;
-            auto p = D[l];
-            auto ip = (has_map) ? map[l] : 0;
-
-            for(auto j = ii; j < n; j++)
-            {
-                if(D[j] < p)
-                {
-                    m = j;
-                    p = D[j];
-                    if(has_map)
-                    {
-                        ip = map[j];
-                    };
-                }
-            }
-            if(m != l)
-            {
-                D[m] = D[l];
-                D[l] = p;
-
-                if(has_map)
-                {
-                    map[m] = map[l];
-                    map[l] = ip;
-                };
-            }
-        }
-    }
-    __syncthreads();
-#ifdef NDEBUG
-#else
-    if(n >= 2)
-    {
-        for(auto k = k_start; k < (n - 1); k += k_inc)
-        {
-            assert(D[k] <= D[k + 1]);
-        };
-    };
-    __syncthreads();
-#endif
-}
-
-template <typename S, typename I>
-__device__ static void selection_sort_descending(const I n, S* D, I* map = nullptr)
-{
-    // ---------------------------------------------------
-    // Sort entries in D[0...(n-1)]
-    // generates permutation vector in map[] if map[] is available
-    // Note: performs in a single thread block
-    // ---------------------------------------------------
-    if((n <= 0) || (D == nullptr))
-    {
-        return;
-    };
-
-    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
-        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
-
-    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
-
-    auto const k_start = tid;
-    auto const k_inc = nthreads;
-    bool const is_root_thread = (tid == 0);
-
-    bool const has_map = (map != nullptr);
-
-    __syncthreads();
-
-    if(has_map)
-    {
-        for(auto k = k_start; k < n; k += k_inc)
-        {
-            map[k] = k;
-        };
-    };
-
-    __syncthreads();
-
-    if(is_root_thread)
-    {
-        for(I ii = 1; ii < n; ii++)
-        {
-            auto l = ii - 1;
-            auto m = l;
-            auto p = D[l];
-            auto ip = (has_map) ? map[l] : 0;
-
-            for(auto j = ii; j < n; j++)
-            {
-                if(D[j] > p)
-                {
-                    m = j;
-                    p = D[j];
-                    if(has_map)
-                    {
-                        ip = map[j];
-                    };
-                }
-            }
-            if(m != l)
-            {
-                D[m] = D[l];
-                D[l] = p;
-
-                if(has_map)
-                {
-                    map[m] = map[l];
-                    map[l] = ip;
-                };
-            }
-        }
-    }
-    __syncthreads();
-#ifdef NDEBUG
-#else
-    if(n >= 2)
-    {
-        for(auto k = k_start; k < (n - 1); k += k_inc)
-        {
-            assert(D[k] >= D[k + 1]);
-        };
-    };
-    __syncthreads();
-#endif
-}
-
-template <typename S, typename I>
-__device__ static void selection_sort(const I n, S* a, I* map = nullptr, const bool is_ascending = true)
-{
-    if((n <= 0) || (a == nullptr))
-    {
-        return;
-    };
-
-    if(is_ascending)
-    {
-        selection_sort_ascending(n, a, map);
-    }
-    else
-    {
-        selection_sort_descending(n, a, map);
-    };
-}
-
-template <typename T, typename I>
-__device__ static void permute_swap(const I n, T* C, I ldc, I* map, const I nev = -1)
-{
-    // --------------------------------------------
-    // perform swaps to implement permutation vector
-    // the permutation vector will be restored to the
-    // identity permutation 0,1,2,...
-    //
-    // Note: performs in a thread block
-    // --------------------------------------------
-    {
-        bool const has_work = (n >= 1) && (C != nullptr) && (ldc >= 1) && (map != nullptr);
-        if(!has_work)
-        {
-            return;
-        }
-    }
-
-    auto const tid = hipThreadIdx_x + hipThreadIdx_y * hipBlockDim_x
-        + hipThreadIdx_z * (hipBlockDim_x * hipBlockDim_y);
-
-    auto const nthreads = (hipBlockDim_x * hipBlockDim_y) * hipBlockDim_z;
-
-    auto const k_start = tid;
-    auto const k_inc = nthreads;
-
-    bool const is_root_thread = (tid == 0);
-
-    auto const nn = (nev >= 0) ? nev : n;
-
-    for(I i = 0; i < nn; i++)
-    {
-        __syncthreads();
-
-        while(map[i] != i)
-        {
-            auto const map_i = map[i];
-            auto const map_ii = map[map[i]];
-
-            __syncthreads();
-
-            if(is_root_thread)
-            {
-                map[map_i] = map_i;
-                map[i] = map_ii;
-            }
-
-            __syncthreads();
-
-            // ---------------------------------------
-            // swap columns C( 0:(n-1),map_i) and C( 0:(n-1),map_ii)
-            // ---------------------------------------
-
-            for(auto k = k_start; k < n; k += k_inc)
-            {
-                auto const k_map_i = k + (map_i * static_cast<int64_t>(ldc));
-                auto const k_map_ii = k + (map_ii * static_cast<int64_t>(ldc));
-
-                auto const ctemp = C[k_map_i];
-                C[k_map_i] = C[k_map_ii];
-                C[k_map_ii] = ctemp;
-            }
-
-            __syncthreads();
-        }
-    }
-#ifdef NDEBUG
-#else
-    // ----------------------------------------------------------
-    // extra check that map[] is restored to identity permutation
-    // ----------------------------------------------------------
-    __syncthreads();
-    for(auto k = k_start; k < nn; k += k_inc)
-    {
-        assert(map[k] == k);
-    }
-    __syncthreads();
-#endif
 }
 
 /** SWAP swaps the values of vectors x and y of dimension n.

@@ -65,7 +65,8 @@ Arguments sterf_setup_arguments(sterf_tuple tup)
     return arg;
 }
 
-class STERF : public ::TestWithParam<sterf_tuple>
+template <rocblas_int MODE>
+class STERF_BASE : public ::TestWithParam<sterf_tuple>
 {
 protected:
     void TearDown() override
@@ -77,12 +78,21 @@ protected:
     void run_tests()
     {
         Arguments arg = sterf_setup_arguments(GetParam());
+        arg.alg_mode = MODE;
 
         if(arg.peek<rocblas_int>("n") == 0)
             testing_sterf_bad_arg<T>();
 
         testing_sterf<T>(arg);
     }
+};
+
+class STERF : public STERF_BASE<0>
+{
+};
+
+class STERF_HYBRID : public STERF_BASE<1>
+{
 };
 
 // non-batch tests
@@ -97,6 +107,20 @@ TEST_P(STERF, __double)
     run_tests<double>();
 }
 
+TEST_P(STERF_HYBRID, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(STERF_HYBRID, __double)
+{
+    run_tests<double>();
+}
+
 INSTANTIATE_TEST_SUITE_P(daily_lapack, STERF, ValuesIn(large_matrix_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, STERF, ValuesIn(matrix_size_range));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, STERF_HYBRID, ValuesIn(large_matrix_size_range));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, STERF_HYBRID, ValuesIn(matrix_size_range));

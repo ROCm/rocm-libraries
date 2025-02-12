@@ -363,7 +363,7 @@ __device__ void lasr(const rocblas_side side,
     [ a b ]
     [ b c ] **/
 template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-__device__ void lae2(T& a, T& b, T& c, T& rt1, T& rt2)
+__device__ __host__ void lae2(T& a, T& b, T& c, T& rt1, T& rt2)
 {
     T sm = a + c;
     T adf = abs(a - c);

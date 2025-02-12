@@ -66,6 +66,12 @@ rocblas_status rocsolver_set_alg_mode_impl(rocblas_handle handle,
             handle_data->bdsqr_mode = mode;
             return rocblas_status_success;
         }
+    case rocsolver_function_sterf:
+        if(mode == rocsolver_alg_mode_gpu || mode == rocsolver_alg_mode_hybrid)
+        {
+            handle_data->sterf_mode = mode;
+            return rocblas_status_success;
+        }
     }
 
     return rocblas_status_invalid_value;
@@ -95,6 +101,7 @@ rocblas_status rocsolver_get_alg_mode_impl(rocblas_handle handle,
         {
         case rocsolver_function_gesvd:
         case rocsolver_function_bdsqr: *mode = handle_data->bdsqr_mode; break;
+        case rocsolver_function_sterf: *mode = handle_data->sterf_mode; break;
         default: return rocblas_status_invalid_value;
         }
     }

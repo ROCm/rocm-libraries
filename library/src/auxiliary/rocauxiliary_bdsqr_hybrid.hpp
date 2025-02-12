@@ -5,7 +5,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2017
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,7 @@
 
 #include "lapack_host_functions.hpp"
 #include "rocauxiliary_lasr.hpp"
+#include "rocsolver_hybrid_storage.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -1341,15 +1342,15 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
                                                    const rocblas_stride strideD,
                                                    S* E,
                                                    const rocblas_stride strideE,
-                                                   W1 V_arg,
+                                                   W1 V,
                                                    const I shiftV,
                                                    const I ldv,
                                                    const rocblas_stride strideV,
-                                                   W2 U_arg,
+                                                   W2 U,
                                                    const I shiftU,
                                                    const I ldu,
                                                    const rocblas_stride strideU,
-                                                   W3 C_arg,
+                                                   W3 C,
                                                    const I shiftC,
                                                    const I ldc,
                                                    const rocblas_stride strideC,
@@ -1358,203 +1359,48 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
                                                    I* splits_map,
                                                    S* work)
 {
-    // -------------------------------
-    // lambda expression as helper
-    // -------------------------------
-    auto is_device_pointer = [](void* ptr) -> bool {
-        hipPointerAttribute_t dev_attributes;
-        if(ptr == nullptr)
-        {
-            return (false);
-        }
-
-        auto istat = hipPointerGetAttributes(&dev_attributes, ptr);
-        if(istat != hipSuccess)
-        {
-            std::cout << "is_device_pointer: istat = " << istat << " " << hipGetErrorName(istat)
-                      << std::endl;
-        }
-        assert(istat == hipSuccess);
-        return (dev_attributes.type == hipMemoryTypeDevice);
-    };
-
-    // -------------------------
-    // copy D into hD, E into hE
-    // -------------------------
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    W1 V = V_arg;
-    W2 U = U_arg;
-    W3 C = C_arg;
+    // -----------------------------------
+    // transfer arrays from device to host
+    // -----------------------------------
+    rocsolver_hybrid_storage<S, I, S*> hD;
+    rocsolver_hybrid_storage<S, I, S*> hE;
+    rocsolver_hybrid_storage<T, I, W1> hV;
+    rocsolver_hybrid_storage<T, I, W2> hU;
+    rocsolver_hybrid_storage<T, I, W3> hC;
+    rocsolver_hybrid_storage<I, I, I*> hInfo;
 
-    // handle  batch case with array of pointers on device
-    std::vector<T*> Vp_array(batch_count);
-    std::vector<T*> Up_array(batch_count);
-    std::vector<T*> Cp_array(batch_count);
-
+    ROCBLAS_CHECK(hD.init_async(n, D, strideD, batch_count, stream));
+    ROCBLAS_CHECK(hE.init_async(n - 1, E, strideE, batch_count, stream));
     if(nv > 0)
-    {
-        bool const is_device_V_arg = is_device_pointer((void*)V_arg);
-        if(is_device_V_arg)
-        {
-            // note "T *" and "T * const" may be considered different types
-            bool constexpr is_array_of_device_pointers
-                = !(std::is_same<W1, T*>::value || std::is_same<W1, T* const>::value);
-            bool constexpr need_copy_W1 = is_array_of_device_pointers;
-            if constexpr(need_copy_W1)
-            {
-                size_t const nbytes = sizeof(T*) * batch_count;
-                void* const dst = (void*)&(Vp_array[0]);
-                void* const src = (void*)V_arg;
-                HIP_CHECK(hipMemcpyAsync(dst, src, nbytes, hipMemcpyDefault, stream));
-                HIP_CHECK(hipStreamSynchronize(stream));
-                V = &(Vp_array[0]);
-            }
-        }
-    }
-
+        ROCBLAS_CHECK(hV.init_pointers_only(V + shiftV, strideV, batch_count, stream));
     if(nu > 0)
-    {
-        bool const is_device_U_arg = is_device_pointer((void*)U_arg);
-        if(is_device_U_arg)
-        {
-            bool constexpr is_array_of_device_pointers
-                = !(std::is_same<W2, T*>::value || std::is_same<W2, T* const>::value);
-            bool constexpr need_copy_W2 = is_array_of_device_pointers;
-            if constexpr(need_copy_W2)
-            {
-                size_t const nbytes = sizeof(T*) * batch_count;
-                void* const dst = (void*)&(Up_array[0]);
-                void* const src = (void*)U_arg;
-                HIP_CHECK(hipMemcpyAsync(dst, src, nbytes, hipMemcpyDefault, stream));
-                HIP_CHECK(hipStreamSynchronize(stream));
-                U = &(Up_array[0]);
-            }
-        }
-    }
-
+        ROCBLAS_CHECK(hU.init_pointers_only(U + shiftU, strideU, batch_count, stream));
     if(nc > 0)
-    {
-        bool const is_device_C_arg = is_device_pointer((void*)C_arg);
-        if(is_device_C_arg)
-        {
-            bool constexpr is_array_of_device_pointers
-                = !(std::is_same<W3, T*>::value || std::is_same<W3, T* const>::value);
-            bool constexpr need_copy_W3 = is_array_of_device_pointers;
-            if constexpr(need_copy_W3)
-            {
-                size_t const nbytes = sizeof(T*) * batch_count;
-                void* const dst = (void*)&(Cp_array[0]);
-                void* const src = (void*)C_arg;
-                HIP_CHECK(hipMemcpyAsync(dst, src, nbytes, hipMemcpyDefault, stream));
-                HIP_CHECK(hipStreamSynchronize(stream));
-                C = &(Cp_array[0]);
-            }
-        }
-    }
-
-    S* hD = nullptr;
-    S* hE = nullptr;
-
-    size_t const E_size = (n - 1);
-    HIP_CHECK(hipHostMalloc(&hD, (sizeof(S) * std::max(1, batch_count)) * n));
-    HIP_CHECK(hipHostMalloc(&hE, (sizeof(S) * std::max(1, batch_count)) * E_size));
-
-    // ----------------------------------------------------
-    // copy info_array[] on device to linfo_array[] on host
-    // ----------------------------------------------------
-    I* linfo_array = nullptr;
-    HIP_CHECK(hipHostMalloc(&linfo_array, sizeof(I) * std::max(1, batch_count)));
-    {
-        void* const dst = &(linfo_array[0]);
-        void* const src = &(info_array[0]);
-        size_t const nbytes = sizeof(I) * batch_count;
-        hipMemcpyKind const kind = hipMemcpyDeviceToHost;
-
-        HIP_CHECK(hipMemcpyAsync(dst, src, nbytes, kind, stream));
-    }
+        ROCBLAS_CHECK(hC.init_pointers_only(C + shiftC, strideC, batch_count, stream));
+    ROCBLAS_CHECK(hInfo.init_async(1, info_array, 1, batch_count, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
 
     S* hwork = nullptr;
     HIP_CHECK(hipHostMalloc(&hwork, sizeof(S) * (4 * n)));
+    S* dwork = nullptr;
+    HIP_CHECK(hipMalloc(&dwork, sizeof(S) * (4 * n)));
 
-    // -------------------------------------------------
-    // transfer arrays D(:) and E(:) from Device to Host
-    // -------------------------------------------------
-    bool const use_single_copy_for_D = (batch_count == 1) || (strideD == n);
-    if(use_single_copy_for_D)
-    {
-        void* const dst = (void*)&(hD[0]);
-        void* const src = (void*)&(D[0]);
-        size_t const sizeBytes = sizeof(S) * n * batch_count;
-        hipMemcpyKind const kind = hipMemcpyDeviceToHost;
-
-        HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-    }
-    else
-    {
-        for(I bid = 0; bid < batch_count; bid++)
-        {
-            void* const dst = (void*)&(hD[bid * n]);
-            void* const src = (void*)&(D[bid * strideD]);
-            size_t const sizeBytes = sizeof(S) * n;
-            hipMemcpyKind const kind = hipMemcpyDeviceToHost;
-            HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-        }
-    }
-
-    {
-        for(I bid = 0; bid < batch_count; bid++)
-        {
-            void* const dst = (void*)&(hE[bid * E_size]);
-            void* const src = (void*)&(E[bid * strideE]);
-            size_t const sizeBytes = sizeof(S) * E_size;
-            hipMemcpyKind const kind = hipMemcpyDeviceToHost;
-            HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-        }
-    }
-
-    // -------------------------------------------------
+    // --------------------------------------
     // Execute for each instance in the batch
-    // -------------------------------------------------
-    HIP_CHECK(hipStreamSynchronize(stream));
-
-    S* dwork_ = nullptr;
-    HIP_CHECK(hipMalloc(&dwork_, sizeof(S) * (4 * n)));
-
+    // --------------------------------------
     for(I bid = 0; bid < batch_count; bid++)
     {
-        if(linfo_array[bid] != 0)
-        {
+        if(hInfo[bid][0] != 0)
             continue;
-        }
 
         char uplo = (uplo_in == rocblas_fill_lower) ? 'L' : 'U';
-        S* d_ = &(hD[bid * n]);
-        S* e_ = &(hE[bid * E_size]);
-
-        T* v_ = (nv > 0) ? load_ptr_batch<T>(V, bid, shiftV, strideV) : nullptr;
-        T* u_ = (nu > 0) ? load_ptr_batch<T>(U, bid, shiftU, strideU) : nullptr;
-        T* c_ = (nc > 0) ? load_ptr_batch<T>(C, bid, shiftC, strideC) : nullptr;
-        S* work_ = &(hwork[0]);
-
         I info = 0;
 
-        I nru = nu;
-        I ncc = nc;
-
-        // NOTE: lapack dbdsqr() accepts "VT" and "ldvt" for transpose of V
-        // as input variable however, rocsolver bdsqr() accepts variable called "V" and "ldv"
-        // but it is  actually holding "VT"
-        T* vt_ = v_;
-        I ldvt = ldv;
-
-        I nrv = n;
-        I ncvt = nv;
-        bool const values_only = (ncvt == 0) && (nru == 0) && (ncc == 0);
-
-        bdsqr_single_template<S, T, I>(handle, uplo, n, ncvt, nru, ncc, d_, e_, vt_, ldvt, u_, ldu,
-                                       c_, ldc, work_, info, dwork_, stream);
+        bdsqr_single_template<S, T, I>(handle, uplo, n, nv, nu, nc, hD[bid], hE[bid], hV[bid], ldv,
+                                       hU[bid], ldu, hC[bid], ldc, hwork, info, dwork, stream);
 
         if(info == 0)
         {
@@ -1563,80 +1409,31 @@ rocblas_status rocsolver_bdsqr_host_batch_template(rocblas_handle handle,
             S const zero = S(0);
             for(I i = 0; i < (n - 1); i++)
             {
-                e_[i] = zero;
+                hE[bid][i] = zero;
             }
         }
 
-        if(linfo_array[bid] == 0)
+        if(hInfo[bid][0] == 0)
         {
-            linfo_array[bid] = info;
+            hInfo[bid][0] = info;
         }
     } // end for bid
 
-    // -------------------------------------------------
-    // transfer arrays D(:) and E(:) from host to device
-    // -------------------------------------------------
-    if(use_single_copy_for_D)
-    {
-        void* const src = (void*)&(hD[0]);
-        void* const dst = (void*)D;
-        size_t const sizeBytes = sizeof(S) * n * batch_count;
-        hipMemcpyKind const kind = hipMemcpyHostToDevice;
-
-        HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-    }
-    else
-    {
-        for(I bid = 0; bid < batch_count; bid++)
-        {
-            void* const src = (void*)&(hD[bid * n]);
-            void* const dst = (void*)(D + bid * strideD);
-            size_t const sizeBytes = sizeof(S) * n;
-            hipMemcpyKind const kind = hipMemcpyHostToDevice;
-            HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-        }
-    }
-
-    {
-        for(I bid = 0; bid < batch_count; bid++)
-        {
-            void* const src = (void*)&(hE[bid * E_size]);
-            void* const dst = (void*)&(E[bid * strideE]);
-            size_t const sizeBytes = sizeof(S) * E_size;
-            hipMemcpyKind const kind = hipMemcpyHostToDevice;
-            HIP_CHECK(hipMemcpyAsync(dst, src, sizeBytes, kind, stream));
-        }
-    }
-
-    // ------------------------------------------------------
-    // copy linfo_array[] from host to info_array[] on device
-    // ------------------------------------------------------
-    {
-        void* const src = (void*)&(linfo_array[0]);
-        void* const dst = (void*)&(info_array[0]);
-        size_t const nbytes = sizeof(I) * batch_count;
-        hipMemcpyKind const kind = hipMemcpyHostToDevice;
-
-        HIP_CHECK(hipMemcpyAsync(dst, src, nbytes, kind, stream));
-    }
-
+    // -----------------------------------
+    // transfer arrays from host to device
+    // -----------------------------------
+    ROCBLAS_CHECK(hD.write_to_device_async(stream));
+    ROCBLAS_CHECK(hE.write_to_device_async(stream));
+    ROCBLAS_CHECK(hInfo.write_to_device_async(stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
     // ----------------------
     // free allocated storage
     // ----------------------
     HIP_CHECK(hipHostFree(hwork));
-    hwork = nullptr;
-    HIP_CHECK(hipHostFree(hD));
-    hD = nullptr;
-    HIP_CHECK(hipHostFree(hE));
-    hE = nullptr;
-    HIP_CHECK(hipFree(dwork_));
-    dwork_ = nullptr;
-    HIP_CHECK(hipHostFree(linfo_array));
-    linfo_array = nullptr;
+    HIP_CHECK(hipFree(dwork));
 
-    return (rocblas_status_success);
+    return rocblas_status_success;
 }
 
 ROCSOLVER_END_NAMESPACE

@@ -4005,6 +4005,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zbdsqr(rocblas_handle handle,
     The matrix is not represented explicitly, but rather as the array of
     diagonal elements D and the array of symmetric off-diagonal elements E.
 
+    \note
+    A hybrid (CPU+GPU) approach is available for STERF, primarily intended for
+    homogeneous architectures. Use \ref rocsolver_set_alg_mode to enable it.
+
     @param[in]
     handle      rocblas_handle.
     @param[in]

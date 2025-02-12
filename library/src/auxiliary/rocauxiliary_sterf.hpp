@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +35,7 @@
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_hybrid_storage.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -46,21 +47,16 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 /** STERF_SQ_E squares the elements of E **/
 template <typename T>
-__device__ void sterf_sq_e(const rocblas_int start, const rocblas_int end, T* E)
+__device__ __host__ void sterf_sq_e(const rocblas_int start, const rocblas_int end, T* E)
 {
     for(int i = start; i < end; i++)
         E[i] = E[i] * E[i];
 }
 
-/** STERF_KERNEL implements the main loop of the sterf algorithm
-    to compute the eigenvalues of a symmetric tridiagonal matrix given by D
-    and E **/
 template <typename T>
-ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
-                                   T* DD,
-                                   const rocblas_stride strideD,
-                                   T* EE,
-                                   const rocblas_stride strideE,
+__device__ __host__ void run_sterf(const rocblas_int n,
+                                   T* D,
+                                   T* E,
                                    rocblas_int* info,
                                    rocblas_int* stack,
                                    const rocblas_int max_iters,
@@ -68,11 +64,6 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
                                    const T ssfmin,
                                    const T ssfmax)
 {
-    rocblas_int bid = hipBlockIdx_x;
-
-    T* D = DD + (bid * strideD);
-    T* E = EE + (bid * strideE);
-
     rocblas_int m, l, lsv, lend, lendsv;
     rocblas_int l1 = 0;
     rocblas_int iters = 0;
@@ -85,7 +76,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
             E[l1 - 1] = 0;
         for(m = l1; m < n - 1; m++)
         {
-            if(abs(E[m]) <= sqrt(abs(D[m])) * sqrt(abs(D[m + 1])) * eps)
+            if(std::abs(E[m]) <= std::sqrt(std::abs(D[m])) * std::sqrt(std::abs(D[m + 1])) * eps)
             {
                 E[m] = 0;
                 break;
@@ -109,7 +100,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
         sterf_sq_e(l, lend, E);
 
         // Choose iteration type (QL or QR)
-        if(abs(D[lend]) < abs(D[l]))
+        if(std::abs(D[lend]) < std::abs(D[l]))
         {
             lend = lsv;
             l = lendsv;
@@ -122,7 +113,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
             {
                 // Find small subdiagonal element
                 for(m = l; m <= lend - 1; m++)
-                    if(abs(E[m]) <= eps * eps * abs(D[m] * D[m + 1]))
+                    if(std::abs(E[m]) <= eps * eps * std::abs(D[m] * D[m + 1]))
                         break;
 
                 if(m < lend)
@@ -137,7 +128,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
                 {
                     // Use lae2 to compute 2x2 eigenvalues. Using rte, rt1, rt2.
                     T rte, rt1, rt2;
-                    rte = sqrt(E[l]);
+                    rte = std::sqrt(E[l]);
                     lae2(D[l], rte, D[l + 1], rt1, rt2);
                     D[l] = rt1;
                     D[l + 1] = rt2;
@@ -153,12 +144,12 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
                     T sigma, gamma, r, rte, c, s;
 
                     // Form shift
-                    rte = sqrt(E[l]);
+                    rte = std::sqrt(E[l]);
                     sigma = (D[l + 1] - p) / (2 * rte);
                     if(sigma >= 0)
-                        r = abs(sqrt(1 + sigma * sigma));
+                        r = std::abs(sqrt(1 + sigma * sigma));
                     else
-                        r = -abs(sqrt(1 + sigma * sigma));
+                        r = -std::abs(sqrt(1 + sigma * sigma));
                     sigma = p - (rte / (sigma + r));
 
                     c = 1;
@@ -198,7 +189,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
             {
                 // Find small subdiagonal element
                 for(m = l; m >= lend + 1; m--)
-                    if(abs(E[m - 1]) <= eps * eps * abs(D[m] * D[m - 1]))
+                    if(std::abs(E[m - 1]) <= eps * eps * std::abs(D[m] * D[m - 1]))
                         break;
 
                 if(m > lend)
@@ -213,7 +204,7 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
                 {
                     // Use lae2 to compute 2x2 eigenvalues. Using rte, rt1, rt2.
                     T rte, rt1, rt2;
-                    rte = sqrt(E[l - 1]);
+                    rte = std::sqrt(E[l - 1]);
                     lae2(D[l], rte, D[l - 1], rt1, rt2);
                     D[l] = rt1;
                     D[l - 1] = rt2;
@@ -229,12 +220,12 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
                     T sigma, gamma, r, rte, c, s;
 
                     // Form shift. Using rte, r, c, s.
-                    rte = sqrt(E[l - 1]);
+                    rte = std::sqrt(E[l - 1]);
                     sigma = (D[l - 1] - p) / (2 * rte);
                     if(sigma >= 0)
-                        r = abs(sqrt(1 + sigma * sigma));
+                        r = std::abs(std::sqrt(1 + sigma * sigma));
                     else
-                        r = -abs(sqrt(1 + sigma * sigma));
+                        r = -std::abs(std::sqrt(1 + sigma * sigma));
                     sigma = p - (rte / (sigma + r));
 
                     c = 1;
@@ -277,14 +268,14 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
     // Check for convergence
     for(int i = 0; i < n - 1; i++)
         if(E[i] != 0)
-            info[bid]++;
+            (*info)++;
 
     // Sort eigenvalues
     /** (TODO: the quick-sort method implemented in lasrt_increasing fails for some cases.
         Substituting it here with a simple sorting algorithm. If more performance is required in
         the future, lasrt_increasing should be debugged or another quick-sort method
         could be implemented) **/
-    //lasrt_increasing(n, D, stack + bid * (2 * 32));
+    //lasrt_increasing(n, D, stack);
 
     for(int ii = 1; ii < n; ii++)
     {
@@ -305,6 +296,32 @@ ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
             D[l] = p;
         }
     }
+}
+
+/** STERF_KERNEL implements the main loop of the sterf algorithm
+    to compute the eigenvalues of a symmetric tridiagonal matrix given by D
+    and E **/
+template <typename T>
+ROCSOLVER_KERNEL void sterf_kernel(const rocblas_int n,
+                                   T* DD,
+                                   const rocblas_stride strideD,
+                                   T* EE,
+                                   const rocblas_stride strideE,
+                                   rocblas_int* infoA,
+                                   rocblas_int* stackA,
+                                   const rocblas_int max_iters,
+                                   const T eps,
+                                   const T ssfmin,
+                                   const T ssfmax)
+{
+    rocblas_int bid = hipBlockIdx_x;
+
+    T* D = DD + (bid * strideD);
+    T* E = EE + (bid * strideE);
+    rocblas_int* info = infoA + bid;
+    rocblas_int* stack = stackA + bid * (2 * 32);
+
+    run_sterf<T>(n, D, E, info, stack, max_iters, eps, ssfmin, ssfmax);
 }
 
 template <typename T>
@@ -368,6 +385,9 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    rocsolver_alg_mode alg_mode;
+    ROCBLAS_CHECK(rocsolver_get_alg_mode(handle, rocsolver_function_sterf, &alg_mode));
+
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
     dim3 gridReset(blocksReset, 1, 1);
     dim3 threads(BS1, 1, 1);
@@ -385,8 +405,33 @@ rocblas_status rocsolver_sterf_template(rocblas_handle handle,
     ssfmin = sqrt(ssfmin) / (eps * eps);
     ssfmax = sqrt(ssfmax) / T(3.0);
 
-    ROCSOLVER_LAUNCH_KERNEL(sterf_kernel<T>, dim3(batch_count), dim3(1), 0, stream, n, D + shiftD,
-                            strideD, E + shiftE, strideE, info, stack, 30 * n, eps, ssfmin, ssfmax);
+    if(alg_mode == rocsolver_alg_mode_hybrid)
+    {
+        rocsolver_hybrid_storage<T, rocblas_int, U> hD;
+        rocsolver_hybrid_storage<T, rocblas_int, U> hE;
+        rocsolver_hybrid_storage<rocblas_int, rocblas_int, rocblas_int*> hInfo;
+
+        ROCBLAS_CHECK(hD.init_async(n, D + shiftD, strideD, batch_count, stream));
+        ROCBLAS_CHECK(hE.init_async(n - 1, E + shiftE, strideE, batch_count, stream));
+        ROCBLAS_CHECK(hInfo.init_async(1, info, 1, batch_count, stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+
+        for(rocblas_int b = 0; b < batch_count; b++)
+        {
+            run_sterf<T>(n, hD[b], hE[b], hInfo[b], nullptr, 30 * n, eps, ssfmin, ssfmax);
+        }
+
+        ROCBLAS_CHECK(hD.write_to_device_async(stream));
+        ROCBLAS_CHECK(hE.write_to_device_async(stream));
+        ROCBLAS_CHECK(hInfo.write_to_device_async(stream));
+        HIP_CHECK(hipStreamSynchronize(stream));
+    }
+    else
+    {
+        ROCSOLVER_LAUNCH_KERNEL(sterf_kernel<T>, dim3(batch_count), dim3(1), 0, stream, n,
+                                D + shiftD, strideD, E + shiftE, strideE, info, stack, 30 * n, eps,
+                                ssfmin, ssfmax);
+    }
 
     return rocblas_status_success;
 }
