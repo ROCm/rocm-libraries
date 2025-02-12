@@ -4,7 +4,7 @@ root: index
 subtrees:
 
 - entries:
-  - file: how-to/what-is-rocblas.rst
+  - file: what-is-rocblas.rst
     title: What is rocBLAS?
 
 - caption: Install 

@@ -5,7 +5,7 @@
 .. _programmers-guide:
 
 ********************************************************************
-Programmers guide
+rocBLAS programming guide
 ********************************************************************
 
 This topic covers internal details that are required to program with rocBLAS. It includes
@@ -278,10 +278,10 @@ stream, which is maintained by the system. You cannot create or destroy the defa
 stream. However, you can create a new non-default stream and bind it to the ``rocBLAS_handle`` using the
 commands ``hipStreamCreate()`` and ``rocblas_set_stream()``.
 
-rocBLAS supports the use of non-blocking streams for functions requiring synchronization to guarantee results on the host.
+rocBLAS supports non-blocking streams for functions requiring synchronization to guarantee results on the host.
 For functions like ``rocblas_Xnrm2``, the scalar result is copied from device to host when ``rocblas_pointer_mode == rocblas_pointer_mode_host``.
 This is accomplished by using ``hipMemcpyAsync()``, followed by ``hipStreamSynchronize()``.
-The stream that is synchronized is the stream in the ``rocBLAS_handle``.
+The stream in the ``rocBLAS_handle`` is synchronized.
 
 .. note::
 

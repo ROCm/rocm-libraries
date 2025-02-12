@@ -5,10 +5,8 @@
 .. _logging:
 
 ********************************************************************
-Logging in rocBLAS
+rocBLAS logging
 ********************************************************************
-
-**Performance will degrade when logging is enabled.**
 
 You can set four environment variables to control logging:
 
@@ -19,6 +17,10 @@ You can set four environment variables to control logging:
 * ``ROCBLAS_LOG_BENCH_PATH``
 
 * ``ROCBLAS_LOG_PROFILE_PATH``
+
+.. caution::
+
+   Performance will degrade when logging is enabled.
 
 ``ROCBLAS_LAYER`` is a bitwise OR of zero or more bit masks as follows:
 
@@ -47,7 +49,7 @@ performance-critical arguments, and the number of times it was called
 with those arguments (the ``call_count``). Some arguments, such as
 ``alpha`` and ``beta`` in GEMM, are recorded with a value representing
 the category that the argument falls into, such as ``-1``, ``0``, ``1``,
-or ``2``. The number of categories, and the values representing them,
+or ``2``. The number of categories and the values representing them
 might change over time, depending on how many categories are needed to
 adequately represent all the values that can affect the performance
 of the function.

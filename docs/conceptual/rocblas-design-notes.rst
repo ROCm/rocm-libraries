@@ -34,7 +34,7 @@ according to the following settings:
 
 .. note::
 
-   hipBLASLt with rocBLAS is not currently supported in Windows builds or static builds
+   hipBLASLt with rocBLAS is not supported on Windows builds or static builds,
    and is not included if building without Tensile.
 
 rocBLAS API and legacy BLAS functions
@@ -167,7 +167,7 @@ ILP64 interface
 The rocBLAS library functions are also available with ILP64 interfaces. With these interfaces,
 all ``rocblas_int`` arguments are replaced by the type name
 ``int64_t``.  These ILP64 function names all end with the suffix ``_64``. The only output arguments that change are for
-``xMAX`` and ``xMIN``, where the index is now ``int64_t``. Performance should match the LP64 API when problem sizes don't require the additional
+``xMAX`` and ``xMIN``, where the index is now ``int64_t``. Performance should match the LP64 API when problem sizes don't require additional
 precision. Function-level documentation is not repeated for these APIs because they are identical in behavior to the LP64 versions.
 However, functions which support this alternate API include the line:
 ``This function supports the 64-bit integer interface (ILP64)``.
@@ -204,14 +204,14 @@ Scalar parameters like alpha and beta can be allocated on the host heap or
 stack when ``rocblas_pointer_mode == rocblas_pointer_mode_host``.
 The kernel launch is asynchronous, so if the parameters are on the heap,
 they can be freed after the return from the kernel launch. When
-``rocblas_pointer_mode == rocblas_pointer_mode_device``, they must not be
+``rocblas_pointer_mode == rocblas_pointer_mode_device``, the parameters must not be
 changed until the kernel completes.
 
 For scalar results when ``rocblas_pointer_mode ==
 rocblas_pointer_mode_host``, the function blocks the CPU until the GPU
 has copied the result back to the host. When ``rocblas_pointer_mode ==
 rocblas_pointer_mode_device``, the function returns after the
-asynchronous launch. Similar to the vector and matrix results, the scalar
+asynchronous launch. Like the vector and matrix results, the scalar
 result is only available when the kernel has completed execution.
 
 Asynchronous API
@@ -226,7 +226,7 @@ The order of operations in the asynchronous functions is shown in the figure
 below. The argument checking, calculation of the process grid, and kernel
 launch take very little time. The asynchronous kernel running on the GPU
 does not block the CPU. After the kernel launch, the CPU continues processing
-the next instructions.
+the instructions.
 
 .. asynch_blocks
 .. figure:: ../data/asynch_function.PNG
@@ -237,7 +237,7 @@ the next instructions.
 
 
 The order of operations above will change if logging is enabled or the
-function is synchronous. Logging requires system calls, and the program
+function is synchronous. Logging requires system calls, so the program
 must wait for them to complete before executing the next instruction.
 For more information, see :doc:`Logging in rocBLAS <../how-to/logging-in-rocblas>`.
 
@@ -284,7 +284,7 @@ Kernel launch status error checking
 
 The function ``hipPeekAtLastError()`` is called before and after a rocBLAS kernel launches.
 This function detects if the launch parameters are incorrect, for example,
-an invalid work-group or thread block size. It also determines if the kernel code is unable to
+an invalid work group or thread block size. It also determines if the kernel code is unable to
 run on the current GPU device. In that case, it returns ``rocblas_status_arch_mismatch``.
 
 Note that ``hipPeekAtLastError()`` does not flush the last error.
@@ -335,7 +335,7 @@ Some functions within the rocBLAS library such as ``gemv``, ``symv``, ``trsv``, 
 and ``gemm`` can use atomic operations to increase performance.
 By using atomics, functions might not give bit-wise reproducible results.
 Differences between multiple runs should not be significant and the results will
-remain accurate, but if users require identical results across multiple runs,
+remain accurate. However, if you require identical results across multiple runs,
 atomics should be turned off. For more information, see :any:`rocblas_atomics_mode`,
 :any:`rocblas_set_atomics_mode`, and :any:`rocblas_get_atomics_mode`.
 
@@ -402,8 +402,8 @@ Functions using atomic operations
 
    This list also includes all Level-3 functions.
 
-MI100 (gfx908) considerations
------------------------------
+Instinct MI100 (gfx908) considerations
+---------------------------------------
 
 On nodes using the MI100 (gfx908) GPU, Matrix-Fused-Multiply-Add (MFMA)
 instructions are available to substantially speed up matrix operations.
@@ -426,8 +426,8 @@ MFMA instructions.
    Not all problem sizes consistently select the MFMA-based kernels.
    Additional tuning might be required to achieve good performance.
 
-MI200 (gfx90a) Considerations
------------------------------
+Instinct MI200 (gfx90a) Considerations
+----------------------------------------
 
 On nodes using the MI200 (gfx90a) GPU, MFMA_F64 instructions are available to
 substantially speed up double-precision matrix operations. This

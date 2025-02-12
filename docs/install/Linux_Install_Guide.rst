@@ -5,7 +5,7 @@
 .. _linux-install:
 
 ********************************************************************
-Installing and building for Linux
+Installing and building on Linux
 ********************************************************************
 
 This topic discusses how to install rocBLAS on Linux from a prebuilt package or from source.
@@ -43,7 +43,7 @@ Non-standard static library builds have the additional runtime dependency of
 the entire ``rocblas/`` subdirectory, which is located in the ``/opt/rocm/lib`` folder.
 This runtime folder can be moved elsewhere, but the environment variable
 ``ROCBLAS_TENSILE_LIBPATH`` must be set to the new location. In addition, if you are running an executable
-linked against the static library ``librocblas.a``, the build seaches for the ``rocblas`` subdirectory in
+linked against the static library ``librocblas.a``, the build searches for the ``rocblas`` subdirectory in
 the same directory as the executable.
 The contents of the ``rocblas/`` subdirectory are read at execution time
 in the same way as shared library files.
@@ -53,13 +53,13 @@ Building and installing rocBLAS
 ===================================
 
 For most users, it isn't necessary to build rocBLAS from source. They can use
-the prebuilt packages as described above. However, you can use the following instructions to build
-rocBLAS from source, if necessary.
+the prebuilt packages as described above. However, if necessary, you can use the following instructions to build
+rocBLAS from source.
 
 Requirements
 ------------
 
-Normally, a full rocBLAS fat binary build requires 64GB of system memory. This value might be lower if
+Normally, a full rocBLAS fat binary build requires 64 GB of system memory. This value might be lower if
 you build rocBLAS for specific architectures using the ``-a`` option for ``install.sh``. For more information,
 run the following help command:
 
@@ -83,7 +83,7 @@ For distributions that use the ``yum`` package manager, run this command:
 
     yum info rocm-libs
 
-The ROCm version has major, minor, and patch fields, possibly followed by a build specific identifier.
+The ROCm version has major, minor, and patch fields, possibly followed by a build-specific identifier.
 For example, the ROCm version might be ``4.0.0.40000-23``. This corresponds to major release = ``4``,
 minor release = ``0``, patch = ``0``, and build identifier ``40000-23``.
 The GitHub branches at the rocBLAS site have names like ``rocm-major.minor.x``,
@@ -96,7 +96,7 @@ To download rocBLAS, use the following command:
    cd rocBLAS
 
 Replace ``x.y`` in the above command with the ROCm version installed on your machine.
-For example, if you have ROCm 6.2 installed, then replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-6.2``.
+For example, if you have ROCm 6.2 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-6.2``.
 
 
 The following sections list the steps to build rocBLAS using the ``install.sh`` script.
@@ -119,7 +119,7 @@ The dependencies are listed in the ``install.sh`` script.
 Pass the ``-d`` flag to ``install.sh`` to install the dependencies.
 
 However, for the host reference BLAS test and benchmark clients,
-it is recommended that you manually download and install AMD's `ILP64 version of
+it is recommended that you manually download and install the AMD `ILP64 version of
 AOCL-BLAS 4.2 <https://www.amd.com/en/developer/aocl.html>`_.
 If you download and install the full AOCL packages into their default locations
 or download the BLIS archive files and extract them into the build directory ``deps`` subfolder,

@@ -5,7 +5,7 @@
 .. _windows-install:
 
 ********************************************************************
-Installing and building for Microsoft Windows
+Installing and building on Microsoft Windows
 ********************************************************************
 
 This topic discusses how to install rocBLAS on Microsoft Windows from a prebuilt package or from source.
@@ -16,7 +16,7 @@ Prerequisites
 
 rocBLAS requires an AMD HIP SDK-enabled platform. For more information,
 see :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
-rocBLAS is supported on the same Windows versions and toolchains that the HIP SDK supports.
+rocBLAS is supported on the same Windows versions and toolchains that HIP SDK supports.
 
 .. note::
 
@@ -73,7 +73,7 @@ Building and installing rocBLAS
 ===============================
 
 Most users do not need to build rocBLAS from source because it can be used after installing the prebuilt packages as described above.
-If necessary, users can follow these instructions to build rocBLAS from source.
+If necessary, follow these instructions to build rocBLAS from source.
 The rocBLAS codebase for the HIP SDK is the same as the one used for the Linux ROCm distribution.
 However, because these two distributions have different stacks, the code and build process have subtle variations.
 
@@ -82,14 +82,13 @@ Requirements
 ------------
 
 64GB of system memory is normally required for a full rocBLAS build. This value can be lower if
-you build rocBLAS with a different Tensile logic target. See the ``--logic`` command from ``rmake.py --help``. The system memory requirement
-could potentially increase in the future as more functions are added to rocBLAS and it adds additional dependencies.
+you build rocBLAS with a different Tensile logic target. See the ``--logic`` command from ``rmake.py --help``.
 
 
 Download rocBLAS
 ----------------
 
-The rocBLAS source code, which is the same as the ROCm Linux version, is available at the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS source code, which is the same as the ROCm Linux version, is available from the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
 The ROCm HIP SDK version might appear in the default installation path,
 but you can run the HIP SDK compiler to display the version from the ``bin/`` folder:
 
@@ -110,7 +109,7 @@ To download rocBLAS, use the following command:
    cd rocBLAS
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
-For example, if you have HIP 5.5 installed, then use ``-b release/rocm-rel-5.5``
+For example, if you have HIP 5.5 installed, then use ``-b release/rocm-rel-5.5``.
 You can add the SDK tools to your path using an entry like this:
 
 ::
@@ -129,7 +128,7 @@ You can build either:
 
 You only need the dependencies and library to call rocBLAS from your code.
 The client contains the test and benchmark code.
-``rmake.py`` prints the full ``cmake`` command being used to configure rocBLAS to the screen
+``rmake.py`` prints the full ``cmake`` command used to configure rocBLAS to the screen
 based on your ``rmake`` command line options.
 The full ``cmake`` command can be used in build scripts to bypass the
 Python helper script and use a fixed set of build options.
@@ -150,15 +149,15 @@ The version of CMake installed with Visual Studio 2022 meets this requirement.
 The ``vcpkg`` version tag is specified at the top of the ``rdeps.py`` file.
 
 However, for the host reference BLAS test and benchmark clients,
-it is recommended that you manually download and install AMD's `ILP64 version of
+it is recommended that you manually download and install the AMD `ILP64 version of
 AOCL-BLAS 4.2 <https://www.amd.com/en/developer/aocl.html>`_.
 If you download and run the full Windows AOCL installer into the default location
 (``C:\Program Files\AMD\AOCL-Windows\``), then the ``CMakeLists.txt`` file for the client can find the reference BLAS.
 
 .. note::
 
-   If instead of using the AOCL reference library, you use OpenBLAS with the ``vcpkg`` version
-   from ``rdeps.py``, you might experience ``rocblas-test`` stress test failures due to 32-bit integer overflow
+   If you use OpenBLAS with the ``vcpkg`` version
+   from ``rdeps.py`` instead of the AOCL reference library, you might experience ``rocblas-test`` stress test failures due to 32-bit integer overflow
    on the host reference code. If this occurs, exclude the ILP64 stress tests
    using the command line argument ``--gtest_filter=-*stress*``.
 
