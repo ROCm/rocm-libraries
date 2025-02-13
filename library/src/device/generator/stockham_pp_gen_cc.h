@@ -21,6 +21,13 @@
 #pragma once
 #include "stockham_gen_cc.h"
 
+// TODO: - Kernel is not getting launched, found out why
+//       - Check launch bounds.
+//       - Implementation here used a kernel with work_group_size = 256, however, the prototype was using 64.
+//         Change kernel_generator.py to use 64 and fix all the issues, comparing again with the prototype.
+//       - Start testing with different threads_per_transform once the original configuration works.
+//       - Then test with other lengths and direct_from_reg=true, half_lds=true, etc.
+
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs& specs,
@@ -102,7 +109,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return load;
     }
 
-    StatementList store_pp_step_1_2_lds_generator(
+    StatementList store_pp_step_3_4_lds_generator(
         unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
         if(hr == 0)
@@ -116,10 +123,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return work;
     }
 
-    Function generate_lds_from_reg_output_pp_step_1_2_function()
+    Function generate_lds_from_reg_output_pp_step_3_4_function()
     {
         std::string function_name
-            = "lds_from_reg_output_pp_step_1_2_length" + std::to_string(length) + "_device";
+            = "lds_from_reg_output_pp_step_3_4_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -130,7 +137,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         body += Declaration{
             lstride, Ternary{Parens{stride_type == "SB_UNIT"}, Parens{1}, Parens{stride_lds}}};
 
-        auto store_lds = std::mem_fn(&StockhamPartialPassKernelCC::store_pp_step_1_2_lds_generator);
+        auto store_lds = std::mem_fn(&StockhamPartialPassKernelCC::store_pp_step_3_4_lds_generator);
         // last pass of store (full)
         unsigned int width  = factors.back();
         float        height = static_cast<float>(length) / width / threads_per_transform;
@@ -142,7 +149,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return f;
     }
 
-    StatementList load_lds_step_1_2_generator(
+    StatementList load_lds_step_3_4_generator(
         unsigned int h, unsigned int hr, unsigned int width, unsigned int dt, Expression guard)
     {
         if(hr == 0)
@@ -167,10 +174,10 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return {R, lds_complex, stride_lds_pp, offset_lds_pp};
     }
 
-    Function generate_lds_to_reg_input_step_1_2_function()
+    Function generate_lds_to_reg_input_step_3_4_function()
     {
         std::string function_name
-            = "lds_to_reg_input_pp_step_1_2_length" + std::to_string(length) + "_device";
+            = "lds_to_reg_input_pp_step_3_4_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
         f.templates = device_lds_reg_inout_templates();
@@ -179,7 +186,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         StatementList& body = f.body;
 
-        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_step_1_2_generator);
+        auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_step_3_4_generator);
         // first pass of load (full)
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
@@ -745,7 +752,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     }
 
     // TODO: Move this to a device function
-    StatementList perform_partial_pass_step_1_2()
+    StatementList perform_partial_pass_step_3_4()
     {
         StatementList stmts;
 
@@ -759,14 +766,15 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         // TODO: handle direct_to_from_reg
         StatementList preLoad;
-        preLoad += Call{"lds_to_reg_input_pp_step_1_2_length" + std::to_string(length) + "_device",
+        preLoad += Call{"lds_to_reg_input_pp_step_3_4_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
                         pre_post_lds_args};
         stmts += preLoad;
 
         for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
-            unsigned int width  = factors_pp[npass];
+            unsigned int width = factors_pp[npass];
+            // TODO: revisit this. Different from same function in stockham_pp_gen_rr.h
             unsigned int height = threads_per_transform / max_factor_pp;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
@@ -778,7 +786,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         StatementList postStore;
         postStore
-            += Call{"lds_from_reg_output_pp_step_1_2_length" + std::to_string(length) + "_device",
+            += Call{"lds_from_reg_output_pp_step_3_4_length" + std::to_string(length) + "_device",
                     pre_post_lds_tmpl,
                     pre_post_lds_args};
         stmts += postStore;
@@ -838,7 +846,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         return args;
     }
 
-    // TODO: Stopped here: implement device function. Kernel is not getting launched, found out why
     Function generate_device_function()
     {
         std::string function_name
@@ -1021,7 +1028,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         }
 
         // partial pass here
-        body += perform_partial_pass_step_1_2();
+        body += perform_partial_pass_step_3_4();
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
