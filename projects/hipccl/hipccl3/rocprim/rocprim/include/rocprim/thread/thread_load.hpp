@@ -106,7 +106,7 @@ ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc1", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0 sc1", "s_waitcnt", "vmcnt");
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0 sc1", "s_waitcnt", "vmcnt");
-#elif defined(__gfx942__)
+#elif defined(__gfx942__) || defined(__gfx950__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc0 nt", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0", "s_waitcnt", "vmcnt");

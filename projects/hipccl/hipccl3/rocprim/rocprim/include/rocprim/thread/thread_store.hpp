@@ -108,7 +108,7 @@ ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "sc0 sc1", "s_waitcnt", ""); // TODO: g
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 sc1", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wt, "sc0 sc1", "s_waitcnt", "vmcnt");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_volatile, "sc0 sc1", "s_waitcnt", "vmcnt");
-#elif defined(__gfx942__)
+#elif defined(__gfx942__) || defined(__gfx950__)
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "sc0", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 nt", "s_waitcnt", "");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wt, "sc0", "s_waitcnt", "vmcnt");

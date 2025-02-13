@@ -2,6 +2,11 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 3.5.0 for ROCm 6.5.0
+
+### Added
+* gfx950 support
+
 ## rocPRIM 3.4.0 for ROCm 6.4.0
 
 ### Added
