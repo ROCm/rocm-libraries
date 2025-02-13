@@ -416,7 +416,8 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    (threadIdx.x / MfmaDim * Traits::KPerThread) % BlockK);
+                                    ((threadIdx.x / MfmaDim) * Traits::KPerThread)
+                                        % (BlockK / SplitK));
             }
         };
 
@@ -487,7 +488,8 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    (threadIdx.x / MfmaDim * Traits::KPerThread) % BlockK);
+                                    (threadIdx.x / MfmaDim * Traits::KPerThread)
+                                        % (BlockK / SplitK));
             }
         };
 
