@@ -423,14 +423,22 @@ namespace rocRoller
         m_launchParameters = launch;
     }
 
-    void CommandKernel::launchKernel(RuntimeArguments const& args)
+    void CommandKernel::launchKernel(RuntimeArguments const&   args,
+                                     std::shared_ptr<HIPTimer> timer,
+                                     int                       iteration)
     {
-        launchKernel(args, nullptr, 0);
+        launchKernel(args, timer, iteration, timer ? timer->stream() : 0);
+    }
+
+    void CommandKernel::launchKernel(RuntimeArguments const& args, hipStream_t stream)
+    {
+        launchKernel(args, nullptr, 0, stream);
     }
 
     void CommandKernel::launchKernel(RuntimeArguments const&   args,
                                      std::shared_ptr<HIPTimer> timer,
-                                     int                       iteration)
+                                     int                       iteration,
+                                     hipStream_t               stream)
     {
         TIMER(t, "CommandKernel::launchKernel");
 
@@ -452,7 +460,10 @@ namespace rocRoller
 
         loadKernel();
 
-        m_executableKernel->executeKernel(kargs, inv, timer, iteration);
+        if(timer)
+            m_executableKernel->executeKernel(kargs, inv, timer, iteration);
+        else
+            m_executableKernel->executeKernel(kargs, inv, stream);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

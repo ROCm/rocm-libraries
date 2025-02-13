@@ -213,13 +213,6 @@ namespace rocRoller
         /**
          * @brief Determines launch bounds and arguments, and launches the kernel.
          *
-         * @param args The runtime arguments being passed to the kernel.
-         */
-        void launchKernel(RuntimeArguments const& args);
-
-        /**
-         * @brief Determines launch bounds and arguments, and launches the kernel.
-         *
          * @param args The runtime arguments being passed to the kernel
          * @param timer HIPTimer that will record how long the kernel took to execute
          * @param iteration Iteration number within the timer
@@ -230,6 +223,18 @@ namespace rocRoller
         void launchKernel(RuntimeArguments const&   args,
                           std::shared_ptr<HIPTimer> timer,
                           int                       iteration);
+
+        /**
+         * @brief Determines launch bounds and arguments, and launches the kernel on
+         *        the given stream..
+         *
+         * @param args The runtime arguments being passed to the kernel
+         * @param stream The stream that the kernel to run on
+         *
+         * Assembles and loads a generated kernel if this has not been
+         * done already.
+         */
+        void launchKernel(RuntimeArguments const& args, hipStream_t stream = 0);
 
         KernelGraph::KernelGraph getKernelGraph() const;
 
@@ -287,6 +292,23 @@ namespace rocRoller
         void generateKernelSource();
 
         Generator<Instruction> kernelInstructions();
+
+        /**
+         * @brief Determines launch bounds and arguments, and launches the kernel with
+         *        optional timer and stream
+         *
+         * @param args The runtime arguments being passed to the kernel
+         * @param timer HIPTimer that will record how long the kernel took to execute
+         * @param iteration Iteration number within the timer
+         * @param stream The stream that the kernel to run on
+         *
+         * Assembles and loads a generated kernel if this has not been
+         * done already.
+         */
+        void launchKernel(RuntimeArguments const&   args,
+                          std::shared_ptr<HIPTimer> timer,
+                          int                       iteration,
+                          hipStream_t               stream);
     };
 
     class CommandSolution

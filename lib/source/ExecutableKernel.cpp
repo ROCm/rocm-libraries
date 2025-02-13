@@ -105,16 +105,26 @@ namespace rocRoller
         m_kernelName   = kernelName;
     }
 
-    void ExecutableKernel::executeKernel(const KernelArguments&  args,
-                                         const KernelInvocation& invocation)
+    void ExecutableKernel::executeKernel(const KernelArguments&    args,
+                                         const KernelInvocation&   invocation,
+                                         std::shared_ptr<HIPTimer> timer,
+                                         int                       iteration)
     {
-        executeKernel(args, invocation, nullptr, 0);
+        executeKernel(args, invocation, timer, iteration, timer->stream());
+    }
+
+    void ExecutableKernel::executeKernel(const KernelArguments&  args,
+                                         const KernelInvocation& invocation,
+                                         hipStream_t             stream)
+    {
+        executeKernel(args, invocation, nullptr, 0, stream);
     }
 
     void ExecutableKernel::executeKernel(const KernelArguments&    args,
                                          const KernelInvocation&   invocation,
                                          std::shared_ptr<HIPTimer> timer,
-                                         int                       iteration)
+                                         int                       iteration,
+                                         hipStream_t               stream)
     {
         // TODO: Include this at a particular logging level.
         if(args.log())
@@ -149,14 +159,14 @@ namespace rocRoller
                                            invocation.workgroupSize[1],
                                            invocation.workgroupSize[2],
                                            invocation.sharedMemBytes,
-                                           timer ? timer->stream() : 0, // stream
+                                           stream,
                                            nullptr,
                                            (void**)&hipLaunchParams,
                                            nullptr, // event
                                            nullptr // event
                                            ));
-
         if(timer)
             HIP_TOC(timer, iteration);
     }
+
 }

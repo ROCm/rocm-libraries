@@ -114,6 +114,7 @@ set(rocRollerTests_SOURCES
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
     unit/OperationTagTest.cpp
+    unit/StreamTest.cpp
 )
 
 if(NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
