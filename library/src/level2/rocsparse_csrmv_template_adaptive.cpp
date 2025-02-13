@@ -366,85 +366,89 @@ rocsparse_status
     // Create csrmv info
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csrmv_info(&info->csrmv_info));
 
-    // Stream
-    hipStream_t stream = handle->stream;
-
-    // row blocks size
-    info->csrmv_info->adaptive.size = 0;
-
-    // Temporary arrays to hold device data
-    std::vector<I> hptr(m + 1);
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-        hptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
-
-    // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-
-    // Determine row blocks array size
-    ComputeRowBlocks<I, J>((I*)NULL,
-                           (J*)NULL,
-                           info->csrmv_info->adaptive.size,
-                           info->csrmv_info->adaptive.first_row,
-                           info->csrmv_info->adaptive.last_row,
-                           hptr.data(),
-                           m,
-                           false);
-
-    // Create row blocks, workgroup flag, and workgroup data structures
-    std::vector<I>        row_blocks(info->csrmv_info->adaptive.size, 0);
-    std::vector<uint32_t> wg_flags(info->csrmv_info->adaptive.size, 0);
-    std::vector<J>        wg_ids(info->csrmv_info->adaptive.size, 0);
-
-    ComputeRowBlocks<I, J>(row_blocks.data(),
-                           wg_ids.data(),
-                           info->csrmv_info->adaptive.size,
-                           info->csrmv_info->adaptive.first_row,
-                           info->csrmv_info->adaptive.last_row,
-                           hptr.data(),
-                           m,
-                           true);
-
-    if(descr->type == rocsparse_matrix_type_symmetric)
+    if(trans == rocsparse_operation_none)
     {
-        info->csrmv_info->max_rows
-            = maxRowsInABlock(row_blocks.data(), info->csrmv_info->adaptive.size);
-    }
+        // Stream
+        hipStream_t stream = handle->stream;
 
-    // Allocate memory on device to hold csrmv info, if required
-    if(info->csrmv_info->adaptive.size > 0)
-    {
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.row_blocks,
-                                                     sizeof(I) * info->csrmv_info->adaptive.size,
-                                                     handle->stream));
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_flags,
-                                     sizeof(uint32_t) * info->csrmv_info->adaptive.size,
-                                     handle->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_ids,
-                                                     sizeof(J) * info->csrmv_info->adaptive.size,
-                                                     handle->stream));
+        // row blocks size
+        info->csrmv_info->adaptive.size = 0;
 
-        // Copy row blocks information to device
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.row_blocks,
-                                           row_blocks.data(),
-                                           sizeof(I) * info->csrmv_info->adaptive.size,
-                                           hipMemcpyHostToDevice,
-                                           stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_flags,
-                                           wg_flags.data(),
-                                           sizeof(uint32_t) * info->csrmv_info->adaptive.size,
-                                           hipMemcpyHostToDevice,
-                                           stream));
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_ids,
-                                           wg_ids.data(),
-                                           sizeof(J) * info->csrmv_info->adaptive.size,
-                                           hipMemcpyHostToDevice,
-                                           stream));
+        // Temporary arrays to hold device data
+        std::vector<I> hptr(m + 1);
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+            hptr.data(), csr_row_ptr, sizeof(I) * (m + 1), hipMemcpyDeviceToHost, stream));
 
-        // Wait for device transfer to finish
+        // Wait for host transfer to finish
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-    }
 
+        // Determine row blocks array size
+        ComputeRowBlocks<I, J>((I*)NULL,
+                               (J*)NULL,
+                               info->csrmv_info->adaptive.size,
+                               info->csrmv_info->adaptive.first_row,
+                               info->csrmv_info->adaptive.last_row,
+                               hptr.data(),
+                               m,
+                               false);
+
+        // Create row blocks, workgroup flag, and workgroup data structures
+        std::vector<I>        row_blocks(info->csrmv_info->adaptive.size, 0);
+        std::vector<uint32_t> wg_flags(info->csrmv_info->adaptive.size, 0);
+        std::vector<J>        wg_ids(info->csrmv_info->adaptive.size, 0);
+
+        ComputeRowBlocks<I, J>(row_blocks.data(),
+                               wg_ids.data(),
+                               info->csrmv_info->adaptive.size,
+                               info->csrmv_info->adaptive.first_row,
+                               info->csrmv_info->adaptive.last_row,
+                               hptr.data(),
+                               m,
+                               true);
+
+        if(descr->type == rocsparse_matrix_type_symmetric)
+        {
+            info->csrmv_info->max_rows
+                = maxRowsInABlock(row_blocks.data(), info->csrmv_info->adaptive.size);
+        }
+
+        // Allocate memory on device to hold csrmv info, if required
+        if(info->csrmv_info->adaptive.size > 0)
+        {
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.row_blocks,
+                                         sizeof(I) * info->csrmv_info->adaptive.size,
+                                         handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_flags,
+                                         sizeof(uint32_t) * info->csrmv_info->adaptive.size,
+                                         handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync((void**)&info->csrmv_info->adaptive.wg_ids,
+                                         sizeof(J) * info->csrmv_info->adaptive.size,
+                                         handle->stream));
+
+            // Copy row blocks information to device
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.row_blocks,
+                                               row_blocks.data(),
+                                               sizeof(I) * info->csrmv_info->adaptive.size,
+                                               hipMemcpyHostToDevice,
+                                               stream));
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_flags,
+                                               wg_flags.data(),
+                                               sizeof(uint32_t) * info->csrmv_info->adaptive.size,
+                                               hipMemcpyHostToDevice,
+                                               stream));
+            RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->csrmv_info->adaptive.wg_ids,
+                                               wg_ids.data(),
+                                               sizeof(J) * info->csrmv_info->adaptive.size,
+                                               hipMemcpyHostToDevice,
+                                               stream));
+
+            // Wait for device transfer to finish
+            RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        }
+    }
     // Store some pointers to verify correct execution
     info->csrmv_info->trans       = trans;
     info->csrmv_info->m           = m;
