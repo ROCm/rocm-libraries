@@ -35,24 +35,10 @@
 #include <cuda/std/cassert>
 #include <cuda/std/cmath>
 #include <cuda/std/cstdint>
+#include <cuda/std/cstring>
 #include <cuda/std/limits>
 
 #include "test_macros.h"
-
-__host__ __device__ cuda::std::size_t test_memcmp(void* lhs, void* rhs, size_t bytes) noexcept
-{
-  const unsigned char* clhs = (const unsigned char*) lhs;
-  const unsigned char* crhs = (const unsigned char*) rhs;
-
-  for (; bytes > 0; --bytes)
-  {
-    if (*clhs++ != *crhs++)
-    {
-      return clhs[-1] < crhs[-1] ? -1 : 1;
-    }
-  }
-  return 0;
-}
 
 // cuda::std::bit_cast does not preserve padding bits, so if T has padding bits,
 // the results might not memcmp cleanly.
@@ -71,9 +57,9 @@ __host__ __device__ void test_roundtrip_through_buffer(T from)
 
   if constexpr (HasUniqueObjectRepresentations)
   {
-    assert(test_memcmp(&from, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&to, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&middle, &middle2, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&from, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&to, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&middle, &middle2, sizeof(T)) == 0);
   }
 }
 
@@ -94,9 +80,9 @@ __host__ __device__ void test_roundtrip_through_nested_T(T from)
 
   if constexpr (HasUniqueObjectRepresentations)
   {
-    assert(test_memcmp(&from, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&to, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&middle, &middle2, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&from, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&to, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&middle, &middle2, sizeof(T)) == 0);
   }
 }
 
@@ -113,9 +99,9 @@ __host__ __device__ void test_roundtrip_through(T from)
 
   if constexpr (HasUniqueObjectRepresentations)
   {
-    assert(test_memcmp(&from, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&to, &middle, sizeof(T)) == 0);
-    assert(test_memcmp(&middle, &middle2, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&from, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&to, &middle, sizeof(T)) == 0);
+    assert(cuda::std::memcmp(&middle, &middle2, sizeof(T)) == 0);
   }
 }
 

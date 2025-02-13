@@ -41,6 +41,7 @@
 #include <cuda/std/__atomic/order.h>
 #include <cuda/std/__atomic/scopes.h>
 #include <cuda/std/__atomic/wait/polling.h>
+#include <cuda/std/cstring>
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
@@ -77,7 +78,7 @@ _LIBCUDACXX_HIDE_FROM_ABI bool __nonatomic_compare_equal(_Tp const& __lhs, _Tp c
 #if _CCCL_HAS_CUDA_COMPILER || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
   return __lhs == __rhs;
 #else
-  return memcmp(&__lhs, &__rhs, sizeof(_Tp)) == 0;
+  return _CUDA_VSTD::memcmp(&__lhs, &__rhs, sizeof(_Tp)) == 0;
 #endif
 }
 
