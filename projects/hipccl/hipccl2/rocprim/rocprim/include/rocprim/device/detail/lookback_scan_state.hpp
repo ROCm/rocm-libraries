@@ -47,7 +47,7 @@
 // cache.
 #ifndef ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES
     #if defined(__HIP_DEVICE_COMPILE__) \
-        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
+        && (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
         #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 1
     #else
         #define ROCPRIM_DETAIL_LOOKBACK_SCAN_STATE_WITHOUT_SLOW_FENCES 0
