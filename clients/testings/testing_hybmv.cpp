@@ -90,6 +90,8 @@ void testing_hybmv_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_hybmv<T>(PARAMS), rocsparse_status_invalid_size);
 
 #undef PARAMS
+
+    memset(reinterpret_cast<test_hyb*>(ptr), 0, sizeof(test_hyb));
 }
 
 template <typename T>
