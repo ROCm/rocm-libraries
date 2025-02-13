@@ -46,6 +46,9 @@ namespace rocwmma
                                   MatrixCoopLayout<MatrixLayout, WaveCount>,
                                   detail::OpaqueStoreBearer>;
 
+        // Don't expose the base implementation, we change arg forwarding order
+        using Base::exec;
+
     public:
         template <typename DataT, typename BufferT>
         ROCWMMA_DEVICE static void

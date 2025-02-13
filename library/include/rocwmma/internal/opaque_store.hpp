@@ -62,6 +62,9 @@ namespace rocwmma
         private:
             using Base = detail::amdgcn_opaque_store<DataT, VectorWidth>;
 
+            // Don't expose the base implementation, we change arg forwarding order
+            using Base::exec;
+
         public:
             template <typename BufferT, typename ExternDataT>
             ROCWMMA_DEVICE static inline void
@@ -78,6 +81,9 @@ namespace rocwmma
     {
     private:
         using Base = IOBearer<DataLayout, MatrixLayout, detail::OpaqueStoreBearer>;
+
+        // Don't expose the base implementation, we change arg forwarding order
+        using Base::exec;
 
     public:
         template <typename ExternDataT, typename BufferT>
