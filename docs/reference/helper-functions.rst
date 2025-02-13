@@ -5,10 +5,10 @@
 .. _helper-functions:
 
 ********************************************************************
-rocBLAS Helper Functions
+rocBLAS helper functions
 ********************************************************************
 
-Auxiliary Functions
+Auxiliary functions
 ===================
 
 .. doxygenfunction:: rocblas_create_handle
@@ -32,9 +32,9 @@ Auxiliary Functions
 .. doxygenfunction:: rocblas_set_matrix_async
 .. doxygenfunction:: rocblas_get_matrix_async
 
-The set/get_vector and set/get_matrix functions including their async forms support the _64 interface.  Refer to section :ref:`ILP64 API`.
+The set/get_vector and set/get_matrix functions including their async forms support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
-Device Memory Allocation Functions
+Device memory allocation functions
 ==================================
 
 .. doxygenfunction:: rocblas_start_device_memory_size_query
@@ -45,9 +45,9 @@ Device Memory Allocation Functions
 .. doxygenfunction:: rocblas_is_managing_device_memory
 .. doxygenfunction:: rocblas_is_user_managing_device_memory
 
-For more detailed information, refer to sections :ref:`Device Memory Allocation Usage` and :ref:`Device Memory allocation in detail`.
+For more detailed information, see the :ref:`Device Memory Allocation Usage` and :ref:`Device Memory allocation in detail` sections.
 
-Build Information Functions
+Build information functions
 ===========================
 
 .. doxygenfunction:: rocblas_get_version_string_size
