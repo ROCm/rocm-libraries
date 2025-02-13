@@ -38,25 +38,25 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-    void coommnn_atomic_main(bool    conj_A,
-                             bool    conj_B,
-                             I       ncol,
-                             int64_t nnz,
-                             I       n,
-                             int64_t batch_stride_A,
-                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                             const I* __restrict__ coo_row_ind,
-                             const I* __restrict__ coo_col_ind,
-                             const A* __restrict__ coo_val,
-                             const B* __restrict__ dense_B,
-                             int64_t ldb,
-                             int64_t batch_stride_B,
-                             C* __restrict__ dense_C,
-                             int64_t              ldc,
-                             int64_t              batch_stride_C,
-                             rocsparse_order      order_C,
-                             rocsparse_index_base idx_base,
-                             bool                 is_host_mode)
+        void coommnn_atomic_main(bool    conj_A,
+                                 bool    conj_B,
+                                 I       ncol,
+                                 int64_t nnz,
+                                 I       n,
+                                 int64_t batch_stride_A,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                 const I* __restrict__ coo_row_ind,
+                                 const I* __restrict__ coo_col_ind,
+                                 const A* __restrict__ coo_val,
+                                 const B* __restrict__ dense_B,
+                                 int64_t ldb,
+                                 int64_t batch_stride_B,
+                                 C* __restrict__ dense_C,
+                                 int64_t              ldc,
+                                 int64_t              batch_stride_C,
+                                 rocsparse_order      order_C,
+                                 rocsparse_index_base idx_base,
+                                 bool                 is_host_mode)
     {
 
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
@@ -90,25 +90,25 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-    void coommnn_atomic_remainder(bool    conj_A,
-                                  bool    conj_B,
-                                  I       ncol_offset,
-                                  I       n,
-                                  int64_t nnz,
-                                  int64_t batch_stride_A,
-                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                  const I* __restrict__ coo_row_ind,
-                                  const I* __restrict__ coo_col_ind,
-                                  const A* __restrict__ coo_val,
-                                  const B* __restrict__ dense_B,
-                                  int64_t ldb,
-                                  int64_t batch_stride_B,
-                                  C* __restrict__ dense_C,
-                                  int64_t              ldc,
-                                  int64_t              batch_stride_C,
-                                  rocsparse_order      order_C,
-                                  rocsparse_index_base idx_base,
-                                  bool                 is_host_mode)
+        void coommnn_atomic_remainder(bool    conj_A,
+                                      bool    conj_B,
+                                      I       ncol_offset,
+                                      I       n,
+                                      int64_t nnz,
+                                      int64_t batch_stride_A,
+                                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                      const I* __restrict__ coo_row_ind,
+                                      const I* __restrict__ coo_col_ind,
+                                      const A* __restrict__ coo_val,
+                                      const B* __restrict__ dense_B,
+                                      int64_t ldb,
+                                      int64_t batch_stride_B,
+                                      C* __restrict__ dense_C,
+                                      int64_t              ldc,
+                                      int64_t              batch_stride_C,
+                                      rocsparse_order      order_C,
+                                      rocsparse_index_base idx_base,
+                                      bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
@@ -140,24 +140,24 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(BLOCKSIZE) __global__
-    void coommtn_atomic_main(bool    conj_A,
-                             bool    conj_B,
-                             int64_t nnz,
-                             I       n,
-                             int64_t batch_stride_A,
-                             ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                             const I* __restrict__ coo_row_ind,
-                             const I* __restrict__ coo_col_ind,
-                             const A* __restrict__ coo_val,
-                             const B* __restrict__ dense_B,
-                             int64_t ldb,
-                             int64_t batch_stride_B,
-                             C* __restrict__ dense_C,
-                             int64_t              ldc,
-                             int64_t              batch_stride_C,
-                             rocsparse_order      order_C,
-                             rocsparse_index_base idx_base,
-                             bool                 is_host_mode)
+        void coommtn_atomic_main(bool    conj_A,
+                                 bool    conj_B,
+                                 int64_t nnz,
+                                 I       n,
+                                 int64_t batch_stride_A,
+                                 ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                 const I* __restrict__ coo_row_ind,
+                                 const I* __restrict__ coo_col_ind,
+                                 const A* __restrict__ coo_val,
+                                 const B* __restrict__ dense_B,
+                                 int64_t ldb,
+                                 int64_t batch_stride_B,
+                                 C* __restrict__ dense_C,
+                                 int64_t              ldc,
+                                 int64_t              batch_stride_C,
+                                 rocsparse_order      order_C,
+                                 rocsparse_index_base idx_base,
+                                 bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))
@@ -227,26 +227,26 @@ namespace rocsparse
             rocsparse_index_base idx_base,                                        \
             bool                 is_host_mode);
 
-#define COOMMTN_ATOMIC_MAIN_KERNEL(T, I, A, B, C, BLOCKSIZE, TRANSB)              \
-    template __launch_bounds__(BLOCKSIZE) __global__ void                         \
-        rocsparse::coommtn_atomic_main<BLOCKSIZE, TRANSB>(                        \
-            bool    conj_A,                                                       \
-            bool    conj_B,                                                       \
-            int64_t nnz,                                                          \
-            I       n,                                                            \
-            int64_t batch_stride_A,                                               \
-            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                        \
-            const I* __restrict__ coo_row_ind,                                    \
-            const I* __restrict__ coo_col_ind,                                    \
-            const A* __restrict__ coo_val,                                        \
-            const B* __restrict__ dense_B,                                        \
-            int64_t ldb,                                                          \
-            int64_t batch_stride_B,                                               \
-            C* __restrict__ dense_C,                                              \
-            int64_t              ldc,                                             \
-            int64_t              batch_stride_C,                                  \
-            rocsparse_order      order_C,                                         \
-            rocsparse_index_base idx_base,                                        \
+#define COOMMTN_ATOMIC_MAIN_KERNEL(T, I, A, B, C, BLOCKSIZE, TRANSB) \
+    template __launch_bounds__(BLOCKSIZE) __global__ void            \
+        rocsparse::coommtn_atomic_main<BLOCKSIZE, TRANSB>(           \
+            bool    conj_A,                                          \
+            bool    conj_B,                                          \
+            int64_t nnz,                                             \
+            I       n,                                               \
+            int64_t batch_stride_A,                                  \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),           \
+            const I* __restrict__ coo_row_ind,                       \
+            const I* __restrict__ coo_col_ind,                       \
+            const A* __restrict__ coo_val,                           \
+            const B* __restrict__ dense_B,                           \
+            int64_t ldb,                                             \
+            int64_t batch_stride_B,                                  \
+            C* __restrict__ dense_C,                                 \
+            int64_t              ldc,                                \
+            int64_t              batch_stride_C,                     \
+            rocsparse_order      order_C,                            \
+            rocsparse_index_base idx_base,                           \
             bool                 is_host_mode);
 
 #define COOMMNN_ATOMIC_MAIN_256_32_2_0(T, I, A, B, C) \

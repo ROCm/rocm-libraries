@@ -38,23 +38,23 @@ namespace rocsparse
               typename B,
               typename C>
     __launch_bounds__(WF_SIZE) __global__
-    void coommnn_segmented_atomic(rocsparse_operation trans_B,
-                                  int64_t             nnz,
-                                  I                   n,
-                                  int64_t             batch_stride_A,
-                                  ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
-                                  const I* __restrict__ coo_row_ind,
-                                  const I* __restrict__ coo_col_ind,
-                                  const A* __restrict__ coo_val,
-                                  const B* __restrict__ dense_B,
-                                  int64_t ldb,
-                                  int64_t batch_stride_B,
-                                  C* __restrict__ dense_C,
-                                  int64_t              ldc,
-                                  int64_t              batch_stride_C,
-                                  rocsparse_order      order_C,
-                                  rocsparse_index_base idx_base,
-                                  bool                 is_host_mode)
+        void coommnn_segmented_atomic(rocsparse_operation trans_B,
+                                      int64_t             nnz,
+                                      I                   n,
+                                      int64_t             batch_stride_A,
+                                      ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                      const I* __restrict__ coo_row_ind,
+                                      const I* __restrict__ coo_col_ind,
+                                      const A* __restrict__ coo_val,
+                                      const B* __restrict__ dense_B,
+                                      int64_t ldb,
+                                      int64_t batch_stride_B,
+                                      C* __restrict__ dense_C,
+                                      int64_t              ldc,
+                                      int64_t              batch_stride_C,
+                                      rocsparse_order      order_C,
+                                      rocsparse_index_base idx_base,
+                                      bool                 is_host_mode)
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         if(alpha != static_cast<T>(0))

@@ -1432,7 +1432,8 @@ struct rocsparse::csritilu0_driver_t<rocsparse_itilu0_alg_async_inplace>
                 if(sizeof(J) * unnz > handle_->buffer_size)
                 {
 
-                    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csc_col_ind, sizeof(J) * unnz, handle_->stream));
+                    RETURN_IF_HIP_ERROR(
+                        rocsparse_hipMallocAsync(&csc_col_ind, sizeof(J) * unnz, handle_->stream));
                 }
                 else
                 {
