@@ -92,6 +92,10 @@ struct Arguments
 
     hipsparselt_initialization initialization;
 
+    // the gpu arch string after "gfx" for which the test is valid
+    // '?' is wildcard char, empty string is default as valid on all
+    char gpu_arch[16];
+
     // memory padding for testing write out of bounds
     uint32_t pad;
 
@@ -174,6 +178,7 @@ struct Arguments
     OPER(d_type) SEP                 \
     OPER(compute_type) SEP           \
     OPER(initialization) SEP         \
+    OPER(gpu_arch) SEP               \
     OPER(pad) SEP                    \
     OPER(threads) SEP                \
     OPER(streams) SEP                \

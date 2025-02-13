@@ -279,6 +279,8 @@ extern thread_pool g_thread_pool;
 
 extern thread_local std::unique_ptr<std::function<void(hipsparseLtHandle_t)>> t_set_stream_callback;
 
+bool hipsparselt_client_global_filters(const Arguments& args);
+
 /* ============================================================================================ */
 /*! \brief  Normalized test name to conform to Google Tests */
 // The template parameter is only used to generate multiple instantiations with distinct static local variables
@@ -340,8 +342,11 @@ protected:
     template <typename... T>
     struct type_filter_functor
     {
-        bool operator()(const Arguments&)
+        bool operator()(const Arguments& args)
         {
+            // additional global filters applied first
+            if(!hipsparselt_client_global_filters(args))
+                return false;
             return static_cast<bool>(FILTER<T...>{});
         }
     };

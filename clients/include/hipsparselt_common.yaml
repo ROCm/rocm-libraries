@@ -107,6 +107,7 @@ Arguments:
   - d_type: hipDataType
   - compute_type: hipsparseLtComputetype_t
   - initialization: hipsparselt_initialization
+  - gpu_arch: c_char*16
   - pad: c_uint32
   - threads: c_uint16
   - streams: c_uint16
@@ -184,6 +185,7 @@ Defaults:
   threads: 0
   streams: 0
   devices: 0
+  gpu_arch: ''
   norm_check: 0
   unit_check: 1
   timing: 0

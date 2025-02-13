@@ -27,6 +27,8 @@
 #pragma once
 
 #include <hipsparselt/hipsparselt.h>
+#include <regex>
+#include <string_view>
 
 HIPSPARSELT_EXPORT
 constexpr const char* hipsparse_status_to_string(hipsparseStatus_t status)
@@ -262,4 +264,20 @@ template <typename T>
 __host__ __device__ inline bool hipsparselt_iszero(T arg)
 {
     return arg == 0;
+}
+
+/*! \brief device matches pattern */
+inline
+bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
+{
+    if(!pattern.length())
+    {
+        return true;
+    }
+
+    constexpr char    prefix[]   = "gfx";
+    const std::size_t prefix_len = std::string_view(prefix).length();
+    gpu_arch.remove_prefix(prefix_len);
+    std::regex arch_regex(pattern.data());
+    return std::regex_search(gpu_arch.data(), arch_regex);
 }

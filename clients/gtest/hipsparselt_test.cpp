@@ -410,3 +410,15 @@ bool match_test_category(const Arguments& arg, const char* category)
 
     return true;
 }
+
+bool hipsparselt_client_global_filters(const Arguments& args)
+{
+    int             deviceId;
+    hipDeviceProp_t deviceProperties;
+    static_cast<void>(hipGetDevice(&deviceId));
+    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+    //printf("%s %s\n", deviceProperties.gcnArchName, args.gpu_arch);
+    if(args.gpu_arch[0] && !gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch))
+        return false;
+    return true;
+}
