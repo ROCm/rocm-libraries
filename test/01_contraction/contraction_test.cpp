@@ -92,24 +92,24 @@ namespace hiptensor
     {
         // clang-format off
         return stream
-            << "TypeA,"                // 1
-            << "TypeB,"                // 2
-            << "TypeC,"                // 3
-            << "TypeD,"                // 4
-            << "TypeCompute,"          // 5
-            << "Algorithm,"            // 6
-            << "Operator,"             // 7
-            << "WorkSizePreference,"   // 8
-            << "LogLevel,"             // 9
-            << "Lengths,"              // 10
-            << "Strides,"              // 11
-            << "Modes,"                // 12
-            << "Alpha,"                // 13
-            << "Beta,"                 // 14
-            << "elapsedMs,"            // 15
-            << "Problem Size(GFlops)," // 16
-            << "TFlops,"               // 17
-            << "TotalBytes,"           // 18
+            << "TypeA, "                // 1
+            << "TypeB, "                // 2
+            << "TypeC, "                // 3
+            << "TypeD, "                // 4
+            << "TypeCompute, "          // 5
+            << "Algorithm, "            // 6
+            << "Operator, "             // 7
+            << "WorkSizePreference, "   // 8
+            << "LogLevel, "             // 9
+            << "Lengths, "              // 10
+            << "Strides, "              // 11
+            << "Modes, "                // 12
+            << "Alpha, "                // 13
+            << "Beta, "                 // 14
+            << "elapsedMs, "            // 15
+            << "Problem Size(GFlops), " // 16
+            << "TFlops/s, "               // 17
+            << "TotalBytes, "           // 18
             << "Result"                // 19
             << std::endl;
         // clang-format on
@@ -131,30 +131,30 @@ namespace hiptensor
 
         // clang-format off
         stream
-            << hipTypeToString(testType[0]) << ","                           // 1
-            << hipTypeToString(testType[1]) << ","                           // 2
-            << hipTypeToString(testType[2]) << ","                           // 3
-            << hipTypeToString(testType[3]) << ","                           // 4
-            << computeTypeToString(convertToComputeType(testType[4])) << "," // 5
-            << algoTypeToString(algorithm)  << ","                           // 6
-            << opTypeToString(operatorType) << ","                           // 7
-            << workSizePrefToString(workSizePref) << ","                     // 8
-            << logLevelToString(logLevel) << ",";                            // 9
-        printContainerInCsv(lengths, stream) << ",";                         // 10
-        printContainerInCsv(strides, stream) << ",";                         // 11
-        printContainerInCsv(modes, stream)   << ",";                         // 12
-        printContainerInCsv(alpha, stream)   << ",";                         // 13
-        printContainerInCsv(beta, stream)   << ",";                          // 14
+            << hipTypeToString(testType[0]) << ", "                           // 1
+            << hipTypeToString(testType[1]) << ", "                           // 2
+            << hipTypeToString(testType[2]) << ", "                           // 3
+            << hipTypeToString(testType[3]) << ", "                           // 4
+            << computeTypeToString(convertToComputeType(testType[4])) << ", " // 5
+            << algoTypeToString(algorithm)  << ", "                           // 6
+            << opTypeToString(operatorType) << ", "                           // 7
+            << workSizePrefToString(workSizePref) << ", "                     // 8
+            << logLevelToString(logLevel) << ", ";                            // 9
+        printVectorInCsv(lengths, stream) << ", ";                         // 10
+        printContainerInCsv(strides, stream) << ", ";                         // 11
+        printContainerInCsv(modes, stream)   << ", ";                         // 12
+        printContainerInCsv(alpha, stream)   << ", ";                         // 13
+        printContainerInCsv(beta, stream)   << ", ";                          // 14
         // clang-format on
 
         if(!mRunFlag)
         {
             // clang-format off
             stream
-                << "n/a" << "," // 15
-                << "n/a" << "," // 16
-                << "n/a" << "," // 17
-                << "n/a" << "," // 18
+                << "n/a" << ", " // 15
+                << "n/a" << ", " // 16
+                << "n/a" << ", " // 17
+                << "n/a" << ", " // 18
                 << "SKIPPED"    // 19
                 << std::endl;
             // clang-format on
@@ -166,10 +166,10 @@ namespace hiptensor
 
             // clang-format off
             stream
-                   << mElapsedTimeMs        << ","       // 15
-                   << mTotalGFlops          << ","       // 16
-                   << mMeasuredTFlopsPerSec << ","       // 17
-                   << mTotalBytes           << ","       // 18
+                   << mElapsedTimeMs        << ", "       // 15
+                   << mTotalGFlops          << ", "       // 16
+                   << mMeasuredTFlopsPerSec << ", "       // 17
+                   << mTotalBytes           << ", "       // 18
                    << result                             // 19
                    << std::endl;
             // clang-format on
@@ -780,18 +780,27 @@ namespace hiptensor
                                                  size_t(1),
                                                  std::multiplies<size_t>());
 
-            uint32_t hops = desc.mTensorMode[2].size() / 2;
-            auto     iter = std::find(desc.mTensorMode[0].cbegin(),
-                                  desc.mTensorMode[0].cend(),
-                                  desc.mTensorMode[2][desc.mTensorMode[2].size() - 1]);
-            if(iter != desc.mTensorMode[0].cend())
+            // TODO: make totalLength calculation robust to different modes
+            // currently assumes modes in the following:
+            // Rank 2 ex:
+            // [[modesA], [modesB], [modesD]]
+            // [[0, 1, 4, 5], [2, 3, 4, 5], [0, 1, 2, 3]]
+
+            // iterate through "K" dimension
+            auto rank = a_ms_ks.mLengths.size() / 2;
+            for(auto i = 0; i < rank; i++)
             {
-                auto offset = std::distance(desc.mTensorMode[0].cbegin(), iter);
-                totalLength *= std::accumulate(a_ms_ks.mLengths.begin() + offset,
-                                               a_ms_ks.mLengths.begin() + offset + hops,
-                                               size_t(1),
-                                               std::multiplies<size_t>());
+                totalLength *= a_ms_ks.mLengths[i + rank];
             }
+
+            /*
+                A       B       C
+                [m, k], [n, k], [m, n]
+
+                m * n * k * k / (m * n)
+                = k * k
+                k = sqrt((A * B) / C)
+            */
 
             mElapsedTimeMs        = float64_t(timeMs);
             mTotalGFlops          = 2.0 * totalLength;
@@ -814,7 +823,7 @@ namespace hiptensor
 
             mTotalBytes = sizeA + sizeB + sizeD;
             mTotalBytes += (betaBuf.mReal != 0.0) ? sizeD : 0;
-            mTotalBytes /= (1e9 * mElapsedTimeMs);
+            mTotalBytes /= 1e12;
 
             CHECK_HIP_ERROR(hipEventDestroy(startEvent));
             CHECK_HIP_ERROR(hipEventDestroy(stopEvent));

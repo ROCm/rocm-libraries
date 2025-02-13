@@ -462,10 +462,41 @@ namespace hiptensor
             }
             else
             {
-                outStream << element << " ";
+                outStream << element;
+                if(element != container.back())
+                {
+                    outStream << " ";
+                }
             }
         }
         outStream << "] ";
+        return outStream;
+    }
+
+    // Print a std::vector<std::vector<T>>
+    template <typename T>
+    std::ostream& printVectorInCsv(std::vector<std::vector<T>> const& container,
+                                   std::ostream&                      outStream)
+    {
+        outStream << "[";
+        for(const auto& vec : container)
+        {
+            outStream << "[";
+            for(const auto& element : vec)
+            {
+                outStream << element;
+                if(&element != &vec.back())
+                {
+                    outStream << " ";
+                }
+            }
+            outStream << "]";
+            if(&vec != &container.back())
+            {
+                outStream << " ";
+            }
+        }
+        outStream << "]";
         return outStream;
     }
 }

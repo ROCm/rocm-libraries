@@ -114,6 +114,9 @@ namespace hiptensor
 
         for(auto* solution : candidates)
         {
+            using hiptensor::HiptensorOptions;
+            auto& options = HiptensorOptions::instance();
+
             auto [errorCode, time] = (*solution)(&alpha,
                                                  A_d,
                                                  B_d,
@@ -134,7 +137,13 @@ namespace hiptensor
                                                  e_ms_ns_modes,
                                                  wspace,
                                                  workspaceSize,
-                                                 StreamConfig{nullptr, true});
+                                                 StreamConfig{
+                                                     nullptr, // stream id
+                                                     true, // time_kernel
+                                                     0, // log_level
+                                                     options->coldRuns(), // cold_niters
+                                                     options->hotRuns(), // nrepeat
+                                                 });
             if(errorCode == HIPTENSOR_STATUS_SUCCESS && time > 0)
             {
                 // Make sure to time the kernels

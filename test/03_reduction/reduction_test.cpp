@@ -115,18 +115,18 @@ namespace hiptensor
     {
         // clang-format off
         return stream
-            << "TypeIn,"               //1
-            << "TypeCompute,"          //2
-            << "Operator,"             //3
-            << "LogLevel,"             //4
-            << "Lengths,"              //5
-            << "ReOrder,"              //6
-            << "Alpha,"                //7
-            << "Beta,"                 //8
-            << "elapsedMs,"            //9
-            << "Problem Size(GFlops)," //10
-            << "TFlops,"               //11
-            << "TotalBytes,"           //12
+            << "TypeIn, "               //1
+            << "TypeCompute, "          //2
+            << "Operator, "             //3
+            << "LogLevel, "             //4
+            << "Lengths, "              //5
+            << "ReOrder, "              //6
+            << "Alpha, "                //7
+            << "Beta, "                 //8
+            << "elapsedMs, "            //9
+            << "Problem Size(GFlops), " //10
+            << "TFlops/s, "               //11
+            << "TotalBytes, "           //12
             << "Result"                 //13
             << std::endl;
         // clang-format on
@@ -144,23 +144,23 @@ namespace hiptensor
         auto op         = std::get<6>(param);
 
         // clang-format off
-        stream << hipTypeToString(testType[0]) << ","                           //1
-               << computeTypeToString(convertToComputeType(testType[1])) << "," //2
-               << opTypeToString(op) << ","                                     //3
-               << logLevelToString(logLevel) << ",";                            //4
-        printContainerInCsv(lengths, stream) << ",";                            //5
-        printContainerInCsv(outputDims, stream) << ",";                         //6
-        stream << alpha << ","                                                  //7
-            << beta << ",";                                                     //8
+        stream << hipTypeToString(testType[0]) << ", "                           //1
+               << computeTypeToString(convertToComputeType(testType[1])) << ", " //2
+               << opTypeToString(op) << ", "                                     //3
+               << logLevelToString(logLevel) << ", ";                            //4
+        printContainerInCsv(lengths, stream) << ", ";                            //5
+        printContainerInCsv(outputDims, stream) << ", ";                         //6
+        stream << alpha << ", "                                                  //7
+            << beta << ", ";                                                     //8
         // clang-format on
 
         if(!mRunFlag)
         {
             // clang-format off
-            stream << "n/a" << "," //9
-                   << "n/a" << "," //10
-                   << "n/a" << "," //11
-                   << "n/a" << "," //12
+            stream << "n/a" << ", " //9
+                   << "n/a" << ", " //10
+                   << "n/a" << ", " //11
+                   << "n/a" << ", " //12
                    << "SKIPPED"     //13
                    << std::endl;
             // clang-format on
@@ -171,10 +171,10 @@ namespace hiptensor
             auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
             // clang-format off
-            stream << mElapsedTimeMs << ","     //9
-                << mTotalGFlops << ","          //10
-                << mMeasuredTFlopsPerSec << "," //11
-                << mTotalBytes << ","           //12
+            stream << mElapsedTimeMs << ", "     //9
+                << mTotalGFlops << ", "          //10
+                << mMeasuredTFlopsPerSec << ", " //11
+                << mTotalBytes << ", "           //12
                 << result                        //13
                 << std::endl;
             // clang-format on
@@ -486,7 +486,7 @@ namespace hiptensor
 
             mTotalBytes = sizeA + sizeCD;
             mTotalBytes += (betaValue != 0.0) ? sizeCD : 0;
-            mTotalBytes /= (1e9 * mElapsedTimeMs);
+            mTotalBytes /= 1e12;
 
             CHECK_HIP_ERROR(hipEventDestroy(startEvent));
             CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
