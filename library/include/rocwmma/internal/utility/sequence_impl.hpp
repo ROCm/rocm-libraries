@@ -93,17 +93,17 @@ namespace rocwmma
         template <size_t N>
         using make_index_sequence = make_integer_sequence<size_t, N>;
 
-        template <size_t Offset, size_t Scale, size_t... Is>
+        template <size_t Offset, size_t Stride, size_t... Is>
         ROCWMMA_HOST_DEVICE constexpr inline auto
             make_offset_index_sequence_helper(index_sequence<Is...>)
         {
-            return index_sequence<(Offset + Is * Scale)...>{};
+            return index_sequence<(Offset + Is * Stride)...>{};
         }
 
-        template <size_t N, size_t Offset = 0u, size_t Scale = 1u>
+        template <size_t N, size_t Offset = 0u, size_t Stride = 1u>
         ROCWMMA_HOST_DEVICE constexpr inline auto make_offset_index_sequence()
         {
-            return make_offset_index_sequence_helper<Offset, Scale>(make_index_sequence<N>{});
+            return make_offset_index_sequence_helper<Offset, Stride>(make_index_sequence<N>{});
         }
 
     } // namespace detail
