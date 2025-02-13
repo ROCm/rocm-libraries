@@ -35,9 +35,11 @@ struct GEMMProblem
     // Unroll Sizes
     unsigned int unrollK = 0;
 
-    bool loadLDSA  = true;
-    bool loadLDSB  = true;
-    bool storeLDSD = true;
+    bool loadLDSA    = true;
+    bool loadLDSB    = true;
+    bool storeLDSD   = true;
+    bool direct2LDSA = false;
+    bool direct2LDSB = false;
 
     bool fuseLoops                 = true;
     bool tailLoops                 = true;

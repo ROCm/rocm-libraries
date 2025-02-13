@@ -140,6 +140,7 @@ namespace rocRoller
         WAVE,
         WAVE_LDS,
         WAVE_SPLIT,
+        WAVE_Direct2LDS,
         Literal,
         None,
         Count

@@ -194,16 +194,27 @@ namespace rocRoller
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
+                    auto memoryTypeA = MemoryType::WAVE;
+                    auto memoryTypeB = MemoryType::WAVE;
+                    if(solutionParams.direct2LDSA)
+                        memoryTypeA = MemoryType::WAVE_Direct2LDS;
+                    else if(solutionParams.loadLDSA)
+                        memoryTypeA = MemoryType::LDS;
+                    if(solutionParams.direct2LDSA)
+                        memoryTypeB = MemoryType::WAVE_Direct2LDS;
+                    else if(solutionParams.loadLDSB)
+                        memoryTypeB = MemoryType::LDS;
+
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
                         LayoutType::MATRIX_A,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+                        memoryTypeA);
                     auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macK, solutionParams.macN},
                         LayoutType::MATRIX_B,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+                        memoryTypeB);
                     auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,

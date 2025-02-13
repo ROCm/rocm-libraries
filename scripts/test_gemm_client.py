@@ -48,6 +48,8 @@ unroll_y: 0
 loadLDS_A: true
 loadLDS_B: true
 storeLDS_D: true
+direct2LDS_A: false
+direct2LDS_B: false
 prefetch: false
 prefetchInFlight: 0
 prefetchLDSFactor: 0

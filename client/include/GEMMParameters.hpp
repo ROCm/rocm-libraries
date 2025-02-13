@@ -92,6 +92,9 @@ namespace rocRoller
                 bool loadLDSB  = true;
                 bool storeLDSD = true;
 
+                bool direct2LDSA = false;
+                bool direct2LDSB = false;
+
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;

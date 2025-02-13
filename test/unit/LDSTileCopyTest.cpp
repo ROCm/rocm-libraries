@@ -22,44 +22,6 @@ namespace LDSCopyTest
     {
     };
 
-    void moveConnections(rocRoller::KernelGraph::KernelGraph& k, int opTag1, int opTag2)
-    {
-        auto maybeGlobalOp   = k.control.get<LoadTiled>(opTag1);
-        auto maybeStoreLDSOp = k.control.get<StoreLDSTile>(opTag1);
-        for(auto& c : k.mapper.getConnections(opTag1))
-        {
-            if(maybeGlobalOp)
-            {
-                k.mapper.connect(opTag2, c.coordinate, c.connection);
-            }
-            else if(maybeStoreLDSOp)
-            {
-                auto maybeLDSTile = k.coordinates.get<LDS>(c.coordinate);
-                auto maybeOffset  = k.coordinates.get<Offset>(c.coordinate);
-
-                if(maybeLDSTile)
-                {
-                    k.mapper.connect(opTag2, c.coordinate, c.connection);
-                }
-                if(maybeOffset)
-                {
-                    if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
-                    {
-                        auto offsetConnection
-                            = std::get<Connections::TypeAndSubDimension>(c.connection);
-                        if(offsetConnection.subdimension == 0)
-                        {
-                            auto newConnection
-                                = Connections::TypeAndSubDimension{offsetConnection.id, 1};
-                            k.mapper.connect(opTag2, c.coordinate, newConnection);
-                        }
-                    }
-                }
-            }
-            k.mapper.disconnect(opTag1, c.coordinate, c.connection);
-        }
-    }
-
     // TODO: make it more general and works for GEMM problem as a graph transform
     /*
      * This function replaces a pair of {LoadTiled, StoreLDSTile} with a {LoadTileDirect2LDS}

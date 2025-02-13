@@ -869,7 +869,8 @@ namespace rocRoller
             }
 
             // Enable the use of longer word instructions if possible
-            if(params->enableLongDwordInstructions && (packed || packFactor <= 1))
+            if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
+               && (macTile.memoryType != MemoryType::WAVE_Direct2LDS))
             {
                 auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
                                          context->kernelOptions().loadLocalWidth);

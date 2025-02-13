@@ -84,6 +84,8 @@ namespace rocRoller
         std::shared_ptr<BranchGenerator>       brancher() const;
         std::shared_ptr<CrashKernelGenerator>  crasher() const;
         KernelOptions const&                   kernelOptions();
+        // TODO: this is a temporary workaround for direct-to-LDS. Remove it after fixing the wait count observer.
+        void setWaitZeroBeforeBarrier(bool always = false);
 
         std::shared_ptr<RandomGenerator> random() const;
         void                             setRandomSeed(int seed);

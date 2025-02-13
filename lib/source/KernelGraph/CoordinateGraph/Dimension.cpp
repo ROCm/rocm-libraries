@@ -140,6 +140,14 @@ namespace rocRoller
         {
         }
 
+        LDS::LDS() = default;
+
+        LDS::LDS(bool const isDirect2LDS)
+            : BaseDimension()
+            , isDirect2LDS(isDirect2LDS)
+        {
+        }
+
         Unroll::Unroll() = default;
 
         Unroll::Unroll(uint const usize)

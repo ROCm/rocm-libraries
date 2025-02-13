@@ -76,6 +76,8 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "loadLDS_A", result.solutionParams.loadLDSA);
         iot::mapRequired(io, "loadLDS_B", result.solutionParams.loadLDSB);
         iot::mapRequired(io, "storeLDS_D", result.solutionParams.storeLDSD);
+        iot::mapRequired(io, "direct2LDS_A", result.solutionParams.direct2LDSA);
+        iot::mapRequired(io, "direct2LDS_B", result.solutionParams.direct2LDSB);
         iot::mapRequired(io, "prefetch", result.solutionParams.prefetch);
         iot::mapRequired(io, "prefetchInFlight", result.solutionParams.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", result.solutionParams.prefetchLDSFactor);
@@ -131,6 +133,8 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
         iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
         iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
+        iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
+        iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
         iot::mapRequired(io, "prefetch", params.prefetch);
         iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
@@ -679,9 +683,11 @@ int main(int argc, const char* argv[])
         .workgroupSizeX = 128,
         .workgroupSizeY = 2,
 
-        .loadLDSA  = true,
-        .loadLDSB  = true,
-        .storeLDSD = true,
+        .loadLDSA    = true,
+        .loadLDSB    = true,
+        .storeLDSD   = true,
+        .direct2LDSA = false,
+        .direct2LDSB = false,
 
         .prefetch          = false,
         .prefetchInFlight  = 0,
@@ -851,6 +857,8 @@ int main(int argc, const char* argv[])
     app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
     app.add_flag("--loadLDS_B", solution.loadLDSB, "Use LDS when loading B.");
     app.add_flag("--storeLDS_D", solution.storeLDSD, "Use LDS when storing D.");
+    app.add_flag("--direct2LDS_A", solution.direct2LDSA, "Use direct-to-LDS when loading A.");
+    app.add_flag("--direct2LDS_B", solution.direct2LDSB, "Use direct-to-LDS when loading B.");
     app.add_flag(
         "--betaInFma", solution.betaInFma, "Use beta in FMA instruction instead of alpha.");
     app.add_option("--scheduler", solution.scheduler, "Which scheduler to use.");

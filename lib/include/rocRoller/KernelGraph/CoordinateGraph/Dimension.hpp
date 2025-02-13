@@ -236,9 +236,13 @@ namespace rocRoller
          */
         struct LDS : public BaseDimension
         {
-            static constexpr bool HasValue = false;
+            static constexpr bool HasValue     = false;
+            bool                  isDirect2LDS = false;
 
             using BaseDimension::BaseDimension;
+
+            LDS();
+            LDS(bool const isDirect2LDS);
 
             std::string name() const override;
         };

@@ -24,6 +24,9 @@ namespace rocRoller
                 rv << "_LDS";
                 rocRoller::streamJoin(rv, std::vector{loadLDSA, loadLDSB, storeLDSD}, "");
 
+                rv << "_Direct2LDS";
+                rocRoller::streamJoin(rv, std::vector{direct2LDSA, direct2LDSB}, "");
+
                 rv << "_UNROLL";
                 rocRoller::streamJoin(rv, std::vector{unrollX, unrollY}, "x");
 
@@ -94,6 +97,7 @@ namespace rocRoller
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
                 s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
+                s << "Direct2LDS:       " << x.direct2LDSA << x.direct2LDSB << std::endl;
                 s << "Prefetch:  "
                   << "enabled:" << x.prefetch << " inflight:" << x.prefetchInFlight
                   << " LDS:" << x.prefetchLDSFactor << std::endl;
