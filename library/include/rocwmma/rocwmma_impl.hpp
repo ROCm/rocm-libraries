@@ -239,9 +239,8 @@ namespace rocwmma
                       "Must provide layout information. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Loader::Traits::OutputT>::value,
-            "Fragment access and load output types do not match");
+        static_assert(is_same<typename FragT::Traits::AccessT, typename Loader::BufferT>::value,
+                      "Fragment access and load buffer types do not match");
 
         // Load then implicit pack
         Loader::exec(frag.mAccess, data, ldm);
@@ -291,9 +290,8 @@ namespace rocwmma
                       "Must provide data layout. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Storer::Traits::InputT>::value,
-            "Fragment access and store input types do not match");
+        static_assert(is_same<typename FragT::Traits::AccessT, typename Storer::BufferT>::value,
+                      "Fragment access and store input types do not match");
 
         // Implicit unpack and then store
         Storer::exec(data, PreStore::exec(frag.mAccess), ldm);
@@ -332,11 +330,20 @@ namespace rocwmma
               typename LayoutD>
     ROCWMMA_DEVICE void
         mma_sync(fragment<accumulator, BlockM, BlockN, BlockK, ComputeT, LayoutD>&       d,
-                 fragment<matrix_a, BlockM, BlockN, BlockK, InputTA, LayoutA> const&      a,
-                 fragment<matrix_b, BlockM, BlockN, BlockK, InputTB, LayoutB> const&      b,
+                 fragment<matrix_a, BlockM, BlockN, BlockK, InputTA, LayoutA> const&     a,
+                 fragment<matrix_b, BlockM, BlockN, BlockK, InputTB, LayoutB> const&     b,
                  fragment<accumulator, BlockM, BlockN, BlockK, ComputeT, LayoutC> const& c)
     {
-        using MmaConfig = MmaConfig<BlockM, BlockN, BlockK, InputTA, InputTB, ComputeT, LayoutA, LayoutB, LayoutC, LayoutD>;
+        using MmaConfig = MmaConfig<BlockM,
+                                    BlockN,
+                                    BlockK,
+                                    InputTA,
+                                    InputTB,
+                                    ComputeT,
+                                    LayoutA,
+                                    LayoutB,
+                                    LayoutC,
+                                    LayoutD>;
 
         // Transforms
         using XA = typename MmaConfig::PreMmaXFormA;
@@ -356,11 +363,9 @@ namespace rocwmma
         // 2. Mma (packed)
         // 3. Perform acc post-op on Acc
         // 4. Pack back to register
-        d.mAccess = XD::exec(PackD::unpack(
-                                Mma::exec(PackA::pack(XA::exec(a.mAccess)),
-                                          PackB::pack(XB::exec(b.mAccess)),
-                                          PackC::pack(XC::exec(c.mAccess)))));
-
+        d.mAccess = XD::exec(PackD::unpack(Mma::exec(PackA::pack(XA::exec(a.mAccess)),
+                                                     PackB::pack(XB::exec(b.mAccess)),
+                                                     PackC::pack(XC::exec(c.mAccess)))));
     }
 
     ROCWMMA_DEVICE void synchronize_workgroup()

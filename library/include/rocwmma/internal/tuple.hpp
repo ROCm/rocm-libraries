@@ -104,18 +104,20 @@ namespace rocwmma
         }
     }
 
-    template <typename VecT>
-    constexpr static auto pop_right(VecT&& t)
+    template <uint32_t Count = 1u, typename VecT>
+    constexpr static auto pop_back(VecT&& t)
     {
-        return detail::copy_impl(forward<VecT>(t),
-                                 make_index_sequence<VecTraits<decay_t<VecT>>::size() - 1>{});
+        return detail::copy_impl(
+            forward<VecT>(t),
+            make_offset_index_sequence<VecTraits<decay_t<VecT>>::size() - Count>());
     }
 
-    template <typename VecT>
-    constexpr static auto pop_left(VecT&& t)
+    template <uint32_t Count = 1u, typename VecT>
+    constexpr static auto pop_front(VecT&& t)
     {
-        auto pop_front = [](auto front, auto... rest) { return make_vector(rest...); };
-        return apply(pop_front, forward<VecT>(t));
+        return detail::copy_impl(
+            forward<VecT>(t),
+            make_offset_index_sequence<VecTraits<decay_t<VecT>>::size() - Count, Count>());
     }
 
     template <typename VecT>
@@ -219,8 +221,7 @@ namespace rocwmma
             inflate_coord_right_impl(Coord1d&& flatCoord, VecT&& dims, index_sequence<Indices...>)
         {
             auto inflate = [](auto&& c, auto&& d, auto& div, auto&& is_last) {
-
-                if constexpr ((bool)decay_t<decltype(is_last)>::value == true)
+                if constexpr((bool)decay_t<decltype(is_last)>::value == true)
                 {
                     auto result = c / div;
                     div *= d;
@@ -258,8 +259,7 @@ namespace rocwmma
             inflate_coord_left_impl(Coord1d&& flatCoord, VecT&& dims, index_sequence<Indices...>)
         {
             auto inflate = [](auto&& c, auto&& d, auto& div, auto&& is_last) {
-
-                if constexpr ((bool)decay_t<decltype(is_last)>::value == true)
+                if constexpr((bool)decay_t<decltype(is_last)>::value == true)
                 {
                     auto result = c / div;
                     div *= d;
@@ -298,10 +298,11 @@ namespace rocwmma
             to_matrix_space_impl(VecT0&& strideCoord, VecT1&& strides, index_sequence<Indices...>)
         {
             static_assert(VecTraits<decay_t<VecT0>>::size() == sizeof...(Indices)
-                       && VecTraits<decay_t<VecT1>>::size() == sizeof...(Indices),
+                              && VecTraits<decay_t<VecT1>>::size() == sizeof...(Indices),
                           "strideCoord and strides vectors must be the same size");
 
-            auto matrix_space_offset = [](auto&& component, auto&& stride) { return component * stride; };
+            auto matrix_space_offset
+                = [](auto&& component, auto&& stride) { return component * stride; };
 
             // Calculate a final matrix-space offset by accumulating
             // each stride coordinate component multiplied by their respective stride:

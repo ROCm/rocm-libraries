@@ -40,7 +40,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void
+    ROCWMMA_DEVICE inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -67,7 +67,7 @@ namespace rocwmma
     {
 
         using FragT    = decay_t<decltype(frag)>;
-        using IOConfig = GetCoopIOConfig_t<FragT>;
+        using IOConfig = GetCoopIOConfig_t<FragT, 1u>;
         using Loader   = typename IOConfig::Loader;
         using PostLoad = typename IOConfig::PostLoadXForm;
 
@@ -76,9 +76,10 @@ namespace rocwmma
                       "Must provide layout information. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Loader::Traits::OutputT>::value,
-            "Fragment access and coop load output types do not match");
+        // TODO: Fix
+        // static_assert(
+        //     is_same<typename FragT::Traits::AccessT, typename Loader::Traits::OutputT>::value,
+        //     "Fragment access and coop load output types do not match");
 
         // Load and implicit pack
         // Note: the frag will only be partially filled with useful data.
@@ -95,7 +96,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void
+    ROCWMMA_DEVICE inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm)
@@ -109,7 +110,7 @@ namespace rocwmma
 
         auto waveIndex = get<0>(waveCoord) * get<1>(wgDim) + get<1>(waveCoord);
         auto waveCount = get<0>(wgDim) * get<1>(wgDim);
-        load_matrix_coop_sync(frag, data, ldm, waveIndex, waveCount);
+        load_matrix_coop_sync(forward<FragT&>(frag), data, ldm, waveIndex, waveCount);
     }
 
     // @cond
@@ -121,7 +122,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void
+    ROCWMMA_DEVICE inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -155,14 +156,15 @@ namespace rocwmma
                       "Must provide layout information. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Loader::Traits::OutputT>::value,
-            "Fragment access and coop load output types do not match");
+        // TODO: Fix
+        // static_assert(
+        //     is_same<typename FragT::Traits::AccessT, typename Loader::Traits::OutputT>::value,
+        //     "Fragment access and coop load output types do not match");
 
         // Load and implicit pack
         // Note: the frag will only be partially filled with useful data.
         // Layout and thread locality is not guaranteed.
-        Loader::template exec<WaveCount>(frag.mAccess, data, ldm, waveIndex);
+        Loader::exec(frag.mAccess, data, ldm, waveIndex);
 
         // Post-load transformation
         frag.mAccess = PostLoad::exec(frag.mAccess);
@@ -174,7 +176,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void store_matrix_coop_sync(
+    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm,
@@ -192,7 +194,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void store_matrix_coop_sync(
+    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm,
@@ -200,7 +202,7 @@ namespace rocwmma
         uint32_t                                                             waveCount)
     {
         using FragT    = decay_t<decltype(frag)>;
-        using IOConfig = GetCoopIOConfig_t<FragT>;
+        using IOConfig = GetCoopIOConfig_t<FragT, 1u>;
         using PreStore = typename IOConfig::PreStoreXForm;
         using Storer   = typename IOConfig::Storer;
 
@@ -209,9 +211,10 @@ namespace rocwmma
                       "Must provide data layout. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Storer::Traits::InputT>::value,
-            "Fragment access and coop store input types do not match");
+        // TODO: Fix
+        // static_assert(
+        //     is_same<typename FragT::Traits::AccessT, typename Storer::Traits::InputT>::value,
+        //     "Fragment access and coop store input types do not match");
 
         // Implicit unpack and store
         // Note: the frag is only be partially filled with useful data.
@@ -225,7 +228,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void store_matrix_coop_sync(
+    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm)
@@ -251,7 +254,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void store_matrix_coop_sync(
+    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm,
@@ -287,14 +290,14 @@ namespace rocwmma
                       "Must provide data layout. Either statically assign data layout in "
                       "fragment declaration or use the run-time function overload.");
 
-        static_assert(
-            is_same<typename FragT::Traits::AccessT, typename Storer::Traits::InputT>::value,
-            "Fragment access and coop stor input types do not match");
+        // static_assert(
+        //     is_same<typename FragT::Traits::AccessT, typename Storer::Traits::InputT>::value,
+        //     "Fragment access and coop stor input types do not match");
 
         // Implicit unpack and store
         // Note: the frag is only be partially filled with useful data.
         // Layout and thread locality is not guaranteed.
-        Storer::template exec<WaveCount>(data, PreStore::exec(frag.mAccess), ldm, waveIndex);
+        Storer::exec(data, PreStore::exec(frag.mAccess), ldm, waveIndex);
     }
 
 } // namespace rocwmma

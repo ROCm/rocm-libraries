@@ -76,7 +76,7 @@ namespace rocwmma
         auto srcTuple = make_vector(1, 2, 3);
 
         auto expect = make_vector(1, 2);
-        auto result = pop_right(srcTuple);
+        auto result = pop_back(srcTuple);
         err |= vector_reduce_and(expect != result);
 
         return err;
@@ -89,7 +89,7 @@ namespace rocwmma
         auto srcTuple = make_vector(1, 2, 3);
 
         auto expect = make_vector(2, 3);
-        auto result = pop_left(srcTuple);
+        auto result = pop_front(srcTuple);
         err |= vector_reduce_and(expect != result);
 
         return err;

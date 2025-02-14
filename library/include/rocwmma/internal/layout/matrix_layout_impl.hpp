@@ -26,10 +26,12 @@
 #ifndef ROCWMMA_MATRIX_LAYOUT_IMPL_HPP
 #define ROCWMMA_MATRIX_LAYOUT_IMPL_HPP
 
+#include "../utility/algorithm.hpp"
+#include "../utility/vector.hpp"
 #include "layout.hpp"
 #include "layout_traits.hpp"
-#include "../utility/vector.hpp"
-#include "../utility/algorithm.hpp"
+#include "matrix_layout_base.hpp"
+#include "matrix_ortho_layout.hpp"
 
 namespace rocwmma
 {
@@ -37,90 +39,6 @@ namespace rocwmma
     // Implementations for the MatrixLayout classes
     namespace MatrixLayout
     {
-        // All of the matrix layouts are required to provide interface functions to:
-        // - strideCounts()
-        // - strides()
-        template<typename MatrixLayoutT>
-        struct MatrixLayoutBase
-        {
-            private:
-
-            // Incremental iteration offset
-            template<typename Coord1d, size_t... Indices>
-            ROCWMMA_DEVICE constexpr static inline auto incrementalOffset_impl(Coord1d&& flatCoord, index_sequence<Indices...>)
-            {
-                // This will get invoked for each MatrixLayout stride component to determine
-                // iterative stride offset contributions
-                auto component_offset = [](auto&& flatCoord, auto& flatStride, auto&& component, auto&& stride)
-                {
-                    constexpr auto comp = decay_t<decltype(component)>::value;
-
-                    // Ensure component is a contributor
-                    if constexpr (comp > 1)
-                    {
-                        // flatStride it how many iterations between a contribution of given component.
-                        // The stride of the LAST iteration of any component will reset the offset back
-                        // to the component origin.
-                        // Any other component stride will advance the iterative offset.
-                        auto next = flatCoord + 1;
-                        auto nextOffset = next % (comp * flatStride) == 0
-                            ? (-(comp - 1) * stride) // reset stride
-                            : (next % flatStride == 0
-                                ? stride // advance stride
-                                : decay_t<decltype(stride)>{0}); // NOP
-
-                        // scale the flatStride by current component
-                        flatStride *= comp;
-                        return nextOffset;
-                    }
-                    else
-                    {
-                        return decay_t<decltype(stride)>{0};
-                    }
-                };
-
-                // Initialize the MatrixLayout strides and stride space
-                constexpr auto strideSpace = MatrixLayoutT::strideCounts();
-                constexpr auto strides = MatrixLayoutT::strides();
-
-                // Flat stride begins with neighbor elements
-                auto flatStride = decay_t<Coord1d>{1};
-
-                // Accumulate the matrix offset contributions of each component to the next iteration.
-                // Note: Build strides in reverse order due to layouts are built in reverse order
-                return (component_offset(forward<Coord1d>(flatCoord),
-                                        forward<decltype(flatStride)&>(flatStride),
-                                        I<get<sizeof...(Indices) - 1 - Indices>(strideSpace)>{},
-                                        get<sizeof...(Indices) - 1 - Indices>(strides))
-                        + ...);
-            }
-
-            public:
-
-            template<typename Coord1d>
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) cumulativeOffset(Coord1d&& flatCoord)
-            {
-                // Get the iterative stride coord in the stride space.
-                // Note: Using the reverse inflate because layouts generate strideSpace in reverse order.
-                constexpr auto strideSpace = MatrixLayoutT::strideCounts();
-                auto strideCoord = inflate_coord_left(forward<Coord1d>(flatCoord), strideSpace);
-
-                // Calculate the final matrix offset by applying the stride coord on the physical strides
-                constexpr auto strides = MatrixLayoutT::strides();
-                return to_matrix_space(strideCoord, strides);
-            }
-
-            // Incremental iteration offset
-            template<typename Coord1d>
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) incrementalOffset(Coord1d&& flatCoord)
-            {
-                using VecT = decay_t<decltype(MatrixLayoutT::strideCounts())>;
-
-                return incrementalOffset_impl(forward<Coord1d>(flatCoord),
-                                              make_index_sequence<VecTraits<VecT>::size()>{});
-            }
-        };
-
         /* Pattern that maps threads contiguously to matrix columns and assumes
         * that VW will be mapped orthogonally to the column.
         * This pattern considers VW up to MaxVW, BlockDim <= 64 and BlockDim > 64.
@@ -180,7 +98,8 @@ namespace rocwmma
                   typename DataT,
                   uint32_t VectorWidth,
                   uint32_t MaxVectorWidth>
-        struct ColOrthoVW : public MatrixLayoutBase<ColOrthoVW<BlockDim, BlockK, DataT, VectorWidth, MaxVectorWidth>>
+        struct ColOrthoVW : public MatrixLayoutBase<
+                                ColOrthoVW<BlockDim, BlockK, DataT, VectorWidth, MaxVectorWidth>>
         {
             struct Traits
             {
@@ -210,8 +129,7 @@ namespace rocwmma
                 static constexpr uint32_t ElementsPerThread
                     = DimPerThread * KPerThread * BlockDimSegs;
 
-                static_assert(MaxVectorWidth <= BlockK,
-                            "MaxVectorWidth cannot exceed BlockK");
+                static_assert(MaxVectorWidth <= BlockK, "MaxVectorWidth cannot exceed BlockK");
                 static_assert(BlockDim >= BlockDimStride_X,
                               "BlockDim must be larger than BlockDimStride_X");
                 static_assert(BlockDim % BlockDimStride_X == 0,
@@ -353,7 +271,8 @@ namespace rocwmma
                   typename DataT,
                   uint32_t VectorWidth,
                   uint32_t MaxVectorWidth>
-        struct ColInlineVW : public MatrixLayoutBase<ColInlineVW<BlockDim, BlockK, DataT, VectorWidth, MaxVectorWidth>>
+        struct ColInlineVW : public MatrixLayoutBase<
+                                 ColInlineVW<BlockDim, BlockK, DataT, VectorWidth, MaxVectorWidth>>
         {
 
             struct Traits
@@ -385,8 +304,7 @@ namespace rocwmma
                     = DimPerThread * KPerThread * BlockDimSegs;
 
                 // Sanity checks for strides sizes
-                static_assert(MaxVectorWidth <= BlockDim,
-                            "MaxVectorWidth cannot exceed BlockDim");
+                static_assert(MaxVectorWidth <= BlockDim, "MaxVectorWidth cannot exceed BlockDim");
                 static_assert(BlockDim >= BlockDimStride_X,
                               "BlockDim must be larger than BlockDimStride_X");
                 static_assert(BlockDim % BlockDimStride_X == 0,
@@ -438,7 +356,8 @@ namespace rocwmma
                   typename DataT,
                   uint32_t MfmaDim, // MFMA instruction size
                   uint32_t SplitK /* = 1*/> // # of splits
-        struct ColInlineInt : public MatrixLayoutBase<ColInlineInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
+        struct ColInlineInt
+            : public MatrixLayoutBase<ColInlineInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
         {
             struct Traits
             {
@@ -497,7 +416,8 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    (threadIdx.x / MfmaDim * Traits::KPerThread) % BlockK);
+                                    ((threadIdx.x / MfmaDim) * Traits::KPerThread)
+                                        % (BlockK / SplitK));
             }
         };
 
@@ -506,7 +426,8 @@ namespace rocwmma
                   typename DataT,
                   uint32_t MfmaDim, // MFMA instruction size
                   uint32_t SplitK /*= 1*/> // # of splits
-        struct ColOrthoInt : public MatrixLayoutBase<ColOrthoInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
+        struct ColOrthoInt
+            : public MatrixLayoutBase<ColOrthoInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
         {
             struct Traits
             {
@@ -567,92 +488,8 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    (threadIdx.x / MfmaDim * Traits::KPerThread) % BlockK);
-            }
-        };
-
-        template <typename MatrixLayout, typename Enabler = void>
-        struct OrthoTraits;
-
-        template <typename MatrixLayout>
-        struct OrthoTraits<MatrixLayout, enable_if_t<(bool)MatrixLayout::Traits::BlockDimSegs>>
-        {
-            // Number of threads per wave
-            static constexpr uint32_t WaveSize = MatrixLayout::Traits::WaveSize;
-
-            // Strides (swapped)
-            static constexpr uint32_t BlockDimStride_X = MatrixLayout::Traits::BlockDimStride_Y;
-            static constexpr uint32_t BlockDimStride_Y = MatrixLayout::Traits::BlockDimStride_X;
-
-            static constexpr uint32_t BlockKStride_X = MatrixLayout::Traits::BlockKStride_Y;
-            static constexpr uint32_t BlockKStride_Y = MatrixLayout::Traits::BlockKStride_X;
-
-            static constexpr uint32_t VWStride_X = MatrixLayout::Traits::VWStride_Y;
-            static constexpr uint32_t VWStride_Y = MatrixLayout::Traits::VWStride_X;
-
-            // Stride space (same)
-            static constexpr uint32_t BlockDimSegs = MatrixLayout::Traits::BlockDimSegs;
-            static constexpr uint32_t BlockKSegs   = MatrixLayout::Traits::BlockKSegs;
-            static constexpr uint32_t VWSegs       = MatrixLayout::Traits::VWSegs;
-        };
-
-        template <typename MatrixLayout>
-        struct OrthoTraits<MatrixLayout, enable_if_t<(bool)MatrixLayout::Traits::SplitKSegs>>
-        {
-            // Number of threads per wave
-            static constexpr uint32_t WaveSize = MatrixLayout::Traits::WaveSize;
-
-            // Number of elements each thread will fetch in BlockDim direction
-            static constexpr uint32_t DimPerThread = MatrixLayout::Traits::DimPerThread;
-
-            // Number of elements each thread will fetch in BlockK direction
-            static constexpr uint32_t KPerThread = MatrixLayout::Traits::KPerThread;
-
-            // Number of elements that each thread is responsible for
-            static constexpr uint32_t ElementsPerThread = MatrixLayout::Traits::ElementsPerThread;
-
-            // Swapped strides
-            static constexpr uint32_t SplitKStride_X = MatrixLayout::Traits::SplitKStride_Y;
-            static constexpr uint32_t SplitKStride_Y = MatrixLayout::Traits::SplitKStride_X;
-
-            static constexpr uint32_t BlockKStride_X = MatrixLayout::Traits::BlockKStride_Y;
-            static constexpr uint32_t BlockKStride_Y = MatrixLayout::Traits::BlockKStride_X;
-
-            static constexpr uint32_t VWStride_X = MatrixLayout::Traits::VWStride_Y;
-            static constexpr uint32_t VWStride_Y = MatrixLayout::Traits::VWStride_X;
-
-            // Stride Space
-            static constexpr uint32_t SplitKSegs = MatrixLayout::Traits::SplitKSegs;
-            static constexpr uint32_t BlockKSegs = MatrixLayout::Traits::BlockKSegs;
-            static constexpr uint32_t VWSegs     = MatrixLayout::Traits::VWSegs;
-        };
-
-        template <typename MatrixLayout>
-        struct OrthoImpl : public MatrixLayoutBase<OrthoImpl<MatrixLayout>>
-        {
-            struct Traits : public OrthoTraits<MatrixLayout>
-            {
-            };
-
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) strideCounts()
-            {
-                return MatrixLayout::strideCounts();
-            }
-
-            ROCWMMA_DEVICE constexpr static inline decltype(auto) strides()
-            {
-                constexpr auto t = MatrixLayout::strides();
-                constexpr auto swap_strides = [](auto&&... args)
-                {
-                    return make_vector(swap(forward<decay_t<decltype(args)>>(args))...);
-                };
-
-                return apply(swap_strides, t);
-            }
-
-            ROCWMMA_DEVICE static inline decltype(auto) baseOffset()
-            {
-                return swap(MatrixLayout::baseOffset());
+                                    (threadIdx.x / MfmaDim * Traits::KPerThread)
+                                        % (BlockK / SplitK));
             }
         };
 

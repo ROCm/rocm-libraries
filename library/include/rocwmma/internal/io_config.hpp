@@ -81,12 +81,7 @@ namespace rocwmma
         using MappingUtil
             = MappingUtil<IOShape::BlockHeight, IOShape::BlockWidth, DataT, DataLayoutT>;
 
-        using Loader = OpaqueLoad<IOShape::BlockDim,
-                                  IOShape::KDim,
-                                  DataT,
-                                  typename IOLayout::DataLayout,
-                                  typename IOLayout::MatrixLayout,
-                                  IOLayout::VW>;
+        using Loader = OpaqueLoad<typename IOLayout::DataLayout, typename IOLayout::MatrixLayout>;
 
         using PostLoadXForm = register_layout_transform<typename IOLayout::StorageLayout,
                                                         typename IOLayout::FragmentLayout>;
@@ -94,12 +89,7 @@ namespace rocwmma
         using PreStoreXForm = register_layout_transform<typename IOLayout::FragmentLayout,
                                                         typename IOLayout::StorageLayout>;
 
-        using Storer = OpaqueStore<IOShape::BlockDim,
-                                   IOShape::KDim,
-                                   DataT,
-                                   typename IOLayout::DataLayout,
-                                   typename IOLayout::MatrixLayout,
-                                   IOLayout::VW>;
+        using Storer = OpaqueStore<typename IOLayout::DataLayout, typename IOLayout::MatrixLayout>;
     };
 
     /************************************************

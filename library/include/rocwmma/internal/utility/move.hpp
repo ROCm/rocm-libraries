@@ -29,7 +29,7 @@
 
 #if defined(__HIPCC_RTC__) || defined(__clang__)
 
-#include "forward_impl.hpp"
+#include "move_impl.hpp"
 namespace rocwmma
 {
     // Use drop-in replacement

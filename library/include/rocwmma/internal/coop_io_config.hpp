@@ -26,12 +26,12 @@
 #ifndef ROCWMMA_COOP_IO_CONFIG_HPP
 #define ROCWMMA_COOP_IO_CONFIG_HPP
 
-#include "./layout/register_layout_transforms.hpp"
 #include "coop_load.hpp"
 #include "coop_store.hpp"
 #include "io_layout.hpp"
 #include "io_shape.hpp"
 #include "io_traits.hpp"
+#include "layout/register_layout_transforms.hpp"
 #include "pack_util.hpp"
 #include "types.hpp"
 
@@ -79,12 +79,9 @@ namespace rocwmma
         using MappingUtil
             = MappingUtil<IOShape::BlockHeight, IOShape::BlockWidth, DataT, DataLayoutT>;
 
-        using Loader = CooperativeLoad<IOShape::BlockDim,
-                                       IOShape::KDim,
-                                       DataT,
-                                       typename IOLayout::DataLayout,
+        using Loader = CooperativeLoad<typename IOLayout::DataLayout,
                                        typename IOLayout::MatrixLayout,
-                                       IOLayout::VW>;
+                                       WaveCount>;
 
         using PostLoadXForm = register_layout_transform<typename IOLayout::StorageLayout,
                                                         typename IOLayout::FragmentLayout>;
@@ -95,12 +92,9 @@ namespace rocwmma
         using PreStoreXForm = register_layout_transform<typename IOLayout::FragmentLayout,
                                                         typename IOLayout::StorageLayout>;
 
-        using Storer = CooperativeStore<IOShape::BlockDim,
-                                        IOShape::KDim,
-                                        DataT,
-                                        typename IOLayout::DataLayout,
+        using Storer = CooperativeStore<typename IOLayout::DataLayout,
                                         typename IOLayout::MatrixLayout,
-                                        IOLayout::VW>;
+                                        WaveCount>;
     };
 
     /************************************************

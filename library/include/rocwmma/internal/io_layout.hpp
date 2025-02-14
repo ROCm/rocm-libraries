@@ -68,9 +68,11 @@ namespace rocwmma
             // Basic non-interleaved layouts are classified into *OrthoVW (SOA) and *InlineVW (AOS) formats.
             // For any BlockDim/BlockK geometry, we ensure that these layouts come up with the same MaxVW,
             // so that the AOS <-> SOA transforms are possible and valid. The followings tests assure this.
-            static constexpr bool BlockKTest = (Constants::AMDGCN_WAVE_SIZE * TestWidth / min(BlockDim, Constants::AMDGCN_WAVE_SIZE)) <= BlockK;
-            static constexpr bool OrthoTest = TestWidth <= BlockK;
-            static constexpr bool InlineTest = TestWidth <= BlockDim;
+            static constexpr bool BlockKTest = (Constants::AMDGCN_WAVE_SIZE * TestWidth
+                                                / min(BlockDim, Constants::AMDGCN_WAVE_SIZE))
+                                               <= BlockK;
+            static constexpr bool OrthoTest         = TestWidth <= BlockK;
+            static constexpr bool InlineTest        = TestWidth <= BlockDim;
             static constexpr bool LayoutFitnessTest = (BlockKTest && OrthoTest && InlineTest);
 
             // Decide on final MaxVW
@@ -166,8 +168,7 @@ namespace rocwmma
 
         // Matrix Layouts
         // Small dim mma friendly
-        using SmallDimMatrixLayout
-            = MatrixLayout::ColOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
+        using SmallDimMatrixLayout = MatrixLayout::ColOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
 
         // Large dim not mma friendly
         using LargeDimMatrixLayout
@@ -215,8 +216,7 @@ namespace rocwmma
 
         // Matrix Layouts
         // Small dim mma friendly
-        using SmallDimMatrixLayout =
-                            MatrixLayout::RowOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
+        using SmallDimMatrixLayout = MatrixLayout::RowOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
 
         // Large dim not mma friendly
         using LargeDimMatrixLayout
@@ -263,8 +263,7 @@ namespace rocwmma
         using DataLayout = DataLayout::template Array1d<DataLayoutT>;
 
         // Always mma friendly
-        using MatrixLayout
-            = MatrixLayout::RowOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
+        using MatrixLayout = MatrixLayout::RowOrthoVW<BlockDim, BlockK, DataT, VW, MaxVW>;
 
         // Register layout direct to memory storage (load / store)
         using StorageLayout = RegisterLayout::Storage<MatrixLayout, DataLayout>;
@@ -301,10 +300,8 @@ namespace rocwmma
                                                      : RegisterLayout::Format::SOA>;
 
         // Fragments will assume default mma register layout.
-        using FragmentLayout = RegisterLayout::MmaAcc<MmaDim,
-                                                 DataT,
-                                                 false,
-                                                 RegisterLayout::Format::SOA>;
+        using FragmentLayout
+            = RegisterLayout::MmaAcc<MmaDim, DataT, false, RegisterLayout::Format::SOA>;
     };
 
     namespace detail
@@ -317,28 +314,32 @@ namespace rocwmma
         private:
             // Smallest valid mma dim for mfma/wmma.
             // Test MmaDim must not exceed BlockDim for valid layout.
-            static constexpr uint32_t MinMmaDim = 16u;
+            static constexpr uint32_t MinMmaDim  = 16u;
             static constexpr uint32_t TestMmaDim = min(BlockDim, MmaDim);
 
             // For valid mma sizes, (BlockDim >= 16)
             // Find minimum 16 byte load with MmaDim of 32 or 16
-            static constexpr uint32_t MinLargeBytes = 16u;
+            static constexpr uint32_t MinLargeBytes  = 16u;
             static constexpr uint32_t DimPerThread   = BlockDim / TestMmaDim;
             static constexpr uint32_t BytesPerThread = DimPerThread * sizeof(DataT);
-            static constexpr uint32_t MmaDimResult = (BytesPerThread < MinLargeBytes ? MinMmaDim : TestMmaDim);
+            static constexpr uint32_t MmaDimResult
+                = (BytesPerThread < MinLargeBytes ? MinMmaDim : TestMmaDim);
 
             // For invalid mma sizes (BlockDim < 16), we can have smaller MmaDim to increase VW.
             // Try to balance DimPerThread and KPerThread by aiming to get half BlockDim bytes.
-            static constexpr bool SmallDim = TestMmaDim < MinMmaDim;
+            static constexpr bool     SmallDim      = TestMmaDim < MinMmaDim;
             static constexpr uint32_t MinSmallBytes = BlockDim / 2u * sizeof(DataT);
-            static constexpr uint32_t SmallDimResult = (BytesPerThread < MinSmallBytes) ?
-                MmaDimSelector<BlockDim, DataT, TestMmaDim / 2u>::Result : TestMmaDim;
+            static constexpr uint32_t SmallDimResult
+                = (BytesPerThread < MinSmallBytes)
+                      ? MmaDimSelector<BlockDim, DataT, TestMmaDim / 2u>::Result
+                      : TestMmaDim;
 
         public:
-            static constexpr uint32_t Result = SmallDim ? SmallDimResult : MmaDimResult;
+            // TODO: Remove the min with 16u when MmaDim32 is implemented for interleaved layouts
+            static constexpr uint32_t Result = SmallDim ? SmallDimResult : min(MmaDimResult, 16u);
         };
 
-        template<uint32_t BlockDim, typename DataT>
+        template <uint32_t BlockDim, typename DataT>
         struct MmaDimSelector<BlockDim, DataT, 0u>
         {
             static constexpr uint32_t Result = 1u;
@@ -401,7 +402,7 @@ namespace rocwmma
 
         // Vector size properties derived from the matrix layout
         constexpr static uint32_t MaxVW = layout_traits<MatrixLayout>::MaxVectorWidth;
-        constexpr static uint32_t VW = MaxVW;
+        constexpr static uint32_t VW    = MaxVW;
     };
 
     template <uint32_t BlockDim,
@@ -466,20 +467,16 @@ namespace rocwmma
 
         // Register layout required for mma. Expect interleaved accum format for multiple blocks.
         // Quirk: gfx11 requires padded mma acc
-        using MmaLayout
-            = RegisterLayout::MmaAcc<MmaDim,
-                                     DataT,
-                                     true,
-                                     (bool)ROCWMMA_ARCH_GFX11
-                                         ? RegisterLayout::Format::WMMA_ACC_GFX11
-                                         : RegisterLayout::Format::ACC_INT_A_MAJOR>;
+        using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
+                                                 DataT,
+                                                 true,
+                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                     ? RegisterLayout::Format::WMMA_ACC_GFX11
+                                                     : RegisterLayout::Format::ACC_INT_A_MAJOR>;
 
         // Fragments will keep mma register layout.
         using FragmentLayout
-            = RegisterLayout::MmaAcc<MmaDim,
-                                     DataT,
-                                     true,
-                                     RegisterLayout::Format::ACC_INT_A_MAJOR>;
+            = RegisterLayout::MmaAcc<MmaDim, DataT, true, RegisterLayout::Format::ACC_INT_A_MAJOR>;
 
         // Vector size properties derived from the matrix layout
         constexpr static uint32_t MaxVW = layout_traits<MatrixLayout>::MaxVectorWidth;
@@ -497,19 +494,16 @@ namespace rocwmma
 
         // Register layout required for mma. Expect interleaved accum format for multiple blocks.
         // Quirk: gfx11 requires padded mma acc
-        using MmaLayout
-            = RegisterLayout::MmaAcc<MmaDim,
-                                     DataT,
-                                     true,
-                                     (bool)ROCWMMA_ARCH_GFX11
-                                         ? RegisterLayout::Format::WMMA_ACC_GFX11
-                                         : RegisterLayout::Format::ACC_INT_A_MAJOR>;
+        using MmaLayout = RegisterLayout::MmaAcc<MmaDim,
+                                                 DataT,
+                                                 true,
+                                                 (bool)ROCWMMA_ARCH_GFX11
+                                                     ? RegisterLayout::Format::WMMA_ACC_GFX11
+                                                     : RegisterLayout::Format::ACC_INT_A_MAJOR>;
 
         // Fragments will keep mma interleaved layout.
-        using FragmentLayout = RegisterLayout::MmaAcc<MmaDim,
-                                     DataT,
-                                     true,
-                                     RegisterLayout::Format::ACC_INT_A_MAJOR>;
+        using FragmentLayout
+            = RegisterLayout::MmaAcc<MmaDim, DataT, true, RegisterLayout::Format::ACC_INT_A_MAJOR>;
     };
 
 } // namespace rocwmma

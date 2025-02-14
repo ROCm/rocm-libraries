@@ -32,10 +32,8 @@
 
 namespace rocwmma
 {
-
     namespace detail
     {
-
         template <typename DataT, uint32_t VectorWidth>
         struct amdgcn_opaque_store
         {
@@ -43,94 +41,55 @@ namespace rocwmma
             static_assert(sizeof(DataT[VectorWidth]) == sizeof(VecT<DataT, VectorWidth>),
                           "Cannot vectorize output");
 
-            using StoreT = VecT<DataT, VectorWidth>;
-            ROCWMMA_DEVICE static inline void
-                exec(DataT* dataPtr, StoreT const& data, index_t offset = 0)
+            using BufferT = VecT<DataT, VectorWidth>;
+
+            ROCWMMA_HOST_DEVICE constexpr static inline uint32_t size()
             {
-                *reinterpret_cast<StoreT*>(&(dataPtr[offset])) = data;
+                return VectorWidth;
+            }
+
+            ROCWMMA_DEVICE static inline void
+                exec(DataT* dataPtr, BufferT const& data, index_t offset = 0)
+            {
+                *(BufferT*)(&(dataPtr[offset])) = data;
+            }
+        };
+
+        // Wrapper to adapt to the IOBearer interface (bufferT, PtrT)
+        template <typename DataT, uint32_t VectorWidth>
+        struct OpaqueStoreBearer : public detail::amdgcn_opaque_store<DataT, VectorWidth>
+        {
+        private:
+            using Base = detail::amdgcn_opaque_store<DataT, VectorWidth>;
+
+            // Don't expose the base implementation, we change arg forwarding order
+            using Base::exec;
+
+        public:
+            template <typename BufferT, typename ExternDataT>
+            ROCWMMA_DEVICE static inline void
+                exec(BufferT&& data, ExternDataT* dataPtr, index_t offset = 0)
+            {
+                Base::exec(dataPtr, forward<BufferT>(data), offset);
             }
         };
 
     } // namespace detail
 
-    template <uint32_t BlockDim,
-              uint32_t BlockK,
-              typename DataT,
-              class DataLayout,
-              class MatrixLayout,
-              uint32_t VectorWidth>
-    struct OpaqueStore
+    template <class DataLayout, class MatrixLayout>
+    struct OpaqueStore : public IOBearer<DataLayout, MatrixLayout, detail::OpaqueStoreBearer>
     {
-        using IOTraits = IOTraits<BlockDim, BlockK, DataT, VectorWidth>;
-        struct Traits
+    private:
+        using Base = IOBearer<DataLayout, MatrixLayout, detail::OpaqueStoreBearer>;
+
+        // Don't expose the base implementation, we change arg forwarding order
+        using Base::exec;
+
+    public:
+        template <typename ExternDataT, typename BufferT>
+        ROCWMMA_DEVICE static void exec(ExternDataT* dataPtr, BufferT&& buff, uint32_t ldm)
         {
-            // Raw IO on unpacked register data.
-            using Storer = detail::amdgcn_opaque_store<DataT, VectorWidth>;
-            using StoreT = typename Storer::StoreT;
-            using InputT = VecT<DataT, IOTraits::UnpackedSize>;
-        };
-
-        using StoreVecTraits = VecTraits<typename Traits::StoreT>;
-
-        template <size_t Depth = 0, typename Iterator, typename StrideCounts, typename Strides2d>
-        ROCWMMA_DEVICE static inline auto unroll_right(DataT*         dataPtr,
-                                                       Iterator&      in,
-                                                       uint32_t       ldm,
-                                                       StrideCounts&& strideCounts,
-                                                       Strides2d&&    strides2d)
-        {
-            auto strideOffset = DataLayout::fromMatrixCoord(get<Depth>(strides2d), ldm);
-            auto strideCount  = get<Depth>(strideCounts);
-
-            // Last depth layer will invoke the load
-            if constexpr(Depth == (VecTraits<decay_t<StrideCounts>>::size() - 1u))
-            {
-#pragma unroll
-                for(unsigned int i = 0; i < strideCount; i++)
-                {
-                    Traits::Storer::exec(dataPtr, *in);
-                    dataPtr += strideOffset;
-                    in++;
-                }
-            }
-            // Recurse to the next nested layer
-            else
-            {
-#pragma unroll
-                for(unsigned int i = 0; i < strideCount; i++)
-                {
-                    unroll_right<Depth + 1>(dataPtr, in, ldm, strideCounts, strides2d);
-                    dataPtr += strideOffset;
-                }
-            }
-        }
-
-        ROCWMMA_DEVICE static void
-            exec(DataT* dataPtr, typename Traits::InputT const& data, uint32_t ldm)
-        {
-            // Arrange wave threads to starting matrix layout offsets.
-            auto baseOffset2d = MatrixLayout::baseOffset();
-            auto it           = makeVectorIterator<StoreVecTraits::size()>(data).begin();
-
-            static_assert(decltype(it)::range() == IOTraits::IOCount,
-                          "IOCount inconsistent with iterator range");
-
-            // Make sure that the IOCount is consistent with the number of total strides
-            static_assert(IOTraits::IOCount
-                              == apply([](auto... items) { return (items * ...); },
-                                       MatrixLayout::strideCounts()),
-                          "IOCount inconsistent with total strides");
-
-            // Initialize the stride details as constexpr
-            // so that the compiler can optimize them as args.
-            constexpr auto strideCounts = MatrixLayout::strideCounts();
-            constexpr auto strides      = MatrixLayout::strides();
-
-            unroll_right(dataPtr + DataLayout::fromMatrixCoord(baseOffset2d, ldm),
-                         it,
-                         ldm,
-                         strideCounts,
-                         strides);
+            Base::exec(forward<BufferT>(buff), dataPtr, ldm);
         }
     };
 

@@ -69,7 +69,7 @@ list( APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} ${ROCM_PATH} /opt/rocm )
 # Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
-find_package(ROCM 0.7 CONFIG REQUIRED)
+find_package(ROCmCMakeBuildTools 0.7 CONFIG REQUIRED)
 include(ROCMSetupVersion)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)

@@ -55,7 +55,7 @@ namespace rocwmma
     template <typename FragT, uint32_t WaveCount>
     struct GetCoopIOConfig;
 
-    template <typename FragT, uint32_t WaveCount = 1u>
+    template <typename FragT, uint32_t WaveCount>
     using GetCoopIOConfig_t = typename GetCoopIOConfig<FragT, WaveCount>::type;
 
     ///
