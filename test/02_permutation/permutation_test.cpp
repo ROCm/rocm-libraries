@@ -74,7 +74,7 @@ namespace hiptensor
         mValidationResult = false;
         mMaxRelativeError = 0.0;
 
-        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalGBytes = 0.0;
+        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalGBytes = mGBytesPerSec = 0.0;
     }
 
     std::ostream& PermutationTest::printHeader(std::ostream& stream /* = std::cout */) const
