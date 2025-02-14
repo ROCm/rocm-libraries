@@ -80,7 +80,7 @@ namespace hiptensor
         mValidationResult = false;
         mMaxRelativeError = 0.0;
 
-        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalBytes = 0.0;
+        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalGBytes = 0.0;
     }
 
     ContractionResource* ContractionTest::getResource() const
@@ -108,9 +108,10 @@ namespace hiptensor
             << "Beta, "                 // 14
             << "elapsedMs, "            // 15
             << "Problem Size(GFlops), " // 16
-            << "TFlops/s, "               // 17
-            << "TotalBytes, "           // 18
-            << "Result"                // 19
+            << "TFlops/s, "             // 17
+            << "TotalGBytes, "          // 18
+            << "GBytes/s, "             // 19
+            << "Result"                 // 20
             << std::endl;
         // clang-format on
     }
@@ -155,7 +156,8 @@ namespace hiptensor
                 << "n/a" << ", " // 16
                 << "n/a" << ", " // 17
                 << "n/a" << ", " // 18
-                << "SKIPPED"    // 19
+                << "n/a" << ", " // 19
+                << "SKIPPED"    // 20
                 << std::endl;
             // clang-format on
         }
@@ -169,8 +171,9 @@ namespace hiptensor
                    << mElapsedTimeMs        << ", "       // 15
                    << mTotalGFlops          << ", "       // 16
                    << mMeasuredTFlopsPerSec << ", "       // 17
-                   << mTotalBytes           << ", "       // 18
-                   << result                             // 19
+                   << mTotalGBytes          << ", "       // 18
+                   << mGBytesPerSec         << ", "       // 18
+                   << result                              // 20
                    << std::endl;
             // clang-format on
         }
@@ -803,7 +806,7 @@ namespace hiptensor
             */
 
             mElapsedTimeMs        = float64_t(timeMs);
-            mTotalGFlops          = 2.0 * totalLength;
+            mTotalGFlops          = 2.0 * totalLength * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
             size_t sizeA = std::accumulate(a_ms_ks.mLengths.begin(),
@@ -821,9 +824,10 @@ namespace hiptensor
                                            hipDataTypeSize(DDataType),
                                            std::multiplies<size_t>());
 
-            mTotalBytes = sizeA + sizeB + sizeD;
-            mTotalBytes += (betaBuf.mReal != 0.0) ? sizeD : 0;
-            mTotalBytes /= 1e12;
+            mTotalGBytes = sizeA + sizeB + sizeD;
+            mTotalGBytes += (betaBuf.mReal != 0.0) ? sizeD : 0;
+            mTotalGBytes /= 1e9;
+            mGBytesPerSec = mTotalGBytes / (mElapsedTimeMs * 1e-3);
 
             CHECK_HIP_ERROR(hipEventDestroy(startEvent));
             CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
