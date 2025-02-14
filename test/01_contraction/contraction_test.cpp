@@ -796,15 +796,6 @@ namespace hiptensor
                 totalLength *= a_ms_ks.mLengths[i + rank];
             }
 
-            /*
-                A       B       C
-                [m, k], [n, k], [m, n]
-
-                m * n * k * k / (m * n)
-                = k * k
-                k = sqrt((A * B) / C)
-            */
-
             mElapsedTimeMs        = float64_t(timeMs);
             mTotalGFlops          = 2.0 * totalLength * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
