@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,7 @@ namespace rocsparse_reproducibility
         const host_dense_matrix<T> host_first(first);
         const size_t               numbytes = sizeof(T) * host_first.m * host_first.n;
         void*                      p        = data->add(name, numbytes);
-        hipMemcpy(p, host_first.data(), numbytes, hipMemcpyHostToHost);
+        CHECK_HIP_ERROR(hipMemcpy(p, host_first.data(), numbytes, hipMemcpyHostToHost));
     }
 
     template <typename T>
@@ -49,7 +49,7 @@ namespace rocsparse_reproducibility
     {
         const size_t numbytes = sizeof(T) * first.m * first.n;
         void*        p        = data->add(name, numbytes);
-        hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost);
+        CHECK_HIP_ERROR(hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost));
     }
 
     template <typename T>
@@ -59,7 +59,7 @@ namespace rocsparse_reproducibility
     {
         const size_t numbytes = sizeof(T) * first.size();
         void*        p        = data->add(name, numbytes);
-        hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost);
+        CHECK_HIP_ERROR(hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost));
     }
 
     template <typename T>
@@ -69,7 +69,7 @@ namespace rocsparse_reproducibility
     {
         const size_t numbytes = sizeof(T) * first.size();
         void*        p        = data->add(name, numbytes);
-        hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost);
+        CHECK_HIP_ERROR(hipMemcpy(p, first.data(), numbytes, hipMemcpyDeviceToHost));
     }
 
     template <typename T>
@@ -79,7 +79,7 @@ namespace rocsparse_reproducibility
     {
         const size_t numbytes = sizeof(T) * first.size();
         void*        p        = data->add(name, numbytes);
-        hipMemcpy(p, first.data(), numbytes, hipMemcpyHostToHost);
+        CHECK_HIP_ERROR(hipMemcpy(p, first.data(), numbytes, hipMemcpyHostToHost));
     }
 
     template <memory_mode::value_t MODE,

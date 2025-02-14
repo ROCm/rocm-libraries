@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -254,23 +254,24 @@ int main(int argc, char* argv[])
                                                 solve_policy,
                                                 temp_buffer));
     HIP_CHECK(hipMemset(dy, 0, sizeof(double) * m));
-    ROCSPARSE_CHECK(rocsparse_dcsritsv_solve(handle,
-                                             &nmaxiter,
-                                             tol,
-                                             history,
-                                             trans,
-                                             m,
-                                             nnz,
-                                             &alpha,
-                                             descr,
-                                             dcsr_val,
-                                             dcsr_row_ptr,
-                                             dcsr_col_ind,
-                                             info,
-                                             dx,
-                                             dy,
-                                             solve_policy,
-                                             temp_buffer));
+    ROCSPARSE_CHECK(rocsparse_dcsritsv_solve_ex(handle,
+                                                &nmaxiter,
+                                                0,
+                                                tol,
+                                                history,
+                                                trans,
+                                                m,
+                                                nnz,
+                                                &alpha,
+                                                descr,
+                                                dcsr_val,
+                                                dcsr_row_ptr,
+                                                dcsr_col_ind,
+                                                info,
+                                                dx,
+                                                dy,
+                                                solve_policy,
+                                                temp_buffer));
     std::cout << "history, niter  " << nmaxiter << std::endl;
 
     for(int i = 0; i < std::min(nmaxiter, 10); ++i)
@@ -290,23 +291,24 @@ int main(int argc, char* argv[])
     {
         nmaxiter = s_nmaxiter;
         HIP_CHECK(hipMemset(dy, 0, sizeof(double) * m));
-        ROCSPARSE_CHECK(rocsparse_dcsritsv_solve(handle,
-                                                 &nmaxiter,
-                                                 tol,
-                                                 history,
-                                                 trans,
-                                                 m,
-                                                 nnz,
-                                                 &alpha,
-                                                 descr,
-                                                 dcsr_val,
-                                                 dcsr_row_ptr,
-                                                 dcsr_col_ind,
-                                                 info,
-                                                 dx,
-                                                 dy,
-                                                 solve_policy,
-                                                 temp_buffer));
+        ROCSPARSE_CHECK(rocsparse_dcsritsv_solve_ex(handle,
+                                                    &nmaxiter,
+                                                    0,
+                                                    tol,
+                                                    history,
+                                                    trans,
+                                                    m,
+                                                    nnz,
+                                                    &alpha,
+                                                    descr,
+                                                    dcsr_val,
+                                                    dcsr_row_ptr,
+                                                    dcsr_col_ind,
+                                                    info,
+                                                    dx,
+                                                    dy,
+                                                    solve_policy,
+                                                    temp_buffer));
     }
 
     // Device synchronization
@@ -324,23 +326,24 @@ int main(int argc, char* argv[])
             HIP_CHECK(hipMemset(dy, 0, sizeof(double) * m));
             double time = utils_time_us();
 
-            ROCSPARSE_CHECK(rocsparse_dcsritsv_solve(handle,
-                                                     &nmaxiter,
-                                                     tol,
-                                                     history,
-                                                     trans,
-                                                     m,
-                                                     nnz,
-                                                     &alpha,
-                                                     descr,
-                                                     dcsr_val,
-                                                     dcsr_row_ptr,
-                                                     dcsr_col_ind,
-                                                     info,
-                                                     dx,
-                                                     dy,
-                                                     solve_policy,
-                                                     temp_buffer));
+            ROCSPARSE_CHECK(rocsparse_dcsritsv_solve_ex(handle,
+                                                        &nmaxiter,
+                                                        0,
+                                                        tol,
+                                                        history,
+                                                        trans,
+                                                        m,
+                                                        nnz,
+                                                        &alpha,
+                                                        descr,
+                                                        dcsr_val,
+                                                        dcsr_row_ptr,
+                                                        dcsr_col_ind,
+                                                        info,
+                                                        dx,
+                                                        dy,
+                                                        solve_policy,
+                                                        temp_buffer));
 
             // Device synchronization
             HIP_CHECK(hipDeviceSynchronize());

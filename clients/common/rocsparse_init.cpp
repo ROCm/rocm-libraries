@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -125,7 +125,7 @@ void host_csr_to_ell(J                     M,
     size_t required_memory  = sizeof(J) * ell_nnz + sizeof(T) * ell_nnz;
     size_t total_memory     = 0;
     size_t available_memory = 0;
-    hipMemGetInfo(&available_memory, &total_memory);
+    std::ignore             = hipMemGetInfo(&available_memory, &total_memory);
 
     if(required_memory > available_memory)
     {

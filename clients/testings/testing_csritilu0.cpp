@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -459,7 +459,7 @@ void testing_csritilu0(const Arguments& arg)
         //
         // Compute solution.
         //
-        hipMemset((T*)ilu0, 0, sizeof(T) * dA.nnz);
+        CHECK_HIP_ERROR(hipMemset((T*)ilu0, 0, sizeof(T) * dA.nnz));
 
         p.maxiter = arg.nmaxiter;
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
@@ -597,7 +597,7 @@ void testing_csritilu0(const Arguments& arg)
             //
             // Reinitialize, otherwise it will stay converged.
             //
-            hipMemset((T*)ilu0, 0, sizeof(T) * dA.nnz);
+            CHECK_HIP_ERROR(hipMemset((T*)ilu0, 0, sizeof(T) * dA.nnz));
 
             p.maxiter                          = arg.nmaxiter;
             double gpu_presolve_time_used_iter = get_time_us();

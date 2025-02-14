@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,8 +32,6 @@
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == rocsparse_direction_row) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
 
 /*
  * ===========================================================================
@@ -1488,8 +1486,8 @@ static void host_csrmv_general(rocsparse_operation  trans,
             int             dev;
             hipDeviceProp_t prop;
 
-            hipGetDevice(&dev);
-            hipGetDeviceProperties(&prop, dev);
+            std::ignore = hipGetDevice(&dev);
+            std::ignore = hipGetDeviceProperties(&prop, dev);
 
             int WF_SIZE;
             J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1631,8 +1629,8 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
         int             dev;
         hipDeviceProp_t prop;
 
-        hipGetDevice(&dev);
-        hipGetDeviceProperties(&prop, dev);
+        std::ignore = hipGetDevice(&dev);
+        std::ignore = hipGetDeviceProperties(&prop, dev);
 
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -1914,8 +1912,8 @@ static void host_csr_lsolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    hipGetDevice(&dev);
-    hipGetDeviceProperties(&prop, dev);
+    std::ignore = hipGetDevice(&dev);
+    std::ignore = hipGetDeviceProperties(&prop, dev);
 
     std::vector<T> temp(prop.warpSize);
 
@@ -2023,8 +2021,8 @@ static void host_csr_usolve(J                    M,
     int             dev;
     hipDeviceProp_t prop;
 
-    hipGetDevice(&dev);
-    hipGetDeviceProperties(&prop, dev);
+    std::ignore = hipGetDevice(&dev);
+    std::ignore = hipGetDeviceProperties(&prop, dev);
 
     std::vector<T> temp(prop.warpSize);
 

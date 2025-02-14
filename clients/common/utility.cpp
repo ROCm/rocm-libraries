@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -133,8 +133,8 @@ std::string rocsparse_datapath()
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us(void)
 {
-    hipDeviceSynchronize();
-    auto now = std::chrono::steady_clock::now();
+    std::ignore = hipDeviceSynchronize();
+    auto now    = std::chrono::steady_clock::now();
     // struct timeval tv;
     // gettimeofday(&tv, NULL);
     //  return (tv.tv_sec * 1000 * 1000) + tv.tv_usec;
@@ -146,8 +146,8 @@ double get_time_us(void)
 /*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
 double get_time_us_sync(hipStream_t stream)
 {
-    hipStreamSynchronize(stream);
-    auto now = std::chrono::steady_clock::now();
+    std::ignore = hipStreamSynchronize(stream);
+    auto now    = std::chrono::steady_clock::now();
 
     // struct timeval tv;
     // gettimeofday(&tv, NULL);

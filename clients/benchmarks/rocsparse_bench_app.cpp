@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -320,7 +320,11 @@ rocsparse_status rocsparse_bench_app::define_results_json(std::ostream& out)
     // !!! To fix, not necessarily the gpu used from rocsparse_bench.
     //
     hipDeviceProp_t prop;
-    hipGetDeviceProperties(&prop, 0);
+    if(hipGetDeviceProperties(&prop, 0) != hipSuccess)
+    {
+        std::cerr << "rocsparse-bench error: cannot get device properties" << std::endl;
+        return rocsparse_status_internal_error;
+    }
     gpu_config g(prop);
     g.print_json(out);
 

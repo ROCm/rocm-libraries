@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ public:
     int64_t* m_device_nnz{};
     virtual ~_rocsparse_extract_descr()
     {
-        rocsparse_hipFree(this->m_device_nnz);
+        std::ignore = rocsparse_hipFree(this->m_device_nnz);
     }
 
     ///

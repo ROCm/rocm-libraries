@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -82,8 +82,8 @@ static std::string relfilename(const char* tag_)
 
 static double get_time_us(void)
 {
-    hipDeviceSynchronize();
-    auto now = std::chrono::steady_clock::now();
+    std::ignore = hipDeviceSynchronize();
+    auto now    = std::chrono::steady_clock::now();
     auto duration
         = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     return (static_cast<double>(duration));

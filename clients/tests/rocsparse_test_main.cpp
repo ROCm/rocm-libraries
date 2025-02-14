@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -220,8 +220,8 @@ int main(int argc, char** argv)
 
         if(hipGetDeviceProperties(&prop, i) != hipSuccess)
         {
-            std::cerr << "Error: cannot get device properties" << std::endl;
-            return -1;
+            std::cerr << "rocsparse-test error: cannot get device properties" << std::endl;
+            return rocsparse_status_internal_error;
         }
 
         std::cout << "Device ID " << i << ": " << prop.name << std::endl;
@@ -246,7 +246,11 @@ int main(int argc, char** argv)
     }
 
     hipDeviceProp_t prop;
-    hipGetDeviceProperties(&prop, dev);
+    if(hipGetDeviceProperties(&prop, dev) != hipSuccess)
+    {
+        std::cerr << "rocsparse-test error: cannot get device properties" << std::endl;
+        return rocsparse_status_internal_error;
+    }
 
     std::cout << "Using device ID " << dev << " (" << prop.name << ") for rocSPARSE" << std::endl;
     std::cout << "-------------------------------------------------------------------------"
@@ -313,7 +317,11 @@ int main(int argc, char** argv)
     }
 
     // Reset HIP device
-    hipDeviceReset();
+    if(hipDeviceReset() != hipSuccess)
+    {
+        std::cerr << "Error: cannot reset HIP device" << std::endl;
+        return rocsparse_status_internal_error;
+    }
 
     return ret;
 }
