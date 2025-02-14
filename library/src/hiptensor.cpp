@@ -155,7 +155,9 @@ hiptensorStatus_t hiptensorInitTensorDescriptor(const hiptensorHandle_t*     han
     if((lens == nullptr && strides != nullptr)
        || ((dataType != HIP_R_16F) && (dataType != HIP_R_16BF) && (dataType != HIP_R_32F)
            && (dataType != HIP_R_64F) && (dataType != HIP_C_32F) && (dataType != HIP_C_64F))
-       || ((unaryOp != HIPTENSOR_OP_IDENTITY) && (unaryOp != HIPTENSOR_OP_SQRT)))
+       || ((unaryOp == HIPTENSOR_OP_ADD) || (unaryOp == HIPTENSOR_OP_MUL)
+           || (unaryOp == HIPTENSOR_OP_MIN) || (unaryOp == HIPTENSOR_OP_MAX)
+           || (unaryOp == HIPTENSOR_OP_UNKNOWN)))
     {
         auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
         if(lens == nullptr && strides != nullptr)
@@ -165,11 +167,13 @@ hiptensorStatus_t hiptensorInitTensorDescriptor(const hiptensorHandle_t*     han
                      "Tensor Initialization Error : lens = nullptr and strides != nullptr (%s)",
                      hiptensorGetErrorString(errorCode));
         }
-        else if((unaryOp != HIPTENSOR_OP_IDENTITY) && (unaryOp != HIPTENSOR_OP_SQRT))
+        else if((unaryOp == HIPTENSOR_OP_ADD) || (unaryOp == HIPTENSOR_OP_MUL)
+                || (unaryOp == HIPTENSOR_OP_MIN) || (unaryOp == HIPTENSOR_OP_MAX)
+                || (unaryOp == HIPTENSOR_OP_UNKNOWN))
         {
             snprintf(msg,
                      sizeof(msg),
-                     "Tensor Initialization Error : op != identity / op != unarysquare (%s) ",
+                     "Tensor Initialization Error : op is not a valid unary operator (%s) ",
                      hiptensorGetErrorString(errorCode));
         }
         else

@@ -29,19 +29,20 @@
 
 // Ensure access to
 #include "../device/hiptensor_permutation_scale_instances.hpp"
+#include <hiptensor_unary_element_wise_operation.hpp>
 
 namespace hiptensor
 {
-    void PermutationSolutionInstances::PermutationSolution5DHalfThroughThroughInstances()
+    void PermutationSolutionInstances::PermutationSolution6DFloatInstances()
     {
         // Register all the solutions exactly once
-        // 5d Permutation
+        // 6d Permutation
         registerSolutions(
-            enumeratePermutationSolutions<ck::Tuple<ck::half_t>,
-                                          ck::Tuple<ck::half_t>,
-                                          ck::tensor_operation::element_wise::PassThrough,
-                                          ck::tensor_operation::element_wise::PassThrough,
+            enumeratePermutationSolutions<ck::Tuple<float>,
+                                          ck::Tuple<float>,
+                                          ck::tensor_operation::element_wise::HiptensorUnaryOp,
+                                          ck::tensor_operation::element_wise::HiptensorUnaryOp,
                                           ck::tensor_operation::element_wise::Scale,
-                                          5>());
+                                          6>());
     }
 } // namespace hiptensor

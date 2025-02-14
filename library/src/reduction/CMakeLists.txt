@@ -123,5 +123,3 @@ set(HIPTENSOR_REDUCTION_SOURCES
 
 add_hiptensor_component(hiptensor_reduction ${HIPTENSOR_REDUCTION_SOURCES})
 target_include_directories(hiptensor_reduction PRIVATE ${composable_kernel_INCLUDES})
-
-# add_subdirectory(device)

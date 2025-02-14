@@ -49,6 +49,8 @@ if(NOT googletest_POPULATED)
   set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_OLD} CACHE INTERNAL "Build SHARED libraries" FORCE)
 endif()
 
+get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+
 # Setup a test manifest
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
 file(WRITE "${INSTALL_TEST_FILE}"
@@ -140,21 +142,25 @@ endfunction()
 
 # Create unit test executables and deploy
 # Differs from hiptensor_test in that src include directory is linked
-function(add_hiptensor_unit_test BINARY_NAME FILE_NAME)
-
+function(add_hiptensor_unit_test )
+    set(BINARY_NAME ${ARGV0})
     message( STATUS "adding hiptensor unit test: ${BINARY_NAME}")
-    add_executable(${BINARY_NAME} ${FILE_NAME})
+
+    list(REMOVE_AT ARGV 0)
+    add_executable(${BINARY_NAME} ${ARGV})
 
     target_compile_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     target_link_options(${BINARY_NAME} PRIVATE ${CLANG_DRIVER_MODE})
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm "-L${HIP_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIP_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
+                               ${composable_kernel_INCLUDES}
                                ${PROJECT_SOURCE_DIR}/library/include
                                ${PROJECT_SOURCE_DIR}/library/src/include
+                               ${PROJECT_SOURCE_DIR}/library/src
                                ${PROJECT_SOURCE_DIR}/test)
 
     # Build this test under custom target

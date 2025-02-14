@@ -23,16 +23,19 @@
  # THE SOFTWARE.
  #
  ###############################################################################
- set(PermutationCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
- ${CMAKE_CURRENT_SOURCE_DIR}/permutation_resource.cpp
- ${CMAKE_CURRENT_SOURCE_DIR}/permutation_test.cpp)
+ set(PermutationCommonSources
+     ${HIPTENSOR_COMMON_TEST_SOURCES}
+     ${CMAKE_CURRENT_SOURCE_DIR}/permutation_resource.cpp
+     ${CMAKE_CURRENT_SOURCE_DIR}/permutation_test.cpp
+     )
 
 #  tests
-set (PermutationTestSources ${PermutationCommonSources}
-${CMAKE_CURRENT_SOURCE_DIR}/permutation_column_major_test.cpp
-${CMAKE_CURRENT_SOURCE_DIR}/permutation_cpu_impl_test.cpp
-)
+set (PermutationTestSources
+    ${PermutationCommonSources}
+    ${CMAKE_CURRENT_SOURCE_DIR}/permutation_cpu_impl_test.cpp
+    )
 
+add_hiptensor_unit_test(permutation_cpu_test ${PermutationTestSources})
 
 # Rank 2 tests
 set (PermutationRank2TestSources ${PermutationCommonSources}

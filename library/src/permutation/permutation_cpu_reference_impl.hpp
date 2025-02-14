@@ -260,8 +260,7 @@ namespace hiptensor
             std::make_unique<ReferenceOp>());
 
         auto hashCode = ck::tensor_operation::device::instance::
-            DeviceElementwiseParams<InDataTypeTuple, OutDataTypeTuple, Aop, Bop, Scale, NumDim>::
-                hashCode();
+            DeviceElementwiseParams<InDataTypeTuple, OutDataTypeTuple, Scale, NumDim>::hashCode();
         auto result = std::unordered_map<Uid, std::unique_ptr<PermutationSolution>>();
         result.insert({hashCode, std::move(solution)});
 

@@ -67,9 +67,11 @@ namespace hiptensor
                               void*                           B,
                               std::vector<std::size_t> const& a_lengths,
                               std::vector<std::size_t> const& a_strides,
+                              hiptensorOperator_t             opA,
                               const int32_t                   modeA[],
                               std::vector<std::size_t> const& b_lengths,
                               std::vector<std::size_t> const& b_strides,
+                              hiptensorOperator_t             opB,
                               const int32_t                   modeB[],
                               const hipDataType               typeScalar)
             = 0;
@@ -81,9 +83,11 @@ namespace hiptensor
                          void*                           B,
                          std::vector<std::size_t> const& a_lengths,
                          std::vector<std::size_t> const& a_strides,
+                         hiptensorOperator_t             opA,
                          const int32_t                   modeA[],
                          std::vector<std::size_t> const& b_lengths,
                          std::vector<std::size_t> const& b_strides,
+                         hiptensorOperator_t             opB,
                          const int32_t                   modeB[],
                          const hipDataType               typeScalar,
                          StreamConfig const&             streamConfig = StreamConfig{});

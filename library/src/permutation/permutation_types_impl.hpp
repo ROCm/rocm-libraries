@@ -35,19 +35,6 @@
 
 namespace hiptensor
 {
-    // Specialize overrides for runtime ElementWiseOperatorType
-    template <>
-    struct ElementWiseOperatorType<ck::tensor_operation::element_wise::PassThrough>
-    {
-        static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_IDENTITY;
-    };
-
-    template <>
-    struct ElementWiseOperatorType<ck::tensor_operation::element_wise::UnarySquare>
-    {
-        static constexpr auto value = hiptensorOperator_t::HIPTENSOR_OP_SQRT;
-    };
-
     // Specialize overrides for runtime PermutationOperatorType
     template <>
     struct PermutationOperatorType<ck::tensor_operation::element_wise::Scale>

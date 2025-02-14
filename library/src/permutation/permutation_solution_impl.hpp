@@ -33,6 +33,7 @@
 #include "hash.hpp"
 #include "hiptensor_options.hpp"
 #include "permutation_solution.hpp"
+#include <hiptensor_unary_element_wise_operation.hpp>
 
 namespace std
 {
@@ -66,9 +67,11 @@ namespace hiptensor
                       void*                           B,
                       std::vector<std::size_t> const& a_lengths,
                       std::vector<std::size_t> const& a_strides,
+                      hiptensorOperator_t             opA,
                       const int32_t                   modeA[],
                       std::vector<std::size_t> const& b_lengths,
                       std::vector<std::size_t> const& b_strides,
+                      hiptensorOperator_t             opB,
                       const int32_t                   modeB[],
                       const hipDataType               typeScalar) override
         {
@@ -152,15 +155,19 @@ namespace hiptensor
             else
             {
 
+                // According to the definition of permutation \f$B_{\Pi^B(i_0,i_1,...,i_n)} = \alpha \Psi(A_{\Pi^A(i_0,i_1,...,i_n)}))\f$
+                // No operations can be applied to B so that the `opB` which is from descriptor B should be ignored.
                 Base::mInvokerArgPtr = std::move(deviceOp->MakeArgumentPointer(
                     abLengths,
                     {aStrides},
                     {bStridesCk},
                     {A},
                     {B},
-                    typename Traits::CombinedOp{typename Traits::AOp{},
-                                                typename Traits::ScaleOp{alphaF},
-                                                typename Traits::BOp{}}));
+                    typename Traits::CombinedOp{
+                        typename Traits::AOp{opA},
+                        typename Traits::ScaleOp{alphaF},
+                        typename Traits::BOp{
+                            HIPTENSOR_OP_IDENTITY}})); // ignore opB since none operation should be applied on output
             }
 
             // Initialize the invoker

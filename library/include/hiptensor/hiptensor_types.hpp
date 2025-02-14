@@ -101,23 +101,38 @@ typedef enum
 //! @brief Element-wise operations
 typedef enum
 {
-    //! Identity operator
-    HIPTENSOR_OP_IDENTITY = 1,
-    //! Square root operator
-    HIPTENSOR_OP_SQRT = 2,
+    HIPTENSOR_OP_IDENTITY = 1, ///< Identity operator (i.e., elements are not changed)
+    HIPTENSOR_OP_SQRT     = 2, ///< Square root
+    HIPTENSOR_OP_RELU     = 8, ///< Rectified linear unit
+    HIPTENSOR_OP_CONJ     = 9, ///< Complex conjugate
+    HIPTENSOR_OP_RCP      = 10, ///< Reciprocal
+    HIPTENSOR_OP_SIGMOID  = 11, ///< y=1/(1+exp(-x))
+    HIPTENSOR_OP_TANH     = 12, ///< y=tanh(x)
+    HIPTENSOR_OP_EXP      = 22, ///< Exponentiation.
+    HIPTENSOR_OP_LOG      = 23, ///< Log (base e).
+    HIPTENSOR_OP_ABS      = 24, ///< Absolute value.
+    HIPTENSOR_OP_NEG      = 25, ///< Negation.
+    HIPTENSOR_OP_SIN      = 26, ///< Sine.
+    HIPTENSOR_OP_COS      = 27, ///< Cosine.
+    HIPTENSOR_OP_TAN      = 28, ///< Tangent.
+    HIPTENSOR_OP_SINH     = 29, ///< Hyperbolic sine.
+    HIPTENSOR_OP_COSH     = 30, ///< Hyperbolic cosine.
+    HIPTENSOR_OP_ASIN     = 31, ///< Inverse sine.
+    HIPTENSOR_OP_ACOS     = 32, ///< Inverse cosine.
+    HIPTENSOR_OP_ATAN     = 33, ///< Inverse tangent.
+    HIPTENSOR_OP_ASINH    = 34, ///< Inverse hyperbolic sine.
+    HIPTENSOR_OP_ACOSH    = 35, ///< Inverse hyperbolic cosine.
+    HIPTENSOR_OP_ATANH    = 36, ///< Inverse hyperbolic tangent.
+    HIPTENSOR_OP_CEIL     = 37, ///< Ceiling.
+    HIPTENSOR_OP_FLOOR    = 38, ///< Floor.
 
     /* Binary */
-    //! Addition operator
-    HIPTENSOR_OP_ADD = 3,
-    //! Multiplication operator
-    HIPTENSOR_OP_MUL = 5,
-    //! Maximum operator
-    HIPTENSOR_OP_MAX = 6,
-    //! Minimum operator
-    HIPTENSOR_OP_MIN = 7,
+    HIPTENSOR_OP_ADD = 3, ///< Addition of two elements
+    HIPTENSOR_OP_MUL = 5, ///< Multiplication of two elements
+    HIPTENSOR_OP_MAX = 6, ///< Maximum of two elements
+    HIPTENSOR_OP_MIN = 7, ///< Minimum of two elements
 
-    //! Reserved
-    HIPTENSOR_OP_UNKNOWN = 126,
+    HIPTENSOR_OP_UNKNOWN = 126, ///< reserved for internal use only)
 } hiptensorOperator_t;
 
 //! @brief Tensor contraction kernel selection algorithm

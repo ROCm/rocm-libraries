@@ -9,7 +9,7 @@ Alphas:
 Lengths:
   - [ 5, 2, 3, 4]
 Operators:
-  - [HIPTENSOR_OP_SQRT, HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_IDENTITY]
 Permuted Dims:
   - [3, 0, 1, 2]
 ...

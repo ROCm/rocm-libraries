@@ -168,7 +168,7 @@ namespace hiptensor
 
         EXPECT_EQ(operators.size(), 2); // HIPTENSOR_OP_IDENTITY or HIPTENSOR_OP_SQRT
         auto op = operators[0];
-        EXPECT_TRUE((op == HIPTENSOR_OP_IDENTITY) || (op == HIPTENSOR_OP_SQRT));
+        EXPECT_TRUE((op == HIPTENSOR_OP_IDENTITY) || (op == HIPTENSOR_OP_NEG));
 
         EXPECT_EQ(dataTypes.size(), 2); // HIP_R_16F or HIP_R_32F
         auto abDataType = dataTypes[0];
@@ -213,8 +213,9 @@ namespace hiptensor
             {
                 auto resource = getResource();
 
-                size_t elementsA = resource->getCurrentMatrixElement();
-                size_t elementsB = elementsA;
+                size_t elementsA   = resource->getCurrentMatrixElement();
+                size_t elementsB   = elementsA;
+                size_t elementsRef = elementsA;
 
                 if(dataType == HIP_R_32F)
                 {
@@ -227,6 +228,11 @@ namespace hiptensor
                     hiptensorPrintArrayElements<float>(
                         stream, (float*)resource->hostB().get(), elementsB);
                     stream << std::endl;
+
+                    stream << "Tensor ref elements (" << elementsRef << "):\n";
+                    hiptensorPrintArrayElements<float>(
+                        stream, (float*)resource->hostReference().get(), elementsRef);
+                    stream << std::endl;
                 }
                 else
                 {
@@ -238,6 +244,11 @@ namespace hiptensor
                     stream << "Tensor B elements (" << elementsB << "):\n";
                     hiptensorPrintArrayElements<_Float16>(
                         stream, (_Float16*)resource->hostB().get(), elementsB);
+                    stream << std::endl;
+
+                    stream << "Tensor ref elements (" << elementsRef << "):\n";
+                    hiptensorPrintArrayElements<_Float16>(
+                        stream, (_Float16*)resource->hostReference().get(), elementsRef);
                     stream << std::endl;
                 }
             }

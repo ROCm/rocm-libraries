@@ -34,8 +34,6 @@ namespace ck::tensor_operation::device::instance
 {
     template <typename InDataTypeTuple,
               typename OutDataTypeTuple,
-              typename Aop,
-              typename Bop,
               typename Scale,
               index_t NumDim,
               index_t BlockSize                  = 0,
@@ -53,8 +51,6 @@ namespace ck::tensor_operation::device::instance
             return hiptensor::Hash{}(
                 hiptensor::HipDataType_v<typename ck::tuple_element_t<0, InDataTypeTuple>>,
                 hiptensor::HipDataType_v<typename ck::tuple_element_t<0, OutDataTypeTuple>>,
-                hiptensor::ElementWiseOperatorType_v<Aop>,
-                hiptensor::ElementWiseOperatorType_v<Bop>,
                 hiptensor::PermutationOperatorType_v<Scale>,
                 NumDim,
                 BlockSize,
@@ -81,8 +77,6 @@ namespace ck::tensor_operation::device::instance
     std::vector<hiptensor::Uid>
         getHashCodeOfBestPerfInstances(hipDataType                           typeIn,
                                        hipDataType                           typeOut,
-                                       hiptensorOperator_t                   aOp,
-                                       hiptensorOperator_t                   bOp,
                                        hiptensor::PermutationOpId_t          scale,
                                        index_t                               numDim,
                                        hiptensor::InstanceHyperParams const& hyperParams);

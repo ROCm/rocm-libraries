@@ -52,9 +52,11 @@ hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*        
                                   B,
                                   descA->mLengths,
                                   descA->mStrides,
+                                  descA->mUnaryOp,
                                   modeA,
                                   descB->mLengths,
                                   descB->mStrides,
+                                  descB->mUnaryOp,
                                   modeB,
                                   typeScalar))
         {

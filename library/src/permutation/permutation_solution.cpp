@@ -97,15 +97,27 @@ namespace hiptensor
                                           void*                           B,
                                           std::vector<std::size_t> const& a_lengths,
                                           std::vector<std::size_t> const& a_strides,
+                                          hiptensorOperator_t             opA,
                                           const int32_t                   modeA[],
                                           std::vector<std::size_t> const& b_lengths,
                                           std::vector<std::size_t> const& b_strides,
+                                          hiptensorOperator_t             opB,
                                           const int32_t                   modeB[],
                                           const hipDataType               typeScalar,
                                           StreamConfig const&             streamConfig)
     {
-        if(!initArgs(
-               alpha, A, B, a_lengths, a_strides, modeA, b_lengths, b_strides, modeB, typeScalar))
+        if(!initArgs(alpha,
+                     A,
+                     B,
+                     a_lengths,
+                     a_strides,
+                     opA,
+                     modeA,
+                     b_lengths,
+                     b_strides,
+                     opB,
+                     modeB,
+                     typeScalar))
         {
 #if !NDEBUG
             std::cout << kernelName() << " does not support this problem" << std::endl;

@@ -29,7 +29,7 @@
 
 #include <binary_element_wise_operation.hpp>
 #include <hip/hip_complex.h>
-#include <unary_element_wise_operation.hpp>
+#include <hiptensor_unary_element_wise_operation.hpp>
 
 namespace ck
 {

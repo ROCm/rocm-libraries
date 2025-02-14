@@ -73,7 +73,7 @@ namespace hiptensor
         auto scale     = usePassThroughIfAlphaIsOne ? hiptensor::PermutationOpId_t::PASS_THROUGH
                                                     : hiptensor::PermutationOpId_t::SCALE;
         auto hashCodes = ck::tensor_operation::device::instance::getHashCodeOfBestPerfInstances(
-            ADataType, BDataType, AOp, BOp, scale, nDims, instanceParams);
+            ADataType, BDataType, scale, nDims, instanceParams);
         std::vector<PermutationSolution*> solutions;
         for(auto hashCode : hashCodes)
         {

@@ -148,6 +148,28 @@ namespace llvm
             {
                 io.enumCase(value, "HIPTENSOR_OP_IDENTITY", HIPTENSOR_OP_IDENTITY);
                 io.enumCase(value, "HIPTENSOR_OP_SQRT", HIPTENSOR_OP_SQRT);
+                io.enumCase(value, "HIPTENSOR_OP_RELU", HIPTENSOR_OP_RELU);
+                io.enumCase(value, "HIPTENSOR_OP_CONJ", HIPTENSOR_OP_CONJ);
+                io.enumCase(value, "HIPTENSOR_OP_RCP", HIPTENSOR_OP_RCP);
+                io.enumCase(value, "HIPTENSOR_OP_SIGMOID", HIPTENSOR_OP_SIGMOID);
+                io.enumCase(value, "HIPTENSOR_OP_TANH", HIPTENSOR_OP_TANH);
+                io.enumCase(value, "HIPTENSOR_OP_EXP", HIPTENSOR_OP_EXP);
+                io.enumCase(value, "HIPTENSOR_OP_LOG", HIPTENSOR_OP_LOG);
+                io.enumCase(value, "HIPTENSOR_OP_ABS", HIPTENSOR_OP_ABS);
+                io.enumCase(value, "HIPTENSOR_OP_NEG", HIPTENSOR_OP_NEG);
+                io.enumCase(value, "HIPTENSOR_OP_SIN", HIPTENSOR_OP_SIN);
+                io.enumCase(value, "HIPTENSOR_OP_COS", HIPTENSOR_OP_COS);
+                io.enumCase(value, "HIPTENSOR_OP_TAN", HIPTENSOR_OP_TAN);
+                io.enumCase(value, "HIPTENSOR_OP_SINH", HIPTENSOR_OP_SINH);
+                io.enumCase(value, "HIPTENSOR_OP_COSH", HIPTENSOR_OP_COSH);
+                io.enumCase(value, "HIPTENSOR_OP_ASIN", HIPTENSOR_OP_ASIN);
+                io.enumCase(value, "HIPTENSOR_OP_ACOS", HIPTENSOR_OP_ACOS);
+                io.enumCase(value, "HIPTENSOR_OP_ATAN", HIPTENSOR_OP_ATAN);
+                io.enumCase(value, "HIPTENSOR_OP_ASINH", HIPTENSOR_OP_ASINH);
+                io.enumCase(value, "HIPTENSOR_OP_ACOSH", HIPTENSOR_OP_ACOSH);
+                io.enumCase(value, "HIPTENSOR_OP_ATANH", HIPTENSOR_OP_ATANH);
+                io.enumCase(value, "HIPTENSOR_OP_CEIL", HIPTENSOR_OP_CEIL);
+                io.enumCase(value, "HIPTENSOR_OP_FLOOR", HIPTENSOR_OP_FLOOR);
                 io.enumCase(value, "HIPTENSOR_OP_ADD", HIPTENSOR_OP_ADD);
                 io.enumCase(value, "HIPTENSOR_OP_MUL", HIPTENSOR_OP_MUL);
                 io.enumCase(value, "HIPTENSOR_OP_MIN", HIPTENSOR_OP_MIN);

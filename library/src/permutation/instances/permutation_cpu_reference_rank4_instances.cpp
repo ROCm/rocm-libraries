@@ -26,6 +26,7 @@
 
 #include "../permutation_cpu_reference_impl.hpp"
 #include "../permutation_cpu_reference_instances.hpp"
+#include <hiptensor_unary_element_wise_operation.hpp>
 
 namespace hiptensor
 {
@@ -36,64 +37,16 @@ namespace hiptensor
         registerSolutions(
             enumerateReferenceSolutions<ck::Tuple<float>,
                                         ck::Tuple<float>,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<float>,
-                                        ck::Tuple<float>,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<float>,
-                                        ck::Tuple<float>,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<float>,
-                                        ck::Tuple<float>,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::UnarySquare,
+                                        ck::tensor_operation::element_wise::HiptensorUnaryOp,
+                                        ck::tensor_operation::element_wise::HiptensorUnaryOp,
                                         ck::tensor_operation::element_wise::Scale,
                                         4>());
 
         registerSolutions(
             enumerateReferenceSolutions<ck::Tuple<ck::half_t>,
                                         ck::Tuple<ck::half_t>,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<ck::half_t>,
-                                        ck::Tuple<ck::half_t>,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<ck::half_t>,
-                                        ck::Tuple<ck::half_t>,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::PassThrough,
-                                        ck::tensor_operation::element_wise::Scale,
-                                        4>());
-
-        registerSolutions(
-            enumerateReferenceSolutions<ck::Tuple<ck::half_t>,
-                                        ck::Tuple<ck::half_t>,
-                                        ck::tensor_operation::element_wise::UnarySquare,
-                                        ck::tensor_operation::element_wise::UnarySquare,
+                                        ck::tensor_operation::element_wise::HiptensorUnaryOp,
+                                        ck::tensor_operation::element_wise::HiptensorUnaryOp,
                                         ck::tensor_operation::element_wise::Scale,
                                         4>());
     }

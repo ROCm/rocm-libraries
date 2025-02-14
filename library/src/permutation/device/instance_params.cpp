@@ -31,8 +31,6 @@ namespace ck::tensor_operation::device::instance
     std::vector<hiptensor::Uid>
         getHashCodeOfBestPerfInstances(hipDataType                           typeIn,
                                        hipDataType                           typeOut,
-                                       hiptensorOperator_t                   aOp,
-                                       hiptensorOperator_t                   bOp,
                                        hiptensor::PermutationOpId_t          scale,
                                        index_t                               numDim,
                                        hiptensor::InstanceHyperParams const& hyperParams)
@@ -50,8 +48,6 @@ namespace ck::tensor_operation::device::instance
         index_t                     inScalarPerVectorSeq      = std::get<6>(hyperParams);
         hashCodes.push_back(hiptensor::Hash{}(typeIn,
                                               typeOut,
-                                              aOp,
-                                              bOp,
                                               scale,
                                               numDim,
                                               blockSize,
@@ -67,32 +63,32 @@ namespace ck::tensor_operation::device::instance
         // clang-format off
         if (numDim == 2) {
             if (typeIn == HIP_R_16F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 64  , 32  , 128 , 8 , 8 , 0 , 1 , 2 , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 64  , 32  , 128 , 8 , 8 , 0 , 1 , 1 , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 64  , 32  , 128 , 8 , 8 , 0 , 1 , 2 , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 64  , 32  , 128 , 8 , 8 , 0 , 1 , 1 , 1));
             } else if (typeIn == HIP_R_32F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
             }
         } else if (numDim == 3) {
             if (typeIn == HIP_R_16F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 128 , 128 , 8 , 8 , 0 , 1 , 2 , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 128 , 128 , 8 , 8 , 0 , 1 , 1 , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 128 , 128 , 8 , 8 , 0 , 1 , 2 , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 128 , 128 , 8 , 8 , 0 , 1 , 1 , 1));
             } else if (typeIn == HIP_R_32F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
             }
         } else if (numDim == 4) {
             if (typeIn == HIP_R_16F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 64  , 128 , 32  , 8  , 8  , 0 , 1 , 2  , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 64  , 128 , 32  , 8  , 8  , 0 , 1 , 1  , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 64  , 128 , 32  , 8  , 8  , 0 , 1 , 2  , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 64  , 128 , 32  , 8  , 8  , 0 , 1 , 1  , 1));
             } else if (typeIn == HIP_R_32F) {
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
-                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
+                hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
             }
         } else if (numDim == 5 || numDim == 6) {
-            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 4 , 4));
-            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
-            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , aOp , bOp , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
+            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 4 , 4));
+            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 2 , 2));
+            hashCodes.push_back(hiptensor::Hash{}( typeIn , typeOut , scale , numDim , 256 , 64  , 64  , 4 , 4 , 0 , 1 , 1 , 1));
         }
         // clang-format on
 

@@ -57,13 +57,6 @@ namespace hiptensor
         UNKNOWN,
     };
 
-    // Map type to runtime hiptensorOperator_t
-    template <typename OpId>
-    struct ElementWiseOperatorType;
-
-    template <typename OpId>
-    static constexpr auto ElementWiseOperatorType_v = ElementWiseOperatorType<OpId>::value;
-
     // Map type to runtime PermutationOpId_t
     template <typename OpId>
     struct PermutationOperatorType;

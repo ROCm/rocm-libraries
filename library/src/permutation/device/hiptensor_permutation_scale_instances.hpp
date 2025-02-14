@@ -128,8 +128,6 @@ namespace ck
                         container.insert(
                             {DeviceElementwiseParams<InDataTypeTuple,
                                                      OutDataTypeTuple,
-                                                     Aop,
-                                                     Bop,
                                                      Scale,
                                                      NumDim,
                                                      BlockSize,

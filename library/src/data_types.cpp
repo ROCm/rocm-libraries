@@ -31,119 +31,73 @@ namespace hiptensor
     // Get data size in bytes from id
     uint32_t hipDataTypeSize(hipDataType id)
     {
-        if(id == HIP_R_16BF)
+        switch(id)
         {
+        case HIP_R_16BF:
             return sizeof(hip_bfloat16);
-        }
-        else if(id == HIP_R_16F)
-        {
+        case HIP_R_16F:
             return sizeof(_Float16);
-        }
-        else if(id == HIP_R_32F)
-        {
+        case HIP_R_32F:
             return sizeof(float);
-        }
-        else if(id == HIP_R_64F)
-        {
+        case HIP_R_64F:
             return sizeof(double);
-        }
-        else if(id == HIP_R_8I)
-        {
+        case HIP_R_8I:
             return sizeof(int8_t);
-        }
-        else if(id == HIP_R_8U)
-        {
+        case HIP_R_8U:
             return sizeof(uint8_t);
-        }
-        else if(id == HIP_R_16I)
-        {
+        case HIP_R_16I:
             return sizeof(int16_t);
-        }
-        else if(id == HIP_R_16U)
-        {
+        case HIP_R_16U:
             return sizeof(uint16_t);
-        }
-        else if(id == HIP_R_32I)
-        {
+        case HIP_R_32I:
             return sizeof(int32_t);
-        }
-        else if(id == HIP_R_32U)
-        {
+        case HIP_R_32U:
             return sizeof(uint32_t);
-        }
-        else if(id == HIP_R_64I)
-        {
+        case HIP_R_64I:
             return sizeof(int64_t);
-        }
-        else if(id == HIP_R_64U)
-        {
+        case HIP_R_64U:
             return sizeof(uint64_t);
-        }
-        else if(id == HIP_C_32F)
-        {
+        case HIP_C_32F:
             return sizeof(hipFloatComplex);
-        }
-        else if(id == HIP_C_64F)
-        {
+        case HIP_C_64F:
             return sizeof(hipDoubleComplex);
-        }
-        else if(id == NONE_TYPE)
-        {
+        case NONE_TYPE:
             return 0;
-        }
-        else
+        default:
         {
 #if !NDEBUG
             std::cout << "Unhandled hip datatype: " << id << std::endl;
 #endif // !NDEBUG
             return 0;
         }
+        }
     }
 
     hiptensorComputeType_t convertToComputeType(hipDataType hipType)
     {
-        if(hipType == HIP_R_16BF)
+        switch(hipType)
         {
+        case HIP_R_16BF:
             return HIPTENSOR_COMPUTE_16BF;
-        }
-        else if(hipType == HIP_R_16F)
-        {
+        case HIP_R_16F:
             return HIPTENSOR_COMPUTE_16F;
-        }
-        else if(hipType == HIP_R_32F)
-        {
+        case HIP_R_32F:
             return HIPTENSOR_COMPUTE_32F;
-        }
-        else if(hipType == HIP_R_64F)
-        {
+        case HIP_R_64F:
             return HIPTENSOR_COMPUTE_64F;
-        }
-        else if(hipType == HIP_R_8I)
-        {
+        case HIP_R_8I:
             return HIPTENSOR_COMPUTE_8I;
-        }
-        else if(hipType == HIP_R_8U)
-        {
+        case HIP_R_8U:
             return HIPTENSOR_COMPUTE_8U;
-        }
-        else if(hipType == HIP_R_32I)
-        {
+        case HIP_R_32I:
             return HIPTENSOR_COMPUTE_32I;
-        }
-        else if(hipType == HIP_R_32U)
-        {
+        case HIP_R_32U:
             return HIPTENSOR_COMPUTE_32U;
-        }
-        else if(hipType == HIP_C_32F)
-        {
+        case HIP_C_32F:
             return HIPTENSOR_COMPUTE_C32F;
-        }
-        else if(hipType == HIP_C_64F)
-        {
+        case HIP_C_64F:
             return HIPTENSOR_COMPUTE_C64F;
-        }
-        else
-        {
+        default:
             return HIPTENSOR_COMPUTE_NONE;
         }
     }
@@ -152,305 +106,295 @@ namespace hiptensor
     template <>
     ScalarData readVal(void const* value, hiptensorComputeType_t id)
     {
-        if(id == HIPTENSOR_COMPUTE_16F)
+        switch(id)
+        {
+        case HIPTENSOR_COMPUTE_16F:
         {
             return ScalarData(id, *(_Float16*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_16BF)
+        case HIPTENSOR_COMPUTE_16BF:
         {
             return ScalarData(id, *(hip_bfloat16*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_32F)
+        case HIPTENSOR_COMPUTE_32F:
         {
             return ScalarData(id, *(float*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_64F)
+        case HIPTENSOR_COMPUTE_64F:
         {
             return ScalarData(id, *(double*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_8U)
+        case HIPTENSOR_COMPUTE_8U:
         {
             return ScalarData(id, *(uint8_t*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_8I)
+        case HIPTENSOR_COMPUTE_8I:
         {
             return ScalarData(id, *(int8_t*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_32U)
+        case HIPTENSOR_COMPUTE_32U:
         {
             return ScalarData(id, *(uint32_t*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_32I)
+        case HIPTENSOR_COMPUTE_32I:
         {
             return ScalarData(id, *(int32_t*)value);
         }
-        else if(id == HIPTENSOR_COMPUTE_C32F)
+        case HIPTENSOR_COMPUTE_C32F:
         {
             auto complex = *(hipFloatComplex*)value;
             return {id, complex.x, complex.y};
         }
-        else if(id == HIPTENSOR_COMPUTE_C64F)
+        case HIPTENSOR_COMPUTE_C64F:
         {
             auto complex = *(hipDoubleComplex*)value;
             return {id, complex.x, complex.y};
         }
-        else
+        default:
         {
 #if !NDEBUG
             std::cout << "Unhandled hiptensorComputeType_t: " << id << std::endl;
 #endif // !NDEBUG
             return {HIPTENSOR_COMPUTE_NONE, 0, 0};
         }
+        }
     }
     // @endcond
 
     void writeVal(void const* addr, hiptensorComputeType_t id, ScalarData value)
     {
-        if(id == HIPTENSOR_COMPUTE_16F)
+        switch(id)
+        {
+        case HIPTENSOR_COMPUTE_16F:
         {
             *(_Float16*)addr = value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_16BF)
+        case HIPTENSOR_COMPUTE_16BF:
         {
             *(hip_bfloat16*)addr = value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_32F)
+        case HIPTENSOR_COMPUTE_32F:
         {
             *(float*)addr = value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_64F)
+        case HIPTENSOR_COMPUTE_64F:
         {
             *(double*)addr = value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_8U)
+        case HIPTENSOR_COMPUTE_8U:
         {
             *(uint8_t*)addr = (uint8_t)value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_8I)
+        case HIPTENSOR_COMPUTE_8I:
         {
             *(int8_t*)addr = (int8_t)value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_32U)
+        case HIPTENSOR_COMPUTE_32U:
         {
             *(uint32_t*)addr = (uint32_t)value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_32I)
+        case HIPTENSOR_COMPUTE_32I:
         {
             *(int32_t*)addr = (int32_t)value.mReal;
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_C32F)
+        case HIPTENSOR_COMPUTE_C32F:
         {
             *(hipFloatComplex*)addr = hipComplexDoubleToFloat(value.mComplex);
+            return;
         }
-        else if(id == HIPTENSOR_COMPUTE_C64F)
+        case HIPTENSOR_COMPUTE_C64F:
         {
             *(hipDoubleComplex*)addr = value.mComplex;
+            return;
         }
-        else
+        default:
         {
 #if !NDEBUG
             std::cout << "Unhandled hiptensorComputeType_t: " << id << std::endl;
 #endif // !NDEBUG
             return;
         }
+        }
     }
 
     std::string computeTypeToString(hiptensorComputeType_t computeType)
     {
-        if(computeType == HIPTENSOR_COMPUTE_16BF)
+        switch(computeType)
         {
+        case HIPTENSOR_COMPUTE_16BF:
             return "HIPTENSOR_COMPUTE_16BF";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_16F)
-        {
+        case HIPTENSOR_COMPUTE_16F:
             return "HIPTENSOR_COMPUTE_16F";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_32F)
-        {
+        case HIPTENSOR_COMPUTE_32F:
             return "HIPTENSOR_COMPUTE_32F";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_64F)
-        {
+        case HIPTENSOR_COMPUTE_64F:
             return "HIPTENSOR_COMPUTE_64F";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_8I)
-        {
+        case HIPTENSOR_COMPUTE_8I:
             return "HIPTENSOR_COMPUTE_8I";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_8U)
-        {
+        case HIPTENSOR_COMPUTE_8U:
             return "HIPTENSOR_COMPUTE_8U";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_32I)
-        {
+        case HIPTENSOR_COMPUTE_32I:
             return "HIPTENSOR_COMPUTE_32I";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_32U)
-        {
+        case HIPTENSOR_COMPUTE_32U:
             return "HIPTENSOR_COMPUTE_32U";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_C32F)
-        {
+        case HIPTENSOR_COMPUTE_C32F:
             return "HIPTENSOR_COMPUTE_C32F";
-        }
-        else if(computeType == HIPTENSOR_COMPUTE_C64F)
-        {
+        case HIPTENSOR_COMPUTE_C64F:
             return "HIPTENSOR_COMPUTE_C64F";
-        }
-        else
-        {
+        default:
             return "HIPTENSOR_COMPUTE_NONE";
         }
     }
 
     std::string hipTypeToString(hipDataType hipType)
     {
-        if(hipType == HIP_R_16BF)
+        switch(hipType)
         {
+        case HIP_R_16BF:
             return "HIP_R_16BF";
-        }
-        else if(hipType == HIP_R_16F)
-        {
+        case HIP_R_16F:
             return "HIP_R_16F";
-        }
-        else if(hipType == HIP_R_32F)
-        {
+        case HIP_R_32F:
             return "HIP_R_32F";
-        }
-        else if(hipType == HIP_R_64F)
-        {
+        case HIP_R_64F:
             return "HIP_R_64F";
-        }
-        else if(hipType == HIP_R_8I)
-        {
+        case HIP_R_8I:
             return "HIP_R_8I";
-        }
-        else if(hipType == HIP_R_8U)
-        {
+        case HIP_R_8U:
             return "HIP_R_8U";
-        }
-        else if(hipType == HIP_R_32I)
-        {
+        case HIP_R_32I:
             return "HIP_R_32I";
-        }
-        else if(hipType == HIP_R_32U)
-        {
+        case HIP_R_32U:
             return "HIP_R_32U";
-        }
-        else if(hipType == HIP_C_32F)
-        {
+        case HIP_C_32F:
             return "HIP_C_32F";
-        }
-        else if(hipType == HIP_C_64F)
-        {
+        case HIP_C_64F:
             return "HIP_C_64F";
-        }
-        else
-        {
+        default:
             return "HIP_TYPE_NONE";
         }
     }
 
     std::string opTypeToString(hiptensorOperator_t opType)
     {
-        if(opType == HIPTENSOR_OP_IDENTITY)
+        switch(opType)
         {
+        case HIPTENSOR_OP_IDENTITY:
             return "HIPTENSOR_OP_IDENTITY";
-        }
-        else if(opType == HIPTENSOR_OP_SQRT)
-        {
+        case HIPTENSOR_OP_SQRT:
             return "HIPTENSOR_OP_SQRT";
-        }
-        else if(opType == HIPTENSOR_OP_ADD)
-        {
+        case HIPTENSOR_OP_RELU:
+            return "HIPTENSOR_OP_RELU";
+        case HIPTENSOR_OP_CONJ:
+            return "HIPTENSOR_OP_CONJ";
+        case HIPTENSOR_OP_RCP:
+            return "HIPTENSOR_OP_RCP";
+        case HIPTENSOR_OP_SIGMOID:
+            return "HIPTENSOR_OP_SIGMOID";
+        case HIPTENSOR_OP_TANH:
+            return "HIPTENSOR_OP_TANH";
+        case HIPTENSOR_OP_EXP:
+            return "HIPTENSOR_OP_EXP";
+        case HIPTENSOR_OP_LOG:
+            return "HIPTENSOR_OP_LOG";
+        case HIPTENSOR_OP_ABS:
+            return "HIPTENSOR_OP_ABS";
+        case HIPTENSOR_OP_NEG:
+            return "HIPTENSOR_OP_NEG";
+        case HIPTENSOR_OP_SIN:
+            return "HIPTENSOR_OP_SIN";
+        case HIPTENSOR_OP_COS:
+            return "HIPTENSOR_OP_COS";
+        case HIPTENSOR_OP_TAN:
+            return "HIPTENSOR_OP_TAN";
+        case HIPTENSOR_OP_SINH:
+            return "HIPTENSOR_OP_SINH";
+        case HIPTENSOR_OP_COSH:
+            return "HIPTENSOR_OP_COSH";
+        case HIPTENSOR_OP_ASIN:
+            return "HIPTENSOR_OP_ASIN";
+        case HIPTENSOR_OP_ACOS:
+            return "HIPTENSOR_OP_ACOS";
+        case HIPTENSOR_OP_ATAN:
+            return "HIPTENSOR_OP_ATAN";
+        case HIPTENSOR_OP_ASINH:
+            return "HIPTENSOR_OP_ASINH";
+        case HIPTENSOR_OP_ACOSH:
+            return "HIPTENSOR_OP_ACOSH";
+        case HIPTENSOR_OP_ATANH:
+            return "HIPTENSOR_OP_ATANH";
+        case HIPTENSOR_OP_CEIL:
+            return "HIPTENSOR_OP_CEIL";
+        case HIPTENSOR_OP_FLOOR:
+            return "HIPTENSOR_OP_FLOOR";
+        case HIPTENSOR_OP_ADD:
             return "HIPTENSOR_OP_ADD";
-        }
-        else if(opType == HIPTENSOR_OP_MUL)
-        {
+        case HIPTENSOR_OP_MUL:
             return "HIPTENSOR_OP_MUL";
-        }
-        else if(opType == HIPTENSOR_OP_MAX)
-        {
+        case HIPTENSOR_OP_MAX:
             return "HIPTENSOR_OP_MAX";
-        }
-        else if(opType == HIPTENSOR_OP_MIN)
-        {
+        case HIPTENSOR_OP_MIN:
             return "HIPTENSOR_OP_MIN";
-        }
-        else
-        {
+        default:
             return "HIPTENSOR_OP_UNKNOWN";
         }
     }
 
     std::string algoTypeToString(hiptensorAlgo_t algoType)
     {
-        if(algoType == HIPTENSOR_ALGO_ACTOR_CRITIC)
+        switch(algoType)
         {
+        case HIPTENSOR_ALGO_ACTOR_CRITIC:
             return "HIPTENSOR_ALGO_ACTOR_CRITIC";
-        }
-        else if(algoType == HIPTENSOR_ALGO_DEFAULT)
-        {
+        case HIPTENSOR_ALGO_DEFAULT:
             return "HIPTENSOR_ALGO_DEFAULT";
-        }
-        else if(algoType == HIPTENSOR_ALGO_DEFAULT_PATIENT)
-        {
+        case HIPTENSOR_ALGO_DEFAULT_PATIENT:
             return "HIPTENSOR_ALGO_DEFAULT_PATIENT";
-        }
-        else
-        {
+        default:
             return "HIPTENSOR_ALGO_UNKNOWN";
         }
     }
 
     std::string logLevelToString(hiptensorLogLevel_t logLevel)
     {
-        if(logLevel == HIPTENSOR_LOG_LEVEL_OFF)
+        switch(logLevel)
         {
+        case HIPTENSOR_LOG_LEVEL_OFF:
             return "HIPTENSOR_LOG_LEVEL_OFF";
-        }
-        else if(logLevel == HIPTENSOR_LOG_LEVEL_ERROR)
-        {
+        case HIPTENSOR_LOG_LEVEL_ERROR:
             return "HIPTENSOR_LOG_LEVEL_ERROR";
-        }
-        else if(logLevel == HIPTENSOR_LOG_LEVEL_PERF_TRACE)
-        {
+        case HIPTENSOR_LOG_LEVEL_PERF_TRACE:
             return "HIPTENSOR_LOG_LEVEL_PERF_TRACE";
-        }
-        else if(logLevel == HIPTENSOR_LOG_LEVEL_PERF_HINT)
-        {
+        case HIPTENSOR_LOG_LEVEL_PERF_HINT:
             return "HIPTENSOR_LOG_LEVEL_PERF_HINT";
-        }
-        else if(logLevel == HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE)
-        {
+        case HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE:
             return "HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE";
-        }
-        else if(logLevel == HIPTENSOR_LOG_LEVEL_API_TRACE)
-        {
+        case HIPTENSOR_LOG_LEVEL_API_TRACE:
             return "HIPTENSOR_LOG_LEVEL_API_TRACE";
-        }
-        else
-        {
+        default:
             return "HIPTENSOR_LOG_LEVEL_UNKNOWN";
         }
     }
 
     std::string workSizePrefToString(hiptensorWorksizePreference_t workSize)
     {
-        if(workSize == HIPTENSOR_WORKSPACE_MIN)
+        switch(workSize)
         {
+        case HIPTENSOR_WORKSPACE_MIN:
             return "HIPTENSOR_WORKSPACE_MIN";
-        }
-        else if(workSize == HIPTENSOR_WORKSPACE_RECOMMENDED)
-        {
+        case HIPTENSOR_WORKSPACE_RECOMMENDED:
             return "HIPTENSOR_WORKSPACE_RECOMMENDED";
-        }
-        else if(workSize == HIPTENSOR_WORKSPACE_MAX)
-        {
+        case HIPTENSOR_WORKSPACE_MAX:
             return "HIPTENSOR_WORKSPACE_MAX";
-        }
-        else
-        {
+        default:
             return "HIPTENSOR_WORKSPACE_UNKNOWN";
         }
     }

@@ -170,6 +170,9 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
   add_compile_options("SHELL: -mllvm -amdgpu-function-calls=false")
 endif()
 
+find_package( composable_kernel 1.0.0 REQUIRED PATHS $ENV{CK_DIR}/lib/cmake /opt/rocm /opt/rocm/ck COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
+rocm_package_add_dependencies("composable_kernel >= 1.0.0" COMPONENT tests)
+
 # Configure library build
 add_subdirectory(library/src)
 
