@@ -61,7 +61,7 @@ namespace rocRoller
                     auto coord = graph.mapper.get<MacroTile>(node);
                     m_loadMap[coord].insert(node);
                     m_storageDataType[graph.mapper.get<MacroTile>(node)]
-                        = getDataType(std::get<Operation>(graph.control.getElement(node)));
+                        = getDataType(graph.control.getNode(node));
                 }
             }
 
@@ -129,8 +129,7 @@ namespace rocRoller
 
                     for(auto const& edge : loc.outgoing)
                     {
-                        if(!CT::isEdge<DataFlow>(
-                               std::get<Edge>(graph.coordinates.getElement(edge))))
+                        if(!CT::isEdge<DataFlow>(graph.coordinates.getEdge(edge)))
                             continue;
 
                         auto             edgeLoc = graph.coordinates.getLocation(edge);

@@ -316,7 +316,7 @@ namespace rocRoller::KernelGraph
             op,
             location);
 
-        auto dtype = getDataType(std::get<Operation>(graph.control.getElement(op)));
+        auto dtype = getDataType(graph.control.getNode(op));
 
         auto [target, direction] = getOperationTarget(op, graph);
 
@@ -492,8 +492,7 @@ namespace rocRoller::KernelGraph
             log->debug("  target: {}", target);
             for(auto r : required)
             {
-                auto e = std::get<Dimension>(kgraph.coordinates.getElement(r));
-                log->debug("  required: {}: {}", r, toString(e));
+                log->debug("  required: {}: {}", r, toString(kgraph.coordinates.getNode(r)));
             }
 
             auto maybeForLoop  = findContainingOperation<ForLoopOp>(candidate, kgraph);

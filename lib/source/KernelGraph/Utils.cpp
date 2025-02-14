@@ -630,7 +630,7 @@ namespace rocRoller
                     bool isLeaf = true;
                     for(auto edgeTag : kgraph.coordinates.getNeighbours(tag, direction))
                     {
-                        auto edge = std::get<CT::Edge>(kgraph.coordinates.getElement(edgeTag));
+                        auto edge = kgraph.coordinates.getEdge(edgeTag);
                         if(std::holds_alternative<CT::CoordinateTransformEdge>(edge))
                         {
                             // If a connected node, in the opposing

@@ -1,7 +1,7 @@
 #!/bin/bash -ex
 
 # Installs CodeQL binaries in /opt/codeql
-VERSION=v2.12.1
+VERSION=v2.20.4
 DESTINATION=/opt/codeql
 
 mkdir -p $DESTINATION

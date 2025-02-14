@@ -1424,9 +1424,8 @@ namespace rocRoller
             loopInfo.accumulatorLoopOp = *maybeAccumLoopOp;
 
             auto loopLength = [&](int tag) {
-                auto dimTag = original.mapper.get(tag, NaryArgument::DEST);
-                auto sizeExpr
-                    = getSize(std::get<Dimension>(original.coordinates.getElement(dimTag)));
+                auto dimTag   = original.mapper.get(tag, NaryArgument::DEST);
+                auto sizeExpr = getSize(original.coordinates.getNode(dimTag));
 
                 AssertFatal(
                     Expression::evaluationTimes(sizeExpr)[Expression::EvaluationTime::Translate],

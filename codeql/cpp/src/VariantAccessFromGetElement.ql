@@ -15,5 +15,5 @@ where
   getElement.getTarget().hasName("getElement") and
   (f.getTarget().hasName("get") or f.getTarget().hasName("holds_alternative")) and
   f.getArgument(0) = getElement and
-  f.getLocation().getFile().getBaseName() != "Hypergraph_impl.hpp"
+  (f.getLocation().getFile().getBaseName() != "Hypergraph_impl.hpp" and f.getLocation().getFile().getBaseName() != "HypergraphTest.cpp")
 select f, "Variant access from getElement; use graph.get<> instead."

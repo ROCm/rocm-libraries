@@ -364,13 +364,13 @@ namespace rocRoller
         /**
          * Lower rank-2 TensorContraction into a matrix multiply.
          */
-        void lowerMatrixMultiply(KernelGraph&             graph,
-                                 int                      tag,
-                                 int                      a,
-                                 int                      b,
-                                 int                      d,
-                                 CommandParametersPtr     params,
-                                 std::shared_ptr<Context> context)
+        void lowerMatrixMultiply(KernelGraph&         graph,
+                                 int                  tag,
+                                 int                  a,
+                                 int                  b,
+                                 int                  d,
+                                 CommandParametersPtr params,
+                                 ContextPtr           context)
         {
             rocRoller::Log::debug("KernelGraph::lowerMatrixMultiply({})", tag);
 

@@ -29,7 +29,7 @@ namespace rocRoller
             if(!onlyUnroll.contains(name))
                 return 1u;
             auto dimTag        = graph.mapper.get(loopTag, NaryArgument::DEST);
-            auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));
+            auto forLoopLength = getSize(graph.coordinates.getNode(dimTag));
             auto unrollK       = params->unrollK;
             // Find the number of forLoops following this for loop.
             if(name == rocRoller::KLOOP && unrollK > 0)
@@ -464,7 +464,7 @@ namespace rocRoller
                 int  unrollDimension = graph.coordinates.addElement(Unroll(unrollAmount));
                 for(auto const& input : forLoopLocation.incoming)
                 {
-                    if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(input))))
+                    if(isEdge<PassThrough>(graph.coordinates.getEdge(input)))
                     {
                         int parent = *graph.coordinates.getNeighbours<GD::Upstream>(input).begin();
                         graph.coordinates.addElement(
@@ -476,7 +476,7 @@ namespace rocRoller
                 // them with a Join edge with an Unroll dimension.
                 for(auto const& output : forLoopLocation.outgoing)
                 {
-                    if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(output))))
+                    if(isEdge<PassThrough>(graph.coordinates.getEdge(output)))
                     {
                         int child
                             = *graph.coordinates.getNeighbours<GD::Downstream>(output).begin();
