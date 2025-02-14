@@ -311,7 +311,15 @@ class LibcxxTestFormat(object):
             # nodiscard before enabling it
             test_str_list = [b"ignoring return value", b"nodiscard", b"NODISCARD"]
             if any(test_str in contents for test_str in test_str_list):
-                test_cxx.flags += ["-Werror=unused-result"]
+                if test_cxx.type != "nvc++":
+                    test_cxx.flags += [
+                        "-Xcompiler",
+                        "-Werror",
+                        "-Xcompiler",
+                        "-Wunused",
+                    ]
+                else:
+                    test_cxx.flags += ["-Xcompiler", "-Werror=unused-result"]
         cmd = ""
         out = "None"
         report = ""
