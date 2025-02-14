@@ -51,6 +51,7 @@ namespace rocwmma
             GFX940           = Constants::AMDGCN_ARCH_ID_GFX940,
             GFX941           = Constants::AMDGCN_ARCH_ID_GFX941,
             GFX942           = Constants::AMDGCN_ARCH_ID_GFX942,
+            GFX950           = Constants::AMDGCN_ARCH_ID_GFX950,
             GFX1100          = Constants::AMDGCN_ARCH_ID_GFX1100,
             GFX1101          = Constants::AMDGCN_ARCH_ID_GFX1101,
             GFX1102          = Constants::AMDGCN_ARCH_ID_GFX1102,

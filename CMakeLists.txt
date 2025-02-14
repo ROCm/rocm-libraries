@@ -102,10 +102,10 @@ endif()
 if (ADDRESS_SANITIZER_ENABLED)
     #TODO: Remove next line when rocm-cmake fix is available
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx90a:xnack+;gfx942:xnack+" )
+        TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201" )
 endif()
 
 # Check if offload compression is supported
