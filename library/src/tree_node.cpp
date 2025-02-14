@@ -106,14 +106,6 @@ void LeafNode::GetKernelFactors()
 {
     FMKey key     = GetKernelKey();
     kernelFactors = function_pool::get_kernel(key).factors;
-
-    // Hard-coded kernel factors for len 64x64x64 partial-pass
-    // TODO: Remove this hard-coded logic once
-    // partial-pass is integrated into the stockham generators.
-    if(scheme == CS_KERNEL_STOCKHAM && applyPartialPass)
-        kernelFactors = {8, 8};
-    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC && applyPartialPass)
-        kernelFactors = {8, 8};
 }
 
 void LeafNode::GetKernelPartialPassFactors()
