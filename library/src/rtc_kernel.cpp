@@ -29,8 +29,6 @@
 #include "logging.h"
 #include "rtc_bluestein_kernel.h"
 #include "rtc_cache.h"
-#include "rtc_partial_pass_sbcc_64_64_64.h"
-#include "rtc_partial_pass_sbrr_64_64_64.h"
 #include "rtc_realcomplex_kernel.h"
 #include "rtc_stockham_kernel.h"
 #include "rtc_transpose_kernel.h"
@@ -153,12 +151,6 @@ std::shared_future<std::unique_ptr<RTCKernel>>
         generator = RTCKernelBluesteinSingle::generate_from_node(node, gpu_arch, enable_callbacks);
     if(!generator.valid())
         generator = RTCKernelBluesteinMulti::generate_from_node(node, gpu_arch, enable_callbacks);
-    if(!generator.valid())
-        generator
-            = RTCKernelPartialPassSBRR64Cubed::generate_from_node(node, gpu_arch, enable_callbacks);
-    if(!generator.valid())
-        generator
-            = RTCKernelPartialPassSBCC64Cubed::generate_from_node(node, gpu_arch, enable_callbacks);
 
     if(generator.valid())
     {

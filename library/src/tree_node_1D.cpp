@@ -908,19 +908,6 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
     if(ebtype != EmbeddedType::NONE)
         lds_padding = 1;
 
-    if(applyPartialPass)
-    {
-        // Special case for partial pass 64 x 64 x 64.
-        // Kernel configuration is hardcoded for now.
-        // TODO: Once the partial-pass kernels are properly
-        // integrated into the Stockham kernel generators,
-        // this configuration will come from the usual location
-        // in kernel-generator.py.
-        kernel.threads_per_transform[0] = 8;
-        kernel.workgroup_size           = 128;
-        kernel.transforms_per_block     = kernel.workgroup_size / kernel.threads_per_transform[0];
-    }
-
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
     gp.b_x   = (batch_accum + bwd - 1) / bwd;
@@ -944,6 +931,10 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
         else
             lds = (length[0] + lds_padding) * bwd;
     }
+
+    std::cout << "gp.b_x: " << gp.b_x << std::endl;
+    std::cout << "gp.wgs_x: " << gp.wgs_x << std::endl;
+    std::cout << "lds: " << lds << std::endl;
 }
 
 bool Stockham1DNode::CreateDeviceResources()
@@ -1135,35 +1126,15 @@ void SBCCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
-    if(applyPartialPass)
-    {
-        // Special case for partial pass 64 x 64 x 64.
-        // Kernel configration is hardcoded for now.
-        // TODO: Once the partial-pass kernels are integrated
-        // into the stockham kernel generators, change this
-        // configuration to use kernel-generator.py data.
-        auto tpt = 8;
-        wgs      = 64;
-        bwd      = wgs / tpt;
-    }
-
     lds = length[0] * bwd;
 
     gp.b_x = ((length[1]) - 1) / bwd + 1;
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
 
-    if(applyPartialPass)
-    {
-        // grid and thread organization is different
-        // on partial pass sbcc kernels (for improved
-        // global memory access patterns).
-        auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
-
-        gp.b_x /= factor;
-        gp.wgs_x *= factor;
-        lds *= factor;
-    }
+    std::cout << "gp.b_x: " << gp.b_x << std::endl;
+    std::cout << "gp.wgs_x: " << gp.wgs_x << std::endl;
+    std::cout << "lds: " << lds << std::endl;
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()

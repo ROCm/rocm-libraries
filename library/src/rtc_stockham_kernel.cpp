@@ -179,7 +179,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         else if(node.scheme == CS_KERNEL_STOCKHAM)
             ppType = PartialPassType::PPT_SBRR;
         else
-            throw std::runtime_error("Invalid scheme for partial pass");
+            throw std::runtime_error("Invalid scheme for partial pass");        
     }
 
     generator.generate_name = [=, &node]() {
@@ -249,6 +249,8 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs;
 
     // twiddles
+    if(data.node->applyPartialPass && data.node->scheme == CS_KERNEL_STOCKHAM)
+        kargs.append_ptr(data.node->twiddles_pp);
     kargs.append_ptr(data.node->twiddles);
     // large 1D twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)

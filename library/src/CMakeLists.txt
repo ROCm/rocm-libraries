@@ -296,8 +296,6 @@ add_library( rocfft-rtc-launch OBJECT
   rtc_transpose_kernel.cpp
   rtc_twiddle_kernel.cpp
   rtc_chirp_kernel.cpp
-  rtc_partial_pass_sbcc_64_64_64.cpp
-  rtc_partial_pass_sbrr_64_64_64.cpp
   load_store_ops_kernel.cpp
   tree_node_callback.cpp
 )
