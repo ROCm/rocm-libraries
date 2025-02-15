@@ -30,6 +30,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
     {
         // TODO: revisit this. Test with factors_pp.size() > 1
         max_factor_pp = *std::max_element(specs.factors_pp.begin(), specs.factors_pp.end());
+
+        R.size = Expression{std::max(nregisters, max_factor_pp)};
     }
 
     unsigned int max_factor_pp;
@@ -274,8 +276,15 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         StatementList& body = f.body;
 
+        body += Declaration{t};
+        body += Declaration{W};
+
         for(unsigned int w = 0; w < max_factor_pp; ++w)
-            body += Assign(R[w], twiddles_pp[thread * length + w] * R[w]);
+        {
+            body += Assign{W, twiddles_pp[thread * length + w]};
+            body += Assign{t, TwiddleMultiply{R[w], W}};
+            body += Assign{R[w], t};
+        }
 
         return f;
     }
@@ -346,6 +355,15 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             arguments.append(arg);
         arguments.append(buf);
         return arguments;
+    }
+
+    void collect_length_stride(StatementList& body)
+    {
+        if(static_dim)
+        {
+            body += Declaration{dim, static_dim};
+        }
+        body += Declaration{stride0, Parens{stride[0]}};
     }
 
     Function generate_global_function() override
