@@ -220,7 +220,9 @@ void near_check_general_template(int64_t            M,
                                  int64_t            LDB,
                                  floating_data_t<T> tol = default_tolerance<T>::value)
 {
-    int tolm = 1;
+    int                tolm            = 1;
+    bool               passed          = true;
+    floating_data_t<T> min_passing_tol = 0;
     for(int64_t j = 0; j < N; ++j)
     {
         for(int64_t i = 0; i < M; ++i)
@@ -237,6 +239,7 @@ void near_check_general_template(int64_t            M,
                 ASSERT_TRUE(rocsparse_isinf(B[i + j * LDB]));
             }
             else
+#endif
             {
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
@@ -249,35 +252,39 @@ void near_check_general_template(int64_t            M,
 
                 if(k > MAX_TOL_MULTIPLIER)
                 {
-                    ASSERT_NEAR(A[i + j * LDA], B[i + j * LDB], compare_val);
+                    if(std::abs(A[i + j * LDA] - B[i + j * LDB]) > compare_val)
+                    {
+                        if(passed)
+                        {
+                            std::cerr.precision(12);
+                            std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
+                                      << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
+                                      << " exceeds permissive range [" << compare_val << ","
+                                      << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                        }
+
+                        min_passing_tol = std::max(
+                            min_passing_tol,
+                            std::abs(A[i + j * LDA] - B[i + j * LDB])
+                                / std::max(std::abs(A[i + j * LDA]), std::abs(B[i + j * LDB])));
+                        passed = false;
+                    }
                 }
                 tolm = std::max(tolm, k);
             }
-#else
-
-            int k;
-            for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
-            {
-                if(std::abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
-                {
-                    break;
-                }
-            }
-
-            if(k > MAX_TOL_MULTIPLIER)
-            {
-                std::cerr.precision(12);
-                std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
-                          << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
-                          << " exceeds permissive range [" << compare_val << ","
-                          << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            tolm = std::max(tolm, k);
-#endif
         }
     }
-
+    if(!passed)
+    {
+        std::cerr << "Test failed with tol = " << tol << ". Relaxing the tolerance to at least "
+                  << min_passing_tol << " would make the test pass." << std::endl;
+    }
+#ifdef GOOGLE_TEST
+    ASSERT_TRUE(passed);
+#else
+    if(!passed)
+        exit(EXIT_FAILURE);
+#endif
     if(tolm > 1)
     {
         std::cerr << "WARNING near_check has been permissive with a tolerance multiplier equal to "
@@ -294,7 +301,9 @@ void near_check_general_template(int64_t                        M,
                                  int64_t                        LDB,
                                  float                          tol)
 {
-    int tolm = 1;
+    int   tolm            = 1;
+    bool  passed          = true;
+    float min_passing_tol = 0;
     for(int64_t j = 0; j < N; ++j)
     {
         for(int64_t i = 0; i < M; ++i)
@@ -314,6 +323,7 @@ void near_check_general_template(int64_t                        M,
                 ASSERT_TRUE(rocsparse_isinf(B[i + j * LDB]));
             }
             else
+#endif
             {
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
@@ -329,43 +339,47 @@ void near_check_general_template(int64_t                        M,
 
                 if(k > MAX_TOL_MULTIPLIER)
                 {
-                    ASSERT_NEAR(std::real(A[i + j * LDA]),
-                                std::real(B[i + j * LDB]),
-                                std::real(compare_val));
-                    ASSERT_NEAR(std::imag(A[i + j * LDA]),
-                                std::imag(B[i + j * LDB]),
-                                std::imag(compare_val));
+                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
+                           > std::abs(std::real(compare_val))
+                       || std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
+                              > std::abs(std::imag(compare_val)))
+                    {
+                        if(passed)
+                        {
+                            std::cerr.precision(16);
+                            std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
+                                      << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
+                                      << " exceeds permissive range [" << compare_val << ","
+                                      << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                        }
+
+                        float min_passing_tol_tmp = std::max(
+                            std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
+                                / std::max(std::abs(std::real(A[i + j * LDA])),
+                                           std::abs(std::real(B[i + j * LDB]))),
+                            std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
+                                / std::max(std::abs(std::imag(A[i + j * LDA])),
+                                           std::abs(std::imag(B[i + j * LDB]))));
+
+                        min_passing_tol = std::max(min_passing_tol, min_passing_tol_tmp);
+                        passed          = false;
+                    }
                 }
                 tolm = std::max(tolm, k);
             }
-#else
-
-            int k;
-            for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
-            {
-                if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                       <= std::real(compare_val) * k
-                   && std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                          <= std::imag(compare_val) * k)
-                {
-                    break;
-                }
-            }
-
-            if(k > MAX_TOL_MULTIPLIER)
-            {
-                std::cerr.precision(16);
-                std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
-                          << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
-                          << " exceeds permissive range [" << compare_val << ","
-                          << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            tolm = std::max(tolm, k);
-#endif
         }
     }
-
+    if(!passed)
+    {
+        std::cerr << "Test failed with tol = " << tol << ". Relaxing the tolerance to at least "
+                  << min_passing_tol << " would make the test pass." << std::endl;
+    }
+#ifdef GOOGLE_TEST
+    ASSERT_TRUE(passed);
+#else
+    if(!passed)
+        exit(EXIT_FAILURE);
+#endif
     if(tolm > 1)
     {
         std::cerr << "WARNING near_check has been permissive with a tolerance multiplier equal to "
@@ -382,7 +396,9 @@ void near_check_general_template(int64_t                         M,
                                  int64_t                         LDB,
                                  double                          tol)
 {
-    int tolm = 1;
+    int    tolm            = 1;
+    bool   passed          = true;
+    double min_passing_tol = 0;
     for(int64_t j = 0; j < N; ++j)
     {
         for(int64_t i = 0; i < M; ++i)
@@ -402,6 +418,7 @@ void near_check_general_template(int64_t                         M,
                 ASSERT_TRUE(rocsparse_isinf(B[i + j * LDB]));
             }
             else
+#endif
             {
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
@@ -417,43 +434,47 @@ void near_check_general_template(int64_t                         M,
 
                 if(k > MAX_TOL_MULTIPLIER)
                 {
-                    ASSERT_NEAR(std::real(A[i + j * LDA]),
-                                std::real(B[i + j * LDB]),
-                                std::real(compare_val));
-                    ASSERT_NEAR(std::imag(A[i + j * LDA]),
-                                std::imag(B[i + j * LDB]),
-                                std::imag(compare_val));
+                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
+                           > std::abs(std::real(compare_val))
+                       || std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
+                              > std::abs(std::imag(compare_val)))
+                    {
+                        if(passed)
+                        {
+                            std::cerr.precision(16);
+                            std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
+                                      << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
+                                      << " exceeds permissive range [" << compare_val << ","
+                                      << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
+                        }
+
+                        double min_passing_tol_tmp = std::max(
+                            std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
+                                / std::max(std::abs(std::real(A[i + j * LDA])),
+                                           std::abs(std::real(B[i + j * LDB]))),
+                            std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
+                                / std::max(std::abs(std::imag(A[i + j * LDA])),
+                                           std::abs(std::imag(B[i + j * LDB]))));
+
+                        min_passing_tol = std::max(min_passing_tol, min_passing_tol_tmp);
+                        passed          = false;
+                    }
                 }
                 tolm = std::max(tolm, k);
             }
-#else
-
-            int k;
-            for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
-            {
-                if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                       <= std::real(compare_val) * k
-                   && std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                          <= std::imag(compare_val) * k)
-                {
-                    break;
-                }
-            }
-
-            if(k > MAX_TOL_MULTIPLIER)
-            {
-                std::cerr.precision(16);
-                std::cerr << "ASSERT_NEAR(" << A[i + j * LDA] << ", " << B[i + j * LDB]
-                          << ") failed: " << std::abs(A[i + j * LDA] - B[i + j * LDB])
-                          << " exceeds permissive range [" << compare_val << ","
-                          << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            tolm = std::max(tolm, k);
-#endif
         }
     }
-
+    if(!passed)
+    {
+        std::cerr << "Test failed with tol = " << tol << ". Relaxing the tolerance to at least "
+                  << min_passing_tol << " would make the test pass." << std::endl;
+    }
+#ifdef GOOGLE_TEST
+    ASSERT_TRUE(passed);
+#else
+    if(!passed)
+        exit(EXIT_FAILURE);
+#endif
     if(tolm > 1)
     {
         std::cerr << "WARNING near_check has been permissive with a tolerance multiplier equal to "
