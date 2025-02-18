@@ -109,7 +109,7 @@ namespace hiptensor
         static std::stringstream sAPILogBuff;
 
         // Performance
-        float64_t mElapsedTimeMs, mTotalGFlops, mMeasuredTFlopsPerSec, mTotalBytes;
+        float64_t mElapsedTimeMs, mTotalGFlops, mMeasuredTFlopsPerSec, mTotalGBytes, mGBytesPerSec;
     };
 
 } // namespace hiptensor

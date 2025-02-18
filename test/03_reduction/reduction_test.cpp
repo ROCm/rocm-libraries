@@ -103,7 +103,7 @@ namespace hiptensor
         mValidationResult = false;
         mMaxRelativeError = 0.0;
 
-        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalBytes = 0.0;
+        mElapsedTimeMs = mTotalGFlops = mMeasuredTFlopsPerSec = mTotalGBytes = mGBytesPerSec = 0.0;
     }
 
     ReductionResource* ReductionTest::getResource() const
@@ -115,19 +115,20 @@ namespace hiptensor
     {
         // clang-format off
         return stream
-            << "TypeIn,"               //1
-            << "TypeCompute,"          //2
-            << "Operator,"             //3
-            << "LogLevel,"             //4
-            << "Lengths,"              //5
-            << "ReOrder,"              //6
-            << "Alpha,"                //7
-            << "Beta,"                 //8
-            << "elapsedMs,"            //9
-            << "Problem Size(GFlops)," //10
-            << "TFlops,"               //11
-            << "TotalBytes,"           //12
-            << "Result"                 //13
+            << "TypeIn, "               // 1
+            << "TypeCompute, "          // 2
+            << "Operator, "             // 3
+            << "LogLevel, "             // 4
+            << "Lengths, "              // 5
+            << "ReOrder, "              // 6
+            << "Alpha, "                // 7
+            << "Beta, "                 // 8
+            << "elapsedMs, "            // 9
+            << "Problem Size(GFlops), " // 10
+            << "TFlops/s, "             // 11
+            << "TotalGBytes, "          // 12
+            << "GBytes/s, "             // 13
+            << "Result"                 // 14
             << std::endl;
         // clang-format on
     }
@@ -144,24 +145,25 @@ namespace hiptensor
         auto op         = std::get<6>(param);
 
         // clang-format off
-        stream << hipTypeToString(testType[0]) << ","                           //1
-               << computeTypeToString(convertToComputeType(testType[1])) << "," //2
-               << opTypeToString(op) << ","                                     //3
-               << logLevelToString(logLevel) << ",";                            //4
-        printContainerInCsv(lengths, stream) << ",";                            //5
-        printContainerInCsv(outputDims, stream) << ",";                         //6
-        stream << alpha << ","                                                  //7
-            << beta << ",";                                                     //8
+        stream << hipTypeToString(testType[0]) << ", "                           //1
+               << computeTypeToString(convertToComputeType(testType[1])) << ", " //2
+               << opTypeToString(op) << ", "                                     //3
+               << logLevelToString(logLevel) << ", ";                            //4
+        printContainerInCsv(lengths, stream) << ", ";                            //5
+        printContainerInCsv(outputDims, stream) << ", ";                         //6
+        stream << alpha << ", "                                                  //7
+            << beta << ", ";                                                     //8
         // clang-format on
 
         if(!mRunFlag)
         {
             // clang-format off
-            stream << "n/a" << "," //9
-                   << "n/a" << "," //10
-                   << "n/a" << "," //11
-                   << "n/a" << "," //12
-                   << "SKIPPED"     //13
+            stream << "n/a" << ", " //9
+                   << "n/a" << ", " //10
+                   << "n/a" << ", " //11
+                   << "n/a" << ", " //12
+                   << "n/a" << ", " //13
+                   << "SKIPPED"     //14
                    << std::endl;
             // clang-format on
         }
@@ -171,11 +173,12 @@ namespace hiptensor
             auto result = isPerformValidation ? (mValidationResult ? "PASSED" : "FAILED") : "BENCH";
 
             // clang-format off
-            stream << mElapsedTimeMs << ","     //9
-                << mTotalGFlops << ","          //10
-                << mMeasuredTFlopsPerSec << "," //11
-                << mTotalBytes << ","           //12
-                << result                        //13
+            stream << mElapsedTimeMs << ", "     // 9
+                << mTotalGFlops << ", "          // 10
+                << mMeasuredTFlopsPerSec << ", " // 11
+                << mTotalGBytes << ", "          // 12
+                << mGBytesPerSec << ", "         // 13
+                << result                        //14
                 << std::endl;
             // clang-format on
         }
@@ -481,12 +484,13 @@ namespace hiptensor
                                             std::multiplies<size_t>());
 
             mElapsedTimeMs        = float64_t(timeMs);
-            mTotalGFlops          = sizeA / hipDataTypeSize(acDataType);
+            mTotalGFlops          = sizeA / hipDataTypeSize(acDataType) * 1e-9;
             mMeasuredTFlopsPerSec = mTotalGFlops / mElapsedTimeMs;
 
-            mTotalBytes = sizeA + sizeCD;
-            mTotalBytes += (betaValue != 0.0) ? sizeCD : 0;
-            mTotalBytes /= (1e9 * mElapsedTimeMs);
+            mTotalGBytes = sizeA + sizeCD;
+            mTotalGBytes += (betaValue != 0.0) ? sizeCD : 0;
+            mTotalGBytes /= 1e9;
+            mGBytesPerSec = mTotalGBytes / (mElapsedTimeMs * 1e-3);
 
             CHECK_HIP_ERROR(hipEventDestroy(startEvent));
             CHECK_HIP_ERROR(hipEventDestroy(stopEvent));
