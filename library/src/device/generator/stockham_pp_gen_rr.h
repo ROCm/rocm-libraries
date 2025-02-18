@@ -53,8 +53,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         stmts += Declaration{thread};
         stmts += Declaration(remaining);
         stmts += Declaration(index_along_d);
-        stmts += Declaration(remaining_pp);
-        stmts += Declaration(offset_pp);
+        stmts += Declaration(remaining_pp, Literal{0});
+        stmts += Declaration(offset_pp, Literal{0});
         stmts += Assign{transform,
                         block_id * transforms_per_block + thread_id / threads_per_transform};
         stmts += Assign{remaining, transform};
