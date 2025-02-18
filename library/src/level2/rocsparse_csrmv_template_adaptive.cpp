@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,6 +102,8 @@ namespace rocsparse
                                         I        nRows,
                                         bool     allocate_row_blocks = true)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         I first_row_with_nonzeros = nRows - 1;
         I last_row_with_nonzeros  = 0;
 
@@ -360,6 +362,8 @@ rocsparse_status
                                                          const J*                  csr_col_ind,
                                                          rocsparse_mat_info        info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Clear csrmv info
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrmv_info(info->csrmv_info));
 
@@ -598,6 +602,8 @@ rocsparse_status rocsparse::csrmv_adaptive_template_dispatch(rocsparse_handle   
                                                              Y*       y,
                                                              bool     force_conj)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(6, descr);
     ROCSPARSE_CHECKARG_POINTER(10, info);

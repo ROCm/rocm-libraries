@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,6 +58,8 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
                                                     const J*                  csr_col_ind,
                                                     rocsparse_mat_info        info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || n == 0 || nnz == 0)
     {
         // No matrix analysis required as matrix never accessed
@@ -108,6 +110,7 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
                                            Y*                        y,
                                            bool                      force_conj)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
@@ -304,6 +307,7 @@ rocsparse_status rocsparse_csrmv_analysis_impl(rocsparse_handle          handle,
         csr_row_ptr,
         csr_col_ind,
         info));
+
     return rocsparse_status_success;
 }
 

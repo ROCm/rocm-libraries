@@ -93,6 +93,12 @@ if (BUILD_WITH_ROCBLAS AND rocblas_FOUND)
   endif()
 endif()
 
+if (NOT WIN32)
+  if (BUILD_SHARED_LIBS AND BUILD_WITH_ROCTX)
+    target_link_libraries(rocsparse PRIVATE -lroctx64)
+    target_compile_definitions( rocsparse PRIVATE ROCSPARSE_WITH_ROCTX )
+  endif()
+endif()
 
 # Target properties
 
