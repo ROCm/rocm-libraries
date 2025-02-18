@@ -33,11 +33,9 @@ extern "C" {
 #endif
 
 /*! \ingroup utility_module
-*  \brief Check matrix to see if it is valid.
-*
 *  \details
 *  \p rocsparse_check_matrix_ell_buffer_size computes the required buffer size needed when
-*  calling \p rocsparse_check_matrix_ell
+*  calling \ref rocsparse_scheck_matrix_ell "rocsparse_Xcheck_matrix_ell()".
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.

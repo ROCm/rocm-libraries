@@ -33,11 +33,9 @@ extern "C" {
 #endif
 
 /*! \ingroup utility_module
-*  \brief Check matrix to see if it is valid.
-*
 *  \details
 *  \p rocsparse_check_matrix_coo_buffer_size computes the required buffer size needed when
-*  calling \p rocsparse_check_matrix_coo
+*  calling \ref rocsparse_scheck_matrix_coo "rocsparse_Xcheck_matrix_coo()".
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -69,8 +67,7 @@ extern "C" {
 *  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
-*              rocsparse_scheck_matrix_coo(), rocsparse_dcheck_matrix_coo(),
-*              rocsparse_ccheck_matrix_coo() and rocsparse_zcheck_matrix_coo().
+*              \ref rocsparse_scheck_matrix_coo "rocsparse_Xcheck_matrix_coo()".
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.

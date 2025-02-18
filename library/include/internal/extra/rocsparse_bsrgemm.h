@@ -33,13 +33,10 @@ extern "C" {
 #endif
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using BSR storage format
-*
 *  \details
 *  \p rocsparse_bsrgemm_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_bsrgemm_nnzb(), rocsparse_sbsrgemm(),
-*  rocsparse_dbsrgemm(), rocsparse_cbsrgemm() and rocsparse_zbsrgemm(). The temporary
-*  storage buffer must be allocated by the user.
+*  that is required by \ref rocsparse_bsrgemm_nnzb() and \ref rocsparse_sbsrgemm "rocsparse_Xbsrgemm()". 
+*  The temporary storage buffer must be allocated by the user.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -237,16 +234,13 @@ rocsparse_status rocsparse_zbsrgemm_buffer_size(rocsparse_handle                
 /**@}*/
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using BSR storage format
-*
 *  \details
 *  \p rocsparse_bsrgemm_nnzb computes the total BSR non-zero block elements and the BSR block row
 *  offsets, that point to the start of every block row of the sparse BSR matrix, of the
 *  resulting multiplied matrix C. It is assumed that \p bsr_row_ptr_C has been allocated
 *  with size \p mb+1.
-*  The required buffer size can be obtained by rocsparse_sbsrgemm_buffer_size(),
-*  rocsparse_dbsrgemm_buffer_size(), rocsparse_cbsrgemm_buffer_size() and
-*  rocsparse_zbsrgemm_buffer_size(), respectively.
+*  The required buffer size can be obtained by 
+*  \ref rocsparse_sbsrgemm_buffer_size "rocsparse_Xbsrgemm_buffer_size()".
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -412,10 +406,9 @@ rocsparse_status rocsparse_bsrgemm_nnzb(rocsparse_handle          handle,
 *  It is assumed that \p bsr_row_ptr_C has already been filled and that \p bsr_val_C and
 *  \p bsr_col_ind_C are allocated by the user. \p bsr_row_ptr_C and allocation size of
 *  \p bsr_col_ind_C and \p bsr_val_C is defined by the number of non-zero elements of
-*  the sparse BSR matrix C. Both can be obtained by rocsparse_bsrgemm_nnzb(). The
+*  the sparse BSR matrix C. Both can be obtained by \ref rocsparse_bsrgemm_nnzb(). The
 *  required buffer size for the computation can be obtained by
-*  rocsparse_sbsrgemm_buffer_size(), rocsparse_dbsrgemm_buffer_size(),
-*  rocsparse_cbsrgemm_buffer_size() and rocsparse_zbsrgemm_buffer_size(), respectively.
+*  \ref rocsparse_sbsrgemm_buffer_size "rocsparse_Xbsrgemm_buffer_size()".
 *
 *  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot D\f$ will be computed.
 *  \note If \f$\beta == 0\f$, then \f$C = \alpha \cdot op(A) \cdot op(B)\f$ will be computed.

@@ -37,10 +37,9 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_gebsrmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$(mb \cdot \text{row_block_dim}) \times (nb \cdot \text{col_block_dim})\f$
-*  matrix, defined in GEBSR storage format, and the dense vector \f$x\f$ and adds the
-*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
-*  such that
+*  \f$m \times n\f$ matrix, defined in GEBSR storage format, and the dense vector 
+*  \f$x\f$ and adds the result to the dense vector \f$y\f$ that is multiplied by 
+*  the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
@@ -48,12 +47,11 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = mb \times row\_block\_dim\f$ and \f$n = nb \times col\_block\_dim\f$.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

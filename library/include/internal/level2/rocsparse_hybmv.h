@@ -47,9 +47,7 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]

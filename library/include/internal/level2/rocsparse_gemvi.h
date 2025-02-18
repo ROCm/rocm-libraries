@@ -33,12 +33,10 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
- *  \brief Dense matrix sparse vector multiplication
- *
  *  \details
  *  \p rocsparse_gemvi_buffer_size returns the size of the temporary storage buffer
- *  required by rocsparse_sgemvi(), rocsparse_dgemvi(), rocsparse_cgemvi() or
- *  rocsparse_zgemvi(). The temporary storage buffer must be allocated by the user.
+ *  required by \ref rocsparse_sgemvi "rocsparse_Xgemvi()". The temporary storage 
+ *  buffer must be allocated by the user.
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.
@@ -116,16 +114,16 @@ rocsparse_status rocsparse_zgemvi_buffer_size(rocsparse_handle    handle,
  *  \f[
  *    op(A) = \left\{
  *    \begin{array}{ll}
- *        A,   & \text{if trans == rocsparse_operation_none} \\
- *        A^T, & \text{if trans == rocsparse_operation_transpose} \\
- *        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+ *        A,   & \text{if trans == rocsparse_operation_none}
  *    \end{array}
  *    \right.
  *  \f]
  *
- *  \p rocsparse_gemvi requires a user allocated temporary buffer. Its size is returned
- *  by rocsparse_sgemvi_buffer_size(), rocsparse_dgemvi_buffer_size(),
- *  rocsparse_cgemvi_buffer_size() or rocsparse_zgemvi_buffer_size().
+ *  Performing the above operation involves two steps. First, the user calls 
+ *  \ref rocsparse_sgemvi_buffer_size "rocsparse_Xgemvi_buffer_size()" in order to determine the size of 
+ *  the temporary storage buffer. Next, the user allocates this temporary buffer and passes it to 
+ *  \p rocsparse_gemvi to complete the computation. Once all calls to \p rocsparse_gemvi are complete the
+ *  temporary storage buffer can be freed.
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

@@ -33,8 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-   *  \brief Sparse matrix extraction.
-   *
    *  \details
    *  \p rocsparse_extract_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
    *  This routine is used in conjunction with \ref rocsparse_extract_nnz and \ref rocsparse_extract to extract 
@@ -73,8 +71,6 @@ rocsparse_status rocsparse_extract_buffer_size(rocsparse_handle            handl
                                                size_t*                     buffer_size_in_bytes);
 
 /*! \ingroup generic_module
-   *  \brief Sparse matrix extraction.
-   *
    *  \details
    *  \p rocsparse_extract_nnz returns the number of non-zeros in the extracted matrix. The value is 
    *  available after the analysis phase \ref rocsparse_extract_stage_analysis has been executed. This routine 

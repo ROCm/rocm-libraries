@@ -33,13 +33,10 @@ extern "C" {
 #endif
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix multiplication using CSR storage format
-*
 *  \details
 *  \p rocsparse_csrgemm_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_csrgemm_nnz(), rocsparse_scsrgemm(),
-*  rocsparse_dcsrgemm(), rocsparse_ccsrgemm() and rocsparse_zcsrgemm(). The temporary
-*  storage buffer must be allocated by the user.
+*  that is required by \ref rocsparse_csrgemm_nnz() and \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()". 
+*  The temporary storage buffer must be allocated by the user.
 *
 *  \note
 *  Please note, that for matrix products with more than 4096 non-zero entries per row,
@@ -112,8 +109,7 @@ extern "C" {
 *  info_C          structure that holds meta data for the sparse CSR matrix \f$C\f$.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
-*                  rocsparse_csrgemm_nnz(), rocsparse_scsrgemm(), rocsparse_dcsrgemm(),
-*                  rocsparse_ccsrgemm() and rocsparse_zcsrgemm().
+*                  \ref rocsparse_csrgemm_nnz() and \ref rocsparse_scsrgemm "rocsparse_Xcsrgemm()".
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.

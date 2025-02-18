@@ -33,8 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse matrix to sparse matrix conversion.
-*
 *  \details
 *  \p rocsparse_sparse_to_sparse_buffer_size calculates the required buffer size in bytes for a given stage \p stage.
 *

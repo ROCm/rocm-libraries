@@ -33,16 +33,16 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
-*
 *  \details
-*  \p rocsparse_bsrmv_ex_analysis performs the analysis step for rocsparse_sbsrmv(),
-*  rocsparse_dbsrmv(), rocsparse_cbsrmv() and rocsparse_zbsrmv(). It is expected that
-*  this function will be executed only once for a given matrix and particular operation
-*  type. The gathered analysis meta data can be cleared by rocsparse_bsrmv_ex_clear().
+*  \p rocsparse_bsrmv_ex_analysis performs the analysis step for \ref rocsparse_sbsrmv_ex "rocsparse_Xbsrmv_ex()". 
+*  It is expected that this function will be executed only once for a given sparsity pattern and particular operation
+*  type. The gathered analysis meta data is stored in the \ref rocsparse_mat_info object and can be cleared by 
+*  \ref rocsparse_bsrmv_ex_clear().
 *
-*  \note
-*  If the matrix sparsity pattern changes, the gathered information will become invalid.
+*  If the matrix sparsity pattern changes, the gathered information will become invalid. In order to perform another 
+*  sparse matrix multiplication with a matrix having a different sparsity pattern, the user would need to either destroy
+*  the old \p info object and create a new one or the user would need to clear the existing \p info object using
+*  \ref rocsparse_bsrmv_ex_clear(). In both cases, the analysis will need to be called again.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -161,10 +161,8 @@ ROCSPARSE_EXPORT rocsparse_status
 *
 *  \details
 *  \p rocsparse_bsrmv_ex multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})\f$
-*  matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
-*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
-*  such that
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
@@ -172,12 +170,32 @@ ROCSPARSE_EXPORT rocsparse_status
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = mb \times block\_dim\f$ and \f$n = nb \times block\_dim\f$.
+*
+*  Performing the above operation can be done with or without analysis. Running with analysis may result in better performance 
+*  when computing the matrix vector product but will also incur a performance cost attributed to the additional analysis step.
+*  For this reason, running with analysis makes sense when a user plans on computing the matrix vector product many times and 
+*  therefore can amortize the analysis cost.
+*
+*  To run without analysis, performing the above operation involves simply calling the \p rocsparse_bsrmv_ex routine while passing 
+*  \p NULL for the \p info parameter.
+*
+*  To run with analysis, performing the above operation involves two steps. First, the user creates a \ref rocsparse_mat_info object 
+*  by calling \ref rocsparse_create_mat_info and then passes this to \ref rocsparse_sbsrmv_ex_analysis "rocsparse_Xbsrmv_ex_analysis()"
+*  which will perform analysis on the sparsity pattern of the matrix \f$op(A)\f$. The user then completes the operation by 
+*  calling \p rocsparse_bsrmv_ex. The creation of the \p info object and the call to the analysis 
+*  routine only need to be performed once for a given sparsity pattern while the computation can be performed repeatedly 
+*  as long as the sparsity pattern has not changed. Once all calls to \p rocsparse_bsrmv_ex have been made, the \p info object 
+*  can be destroyed with a call to \ref rocsparse_destroy_mat_info.
+*
+*  When running with analysis, a user may find themselves in the situation where they wish to perform multiple sparse matrix 
+*  multiplications with each sparse matrix having a different sparsity pattern. Instead of creating and destroying multiple 
+*  \ref rocsparse_mat_info objects for each unique sparsity pattern, the user can instead create the \p info object once and 
+*  then call \ref rocsparse_bsrmv_ex_clear followed by re-running the analysis in between each sparse matrix multiplication.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -317,19 +335,15 @@ __attribute__((deprecated("This function is deprecated and will be removed in a 
 /**@}*/
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
-*
 *  \details
-*  \p rocsparse_bsrmv_ex_clear deallocates all memory that was allocated by
-*  rocsparse_sbsrmv_ex_analysis(), rocsparse_dbsrmv_ex_analysis(), rocsparse_cbsrmv_ex_analysis()
-*  or rocsparse_zbsrmv_ex_analysis(). This is especially useful, if memory is an issue and
-*  the analysis data is not required anymore for further computation, e.g. when
+*  \p rocsparse_bsrmv_ex_clear deallocates all memory that was allocated by 
+*  \ref rocsparse_sbsrmv_ex_analysis "rocsparse_Xbsrmv_ex_analysis()". This is especially useful, 
+*  if memory is an issue and the analysis data is not required anymore for further computation, e.g. when
 *  switching to another sparse matrix format.
 *
-*  \note
 *  Calling \p rocsparse_bsrmv_ex_clear is optional. All allocated resources will be
-*  cleared, when the opaque \ref rocsparse_mat_info struct is destroyed using
-*  rocsparse_destroy_mat_info().
+*  cleared, when the opaque \ref rocsparse_mat_info object is destroyed using
+*  \ref rocsparse_destroy_mat_info().
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -351,16 +365,16 @@ __attribute__((deprecated("This function is deprecated and will be removed in a 
     rocsparse_bsrmv_ex_clear(rocsparse_handle handle, rocsparse_mat_info info);
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
-*
 *  \details
-*  \p rocsparse_bsrmv_analysis performs the analysis step for rocsparse_sbsrmv(),
-*  rocsparse_dbsrmv(), rocsparse_cbsrmv() and rocsparse_zbsrmv(). It is expected that
-*  this function will be executed only once for a given matrix and particular operation
-*  type. The gathered analysis meta data can be cleared by rocsparse_bsrmv_clear().
+*  \p rocsparse_bsrmv_analysis performs the analysis step for \ref rocsparse_sbsrmv "rocsparse_Xbsrmv()". 
+*  It is expected that this function will be executed only once for a given sparsity pattern and particular operation
+*  type. The gathered analysis meta data is stored in the \ref rocsparse_mat_info object and can be cleared by 
+*  \ref rocsparse_bsrmv_clear().
 *
-*  \note
-*  If the matrix sparsity pattern changes, the gathered information will become invalid.
+*  If the matrix sparsity pattern changes, the gathered information will become invalid. In order to perform another 
+*  sparse matrix multiplication with a matrix having a different sparsity pattern, the user would need to either destroy
+*  the old \p info object and create a new one or the user would need to clear the existing \p info object using
+*  \ref rocsparse_bsrmv_clear(). In both cases, the analysis will need to be called again.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -472,10 +486,8 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 *
 *  \details
 *  \p rocsparse_bsrmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})\f$
-*  matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
-*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
-*  such that
+*  \f$m \times n\f$ matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
+*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$, such that
 *  \f[
 *    y := \alpha \cdot op(A) \cdot x + \beta \cdot y,
 *  \f]
@@ -483,12 +495,32 @@ rocsparse_status rocsparse_zbsrmv_analysis(rocsparse_handle                handl
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = mb \times block\_dim\f$ and \f$n= nb \times block\_dim\f$.
+*
+*  Performing the above operation can be done with or without analysis. Running with analysis may result in better performance 
+*  when computing the matrix vector product but will also incur a performance cost attributed to the additional analysis step.
+*  For this reason, running with analysis makes sense when a user plans on computing the matrix vector product many times and 
+*  therefore can amortize the analysis cost.
+*
+*  To run without analysis, performing the above operation involves simply calling the \p rocsparse_bsrmv routine while passing 
+*  \p NULL for the \p info parameter.
+*
+*  To run with analysis, performing the above operation involves two steps. First, the user creates a \ref rocsparse_mat_info object 
+*  by calling \ref rocsparse_create_mat_info and then passes this to \ref rocsparse_sbsrmv_analysis "rocsparse_Xbsrmv_analysis()"
+*  which will perform analysis on the sparsity pattern of the matrix \f$op(A)\f$. The user then completes the operation by 
+*  calling \p rocsparse_bsrmv. The creation of the \p info object and the call to the analysis routine only need to be performed 
+*  once for a given sparsity pattern while the computation can be performed repeatedly as long as the sparsity pattern has 
+*  not changed. Once all calls to \p rocsparse_bsrmv have been made, the \p info object can be destroyed with a call to 
+*  \ref rocsparse_destroy_mat_info.
+*
+*  When running with analysis, a user may find themselves in the situation where they wish to perform multiple sparse matrix 
+*  multiplications with each sparse matrix having a different sparsity pattern. Instead of creating and destroying multiple 
+*  \ref rocsparse_mat_info objects for each unique sparsity pattern, the user can instead create the \p info object once and 
+*  then call \ref rocsparse_bsrmv_clear followed by re-running the analysis in between each sparse matrix multiplication.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -744,19 +776,15 @@ rocsparse_status rocsparse_zbsrmv(rocsparse_handle                handle,
 /**@}*/
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using BSR storage format
-*
 *  \details
-*  \p rocsparse_bsrmv_clear deallocates all memory that was allocated by
-*  rocsparse_sbsrmv_analysis(), rocsparse_dbsrmv_analysis(), rocsparse_cbsrmv_analysis()
-*  or rocsparse_zbsrmv_analysis(). This is especially useful, if memory is an issue and
-*  the analysis data is not required anymore for further computation, e.g. when
-*  switching to another sparse matrix format.
+*  \p rocsparse_bsrmv_clear deallocates all memory that was allocated by 
+*  \ref rocsparse_sbsrmv_analysis "rocsparse_Xbsrmv_analysis()". This is especially useful 
+*  if memory is an issue and the analysis data is not required anymore for further computation, 
+*  e.g. when switching to another sparse matrix format.
 *
-*  \note
 *  Calling \p rocsparse_bsrmv_clear is optional. All allocated resources will be
-*  cleared, when the opaque \ref rocsparse_mat_info struct is destroyed using
-*  rocsparse_destroy_mat_info().
+*  cleared, when the opaque \ref rocsparse_mat_info object is destroyed using
+*  \ref rocsparse_destroy_mat_info().
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.

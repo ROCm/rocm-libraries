@@ -39,6 +39,17 @@ rocsparse_bsrmv_ex_clear()
 
 .. doxygenfunction:: rocsparse_bsrmv_ex_clear
 
+rocsparse_bsrmv_analysis()
+--------------------------
+
+.. doxygenfunction:: rocsparse_sbsrmv_analysis
+  :outline:
+.. doxygenfunction:: rocsparse_dbsrmv_analysis
+  :outline:
+.. doxygenfunction:: rocsparse_cbsrmv_analysis
+  :outline:
+.. doxygenfunction:: rocsparse_zbsrmv_analysis
+
 rocsparse_bsrmv()
 -----------------
 
@@ -49,6 +60,11 @@ rocsparse_bsrmv()
 .. doxygenfunction:: rocsparse_cbsrmv
   :outline:
 .. doxygenfunction:: rocsparse_zbsrmv
+
+rocsparse_bsrmv_clear()
+-----------------------
+
+.. doxygenfunction:: rocsparse_bsrmv_clear
 
 rocsparse_bsrxmv()
 ------------------

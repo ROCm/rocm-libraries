@@ -36,9 +36,8 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_bsrxmv multiplies the scalar \f$\alpha\f$ with a sparse
-*  \f$(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})\f$
-*  modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ and adds the
-*  result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
+*  \f$m \times n\f$ modified matrix, defined in BSR storage format, and the dense vector \f$x\f$ 
+*  and adds the result to the dense vector \f$y\f$ that is multiplied by the scalar \f$\beta\f$,
 *  such that
 *  \f[
 *    y := \left( \alpha \cdot op(A) \cdot x + \beta \cdot y \right)\left( \text{mask} \right),
@@ -47,12 +46,11 @@ extern "C" {
 *  \f[
 *    op(A) = \left\{
 *    \begin{array}{ll}
-*        A,   & \text{if trans == rocsparse_operation_none} \\
-*        A^T, & \text{if trans == rocsparse_operation_transpose} \\
-*        A^H, & \text{if trans == rocsparse_operation_conjugate_transpose}
+*        A,   & \text{if trans == rocsparse_operation_none}
 *    \end{array}
 *    \right.
 *  \f]
+*  and where \f$m = mb \times block\_dim\f$ and \f$n = nb \times block\_dim\f$.
 *
 *  The \f$\text{mask}\f$ is defined as an array of block row indices.
 *  The input sparse matrix is defined with a modified BSR storage format where the beginning and the end of each row

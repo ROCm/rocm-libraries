@@ -36,10 +36,9 @@ extern "C" {
  *  \brief Sparse matrix dense matrix multiplication using GEneral BSR storage format
  *
  *  \details
- *  \p rocsparse_gebsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$mb \times kb\f$
+ *  \p rocsparse_gebsrmm multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$
  *  matrix \f$A\f$, defined in GEneral BSR storage format, and the column-oriented dense \f$k \times n\f$
- *  matrix \f$B\f$ (where \f$k = col\_block\_dim \times kb\f$) and adds the result to the column-oriented dense
- *  \f$m \times n\f$ matrix \f$C\f$ (where \f$m = row\_block\_dim \times mb\f$) that
+ *  matrix \f$B\f$ and adds the result to the column-oriented dense \f$m \times n\f$ matrix \f$C\f$ that
  *  is multiplied by the scalar \f$\beta\f$, such that
  *  \f[
  *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
@@ -61,6 +60,8 @@ extern "C" {
  *    \end{array}
  *    \right.
  *  \f]
+ *  and where \f$k = col\_block\_dim \times kb\f$ and \f$m = row\_block\_dim \times mb\f$.
+ *
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

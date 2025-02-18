@@ -34,6 +34,8 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xbsrmv_ex_analysis() <rocsparse_sbsrmv_ex_analysis>`     x
 :cpp:func:`rocsparse_bsrmv_ex_clear`                                          x
 :cpp:func:`rocsparse_Xbsrmv_ex() <rocsparse_sbsrmv_ex>`                       x
+:cpp:func:`rocsparse_Xbsrmv_analysis() <rocsparse_sbsrmv_analysis>`           x
+:cpp:func:`rocsparse_bsrmv_clear`                                             x
 :cpp:func:`rocsparse_Xbsrmv() <rocsparse_sbsrmv>`                             x
 :cpp:func:`rocsparse_Xbsrxmv() <rocsparse_sbsrxmv>`                           x
 :cpp:func:`rocsparse_Xbsrsv_buffer_size() <rocsparse_sbsrsv_buffer_size>`     x

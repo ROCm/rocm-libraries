@@ -33,8 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Batched Pentadiagonal solver
-*
 *  \details
 *  \p rocsparse_gpsv_interleaved_batch_buffer_size calculates the required buffer size
 *  for \ref rocsparse_sgpsv_interleaved_batch "rocsparse_Xgpsv_interleaved_batch()". It is the user's 

@@ -33,8 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup extra_module
-*  \brief Sparse matrix sparse matrix addition using CSR storage format
-*
 *  \details
 *  \p rocsparse_csrgeam_nnz computes the total CSR non-zero elements and the CSR row
 *  offsets, that point to the start of every row of the sparse CSR matrix, of the
@@ -129,7 +127,7 @@ rocsparse_status rocsparse_csrgeam_nnz(rocsparse_handle          handle,
 *  It is assumed that \p csr_row_ptr_C has already been filled and that \p csr_val_C and
 *  \p csr_col_ind_C are allocated by the user. \p csr_row_ptr_C and allocation size of
 *  \p csr_col_ind_C and \p csr_val_C is defined by the number of non-zero elements of
-*  the sparse CSR matrix C. Both can be obtained by rocsparse_csrgeam_nnz().
+*  the sparse CSR matrix C. Both can be obtained by \ref rocsparse_csrgeam_nnz().
 *
 *  \note Both scalars \f$\alpha\f$ and \f$beta\f$ have to be valid.
 *

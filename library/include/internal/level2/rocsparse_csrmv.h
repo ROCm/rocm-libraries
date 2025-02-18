@@ -33,16 +33,16 @@ extern "C" {
 #endif
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using CSR storage format
-*
 *  \details
-*  \p rocsparse_csrmv_analysis performs the analysis step for rocsparse_scsrmv(),
-*  rocsparse_dcsrmv(), rocsparse_ccsrmv() and rocsparse_zcsrmv(). It is expected that
-*  this function will be executed only once for a given matrix and particular operation
-*  type. The gathered analysis meta data can be cleared by rocsparse_csrmv_clear().
+*  \p rocsparse_csrmv_analysis performs the analysis step for \ref rocsparse_scsrmv "rocsparse_Xcsrmv()". 
+*  It is expected that this function will be executed only once for a given sparsity pattern and particular operation
+*  type. The gathered analysis meta data is stored in the \ref rocsparse_mat_info object and can be cleared by 
+*  \ref rocsparse_csrmv_clear().
 *
-*  \note
-*  If the matrix sparsity pattern changes, the gathered information will become invalid.
+*  If the matrix sparsity pattern changes, the gathered information will become invalid. In order to perform another 
+*  sparse matrix multiplication with a matrix having a different sparsity pattern, the user would need to either destroy
+*  the old \p info object and create a new one or the user would need to clear the existing info object using
+*  \ref rocsparse_csrmv_clear(). In both cases, the analysis will need to be called again.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -136,19 +136,16 @@ rocsparse_status rocsparse_zcsrmv_analysis(rocsparse_handle                handl
 /**@}*/
 
 /*! \ingroup level2_module
-*  \brief Sparse matrix vector multiplication using CSR storage format
-*
 *  \details
 *  \p rocsparse_csrmv_clear deallocates all memory that was allocated by
-*  rocsparse_scsrmv_analysis(), rocsparse_dcsrmv_analysis(), rocsparse_ccsrmv_analysis()
-*  or rocsparse_zcsrmv_analysis(). This is especially useful, if memory is an issue and
-*  the analysis data is not required anymore for further computation, e.g. when
-*  switching to another sparse matrix format.
+*  \ref rocsparse_scsrmv_analysis "rocsparse_Xcsrmv_analysis()". This is especially useful, 
+*  if memory is an issue and the analysis data is not required anymore for further 
+*  computation, e.g. when switching to another sparse matrix format.
 *
 *  \note
 *  Calling \p rocsparse_csrmv_clear is optional. All allocated resources will be
-*  cleared, when the opaque \ref rocsparse_mat_info struct is destroyed using
-*  rocsparse_destroy_mat_info().
+*  cleared, when the opaque \ref rocsparse_mat_info object is destroyed using
+*  \ref rocsparse_destroy_mat_info().
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
@@ -191,10 +188,13 @@ rocsparse_status rocsparse_csrmv_clear(rocsparse_handle handle, rocsparse_mat_in
 *  \f]
 *
 *  The \p info parameter is optional and contains information collected by
-*  rocsparse_scsrmv_analysis(), rocsparse_dcsrmv_analysis(), rocsparse_ccsrmv_analysis()
-*  or rocsparse_zcsrmv_analysis(). If present, the information will be used to speed up
-*  the \p csrmv computation. If \p info == \p NULL, general \p csrmv routine will be
-*  used instead.
+*  \ref rocsparse_scsrmv_analysis "rocsparse_Xcsrmv_analysis()". If present, the 
+*  information will be used to speed up the \p csrmv computation. If 
+*  \p info == \p NULL, a general \p csrmv routine will be used instead. Running with 
+*  analysis may result in better performance when computing the matrix vector product 
+*  but will also incur a performance cost attributed to the additional analysis step.
+*  For this reason, running with analysis makes sense when a user plans on computing 
+*  the matrix vector product many times and therefore can amortize the analysis cost.
 *
 *  \code{.c}
 *      for(i = 0; i < m; ++i)
@@ -207,6 +207,22 @@ rocsparse_status rocsparse_csrmv_clear(rocsparse_handle handle, rocsparse_mat_in
 *          }
 *      }
 *  \endcode
+*
+*  To run without analysis, performing the above operation involves simply calling the \p rocsparse_csrmv routine while passing 
+*  \p NULL for the \p info parameter.
+*
+*  To run with analysis, completing the sparse matrix vector multiplication involves two steps. First, 
+*  the user creates a \ref rocsparse_mat_info object by calling \ref rocsparse_create_mat_info and then passes this to 
+*  \ref rocsparse_scsrmv_analysis "rocsparse_Xcsrmv_analysis()" which will perform analysis on the sparsity pattern of the 
+*  matrix \f$op(A)\f$. The user then completes the operation by calling \p rocsparse_csrmv. The creation of the \p info object 
+*  and the call to the analysis routine only need to be performed once for a given sparsity pattern while the computation 
+*  can be performed repeatedly as long as the sparsity pattern has not changed. Once all calls to \p rocsparse_csrmv have 
+*  been made, the \p info object can be destroyed with a call to \ref rocsparse_destroy_mat_info.
+*
+*  When running with analysis, a user may find themselves in the situation where they wish to perform multiple sparse matrix 
+*  multiplications with each sparse matrix having a different sparsity pattern. Instead of creating and destroying multiple 
+*  \ref rocsparse_mat_info objects for each unique sparsity pattern, the user can instead create the \p info object once and 
+*  then call \ref rocsparse_csrmv_clear followed by re-running the analysis in between each sparse matrix multiplication.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -239,10 +255,8 @@ rocsparse_status rocsparse_csrmv_clear(rocsparse_handle handle, rocsparse_mat_in
 *  csr_col_ind array of \p nnz elements containing the column indices of the sparse
 *              CSR matrix.
 *  @param[in]
-*  info        information collected by rocsparse_scsrmv_analysis(),
-*              rocsparse_dcsrmv_analysis(), rocsparse_ccsrmv_analysis() or
-*              rocsparse_dcsrmv_analysis(), can be \p NULL if no information is
-*              available.
+*  info        information collected by \ref rocsparse_scsrmv_analysis "rocsparse_Xcsrmv_analysis()", 
+*              can be \p NULL if no information is available.
 *  @param[in]
 *  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).

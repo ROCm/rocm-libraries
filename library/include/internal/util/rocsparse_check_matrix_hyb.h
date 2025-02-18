@@ -37,7 +37,7 @@ extern "C" {
 *
 *  \details
 *  \p rocsparse_check_matrix_hyb_buffer_size computes the required buffer size needed when
-*  calling \p rocsparse_check_matrix_hyb
+*  calling \ref rocsparse_check_matrix_hyb.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.

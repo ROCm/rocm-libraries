@@ -33,9 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
-*  storage format.
-*
 *  \details
 *  \p rocsparse_csritilu0_buffer_size computes the size in bytes of the buffer that has to be allocated by the user.
 *  This buffer is then used in \ref rocsparse_csritilu0_preprocess, \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()",
@@ -99,9 +96,6 @@ rocsparse_status rocsparse_csritilu0_buffer_size(rocsparse_handle     handle,
                                                  size_t*              buffer_size);
 
 /*! \ingroup precond_module
-*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
-*  storage format.
-*
 *  \details
 *  \p rocsparse_csritilu0_preprocess computes the information required to run \ref rocsparse_scsritilu0_compute "rocsparse_Xcsritilu0_compute()",
 *  and \ref rocsparse_scsritilu0_compute_ex "rocsparse_Xcsritilu0_compute_ex()" and stores it in the buffer.
@@ -593,9 +587,6 @@ rocsparse_status rocsparse_zcsritilu0_compute_ex(rocsparse_handle               
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Iterative Incomplete LU factorization with 0 fill-ins and no pivoting using CSR
-*  storage format.
-*
 *  \details
 *  \p rocsparse_csritilu0_history fetches convergence history data if 
 *  \ref rocsparse_itilu0_option_convergence_history has been set when calling 

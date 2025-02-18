@@ -59,6 +59,11 @@ extern "C" {
 *      }
 *  \endcode
 *
+*  Performing the above operation involves two steps. First, the user calls \p rocsparse_spvv with \p temp_buffer set to \p nullptr 
+*  which will return the required temporary buffer size in the parameter \p buffer_size. The user then allocates this buffer. Finally, 
+*  the user then completes the computation by calling \p rocsparse_spvv a second time with the newly allocated buffer. Once the 
+*  computation is complete, the user is free to deallocate the buffer. 
+*
 *  \p rocsparse_spvv supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and 
 *  \f$y\f$ and compute types for the scalar \f$result\f$.
 *

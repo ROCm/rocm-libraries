@@ -33,8 +33,6 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief  Sampled Dense-Dense Matrix Multiplication.
-*
 *  \details
 *  \p rocsparse_sddmm_buffer_size returns the size of the required buffer to execute the SDDMM operation from a given configuration.
 *  This routine is used in conjunction with \ref rocsparse_sddmm_preprocess() and \ref rocsparse_sddmm().
@@ -88,8 +86,6 @@ rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle            handle,
                                              size_t*                     buffer_size);
 
 /*! \ingroup generic_module
-*  \brief  Sampled Dense-Dense Matrix Multiplication.
-*
 *  \details
 *  \p rocsparse_sddmm_preprocess executes a part of the algorithm that can be calculated once in the context of multiple
 *  calls of the \ref rocsparse_sddmm with the same sparsity pattern.

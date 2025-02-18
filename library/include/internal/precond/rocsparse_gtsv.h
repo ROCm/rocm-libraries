@@ -33,13 +33,10 @@ extern "C" {
 #endif
 
 /*! \ingroup precond_module
-*  \brief Tridiagonal solver with pivoting
-*
 *  \details
 *  \p rocsparse_gtsv_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_sgtsv(), rocsparse_dgtsv(),
-*  rocsparse_cgtsv() and rocsparse_zgtsv(). The temporary storage buffer
-*  must be allocated by the user.
+*  that is required by \ref rocsparse_sgtsv "rocsparse_Xgtsv()". The temporary 
+*  storage buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -302,13 +299,10 @@ rocsparse_status rocsparse_zgtsv(rocsparse_handle                handle,
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Tridiagonal solver (no pivoting)
-*
 *  \details
 *  \p rocsparse_gtsv_no_pivot_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_sgtsv_no_pivot(), rocsparse_dgtsv_no_pivot(),
-*  rocsparse_cgtsv_no_pivot() and rocsparse_zgtsv_no_pivot(). The temporary storage buffer
-*  must be allocated by the user.
+*  that is required by \ref rocsparse_sgtsv_no_pivot "rocsparse_Xgtsv_no_pivot()". The temporary 
+*  storage buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -571,13 +565,10 @@ rocsparse_status rocsparse_zgtsv_no_pivot(rocsparse_handle                handle
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Strided Batch tridiagonal solver (no pivoting)
-*
 *  \details
 *  \p rocsparse_gtsv_no_pivot_strided_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_sgtsv_no_pivot_strided_batch(), rocsparse_dgtsv_no_pivot_strided_batch(),
-*  rocsparse_cgtsv_no_pivot_strided_batch() and rocsparse_zgtsv_no_pivot_strided_batch(). The temporary
-*  storage buffer must be allocated by the user.
+*  that is required by \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()". 
+*  The temporary storage buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -604,8 +595,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot(rocsparse_handle                handle
 *  batch_stride The number of elements that separate each system. Must satisfy \p batch_stride >= \p m.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
-*              rocsparse_sgtsv_no_pivot_strided_batch(), rocsparse_dgtsv_no_pivot_strided_batch(), rocsparse_cgtsv_no_pivot_strided_batch()
-*              and rocsparse_zgtsv_no_pivot_strided_batch().
+*              \ref rocsparse_sgtsv_no_pivot_strided_batch "rocsparse_Xgtsv_no_pivot_strided_batch()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -905,13 +895,10 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 /**@}*/
 
 /*! \ingroup precond_module
-*  \brief Interleaved Batch tridiagonal solver
-*
 *  \details
 *  \p rocsparse_gtsv_interleaved_batch_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_sgtsv_interleaved_batch(), rocsparse_dgtsv_interleaved_batch(),
-*  rocsparse_cgtsv_interleaved_batch() and rocsparse_zgtsv_interleaved_batch(). The temporary
-*  storage buffer must be allocated by the user.
+*  that is required by \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()". 
+*  The temporary storage buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -943,8 +930,7 @@ rocsparse_status rocsparse_zgtsv_no_pivot_strided_batch(rocsparse_handle        
 *  batch_stride The number of elements that separate consecutive elements in a system. Must satisfy \p batch_stride >= \p batch_count.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
-*              rocsparse_sgtsv_interleaved_batch(), rocsparse_dgtsv_interleaved_batch(), rocsparse_cgtsv_interleaved_batch()
-*              and rocsparse_zgtsv_interleaved_batch().
+*              \ref rocsparse_sgtsv_interleaved_batch "rocsparse_Xgtsv_interleaved_batch()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
