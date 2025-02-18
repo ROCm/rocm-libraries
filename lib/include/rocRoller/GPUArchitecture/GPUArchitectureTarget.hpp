@@ -47,6 +47,8 @@ namespace rocRoller
     std::string toString(GPUArchitectureGFX const& gfx);
     std::string name(GPUArchitectureGFX const& gfx);
 
+    std::ostream& operator<<(std::ostream&, GPUArchitectureGFX const& gfx);
+
     struct GPUArchitectureFeatures
     {
     public:

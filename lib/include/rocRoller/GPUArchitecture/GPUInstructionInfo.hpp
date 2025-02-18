@@ -78,6 +78,8 @@ namespace rocRoller
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
 
+    std::ostream& operator<<(std::ostream&, GPUWaitQueueType::Value const& v);
+
     class GPUWaitQueue
     {
     public:
@@ -158,6 +160,8 @@ namespace rocRoller
         Value                                         m_value = Value::Count;
         static std::unordered_map<std::string, Value> m_stringMap;
     };
+
+    std::ostream& operator<<(std::ostream&, GPUWaitQueue::Value const& v);
 
     class GPUInstructionInfo
     {

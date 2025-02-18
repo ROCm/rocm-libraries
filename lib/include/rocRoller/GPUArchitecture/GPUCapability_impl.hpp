@@ -21,6 +21,11 @@ namespace rocRoller
         return GPUCapability::toString(m_value);
     }
 
+    inline std::ostream& operator<<(std::ostream& stream, GPUCapability::Value v)
+    {
+        return stream << toString(v);
+    }
+
     inline std::string GPUCapability::toString(GPUCapability::Value value)
     {
         auto it = std::find_if(m_stringMap.begin(),

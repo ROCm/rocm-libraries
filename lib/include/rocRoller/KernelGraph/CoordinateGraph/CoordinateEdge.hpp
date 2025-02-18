@@ -27,6 +27,27 @@ namespace rocRoller
             None = Count
         };
 
+        inline std::string toString(EdgeType const& e)
+        {
+            switch(e)
+            {
+            case EdgeType::CoordinateTransform:
+                return "CoordinateTransform";
+            case EdgeType::DataFlow:
+                return "DataFlow";
+            case EdgeType::Any:
+                return "Any";
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid EdgeType");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, EdgeType e)
+        {
+            return stream << toString(e);
+        }
+
         /*
          * Coordinate transform edges
          *

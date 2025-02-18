@@ -9,6 +9,27 @@ namespace rocRoller::KernelGraph
 
     namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
+    inline std::string toString(ControlFlowRWTracer::ReadWrite const& rw)
+    {
+        switch(rw)
+        {
+        case ControlFlowRWTracer::ReadWrite::READ:
+            return "READ";
+        case ControlFlowRWTracer::ReadWrite::WRITE:
+            return "WRITE";
+        case ControlFlowRWTracer::ReadWrite::READWRITE:
+            return "READWRITE";
+        default:
+            break;
+        }
+        throw std::runtime_error("Invalid ControlFlowRWTracer::ReadWrite");
+    }
+
+    inline std::ostream& operator<<(std::ostream& stream, ControlFlowRWTracer::ReadWrite rw)
+    {
+        return stream << toString(rw);
+    }
+
     /**
      * @brief Collect all coordinate tags referenced in an Expression.
      */

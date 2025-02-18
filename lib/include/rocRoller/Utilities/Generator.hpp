@@ -64,7 +64,8 @@ namespace rocRoller
         Done,
         Count
     };
-    std::string toString(GeneratorState s);
+    std::string   toString(GeneratorState s);
+    std::ostream& operator<<(std::ostream&, GeneratorState const&);
 
     /**
      * Range/ConcreteRange wraps a collection object behind a virtual interface,

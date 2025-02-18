@@ -26,6 +26,16 @@ namespace rocRoller
         return input.toString();
     }
 
+    inline std::ostream& operator<<(std::ostream& stream, GPUWaitQueueType::Value const& v)
+    {
+        return stream << GPUWaitQueueType::toString(v);
+    }
+
+    inline std::ostream& operator<<(std::ostream& stream, GPUWaitQueue::Value const& v)
+    {
+        return stream << GPUWaitQueue::toString(v);
+    }
+
     inline GPUInstructionInfo::GPUInstructionInfo(std::string const&                   instruction,
                                                   int                                  waitcnt,
                                                   std::vector<GPUWaitQueueType> const& waitQueues,

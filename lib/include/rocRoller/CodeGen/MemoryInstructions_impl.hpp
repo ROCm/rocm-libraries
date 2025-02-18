@@ -34,7 +34,7 @@ namespace rocRoller
 
         switch(kind)
         {
-        case Global:
+        case MemoryKind::Global:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to loadGlobal
             if(offset && offset->regType() != Register::Type::Literal)
@@ -47,7 +47,7 @@ namespace rocRoller
             co_yield loadGlobal(dest, newAddr, offsetVal, numBytes, high);
             break;
 
-        case Local:
+        case MemoryKind::Local:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to loadLocal
             if(offset && offset->regType() != Register::Type::Literal)
@@ -60,7 +60,7 @@ namespace rocRoller
             co_yield loadLocal(dest, newAddr, offsetVal, numBytes, comment, high);
             break;
 
-        case Scalar:
+        case MemoryKind::Scalar:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to loadScalar
             if(offset && offset->regType() != Register::Type::Literal)
@@ -72,7 +72,7 @@ namespace rocRoller
             co_yield loadScalar(dest, newAddr, offsetVal, numBytes, buffOpts.glc);
             break;
 
-        case Buffer:
+        case MemoryKind::Buffer:
             AssertFatal(bufDesc);
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to loadBuffer
@@ -87,7 +87,7 @@ namespace rocRoller
                 dest, newAddr->subset({0}), offsetVal, bufDesc, buffOpts, numBytes, high);
             break;
 
-        case Buffer2LDS:
+        case MemoryKind::Buffer2LDS:
             AssertFatal(bufDesc);
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to bufferLoad2LDS
@@ -126,7 +126,7 @@ namespace rocRoller
 
         switch(kind)
         {
-        case Global:
+        case MemoryKind::Global:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to storeGlobal
             if(offset && offset->regType() != Register::Type::Literal)
@@ -139,7 +139,7 @@ namespace rocRoller
             co_yield storeGlobal(newAddr, data, offsetVal, numBytes, high);
             break;
 
-        case Local:
+        case MemoryKind::Local:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to storeLocal
             if(offset && offset->regType() != Register::Type::Literal)
@@ -152,7 +152,7 @@ namespace rocRoller
             co_yield storeLocal(newAddr, data, offsetVal, numBytes, comment, high);
             break;
 
-        case Buffer:
+        case MemoryKind::Buffer:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to storeBuffer
             if(offset && offset->regType() != Register::Type::Literal)
@@ -164,7 +164,7 @@ namespace rocRoller
 
             co_yield storeBuffer(data, newAddr, offsetVal, bufDesc, buffOpts, numBytes, high);
             break;
-        case Scalar:
+        case MemoryKind::Scalar:
             // If the provided offset is not a literal, create a new register that will store the value
             // of addr + offset and pass it to storeScalar
             if(offset && offset->regType() != Register::Type::Literal)

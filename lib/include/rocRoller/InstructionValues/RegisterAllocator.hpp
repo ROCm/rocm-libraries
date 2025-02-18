@@ -17,6 +17,9 @@ namespace rocRoller
             Count,
         };
 
+        std::string   toString(AllocatorScheme a);
+        std::ostream& operator<<(std::ostream&, AllocatorScheme const&);
+
         class Allocator : public std::enable_shared_from_this<Allocator>
         {
         public:

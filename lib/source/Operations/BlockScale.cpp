@@ -6,6 +6,25 @@ namespace rocRoller
 {
     namespace Operations
     {
+        std::string toString(BlockScale::PointerMode const& p)
+        {
+            switch(p)
+            {
+            case BlockScale::PointerMode::Separate:
+                return "Separate";
+            case BlockScale::PointerMode::Inline:
+                return "Inline";
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid PointerMode");
+        }
+
+        std::ostream& operator<<(std::ostream& stream, BlockScale::PointerMode p)
+        {
+            return stream << toString(p);
+        }
+
         BlockScale::BlockScale(OperationTag                data,
                                int                         dimensions,
                                std::optional<OperationTag> scale,

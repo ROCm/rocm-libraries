@@ -63,12 +63,14 @@ namespace rocRoller
         std::map<int, std::vector<int>> findLoopCarriedDependencies(KernelGraph const& kgraph,
                                                                     int                forLoop)
         {
-            enum RAW
+            enum class RAW
             {
                 INVALID,
                 NAUGHT,
                 WRITE,
                 READ,
+
+                Count
             };
             using RW = ControlFlowRWTracer::ReadWrite;
             rocRoller::Log::getLogger()->debug("KernelGraph::findLoopDependencies({})", forLoop);

@@ -15,7 +15,9 @@ namespace rocRoller
             Read,
             ReadWrite,
             Live,
-            Allocated
+            Allocated,
+
+            Count
         };
 
         struct LivenessHistoryEntry
@@ -121,6 +123,9 @@ namespace rocRoller
 
             std::string livenessString() const;
         };
+
+        std::string   toString(RegisterLiveState const& rls);
+        std::ostream& operator<<(std::ostream& stream, RegisterLiveState const& rls);
 
         static_assert(CObserverRuntime<RegisterLivenessObserver>);
     }

@@ -75,7 +75,8 @@ namespace rocRoller::KernelGraph
             Count
         };
 
-        std::string toString(ComputeIndexArgument cia);
+        std::string   toString(ComputeIndexArgument cia);
+        std::ostream& operator<<(std::ostream&, ComputeIndexArgument const&);
 
         struct ComputeIndex
         {

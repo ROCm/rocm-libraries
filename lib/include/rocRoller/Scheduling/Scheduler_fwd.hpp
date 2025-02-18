@@ -16,7 +16,7 @@ namespace rocRoller
             Count
         };
 
-        enum Dependency
+        enum class Dependency
         {
             None = 0,
             SCC,
@@ -30,6 +30,7 @@ namespace rocRoller
         class Scheduler;
         class LockState;
 
-        std::string toString(SchedulerProcedure);
+        std::string toString(SchedulerProcedure const&);
+        std::string toString(Dependency const&);
     }
 }

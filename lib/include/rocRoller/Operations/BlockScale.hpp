@@ -37,6 +37,8 @@ namespace rocRoller
             {
                 Separate, //< Scale is separate from data
                 Inline, //< Scale is inline with data
+
+                Count
             };
 
             std::unordered_set<OperationTag> getInputs() const;
@@ -55,5 +57,7 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
         };
 
+        std::string   toString(BlockScale::PointerMode const& p);
+        std::ostream& operator<<(std::ostream& stream, BlockScale::PointerMode p);
     }
 }

@@ -146,7 +146,8 @@ namespace rocRoller
         Count
     };
 
-    std::string toString(MemoryType m);
+    std::string   toString(MemoryType m);
+    std::ostream& operator<<(std::ostream& stream, MemoryType const& m);
 
     /**
      * Layout of wavetile for MFMA instructions.

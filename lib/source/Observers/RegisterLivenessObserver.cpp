@@ -9,31 +9,31 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        std::ostream& operator<<(std::ostream& stream, const RegisterLiveState& state)
+        {
+            return stream << toString(state);
+        }
 
-        inline std::ostream& operator<<(std::ostream& os, const RegisterLiveState& state)
+        std::string toString(RegisterLiveState const& state)
         {
             switch(state)
             {
             case RegisterLiveState::Dead:
-                os << " ";
-                break;
+                return " ";
             case RegisterLiveState::Write:
-                os << "^";
-                break;
+                return "^";
             case RegisterLiveState::Read:
-                os << "v";
-                break;
+                return "v";
             case RegisterLiveState::ReadWrite:
-                os << "x";
-                break;
+                return "x";
             case RegisterLiveState::Live:
-                os << ":";
-                break;
+                return ":";
             case RegisterLiveState::Allocated:
-                os << "_";
-                break;
+                return "_";
+            default:
+                throw std::runtime_error(
+                    concatenate("Invalid RegisterLiveState: ", static_cast<int>(state)));
             }
-            return os;
         }
 
         void RegisterLivenessObserver::observe(Instruction const& inst)

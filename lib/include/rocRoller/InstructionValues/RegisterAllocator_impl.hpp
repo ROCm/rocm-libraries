@@ -12,6 +12,26 @@ namespace rocRoller
 {
     namespace Register
     {
+        inline std::string toString(AllocatorScheme a)
+        {
+            switch(a)
+            {
+            case AllocatorScheme::FirstFit:
+                return "FirstFit";
+            case AllocatorScheme::PerfectFit:
+                return "PerfectFit";
+            default:
+                break;
+            }
+
+            Throw<FatalError>("Invalid AllocatorScheme");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, AllocatorScheme const& a)
+        {
+            return stream << toString(a);
+        }
+
         inline Allocator::Allocator(Type regType, int count, AllocatorScheme scheme)
             : m_regType(regType)
             , m_registers(count)

@@ -48,7 +48,8 @@ namespace rocRoller
             KernelExecute, // An expression that depends on at least one Register::Value.
             Count
         };
-        std::string toString(EvaluationTime t);
+        std::string   toString(EvaluationTime t);
+        std::ostream& operator<<(std::ostream&, EvaluationTime const&);
 
         using EvaluationTimes = EnumBitset<EvaluationTime>;
 
@@ -58,7 +59,8 @@ namespace rocRoller
             Associative,
             Count
         };
-        std::string toString(AlgebraicProperty t);
+        std::string   toString(AlgebraicProperty t);
+        std::ostream& operator<<(std::ostream&, AlgebraicProperty const&);
 
         using AlgebraicProperties = EnumBitset<AlgebraicProperty>;
 
@@ -71,6 +73,8 @@ namespace rocRoller
             Value,
             Count
         };
+        std::string   toString(Category c);
+        std::ostream& operator<<(std::ostream&, Category const&);
 
         // Expression: type alias for std::variant of all expression subtypes.
         // Defined in Expression_fwd.hpp.

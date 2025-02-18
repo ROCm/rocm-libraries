@@ -144,7 +144,7 @@ namespace ArithmeticTest
                     if(logical && regType == Register::Type::Scalar)
                     {
                         co_yield m_context->mem()->store(
-                            MemoryInstructions::Global,
+                            MemoryInstructions::MemoryKind::Global,
                             resultPtr,
                             resultReg,
                             Register::Value::Literal(idx * sizeof(uint32_t)),
@@ -153,7 +153,7 @@ namespace ArithmeticTest
                     else if(logical && regType == Register::Type::Vector)
                     {
                         co_yield m_context->mem()->store(
-                            MemoryInstructions::Global,
+                            MemoryInstructions::MemoryKind::Global,
                             resultPtr,
                             resultReg,
                             Register::Value::Literal(idx * sizeof(uint32_t) * numBoolRegs),
@@ -161,7 +161,7 @@ namespace ArithmeticTest
                     }
                     else
                     {
-                        co_yield m_context->mem()->store(MemoryInstructions::Global,
+                        co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                                          resultPtr,
                                                          resultReg,
                                                          Register::Value::Literal(idx * sizeof(T)),
@@ -578,26 +578,41 @@ namespace ArithmeticTest
             co_yield m_context->mem()->storeGlobal(v_result, v_r, 0, 4);
 
             co_yield generateOp<Expression::Subtract>(v_r, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(4), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(4),
+                                             4);
 
             co_yield generateOp<Expression::Multiply>(v_r, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(8), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(8),
+                                             4);
 
             co_yield generateOp<Expression::Negate>(v_r, v_a);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(12), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(12),
+                                             4);
 
             co_yield generateOp<Expression::MultiplyAdd>(v_r, v_a, v_b, v_c);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(16), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(16),
+                                             4);
 
             auto vcc = m_context->getVCC();
             co_yield generate(vcc, v_c->expression() >= v_a->expression(), m_context);
             co_yield generateOp<Expression::Conditional>(v_r, vcc, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(20), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(20),
+                                             4);
 
             co_yield generateOp<Expression::BitFieldExtract>(
                 v_tmp,
@@ -605,8 +620,11 @@ namespace ArithmeticTest
                 Expression::BitFieldExtract{
                     .outputDataType = DataType::UInt8, .offset = 23, .width = 8});
             co_yield_(Instruction("v_cvt_f32_ubyte0", {v_r}, {v_tmp}, {}, ""));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(24), 4);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(24),
+                                             4);
 
             co_yield generateOp<Expression::GreaterThan>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
@@ -784,7 +802,8 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_a, s_a, "Move value");
 
             co_yield generateOp<Expression::Exponential2>(v_r, v_a);
-            co_yield m_context->mem()->store(MemoryInstructions::Global, v_result, v_r, 0, 4);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::MemoryKind::Global, v_result, v_r, 0, 4);
         };
 
         m_context->schedule(kb());
@@ -931,32 +950,48 @@ namespace ArithmeticTest
 
             // fp32 = fp32 * fp16 + fp32
             co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_c);
-            co_yield m_context->mem()->store(MemoryInstructions::Global, v_result, v_r, 0, 8);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::MemoryKind::Global, v_result, v_r, 0, 8);
 
             // fp32 = fp16 * fp16 + fp32
             co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_b, v_c);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(8), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(8),
+                                             8);
 
             // fp32 = fp16 * fp32 + fp16
             co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_c, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(16), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(16),
+                                             8);
 
             // fp32 = fp32 * fp16 + fp16
             co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(24), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(24),
+                                             8);
 
             // fp32 = fp32 * fp32 + fp16
             co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_c, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(32), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(32),
+                                             8);
 
             // fp32 = fp16 * fp32 + fp32
             co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_c, v_c);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_r, Register::Value::Literal(40), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_r,
+                                             Register::Value::Literal(40),
+                                             8);
         };
 
         m_context->schedule(kb());
@@ -1151,22 +1186,34 @@ namespace ArithmeticTest
             co_yield m_context->mem()->storeGlobal(v_result, v_c, 0, 8);
 
             co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(8), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_c,
+                                             Register::Value::Literal(8),
+                                             8);
 
             co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(16), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_c,
+                                             Register::Value::Literal(16),
+                                             8);
 
             co_yield generateOp<Expression::Negate>(v_c, v_a);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(24), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_c,
+                                             Register::Value::Literal(24),
+                                             8);
 
             auto vcc = m_context->getVCC();
             co_yield generate(vcc, v_a->expression() >= v_b->expression(), m_context);
             co_yield generateOp<Expression::Conditional>(v_c, vcc, v_a, v_b);
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(32), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_c,
+                                             Register::Value::Literal(32),
+                                             8);
 
             co_yield generateOp<Expression::BitFieldExtract>(
                 v_tmp,
@@ -1174,13 +1221,16 @@ namespace ArithmeticTest
                 Expression::BitFieldExtract{
                     .outputDataType = DataType::UInt16, .offset = 52, .width = 11});
             co_yield_(Instruction("v_cvt_f64_u32", {v_c}, {v_tmp->subset({0})}, {}, ""));
-            co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_c, Register::Value::Literal(40), 8);
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
+                                             v_result,
+                                             v_c,
+                                             Register::Value::Literal(40),
+                                             8);
 
             co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
 
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(0),
@@ -1189,7 +1239,7 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
 
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(4),
@@ -1197,7 +1247,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(8),
@@ -1205,7 +1255,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(12),
@@ -1213,7 +1263,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(16),
@@ -1221,7 +1271,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::NotEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_cond, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_cond_result,
                                              v_cond->subset({0}),
                                              Register::Value::Literal(20),

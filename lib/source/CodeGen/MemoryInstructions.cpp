@@ -11,6 +11,8 @@ namespace rocRoller
             return "Load";
         case MemoryInstructions::MemoryDirection::Store:
             return "Store";
+        default:
+            break;
         }
 
         Throw<FatalError>("Invalid MemoryDirection");
@@ -19,6 +21,32 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection d)
     {
         return stream << toString(d);
+    }
+
+    std::string toString(MemoryInstructions::MemoryKind const& k)
+    {
+        switch(k)
+        {
+        case MemoryInstructions::MemoryKind::Global:
+            return "Global";
+        case MemoryInstructions::MemoryKind::Scalar:
+            return "Scalar";
+        case MemoryInstructions::MemoryKind::Local:
+            return "Local";
+        case MemoryInstructions::MemoryKind::Buffer:
+            return "Buffer";
+        case MemoryInstructions::MemoryKind::Buffer2LDS:
+            return "Buffer2LDS";
+        default:
+            break;
+        }
+
+        Throw<FatalError>("Invalid MemoryKind");
+    }
+
+    std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryKind k)
+    {
+        return stream << toString(k);
     }
 
     Generator<Instruction>

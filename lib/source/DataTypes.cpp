@@ -219,6 +219,11 @@ namespace rocRoller
         return "INVALID";
     }
 
+    std::ostream& operator<<(std::ostream& stream, MemoryType const& m)
+    {
+        return stream << toString(m);
+    }
+
     std::string toString(LayoutType l)
     {
         switch(l)

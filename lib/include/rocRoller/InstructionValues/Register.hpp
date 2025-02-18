@@ -35,6 +35,8 @@ namespace rocRoller
             /// Won't be using allocator
             /// (e.g. taking allocation from elsewhere or assigning particular register numbers)
             MANUAL = -1,
+
+            Count = 255,
         };
         struct AllocationOptions
         {

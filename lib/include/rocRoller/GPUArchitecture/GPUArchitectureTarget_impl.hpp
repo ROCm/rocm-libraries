@@ -44,6 +44,11 @@ namespace rocRoller
         }
     }
 
+    inline std::ostream& operator<<(std::ostream& stream, GPUArchitectureGFX const& gfx)
+    {
+        return stream << toString(gfx);
+    }
+
     inline std::string name(GPUArchitectureGFX const& gfx)
     {
         switch(gfx)
