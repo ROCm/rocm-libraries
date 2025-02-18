@@ -76,7 +76,8 @@ bool isGfx9()
             || (deviceName.find("gfx90a") != std::string::npos)
             || (deviceName.find("gfx940") != std::string::npos)
             || (deviceName.find("gfx941") != std::string::npos)
-            || (deviceName.find("gfx942") != std::string::npos));
+            || (deviceName.find("gfx942") != std::string::npos)
+            || (deviceName.find("gfx950") != std::string::npos));
 }
 
 bool isGfx11()
@@ -122,7 +123,8 @@ bool isF64Supported()
     return ((deviceName.find("gfx90a") != std::string::npos)
             || (deviceName.find("gfx940") != std::string::npos)
             || (deviceName.find("gfx941") != std::string::npos)
-            || (deviceName.find("gfx942") != std::string::npos));
+            || (deviceName.find("gfx942") != std::string::npos)
+            || (deviceName.find("gfx950") != std::string::npos));
 }
 
 bool isF32Supported()

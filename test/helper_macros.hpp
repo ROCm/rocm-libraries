@@ -260,6 +260,35 @@
     default:;                                                       \
     }
 
+#define ROCWMMA_SWITCH_BODY11_ARG1(SWITCH_ARG,                        \
+                                   CASE_IMPL,                         \
+                                   CASE_LABEL0,                       \
+                                   CASE_LABEL1,                       \
+                                   CASE_LABEL2,                       \
+                                   CASE_LABEL3,                       \
+                                   CASE_LABEL4,                       \
+                                   CASE_LABEL5,                       \
+                                   CASE_LABEL6,                       \
+                                   CASE_LABEL7,                       \
+                                   CASE_LABEL8,                       \
+                                   CASE_LABEL9,                       \
+                                   CASE_LABEL10)                      \
+    switch(SWITCH_ARG)                                                \
+    {                                                                 \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL0, CASE_IMPL, CASE_LABEL0)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL1, CASE_IMPL, CASE_LABEL1)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL2, CASE_IMPL, CASE_LABEL2)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL3, CASE_IMPL, CASE_LABEL3)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL4, CASE_IMPL, CASE_LABEL4)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL5, CASE_IMPL, CASE_LABEL5)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL6, CASE_IMPL, CASE_LABEL6)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL7, CASE_IMPL, CASE_LABEL7)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL8, CASE_IMPL, CASE_LABEL8)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL9, CASE_IMPL, CASE_LABEL9)   \
+        ROCWMMA_CASE_BODY_ARG1(CASE_LABEL10, CASE_IMPL, CASE_LABEL10) \
+    default:;                                                         \
+    }
+
 // First arg is always case label, second is a constant
 #define ROCWMMA_SWITCH_BODY2_ARG2(SWITCH_ARG, CASE_IMPL, CASE_LABEL0, CASE_LABEL1, FWD_ARG_0) \
     switch(SWITCH_ARG)                                                                        \

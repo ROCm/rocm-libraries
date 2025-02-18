@@ -144,7 +144,7 @@ namespace ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE
 //static_assert((bool)ROCWMMA_ARCH_GFX12 || (bool)ROCWMMA_ARCH_HOST,
 //              "fp8_fnuz types only supported on gfx12 archs");
 
-#define ROCWMMA_FP8 (ROCWMMA_ARCH_GFX12 || ROCWMMA_ARCH_HOST)
+#define ROCWMMA_FP8 (ROCWMMA_ARCH_GFX950 || ROCWMMA_ARCH_GFX12 || ROCWMMA_ARCH_HOST)
 #define ROCWMMA_FP8_VISIBILITY ROCWMMA_HOST_DEVICE
 #else
 
@@ -153,17 +153,17 @@ namespace ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE
 #endif // defined(HIP_FP8_TYPE_OCP) && HIP_FP8_TYPE_OCP
 
 #if defined(__HIPCC_RTC__)
-    #if ROCWMMA_FP8_FNUZ
-	#define  ENABLE_FNUZ_HIPRTC 1
-    #else
-	#define ENABLE_FNUZ_HIPRTC 0
-    #endif
+#if ROCWMMA_FP8_FNUZ
+#define ENABLE_FNUZ_HIPRTC 1
+#else
+#define ENABLE_FNUZ_HIPRTC 0
+#endif
 
-    #if ROCWMMA_FP8_OCP
-	#define ENABLE_OCP_HIPRTC 1
-    #else
-	#define ENABLE_OCP_HIPRTC 0
-    #endif
+#if ROCWMMA_FP8_OCP
+#define ENABLE_OCP_HIPRTC 1
+#else
+#define ENABLE_OCP_HIPRTC 0
+#endif
 #endif
 
 #if !defined(ENABLE_OCP_HIPRTC) || ENABLE_OCP_HIPRTC
@@ -1112,4 +1112,3 @@ namespace ROCWMMA_NUMERIC_LIMITS_IMPL_NAMESPACE
 #endif // ENABLE_FNUZ_HIPRTC
 
 #endif // ROCWMMA_FLOAT8_HPP
-

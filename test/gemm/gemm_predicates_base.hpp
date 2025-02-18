@@ -121,11 +121,17 @@ namespace rocwmma
               || (bool)TestTraits::InputType::IsFloat64,
 
             // Gfx940/1/2 arch req'd for float8_fnuz_t, bfloat8_fnuz_t and xfloat32_t
-            F8XF32ArchTest = !((bool)TestTraits::InputType::IsFloat8Fnuz
-                               || (bool)TestTraits::InputType::IsBFloat8Fnuz
-                               || (bool)TestTraits::InputType::IsXFloat32)
-                             || (bool)TestTraits::Arch::IsGfx940 || (bool)TestTraits::Arch::IsGfx941
-                             || (bool)TestTraits::Arch::IsGfx942,
+            F8FnuzXF32ArchTest = !((bool)TestTraits::InputType::IsFloat8Fnuz
+                                   || (bool)TestTraits::InputType::IsBFloat8Fnuz
+                                   || (bool)TestTraits::InputType::IsXFloat32)
+                                 || (bool)TestTraits::Arch::IsGfx940
+                                 || (bool)TestTraits::Arch::IsGfx941
+                                 || (bool)TestTraits::Arch::IsGfx942,
+
+            // Gfx950 arch req'd for float8_t
+            F8ArchTest
+            = !((bool)TestTraits::InputType::IsFloat8 || (bool)TestTraits::InputType::IsBFloat8)
+              || (bool)TestTraits::Arch::IsGfx950,
 
             // All archs except gfx908 can run float64_t
             F64ArchTest
@@ -140,13 +146,13 @@ namespace rocwmma
                               || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 8u)
                                   && (BlockK % 8u == 0u)),
 
-            // Follow-on to gfx940/1/2 int8_t.
+            // Follow-on to gfx940/1/2/950 int8_t.
             // BlockM/N = 16; Block K >= 32
             // BlockM/N = 32; Block K >= 16
-            Gfx940I8BlockSizeTest
+            ExtI8BlockSizeTest
             = !((bool)TestTraits::InputType::IsInt8
                 && ((bool)TestTraits::Arch::IsGfx940 || (bool)TestTraits::Arch::IsGfx941
-                    || (bool)TestTraits::Arch::IsGfx942))
+                    || (bool)TestTraits::Arch::IsGfx942 || (bool)TestTraits::Arch::IsGfx950))
               || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 32u)
                   && (BlockK % 32u == 0u))
               || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 16u)
@@ -208,10 +214,10 @@ namespace rocwmma
                                || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 4u)
                                    && (BlockK % 4u == 0u)),
 
-            Enable = (ArchTest && WaveSizeTest && TBlockTest && InputTypesTest && F8XF32ArchTest
-                      && F64ArchTest && I8BlockSizeTest && Gfx940I8BlockSizeTest && F8BlockSizeTest
-                      && F16BlockSizeTest && Gfx908BF16BlockSizeTest && F32BlockSizeTest
-                      && XF32BlockSizeTest && F64BlockSizeTest)
+            Enable = (ArchTest && WaveSizeTest && TBlockTest && InputTypesTest && F8FnuzXF32ArchTest
+                      && F8ArchTest && F64ArchTest && I8BlockSizeTest && ExtI8BlockSizeTest
+                      && F8BlockSizeTest && F16BlockSizeTest && Gfx908BF16BlockSizeTest
+                      && F32BlockSizeTest && XF32BlockSizeTest && F64BlockSizeTest)
         };
 
 #if !NDEBUG

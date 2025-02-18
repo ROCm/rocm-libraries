@@ -182,13 +182,14 @@ namespace rocwmma
         waveSize, CASE_IMPL_ASSIGN2, HipDevice::Wave32, HipDevice::Wave64, ARCH_ID)
 
 #define DISPATCH_GUARD_BODY                           \
-    ROCWMMA_SWITCH_BODY10_ARG1(deviceArch,            \
+    ROCWMMA_SWITCH_BODY11_ARG1(deviceArch,            \
                                SWITCH_BODY_WAVE_SIZE, \
                                HipDevice::GFX908,     \
                                HipDevice::GFX90A,     \
                                HipDevice::GFX940,     \
                                HipDevice::GFX941,     \
                                HipDevice::GFX942,     \
+                               HipDevice::GFX950,     \
                                HipDevice::GFX1100,    \
                                HipDevice::GFX1101,    \
                                HipDevice::GFX1102,    \
