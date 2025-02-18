@@ -39,9 +39,8 @@ void rocsparse_seedrand()
     rocsparse_rng_set(rocsparse_seed_get());
     rocsparse_rng_nan_set(rocsparse_seed_get());
 
-    rocsparse_rand_uniform_float_idx  = 0;
-    rocsparse_rand_uniform_double_idx = 0;
-    rocsparse_rand_normal_double_idx  = 0;
+    rocsparse_rand_uniform_idx = 0;
+    rocsparse_rand_normal_idx  = 0;
 }
 
 void rocsparse_rng_set(rocsparse_rng_t a)
@@ -76,59 +75,60 @@ rocsparse_rng_t& rocsparse_rng_nan_get()
 
 #define RANDOM_CACHE_SIZE 1024
 
-int rocsparse_rand_uniform_float_idx;
-int rocsparse_rand_uniform_double_idx;
-int rocsparse_rand_normal_double_idx;
+int rocsparse_rand_uniform_idx;
+int rocsparse_rand_normal_idx;
 
-static int s_rand_uniform_float_init  = 0;
-static int s_rand_uniform_double_init = 0;
-static int s_rand_normal_double_init  = 0;
+static int s_rand_uniform_init = 0;
+static int s_rand_normal_init  = 0;
 
-// float random uniform numbers between 0.0f - 1.0f
-static float s_rand_uniform_float_array[RANDOM_CACHE_SIZE];
-// double random uniform numbers between 0.0 - 1.0
-static double s_rand_uniform_double_array[RANDOM_CACHE_SIZE];
-// double random normal numbers between 0.0 - 1.0
-static double s_rand_normal_double_array[RANDOM_CACHE_SIZE];
+// random uniform numbers between 0.0 - 1.0
+static double s_rand_uniform_array[RANDOM_CACHE_SIZE];
+// random normal numbers between 0.0 - 1.0
+static double s_rand_normal_array[RANDOM_CACHE_SIZE];
 
-float rocsparse_uniform_float(float a, float b)
+void generate_random_cache()
 {
-    if(!s_rand_uniform_float_init)
+    if(!s_rand_uniform_init)
     {
         for(int i = 0; i < RANDOM_CACHE_SIZE; i++)
         {
-            s_rand_uniform_float_array[i]
-                = std::uniform_real_distribution<float>(0.0f, 1.0f)(rocsparse_rng_get());
+            s_rand_uniform_array[i]
+                = std::uniform_real_distribution<double>(0.0, 1.0)(rocsparse_rng_get());
         }
-        s_rand_uniform_float_init = 1;
+        s_rand_uniform_init = 1;
         if(rocsparse_reproducibility_t::instance().is_enabled())
             rocsparse_seedrand();
     }
 
-    rocsparse_rand_uniform_float_idx
-        = (rocsparse_rand_uniform_float_idx + 1) & (RANDOM_CACHE_SIZE - 1);
+    if(!s_rand_normal_init)
+    {
+        for(int i = 0; i < RANDOM_CACHE_SIZE; i++)
+        {
+            s_rand_normal_array[i]
+                = std::normal_distribution<double>(0.0, 1.0)(rocsparse_rng_get());
+        }
+        s_rand_normal_init = 1;
+        if(rocsparse_reproducibility_t::instance().is_enabled())
+            rocsparse_seedrand();
+    }
+}
 
-    return a + s_rand_uniform_float_array[rocsparse_rand_uniform_float_idx] * (b - a);
+float rocsparse_uniform_float(float a, float b)
+{
+    generate_random_cache();
+
+    rocsparse_rand_uniform_idx = (rocsparse_rand_uniform_idx + 1) & (RANDOM_CACHE_SIZE - 1);
+
+    return a + s_rand_uniform_array[rocsparse_rand_uniform_idx] * (b - a);
 }
 
 double rocsparse_uniform_double(double a, double b)
 {
-    if(!s_rand_uniform_double_init)
-    {
-        for(int i = 0; i < RANDOM_CACHE_SIZE; i++)
-        {
-            s_rand_uniform_double_array[i]
-                = std::uniform_real_distribution<double>(0.0, 1.0)(rocsparse_rng_get());
-        }
-        s_rand_uniform_double_init = 1;
-        if(rocsparse_reproducibility_t::instance().is_enabled())
-            rocsparse_seedrand();
-    }
+    generate_random_cache();
 
-    rocsparse_rand_uniform_double_idx
-        = (rocsparse_rand_uniform_double_idx + 1) & (RANDOM_CACHE_SIZE - 1);
+    rocsparse_rand_uniform_idx = (rocsparse_rand_uniform_idx + 1) & (RANDOM_CACHE_SIZE - 1);
 
-    return a + s_rand_uniform_double_array[rocsparse_rand_uniform_double_idx] * (b - a);
+    return a + s_rand_uniform_array[rocsparse_rand_uniform_idx] * (b - a);
 }
 
 int rocsparse_uniform_int(int a, int b)
@@ -138,20 +138,9 @@ int rocsparse_uniform_int(int a, int b)
 
 double rocsparse_normal_double()
 {
-    if(!s_rand_normal_double_init)
-    {
-        for(int i = 0; i < RANDOM_CACHE_SIZE; i++)
-        {
-            s_rand_normal_double_array[i]
-                = std::normal_distribution<double>(0.0, 1.0)(rocsparse_rng_get());
-        }
-        s_rand_normal_double_init = 1;
-        if(rocsparse_reproducibility_t::instance().is_enabled())
-            rocsparse_seedrand();
-    }
+    generate_random_cache();
 
-    rocsparse_rand_normal_double_idx
-        = (rocsparse_rand_normal_double_idx + 1) & (RANDOM_CACHE_SIZE - 1);
+    rocsparse_rand_normal_idx = (rocsparse_rand_normal_idx + 1) & (RANDOM_CACHE_SIZE - 1);
 
-    return s_rand_normal_double_array[rocsparse_rand_normal_double_idx];
+    return s_rand_normal_array[rocsparse_rand_normal_idx];
 }

@@ -50,9 +50,8 @@ rocsparse_rng_t& rocsparse_rng_nan_get();
 
 // extern  rocsparse_rng_t rocsparse_rng, rocsparse_seed, rocsparse_rng_nan;
 
-extern int rocsparse_rand_uniform_float_idx;
-extern int rocsparse_rand_uniform_double_idx;
-extern int rocsparse_rand_normal_double_idx;
+extern int rocsparse_rand_uniform_idx;
+extern int rocsparse_rand_normal_idx;
 
 // Reset the seed (mainly to ensure repeatability of failures in a given suite)
 void rocsparse_seedrand();

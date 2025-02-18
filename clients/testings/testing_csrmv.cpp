@@ -160,6 +160,9 @@ void testing_csrmv(const Arguments& arg)
     host_csr_matrix<T> hA;
     matrix_factory.init_csr(hA, M, N);
 
+    // normalize
+    rocsparse_vector_utils<T>::normalize(hA.val);
+
     if((matrix_type == rocsparse_matrix_type_symmetric && M != N)
        || (matrix_type == rocsparse_matrix_type_triangular && M != N))
     {

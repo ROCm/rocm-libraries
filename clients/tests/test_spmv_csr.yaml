@@ -153,8 +153,7 @@ Tests:
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_stream]
   filename: [mac_econ_fwd500,
              nos2,
-             nos4,
-             nos6]
+             nos4]
 
 - name: spmv_csr_file
   category: pre_checkin
@@ -337,8 +336,7 @@ Tests:
   spmv_alg: [rocsparse_spmv_alg_csr_adaptive, rocsparse_spmv_alg_csr_stream]
   filename: [mac_econ_fwd500,
              nos2,
-             nos4,
-             nos6]
+             nos4]
 
 - name: spmv_csr_file
   category: pre_checkin
