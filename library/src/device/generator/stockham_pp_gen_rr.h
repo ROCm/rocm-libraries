@@ -259,7 +259,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return f;
     }
 
-    Function generate_twiddle_multiply_pp_function()
+    Function generate_twiddle_multiply_pp_function(int direction)
     {
         std::string function_name
             = "twiddle_multiply_pp_length" + std::to_string(length) + "_device";
@@ -282,7 +282,14 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         for(unsigned int w = 0; w < max_factor_pp; ++w)
         {
             body += Assign{W, twiddles_pp[thread * length + w]};
-            body += Assign{t, TwiddleMultiply{R[w], W}};
+
+            if(direction == -1)
+                body += Assign{t, TwiddleMultiply{R[w], W}};
+            else if(direction == 1)
+                body += Assign{t, TwiddleMultiplyConjugate{R[w], W}};
+            else
+                throw std::runtime_error("Invalid FFT direction for twiddle multiply");
+
             body += Assign{R[w], t};
         }
 

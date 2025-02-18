@@ -362,8 +362,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
                 kernel_pp->generate_lds_to_reg_input_step_1_2_function());
             reg2lds_pp_steps = std::make_unique<Function>(
                 kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
-            twiddle_multiply_pp
-                = std::make_unique<Function>(kernel_pp->generate_twiddle_multiply_pp_function());
+            twiddle_multiply_pp = std::make_unique<Function>(
+                kernel_pp->generate_twiddle_multiply_pp_function(direction));
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
             break;
         }
