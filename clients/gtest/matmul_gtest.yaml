@@ -733,6 +733,22 @@ Tests:
   unit_check: 1
   gpu_arch: '94[0-2]'
 
+- name: matmul_swizzleA
+  category: pre_checkin
+  function:
+    matmul: *real_precisions_swizzleA_support
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA: T
+  transB: N
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  bias_type: f16_r
+  unit_check: 1
+  gpu_arch: '942'
+
 ### GFX12 FP8
 - name: matmul_f8_bf8_dst_fp32_gfx12
   category: pre_checkin
