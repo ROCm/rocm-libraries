@@ -1127,10 +1127,6 @@ void SBCCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
     gp.b_x = ((length[1]) - 1) / bwd + 1;
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
-
-    std::cout << "gp.b_x: " << gp.b_x << std::endl;
-    std::cout << "gp.wgs_x: " << gp.wgs_x << std::endl;
-    std::cout << "lds: " << lds << std::endl;
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()
