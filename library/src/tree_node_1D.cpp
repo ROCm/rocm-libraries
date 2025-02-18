@@ -931,10 +931,6 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
         else
             lds = (length[0] + lds_padding) * bwd;
     }
-
-    std::cout << "gp.b_x: " << gp.b_x << std::endl;
-    std::cout << "gp.wgs_x: " << gp.wgs_x << std::endl;
-    std::cout << "lds: " << lds << std::endl;
 }
 
 bool Stockham1DNode::CreateDeviceResources()
