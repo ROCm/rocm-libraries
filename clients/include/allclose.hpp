@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,10 @@ bool allclose(size_t* N, T* a, T* b, double atol, double rtol, bool equal_nan = 
 {
     for(size_t i = 0; i < *N; i++)
     {
+        //Returning ture immediately if 2 elements are identical.
+        //This also can handle inf == inf case
+        if(a[i] == b[i])
+            continue;
         //NaNs compare equal when equal_nan is true
         if(equal_nan && (std::isnan(a[i]) && std::isnan(b[i])))
             continue;
@@ -72,8 +76,8 @@ template <
 #ifdef ROCM_USE_FLOAT8
                        || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}
 #endif
-                ),
-              int> = 0>
+                       ),
+                     int> = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -183,10 +187,9 @@ bool allclose_check_general(char    allclose_type,
 }
 
 #ifdef ROCM_USE_FLOAT8
-template <
-    typename T,
-    std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}),
-                     int> = 0>
+template <typename T,
+          std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}),
+                           int> = 0>
 bool allclose_check_general(char    allclose_type,
                             int64_t M,
                             int64_t N,
@@ -442,26 +445,26 @@ bool allclose_check_general(char        allclose_type,
 #ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         return allclose_check_general<hipblaslt_f8>(allclose_type,
-                                                        M,
-                                                        N,
-                                                        lda,
-                                                        stride_a,
-                                                        static_cast<hipblaslt_f8*>(hCPU),
-                                                        static_cast<hipblaslt_f8*>(hGPU),
-                                                        batch_count,
-                                                        hipblaslt_atol,
-                                                        hipblaslt_rtol);
+                                                    M,
+                                                    N,
+                                                    lda,
+                                                    stride_a,
+                                                    static_cast<hipblaslt_f8*>(hCPU),
+                                                    static_cast<hipblaslt_f8*>(hGPU),
+                                                    batch_count,
+                                                    hipblaslt_atol,
+                                                    hipblaslt_rtol);
     case HIP_R_8F_E5M2:
         return allclose_check_general<hipblaslt_bf8>(allclose_type,
-                                                         M,
-                                                         N,
-                                                         lda,
-                                                         stride_a,
-                                                         static_cast<hipblaslt_bf8*>(hCPU),
-                                                         static_cast<hipblaslt_bf8*>(hGPU),
-                                                         batch_count,
-                                                         hipblaslt_atol,
-                                                         hipblaslt_rtol);
+                                                     M,
+                                                     N,
+                                                     lda,
+                                                     stride_a,
+                                                     static_cast<hipblaslt_bf8*>(hCPU),
+                                                     static_cast<hipblaslt_bf8*>(hGPU),
+                                                     batch_count,
+                                                     hipblaslt_atol,
+                                                     hipblaslt_rtol);
 #endif
     case HIP_R_32I:
         return allclose_check_general<int32_t>(allclose_type,
