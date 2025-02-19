@@ -276,10 +276,10 @@ bool LeafNode::CreateDeviceResources()
     return CreateLargeTwdTable();
 }
 
-void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
+void LeafNode::SetupGridParam(GridParam& gp)
 {
     // derived classes setup the gp (bwd, wgs, lds, padding), funPtr
-    SetupGPAndFnPtr_internal(fnPtr, gp);
+    SetupGridParam_internal(gp);
 
     auto key = GetKernelKey();
 
@@ -346,7 +346,7 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
  *****************************************************/
 
 // grid params are set up by RTC
-void TransposeNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) {}
+void TransposeNode::SetupGridParam_internal(GridParam& gp) {}
 
 void TreeNode::SetTransposeOutputLength()
 {

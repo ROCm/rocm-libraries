@@ -882,11 +882,10 @@ void SBRCTranspose3DNode::TuneDirectRegType()
  * Derived Class of fused SBRC and Transpose
  * CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z
  *****************************************************/
-void SBRCTransXY_ZNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -898,11 +897,10 @@ void SBRCTransXY_ZNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp
  * Derived Class of fused SBRC and Transpose
  * CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY
  *****************************************************/
-void SBRCTransZ_XYNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -914,11 +912,10 @@ void SBRCTransZ_XYNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp
  * Derived Class of fused SBRC and Transpose
  * CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY
  *****************************************************/
-void RealCmplxTransZ_XYNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds_padding = 1;

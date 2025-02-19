@@ -1133,7 +1133,6 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
 
     // grid params are set during runtime compilation, put them on
     // the execPlan so they're known at exec time
-    execPlan.devFnCall.push_back(nullptr);
     auto& gp       = execPlan.gridParam.emplace_back();
     dim3  gridDim  = execPlan.execSeq.front()->compiledKernel.get()->gridDim;
     dim3  blockDim = execPlan.execSeq.front()->compiledKernel.get()->blockDim;

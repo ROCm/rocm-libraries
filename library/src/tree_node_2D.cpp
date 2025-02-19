@@ -314,10 +314,9 @@ bool Single2DNode::CreateDeviceResources()
     return CreateLargeTwdTable();
 }
 
-void Single2DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void Single2DNode::SetupGridParam_internal(GridParam& gp)
 {
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 

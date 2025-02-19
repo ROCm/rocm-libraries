@@ -20,6 +20,7 @@
 
 #include <optional>
 
+#include "../../shared/array_predicate.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
 #include "rtc_stockham_gen.h"
@@ -52,8 +53,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     std::optional<FFTKernel> kernel;
 
-    bool is_pre_compiled = false;
-
     // find function pool entry so we can construct specs for the generator
     // NB: make sure all SBRC-type node have the correct trans_type value
     FMKey key;
@@ -77,14 +76,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         // these go into the function pool normally and are passed to
         // the generator as-is
         kernel = pool.get_kernel(key);
-        // if a kernel is already precompiled, just use that.  but
-        // changing largeTwdBatch transform count requires RTC, so we
-        // can't use a precompiled kernel in that case.
-        if(kernel->device_function && !node.loadOps.enabled() && !node.storeOps.enabled()
-           && !node.largeTwdBatchIsTransformCount)
-        {
-            is_pre_compiled = true;
-        }
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
@@ -103,11 +94,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     case CS_KERNEL_2D_SINGLE:
     {
         kernel = pool.get_kernel(key);
-        // already precompiled?
-        if(kernel->device_function && !node.loadOps.enabled() && !node.storeOps.enabled())
-        {
-            is_pre_compiled = true;
-        }
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
@@ -190,10 +176,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.loadOps,
                                         node.storeOps);
     };
-
-    // if is pre-compiled, we assign the name-function only
-    if(is_pre_compiled)
-        return generator;
 
     generator.generate_src = [=, &node](const std::string& kernel_name) {
         return stockham_rtc(*specs,

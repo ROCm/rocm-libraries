@@ -107,18 +107,14 @@ class FFTKernel(BaseNode):
     def __str__(self):
         aot_rtc = is_aot_rtc(self.function.meta)
         f = 'FFTKernel('
-        if self.function.meta.runtime_compile or aot_rtc:
-            f += 'nullptr'
-        else:
-            f += str(self.function.address())
         use_3steps_large_twd = getattr(self.function.meta,
                                        'use_3steps_large_twd', None)
         # assume half-precision needs the same thing as single
         precision = 'sp' if self.function.meta.precision == 'half' else self.function.meta.precision
         if use_3steps_large_twd is not None:
-            f += ', ' + str(use_3steps_large_twd[precision])
+            f += str(use_3steps_large_twd[precision])
         else:
-            f += ', false'
+            f += 'false'
         factors = getattr(self.function.meta, 'factors', None)
         if factors is not None:
             f += ', {' + cjoin(factors) + '}'

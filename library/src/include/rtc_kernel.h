@@ -164,7 +164,7 @@ struct RTCKernel
 
     // grid parameters for this kernel.  may be set by runtime
     // compilation, if compilation of this kernel type knows how to.
-    // Otherwise, TreeNode::SetupGPAndFnPtr_internal will do it
+    // Otherwise, TreeNode::SetupGridParam_internal will do it
     // later.
     dim3 gridDim;
     dim3 blockDim;

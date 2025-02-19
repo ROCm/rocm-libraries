@@ -76,7 +76,7 @@ protected:
         need_twd_table = true;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
 public:
     bool CreateDeviceResources() override;

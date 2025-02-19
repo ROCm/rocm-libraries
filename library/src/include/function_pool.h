@@ -43,9 +43,6 @@ inline std::string PrintMissingKernelInfo(const FMKey& key)
 
 struct FFTKernel
 {
-    // generated launch function, which will be nullptr if the kernel
-    // is built using runtime compilation
-    DevFnCall           device_function = nullptr;
     std::vector<size_t> factors;
     // NB:
     //    Some abbrevs for namings that we can follow (tpb/wgs/tpt)
@@ -69,8 +66,7 @@ struct FFTKernel
 
     FFTKernel& operator=(const FFTKernel&) = default;
 
-    FFTKernel(DevFnCall             fn,
-              bool                  use_3steps,
+    FFTKernel(bool                  use_3steps,
               std::vector<size_t>&& factors,
               int                   tpb,
               int                   wgs,
@@ -78,8 +74,7 @@ struct FFTKernel
               bool                  half_lds           = false,
               bool                  direct_to_from_reg = false,
               bool                  aot_rtc            = false)
-        : device_function(fn)
-        , factors(factors)
+        : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
         , threads_per_transform(tpt)
@@ -213,14 +208,6 @@ public:
         }
 
         return lengths;
-    }
-
-    static DevFnCall get_function(const FMKey& key)
-    {
-        function_pool& func_pool = get_function_pool();
-
-        auto real_key = function_pool::get_actual_key(key);
-        return func_pool.function_map.at(real_key).device_function;
     }
 
     static FFTKernel get_kernel(const FMKey& key)

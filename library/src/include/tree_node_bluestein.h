@@ -55,7 +55,7 @@ class BluesteinSingleNode : public LeafNode
 protected:
     BluesteinSingleNode(TreeNode* p, ComputeScheme s);
 
-    void   SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override{};
+    void   SetupGridParam_internal(GridParam& gp) override{};
     size_t GetTwiddleTableLength() override;
 
 public:
@@ -100,7 +100,7 @@ protected:
         }
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override{};
+    void SetupGridParam_internal(GridParam& gp) override{};
 };
 
 #endif // TREE_NODE_BLUE_H

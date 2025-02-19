@@ -60,8 +60,6 @@ enum FuseType
     FT_STOCKHAM_R2C_TRANSPOSE, // Stokham + post-r2c + transpose (Advance of FT_R2C_TRANSPOSE)
 };
 
-typedef void (*DevFnCall)(const void*, void*);
-
 struct GridParam
 {
     unsigned int b_x, b_y, b_z; // in HIP, the data type of dimensions of work
@@ -561,7 +559,7 @@ public:
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
     virtual bool CreateDevKernelArgs()                                        = 0;
     virtual bool CreateDeviceResources()                                      = 0;
-    virtual void SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)    = 0;
+    virtual void SetupGridParam(GridParam& gp)                                = 0;
 
     // for 3D SBRC kernels, decide the transpose type based on the
     // block width and lengths that the block tiles need to align on.
@@ -622,9 +620,9 @@ protected:
         return false;
     }
 
-    void SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp) override
+    void SetupGridParam(GridParam& gp) override
     {
-        throw std::runtime_error("Shouldn't call SetupGridParamAndFuncPtr in a non-LeafNode");
+        throw std::runtime_error("Shouldn't call SetupGridParam in a non-LeafNode");
     }
 
 public:
@@ -669,7 +667,7 @@ public:
     {
         return 0;
     }
-    virtual void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) = 0;
+    virtual void SetupGridParam_internal(GridParam& gp) = 0;
 
 public:
     // leaf node would print additional informations about kernel setting
@@ -679,7 +677,7 @@ public:
                              std::vector<FMKey>& kernel_keys     = EmptyFMKeyVec) override;
     virtual bool CreateDevKernelArgs() override;
     bool         CreateDeviceResources() override;
-    void         SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp) override;
+    void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
@@ -701,7 +699,7 @@ protected:
         allowInplace = false;
     }
 
-    void SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp) override;
+    void SetupGridParam_internal(GridParam& gp) override;
 
 public:
     // Transpose tiles read more row-ish and write more column-ish.  So
@@ -1285,7 +1283,6 @@ struct ExecPlan : public MultiPlanItem
     // flattened potentially-fusable shims of rootPlan
     std::vector<FuseShim*> fuseShims;
 
-    std::vector<DevFnCall> devFnCall;
     std::vector<GridParam> gridParam;
 
     hipDeviceProp_t deviceProp;

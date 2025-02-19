@@ -894,7 +894,7 @@ void CRT1DNode::AssignParams_internal()
 /*****************************************************
  * CS_KERNEL_STOCKHAM  *
  *****************************************************/
-void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 {
     // get working group size and number of transforms
     size_t batch_accum = batch;
@@ -903,7 +903,6 @@ void Stockham1DNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
 
     auto key    = GetKernelKey();
     auto kernel = function_pool::get_kernel(key);
-    fnPtr       = kernel.device_function;
 
     if(ebtype != EmbeddedType::NONE)
         lds_padding = 1;
@@ -1089,7 +1088,7 @@ void SBCCNode::InitIntrinsicMode()
     }
 }
 
-// NB: remember set this value at this point instead of SetupGPAndFnPtr_internal()
+// NB: remember set this value at this point instead of SetupGridParam_internal()
 //     since we might need to pass this value to RTC generator
 void SBCCNode::TuneIntrinsicMode()
 {
@@ -1128,10 +1127,9 @@ void SBCCNode::TuneIntrinsicMode()
     }
 }
 
-void SBCCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
@@ -1267,11 +1265,10 @@ void SBRCNode::TuneDirectRegType()
     }
 }
 
-void SBRCNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBRCNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -1369,7 +1366,7 @@ void SBCRNode::InitIntrinsicMode()
     }
 }
 
-// NB: remember set this value at this point instead of SetupGPAndFnPtr_internal()
+// NB: remember set this value at this point instead of SetupGridParam_internal()
 //     since we might need to pass this value to RTC generator
 void SBCRNode::TuneIntrinsicMode()
 {
@@ -1385,10 +1382,9 @@ void SBCRNode::TuneIntrinsicMode()
     }
 }
 
-void SBCRNode::SetupGPAndFnPtr_internal(DevFnCall& fnPtr, GridParam& gp)
+void SBCRNode::SetupGridParam_internal(GridParam& gp)
 {
     auto kernel = function_pool::get_kernel(GetKernelKey());
-    fnPtr       = kernel.device_function;
     wgs         = kernel.workgroup_size;
     bwd         = kernel.transforms_per_block;
     lds         = length[0] * bwd;

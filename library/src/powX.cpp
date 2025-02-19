@@ -70,12 +70,11 @@ bool PlanPowX(ExecPlan& execPlan)
 
     for(const auto& node : execPlan.execSeq)
     {
-        DevFnCall ptr = nullptr;
         GridParam gp;
 
         // if this kernel is runtime compiled, use the grid params
         // from compilation as a default.  the node is free to
-        // override this default in its SetupGPAndFnPtr_internal
+        // override this default in its SetupGridParam_internal
         // method.
         auto& rtcKernel = node->compiledKernel.get();
         if(rtcKernel)
@@ -87,9 +86,8 @@ bool PlanPowX(ExecPlan& execPlan)
             gp.wgs_y = rtcKernel->blockDim.y;
             gp.wgs_z = rtcKernel->blockDim.z;
         }
-        node->SetupGridParamAndFuncPtr(ptr, gp);
+        node->SetupGridParam(gp);
 
-        execPlan.devFnCall.push_back(ptr);
         execPlan.gridParam.push_back(gp);
     }
 
@@ -527,7 +525,6 @@ void TransformPowX(const ExecPlan&       execPlan,
                    rocfft_execution_info info,
                    size_t                multiPlanIdx)
 {
-    assert(execPlan.execSeq.size() == execPlan.devFnCall.size());
     assert(execPlan.execSeq.size() == execPlan.gridParam.size());
 
     bool processing_tuning = TuningBenchmarker::GetSingleton().IsProcessingTuning();
@@ -567,7 +564,6 @@ void TransformPowX(const ExecPlan&       execPlan,
         data.node          = execPlan.execSeq[i];
         data.rocfft_stream = (info == nullptr) ? 0 : info->rocfft_stream;
         data.deviceProp    = execPlan.deviceProp;
-        data.log_func      = LOG_PLAN_ENABLED() ? log_plan : nullptr;
 
         // Size of complex type
         const size_t complexTSize = complex_type_size(data.node->precision);
@@ -775,10 +771,6 @@ void TransformPowX(const ExecPlan&       execPlan,
             *kernelio_stream << std::endl;
         }
 
-        DevFnCall fn = execPlan.devFnCall[i];
-        if(!fn && !data.node->compiledKernel.get())
-            throw std::runtime_error("rocFFT null ptr function call error");
-
 #ifdef REF_DEBUG
         rocfft_cout << "\n---------------------------------------------\n";
         rocfft_cout << "\n\nkernel: " << i << std::endl;
@@ -815,8 +807,6 @@ void TransformPowX(const ExecPlan&       execPlan,
             if(hipEventRecord(start) != hipSuccess)
                 throw std::runtime_error("hipEventRecord failure");
 
-        DeviceCallOut back;
-
         // give callback parameters to kernel launcher
         data.callbacks = execPlan.execSeq[i]->callbacks;
 
@@ -828,7 +818,7 @@ void TransformPowX(const ExecPlan&       execPlan,
         if(localCompiledKernel)
             localCompiledKernel->launch(data, data.node->deviceProp);
         else
-            fn(&data, &back);
+            throw std::runtime_error("rocFFT null ptr function call error");
 
         if(emit_profile_log)
             if(hipEventRecord(stop) != hipSuccess)
