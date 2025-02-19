@@ -77,6 +77,8 @@ static void gather_field(MPI_Comm                                  mpi_comm,
 {
     int mpi_rank = 0;
     MPI_Comm_rank(mpi_comm, &mpi_rank);
+    int mpi_size = 0;
+    MPI_Comm_size(mpi_comm, &mpi_size);
 
     auto elem_size = var_size<size_t>(precision, array_type);
 
@@ -91,8 +93,8 @@ static void gather_field(MPI_Comm                                  mpi_comm,
     }
 
     // work out how much to receive from each rank and where
-    std::vector<int> recvcounts;
-    std::vector<int> displs;
+    std::vector<int> recvcounts(static_cast<size_t>(mpi_size));
+    std::vector<int> displs(static_cast<size_t>(mpi_size));
     // loop over each rank's bricks
     size_t elem_total = 0;
     for(auto range
@@ -100,10 +102,11 @@ static void gather_field(MPI_Comm                                  mpi_comm,
         range.first != range.second;
         range = std::equal_range(range.second, bricks.end(), range.second->rank, match_rank()))
     {
+        size_t current_rank = range.first->rank;
         size_t rank_elems
             = std::accumulate(range.first, range.second, static_cast<size_t>(0), add_brick_elems);
-        recvcounts.push_back(rank_elems);
-        displs.push_back(elem_total);
+        recvcounts[current_rank] = rank_elems;
+        displs[current_rank]     = elem_total;
         elem_total += rank_elems;
     }
 

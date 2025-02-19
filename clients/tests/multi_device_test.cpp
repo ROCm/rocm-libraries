@@ -284,3 +284,81 @@ TEST(multi_gpu_validate, catch_validation_errors)
         }
     }
 }
+
+static const auto multi_gpu_tokens = {
+    // clang-format off
+
+    // input bricks are not contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6480_81_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6480_81_1_rank_1_dev_1",
+    // output bricks are not contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25600_160_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25600_160_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+    // neither input nor output bricks are contiguous
+    "real_forward_len_160_160_160_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_80_160_160_stride_0_25920_162_1_dev_0_brick_lower_0_80_0_0_upper_1_160_160_160_stride_0_25920_162_1_rank_1_dev_1_ofield_brick_lower_0_0_0_0_upper_1_160_80_81_stride_0_6560_82_1_dev_0_brick_lower_0_0_80_0_upper_1_160_160_81_stride_0_6560_82_1_rank_1_dev_1",
+
+    // clang-format on
+};
+
+std::vector<fft_params> param_generator_multi_gpu_adhoc()
+{
+    int localDeviceCount = 0;
+    (void)hipGetDeviceCount(&localDeviceCount);
+
+    auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
+
+    // check if fields use more bricks than we can support
+    auto too_many_bricks = [=](const std::vector<fft_params::fft_field>& fields, size_t maxBricks) {
+        for(const auto& f : fields)
+        {
+            if(f.bricks.size() > maxBricks)
+                return true;
+
+            // also remove a test case if it uses a numbered device
+            // that isn't available
+            if(std::any_of(f.bricks.begin(), f.bricks.end(), [=](const fft_params::fft_brick& b) {
+                   return b.device >= localDeviceCount;
+               }))
+                return true;
+        }
+        return false;
+    };
+
+    // remove test cases where we don't have enough ranks/devices for
+    // the number of bricks
+    all_params.erase(std::remove_if(all_params.begin(),
+                                    all_params.end(),
+                                    [=](const fft_params& params) {
+                                        size_t maxBricks = mp_lib == fft_params::fft_mp_lib_mpi
+                                                               ? mp_ranks
+                                                               : localDeviceCount;
+                                        return too_many_bricks(params.ifields, maxBricks)
+                                               || too_many_bricks(params.ofields, maxBricks);
+                                    }),
+                     all_params.end());
+
+    // set all bricks in a field to rank-0, to change an MPI test
+    // case to single-proc
+    auto set_rank_0 = [](std::vector<fft_params::fft_field>& fields) {
+        for(auto& f : fields)
+        {
+            for(auto& b : f.bricks)
+                b.rank = 0;
+        }
+    };
+
+    // modify the remaining test cases to use the current multi-GPU lib
+    for(auto& params : all_params)
+    {
+        params.mp_lib = mp_lib;
+        if(mp_lib == fft_params::fft_mp_lib_none)
+        {
+            set_rank_0(params.ifields);
+            set_rank_0(params.ofields);
+        }
+    }
+    return all_params;
+}
+
+INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
+                         accuracy_test::TestName);

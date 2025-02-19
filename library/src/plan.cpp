@@ -729,7 +729,7 @@ rocfft_status rocfft_plan_description_add_infield(rocfft_plan_description descri
 try
 {
     log_trace(__func__, "description", description, "field", field);
-    if(!description || !field || field->bricks.empty())
+    if(!description || !field)
         return rocfft_status_invalid_arg_value;
     description->inFields.push_back(*field);
     return rocfft_status_success;
@@ -744,7 +744,7 @@ rocfft_status rocfft_plan_description_add_outfield(rocfft_plan_description descr
 try
 {
     log_trace(__func__, "description", description, "field", field);
-    if(!description || !field || field->bricks.empty())
+    if(!description || !field)
         return rocfft_status_invalid_arg_value;
     description->outFields.push_back(*field);
     return rocfft_status_success;
@@ -1350,16 +1350,26 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
     }
 
     // We'll be packing the brick data contiguously into the output,
-    // so keep track of how much of the output we've filled up
-    size_t contiguousOffset = 0;
+    // so keep track of how much of the output we've filled up.
+    // Track offset per location since we have one temp buffer per
+    // location.
+    std::map<rocfft_location_t, size_t> packOffsets;
+    size_t                              gatherOffset = 0;
     for(size_t brickIdx = 0; brickIdx < bricks.size(); ++brickIdx)
     {
         const auto& brick = bricks[brickIdx];
+
+        // init offset for this location if it's not already
+        // initialized, and get a reference to this location's
+        // offset.
+        size_t& packOffset
+            = packOffsets.emplace(brick.location, static_cast<size_t>(0)).first->second;
+
         if(brick.is_contiguous())
         {
             // Contiguous brick, just copy the data
             gather->ops.emplace_back(
-                brick.location, outputBufs[brickIdx], 0, contiguousOffset, brick.count_elems());
+                brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems());
         }
         else
         {
@@ -1379,7 +1389,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                    0,
                                                    brick.stride,
                                                    BufferPtr::temp(gatherPackBufs.back().data()),
-                                                   contiguousOffset,
+                                                   packOffset,
                                                    brick.contiguous_strides(),
                                                    std::move(description)),
                                    antecedents);
@@ -1388,7 +1398,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
             gather->ops.emplace_back(brick.location,
                                      BufferPtr::temp(gatherPackBufs.back().data()),
                                      0,
-                                     contiguousOffset,
+                                     gatherOffset,
                                      brick.count_elems());
         }
 
@@ -1406,7 +1416,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                  precision,
                                                  arrayType,
                                                  BufferPtr::temp(gatherDestBuf->data()),
-                                                 contiguousOffset,
+                                                 gatherOffset,
                                                  brick.contiguous_strides(),
                                                  output,
                                                  brick.offset_in_field(field_stride),
@@ -1415,7 +1425,8 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                  {gatherIdx}));
         }
 
-        contiguousOffset += brick.count_elems();
+        packOffset += brick.count_elems();
+        gatherOffset += brick.count_elems();
     }
 
     if(outputPlanItems.empty())
@@ -1475,9 +1486,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
         scatter->srcPtr = input;
     }
 
-    // we'll be packing the brick data contiguously into the output,
-    // so keep track of how much of the output we've filled up
-    size_t contiguousOffset = 0;
+    size_t scatterOffset = 0;
 
     for(size_t brickIdx = 0; brickIdx < bricks.size(); ++brickIdx)
     {
@@ -1487,7 +1496,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
         {
             // contiguous brick, just copy the data
             scatter->ops.emplace_back(
-                brick.location, outputBufs[brickIdx], contiguousOffset, 0, brick.count_elems());
+                brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems());
         }
         else
         {
@@ -1504,7 +1513,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                                                             brick.offset_in_field(field_stride),
                                                             field_stride,
                                                             BufferPtr::temp(scatterSrcBuf->data()),
-                                                            contiguousOffset,
+                                                            scatterOffset,
                                                             brick.contiguous_strides(),
                                                             std::move(description)),
                                             antecedents);
@@ -1515,7 +1524,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
             if(brick.is_contiguous())
             {
                 scatter->ops.emplace_back(
-                    brick.location, outputBufs[brickIdx], contiguousOffset, 0, brick.count_elems());
+                    brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems());
             }
             else
             {
@@ -1526,7 +1535,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                 // send the data
                 scatter->ops.emplace_back(brick.location,
                                           BufferPtr::temp(scatterPackBufs.back().data()),
-                                          contiguousOffset,
+                                          scatterOffset,
                                           0,
                                           brick.count_elems());
 
@@ -1549,7 +1558,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                                      {scatterIdx}));
             }
         }
-        contiguousOffset += brick.count_elems();
+        scatterOffset += brick.count_elems();
     }
 
     // following items in the plan just depend on the scatter
@@ -2433,7 +2442,7 @@ rocfft_status allgather_brick_params_lus_mpi(rocfft_plan&    plan,
 
     // First, compute the number of bricks per field.
     std::vector<int> global_brick_count(plan->get_local_comm_size());
-    typeof(decltype(global_brick_count)::value_type) local_brick_count = plan->desc.inFields.size();
+    typeof(decltype(global_brick_count)::value_type) local_brick_count = field.bricks.size();
     {
         // OpenMPI has a runtime error if this is const, so make sure it isn't.
         static_assert(!std::is_const_v<typeof(local_brick_count)>);
@@ -2732,7 +2741,7 @@ rocfft_status allgather_brick_params_mpi(rocfft_plan& plan)
         if(!std::all_of(all_brick_lengths.begin() + offset,
                         all_brick_lengths.end(),
                         [global_brick_length](decltype(all_brick_lengths)::value_type i) {
-                            return i != 0 || i == global_brick_length;
+                            return i == 0 || i == global_brick_length;
                         }))
         {
             // There are different non-zero brick lengths.

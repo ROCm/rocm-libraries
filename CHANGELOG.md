@@ -5,6 +5,11 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.33 (unreleased)
 
+### Resolved issues
+
+* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
+  contiguous.
+
 ## rocFFT 1.0.32 for ROCm 6.4.0
 
 ### Changed
