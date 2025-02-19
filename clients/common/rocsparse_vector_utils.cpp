@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,12 +70,24 @@ static void normalize_array(T* v, size_t v_size)
             min_val = std::min(v[i], min_val);
         }
 
-        // y = (2x - max - min) / (max - min)
-        auto denom = static_cast<T>(1) / (max_val - min_val);
-
-        for(size_t i = 0; i < v_size; i++)
+        if(std::abs(max_val - min_val) > std::numeric_limits<T>::epsilon() * max_val)
         {
-            v[i] = (2 * v[i] - max_val - min_val) * denom;
+            // y = (2x - max - min) / (max - min)
+            auto denom = static_cast<T>(1) / (max_val - min_val);
+
+            for(size_t i = 0; i < v_size; i++)
+            {
+                v[i] = (2 * v[i] - max_val - min_val) * denom;
+            }
+        }
+        else
+        {
+            auto denom = static_cast<T>(1) / std::max(std::abs(max_val), std::abs(min_val));
+
+            for(size_t i = 0; i < v_size; i++)
+            {
+                v[i] *= denom;
+            }
         }
     }
 }
