@@ -328,19 +328,18 @@ try
 
     if(incx == 1 && incy == 1) // contiguous host vector -> contiguous device vector
     {
-        PRINT_AND_RETURN_IF_HIP_ERROR(
-            hipMemcpy(y_d, x_h, elem_size_u64 * n, hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpy(y_d, x_h, elem_size_u64 * n, hipMemcpyHostToDevice));
     }
     else // either non-contiguous host vector or non-contiguous device vector
     {
         // pretend data is 2D to compensate for non unit increments
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2D(y_d,
-                                                  elem_size_u64 * incy,
-                                                  x_h,
-                                                  elem_size_u64 * incx,
-                                                  elem_size,
-                                                  n,
-                                                  hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpy2D(y_d,
+                                        elem_size_u64 * incy,
+                                        x_h,
+                                        elem_size_u64 * incx,
+                                        elem_size,
+                                        n,
+                                        hipMemcpyHostToDevice));
     }
     return rocblas_status_success;
 }
@@ -378,19 +377,18 @@ try
 
     if(incx == 1 && incy == 1) // congiguous device vector -> congiguous host vector
     {
-        PRINT_AND_RETURN_IF_HIP_ERROR(
-            hipMemcpy(y_h, x_d, elem_size_u64 * n, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy(y_h, x_d, elem_size_u64 * n, hipMemcpyDeviceToHost));
     }
     else
     {
         // pretend data is 2D to compensate for non unit increments
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2D(y_h,
-                                                  elem_size_u64 * incy,
-                                                  x_d,
-                                                  elem_size_u64 * incx,
-                                                  elem_size,
-                                                  n,
-                                                  hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy2D(y_h,
+                                        elem_size_u64 * incy,
+                                        x_d,
+                                        elem_size_u64 * incx,
+                                        elem_size,
+                                        n,
+                                        hipMemcpyDeviceToHost));
     }
     return rocblas_status_success;
 }
@@ -433,20 +431,20 @@ try
 
     if(incx == 1 && incy == 1) // contiguous host vector -> contiguous device vector
     {
-        PRINT_AND_RETURN_IF_HIP_ERROR(
+        RETURN_IF_HIP_ERROR(
             hipMemcpyAsync(y_d, x_h, elem_size_u64 * n, hipMemcpyHostToDevice, stream));
     }
     else // either non-contiguous host vector or non-contiguous device vector
     {
         // pretend data is 2D to compensate for non unit increments
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(y_d,
-                                                       elem_size_u64 * incy,
-                                                       x_h,
-                                                       elem_size_u64 * incx,
-                                                       elem_size,
-                                                       n,
-                                                       hipMemcpyHostToDevice,
-                                                       stream));
+        RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(y_d,
+                                             elem_size_u64 * incy,
+                                             x_h,
+                                             elem_size_u64 * incx,
+                                             elem_size,
+                                             n,
+                                             hipMemcpyHostToDevice,
+                                             stream));
     }
     return rocblas_status_success;
 }
@@ -490,20 +488,20 @@ try
 
     if(incx == 1 && incy == 1) // congiguous device vector -> congiguous host vector
     {
-        PRINT_AND_RETURN_IF_HIP_ERROR(
+        RETURN_IF_HIP_ERROR(
             hipMemcpyAsync(y_h, x_d, elem_size_u64 * n, hipMemcpyDeviceToHost, stream));
     }
     else // either device or host vector is non-contiguous
     {
         // pretend data is 2D to compensate for non unit increments
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(y_h,
-                                                       elem_size_u64 * incy,
-                                                       x_d,
-                                                       elem_size_u64 * incx,
-                                                       elem_size,
-                                                       n,
-                                                       hipMemcpyDeviceToHost,
-                                                       stream));
+        RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(y_h,
+                                             elem_size_u64 * incy,
+                                             x_d,
+                                             elem_size_u64 * incx,
+                                             elem_size,
+                                             n,
+                                             hipMemcpyDeviceToHost,
+                                             stream));
     }
     return rocblas_status_success;
 }
@@ -579,18 +577,18 @@ try
     if(lda == rows && ldb == rows)
     {
         size_t bytes_to_copy = elem_size_u64 * rows * cols;
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy(b_d, a_h, bytes_to_copy, hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpy(b_d, a_h, bytes_to_copy, hipMemcpyHostToDevice));
     }
     else
     {
         // width is column vector in matrix
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2D(b_d,
-                                                  elem_size_u64 * ldb,
-                                                  a_h,
-                                                  elem_size_u64 * lda,
-                                                  elem_size_u64 * rows,
-                                                  cols,
-                                                  hipMemcpyHostToDevice));
+        RETURN_IF_HIP_ERROR(hipMemcpy2D(b_d,
+                                        elem_size_u64 * ldb,
+                                        a_h,
+                                        elem_size_u64 * lda,
+                                        elem_size_u64 * rows,
+                                        cols,
+                                        hipMemcpyHostToDevice));
     }
     return rocblas_status_success;
 }
@@ -638,18 +636,18 @@ try
     if(lda == rows && ldb == rows)
     {
         size_t bytes_to_copy = elem_size_u64 * rows * cols;
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy(b_h, a_d, bytes_to_copy, hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy(b_h, a_d, bytes_to_copy, hipMemcpyDeviceToHost));
     }
     else
     {
         // width is column vector in matrix
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2D(b_h,
-                                                  elem_size_u64 * ldb,
-                                                  a_d,
-                                                  elem_size_u64 * lda,
-                                                  elem_size_u64 * rows,
-                                                  cols,
-                                                  hipMemcpyDeviceToHost));
+        RETURN_IF_HIP_ERROR(hipMemcpy2D(b_h,
+                                        elem_size_u64 * ldb,
+                                        a_d,
+                                        elem_size_u64 * lda,
+                                        elem_size_u64 * rows,
+                                        cols,
+                                        hipMemcpyDeviceToHost));
     }
     return rocblas_status_success;
 }
@@ -697,20 +695,19 @@ try
     if(lda == rows && ldb == rows)
     {
         size_t bytes_to_copy = elem_size_u64 * rows * cols;
-        PRINT_AND_RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(b_d, a_h, bytes_to_copy, hipMemcpyHostToDevice, stream));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(b_d, a_h, bytes_to_copy, hipMemcpyHostToDevice, stream));
     }
     else
     {
         // width is column vector in matrix
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(b_d,
-                                                       elem_size_u64 * ldb,
-                                                       a_h,
-                                                       elem_size_u64 * lda,
-                                                       elem_size_u64 * rows,
-                                                       cols,
-                                                       hipMemcpyHostToDevice,
-                                                       stream));
+        RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(b_d,
+                                             elem_size_u64 * ldb,
+                                             a_h,
+                                             elem_size_u64 * lda,
+                                             elem_size_u64 * rows,
+                                             cols,
+                                             hipMemcpyHostToDevice,
+                                             stream));
     }
     return rocblas_status_success;
 }
@@ -760,20 +757,19 @@ try
     if(lda == rows && ldb == rows)
     {
         size_t bytes_to_copy = elem_size_u64 * rows * cols;
-        PRINT_AND_RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(b_h, a_d, bytes_to_copy, hipMemcpyDeviceToHost, stream));
+        RETURN_IF_HIP_ERROR(hipMemcpyAsync(b_h, a_d, bytes_to_copy, hipMemcpyDeviceToHost, stream));
     }
     else
     {
         // width is column vector in matrix
-        PRINT_AND_RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(b_h,
-                                                       elem_size_u64 * ldb,
-                                                       a_d,
-                                                       elem_size_u64 * lda,
-                                                       elem_size_u64 * rows,
-                                                       cols,
-                                                       hipMemcpyDeviceToHost,
-                                                       stream));
+        RETURN_IF_HIP_ERROR(hipMemcpy2DAsync(b_h,
+                                             elem_size_u64 * ldb,
+                                             a_d,
+                                             elem_size_u64 * lda,
+                                             elem_size_u64 * rows,
+                                             cols,
+                                             hipMemcpyDeviceToHost,
+                                             stream));
     }
     return rocblas_status_success;
 }

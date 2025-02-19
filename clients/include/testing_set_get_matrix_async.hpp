@@ -49,7 +49,24 @@ void testing_set_get_matrix_async(const Arguments& arg)
     bool invalidSet       = invalidGPUMatrix || lda <= 0 || lda < rows;
     bool invalidGet       = invalidGPUMatrix || ldb <= 0 || ldb < rows;
 
-    if(rows == 0 || cols == 0)
+    if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
+    {
+        T  host_data;
+        T* host_data_ptr = &host_data;
+
+        rocblas_status status = rocblas_set_matrix_async(
+            1, 1, sizeof(T), host_data_ptr, lda, host_data_ptr, ldd, stream);
+        hipError_t h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        status = rocblas_get_matrix_async(
+            1, 1, sizeof(T), host_data_ptr, ldd, host_data_ptr, ldb, stream);
+        h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        return;
+    }
+    else if(rows == 0 || cols == 0)
     {
         DAPI_EXPECT(rocblas_status_success,
                     rocblas_set_matrix_async,
@@ -59,20 +76,6 @@ void testing_set_get_matrix_async(const Arguments& arg)
                     rocblas_get_matrix_async,
                     (rows, cols, sizeof(T), nullptr, ldd, nullptr, ldb, stream));
 
-        if(rows == 0 && cols == 0)
-        {
-            // test bad device pointer
-            T  host_data;
-            T* host_data_ptr = &host_data;
-
-            DAPI_EXPECT(rocblas_status_internal_error,
-                        rocblas_set_matrix_async,
-                        (1, 1, sizeof(T), host_data_ptr, lda, host_data_ptr, ldd, stream));
-
-            DAPI_EXPECT(rocblas_status_internal_error,
-                        rocblas_get_matrix_async,
-                        (1, 1, sizeof(T), host_data_ptr, ldd, host_data_ptr, ldb, stream));
-        }
         return;
     }
     else if(invalidSet || invalidGet)
