@@ -32,9 +32,18 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean b
                 ${getDependenciesCommand}
                 set -e
 
+               # disable kernel cache on gfx90a, where we currently rely more
+               # on network storage, and SQLite (which we use for storing
+               # kernels) does not behave nicely on NFS
+               if /opt/rocm/bin/rocm_agent_enumerator | grep gfx90a ; then
+                    ROCFFT_KERNEL_CACHE_ENABLE=OFF
+                else
+                    ROCFFT_KERNEL_CACHE_ENABLE=ON
+                fi
+
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
                 ${auxiliary.gfxTargetParser()}
-                ${cmake} ${buildMPIArgs} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang ${buildTypeArg} ${clientArgs} ${warningArgs} ${buildTunerArgs} ${staticArg} ${amdgpuTargets} ${rtcBuildCache} ../..
+                ${cmake} ${buildMPIArgs} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_C_COMPILER=/opt/rocm/bin/amdclang ${buildTypeArg} ${clientArgs} ${warningArgs} ${buildTunerArgs} ${staticArg} ${amdgpuTargets} ${rtcBuildCache} -DROCFFT_KERNEL_CACHE_ENABLE=\$ROCFFT_KERNEL_CACHE_ENABLE ../..
 
                 make -j\$(nproc)
                 sudo make install
