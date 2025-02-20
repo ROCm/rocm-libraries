@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,33 @@ void testing_set_get_matrix(const Arguments& arg)
     bool invalidSet       = invalidGPUMatrix || lda <= 0 || lda < rows;
     bool invalidGet       = invalidGPUMatrix || ldb <= 0 || ldb < rows;
 
-    if(invalidSet || invalidGet)
+    if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
+    {
+        T  host_data;
+        T* host_data_ptr = &host_data;
+
+        rocblas_status status
+            = rocblas_get_matrix_fn(1, 1, sizeof(T), host_data_ptr, 1, host_data_ptr, 1);
+        hipError_t h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        status  = rocblas_set_matrix_fn(1, 1, sizeof(T), host_data_ptr, 1, host_data_ptr, 1);
+        h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        return;
+    }
+    else if(rows == 0 || cols == 0)
+    {
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_set_matrix_fn,
+                    (rows, cols, sizeof(T), nullptr, lda, nullptr, ldd));
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_get_matrix_fn,
+                    (rows, cols, sizeof(T), nullptr, lda, nullptr, ldd));
+        return;
+    }
+    else if(invalidSet || invalidGet)
     {
         DAPI_EXPECT(invalidSet ? rocblas_status_invalid_size : rocblas_status_invalid_pointer,
                     rocblas_set_matrix_fn,

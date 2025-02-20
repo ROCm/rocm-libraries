@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,36 @@ void testing_set_get_matrix_async(const Arguments& arg)
     bool invalidSet       = invalidGPUMatrix || lda <= 0 || lda < rows;
     bool invalidGet       = invalidGPUMatrix || ldb <= 0 || ldb < rows;
 
-    if(invalidSet || invalidGet)
+    if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
+    {
+        T  host_data;
+        T* host_data_ptr = &host_data;
+
+        rocblas_status status = rocblas_set_matrix_async(
+            1, 1, sizeof(T), host_data_ptr, lda, host_data_ptr, ldd, stream);
+        hipError_t h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        status = rocblas_get_matrix_async(
+            1, 1, sizeof(T), host_data_ptr, ldd, host_data_ptr, ldb, stream);
+        h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        return;
+    }
+    else if(rows == 0 || cols == 0)
+    {
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_set_matrix_async,
+                    (rows, cols, sizeof(T), nullptr, lda, nullptr, ldd, stream));
+
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_get_matrix_async,
+                    (rows, cols, sizeof(T), nullptr, ldd, nullptr, ldb, stream));
+
+        return;
+    }
+    else if(invalidSet || invalidGet)
     {
         DAPI_EXPECT(invalidSet ? rocblas_status_invalid_size : rocblas_status_invalid_pointer,
                     rocblas_set_matrix_async,
@@ -58,7 +87,6 @@ void testing_set_get_matrix_async(const Arguments& arg)
         DAPI_EXPECT(invalidGet ? rocblas_status_invalid_size : rocblas_status_invalid_pointer,
                     rocblas_get_matrix_async,
                     (rows, cols, sizeof(T), nullptr, ldd, nullptr, ldb, stream));
-
         return;
     }
 

@@ -39,6 +39,34 @@ Definitions:
     - { M: 1, N: *c_pos_x32_overflow_int32, lda: 1,  ldb: 1,  ldd: 32 }
 
 Tests:
+- name: set_get_matrix_bad_dev_ptr
+  category: quick
+  precision: *single_precision
+  algo: 1
+  arguments:
+    - { M:  1, N:  1, lda: 1, ldb: 1, ldd: 1}
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
+- name: set_get_matrix_bad_args
+  category: quick
+  precision: *single_precision
+  arguments:
+    - { M:  0, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M: -1, N:  1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N: -1, lda: 1, ldb: 1, ldd: 1}
+    - { M: -1, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M:  0, N: -1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  0, N:  1, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N:  0, lda: 1, ldb: 1, ldd: 1}
+    - { M:  1, N:  1, lda: 0, ldb: 1, ldd: 1}
+    - { M:  1, N:  1, lda: 1, ldb: 0, ldd: 1}
+    - { M:  1, N:  1, lda: 1, ldb: 1, ldd: 0}
+  function:
+  - set_get_matrix
+  - set_get_matrix_async
+
 - name: set_get_matrix_small
   category: quick
   precision: *single_double_precisions
