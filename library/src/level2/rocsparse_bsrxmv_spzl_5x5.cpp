@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -337,6 +337,8 @@ namespace rocsparse
                                 Y*                   y,
                                 rocsparse_index_base base)
         {
+            ROCSPARSE_ROUTINE_TRACE;
+
             const J size = (bsr_mask_ptr == nullptr) ? mb : size_of_mask;
             THROW_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::bsrxmvn_5x5_kernel<50>),
@@ -385,6 +387,8 @@ namespace rocsparse
                                 float*               y,
                                 rocsparse_index_base base)
         {
+            ROCSPARSE_ROUTINE_TRACE;
+
             const int wsize = handle->wavefront_size;
             if(wsize == 32)
             {
@@ -488,6 +492,8 @@ void rocsparse::bsrxmvn_5x5(rocsparse_handle     handle,
                             Y*                   y,
                             rocsparse_index_base base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     kernels_type_dispatch<T, A, X, Y>::template bsrxmvn_5x5<I, J>(handle,
                                                                   dir,
                                                                   mb,

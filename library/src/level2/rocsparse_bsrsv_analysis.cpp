@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,8 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
                                                     rocsparse_solve_policy    solve,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -263,6 +265,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
                                      void*                     temp_buffer)         \
     try                                                                             \
     {                                                                               \
+        ROCSPARSE_ROUTINE_TRACE;                                                    \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsv_analysis_template(handle,        \
                                                                      dir,           \
                                                                      trans,         \

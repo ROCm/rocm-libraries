@@ -150,6 +150,8 @@ namespace rocsparse
                                         T*                   y,
                                         rocsparse_index_base base)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_int blocks_per_row = nnzb / mb;
 
 #define BSRMVN_DIM 128
@@ -343,6 +345,8 @@ namespace rocsparse
                                                       const T*                  beta_device_host,
                                                       T*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(row_block_dim == 3,
                               "This function is designed for row_block_dim = 3.");
 

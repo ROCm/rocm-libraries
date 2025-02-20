@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,8 @@ namespace
                                           rocsparse_index_base csr_diag_ind_base,
                                           rocsparse_int* __restrict__ zero_pivot)
         {
+            ROCSPARSE_ROUTINE_TRACE;
+
             //
             // Compute inverse of the diagonal.
             //
@@ -196,6 +198,8 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                                                       rocsparse_solve_policy    policy,
                                                       void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const bool                    breakable   = (host_tol != nullptr);
     const bool                    recordable  = (host_history != nullptr);
     const bool                    compute_nrm = (recordable || breakable);
@@ -749,6 +753,8 @@ namespace rocsparse
                                            rocsparse_solve_policy               policy,
                                            void*                                temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Check for valid handle and matrix descriptor
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(9, descr);
@@ -923,6 +929,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      void*                                temp_buffer)       \
     try                                                                                      \
     {                                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csritsv_solve_ex_impl(handle,                   \
                                                                    host_nmaxiter,            \
                                                                    host_nfreeiter,           \

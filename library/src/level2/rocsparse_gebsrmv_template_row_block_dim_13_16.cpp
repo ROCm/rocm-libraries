@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -154,6 +154,8 @@ namespace rocsparse
                                              T*                   y,
                                              rocsparse_index_base base)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(row_block_dim == 13)
         {
             if(col_block_dim == 1)
@@ -349,6 +351,8 @@ namespace rocsparse
                                                           const T*                  beta,
                                                           T*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(
             row_block_dim >= 13 && row_block_dim <= 16,
             "This function is designed for row_block_dim >= 13 and row_block_dim <= 16.");

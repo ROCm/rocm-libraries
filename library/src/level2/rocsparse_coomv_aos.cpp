@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -143,6 +143,8 @@ namespace rocsparse
                                                const T*                  beta_device_host,
                                                Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -210,6 +212,8 @@ namespace rocsparse
                                                   const T*                  beta_device_host,
                                                   Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -316,6 +320,8 @@ namespace rocsparse
                                         const T*                  beta_device_host,
                                         Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_coomv_aos_alg_default:
@@ -373,6 +379,8 @@ rocsparse_status rocsparse::coomv_aos_template(rocsparse_handle          handle,
                                                const T*                  beta_device_host,
                                                Y*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(7, descr);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -157,6 +157,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                     const I*                  coo_row_ind,
                                                     const I*                  coo_col_ind)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(6, descr);
@@ -294,6 +296,8 @@ namespace rocsparse
                                                   const T*                  beta_device_host,
                                                   Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -386,6 +390,8 @@ namespace rocsparse
                                                      const T*                  beta_device_host,
                                                      Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -496,6 +502,8 @@ namespace rocsparse
                                     const T*                  beta_device_host,
                                     Y*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_coomv_alg_default:
@@ -555,6 +563,8 @@ rocsparse_status rocsparse::coomv_template(rocsparse_handle          handle,
                                            const T*                  beta_device_host,
                                            Y*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_int ysize = (trans == rocsparse_operation_none) ? m : n;
 
     // Quick return if possible
@@ -606,6 +616,8 @@ namespace rocsparse
                                           const T*                  beta_device_host,
                                           T*                        y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Check for valid handle and matrix descriptor
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(6, descr);
@@ -798,6 +810,7 @@ INSTANTIATE_MIXED(rocsparse_double_complex,
                                      TYPE*                     y)              \
     try                                                                        \
     {                                                                          \
+        ROCSPARSE_ROUTINE_TRACE;                                               \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::rocsparse_coomv_impl(handle,      \
                                                                   trans,       \
                                                                   m,           \

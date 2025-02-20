@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,8 @@ rocsparse_status rocsparse::bsrmv_analysis_template(rocsparse_handle          ha
                                                     J                         block_dim,
                                                     rocsparse_mat_info        info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     // Check for valid matrix descriptor and info struct
@@ -133,6 +135,8 @@ rocsparse_status rocsparse::bsrmv_template_dispatch(rocsparse_handle          ha
                                                     const T*                  beta_device_host,
                                                     Y*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(trans != rocsparse_operation_none)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -360,6 +364,8 @@ rocsparse_status rocsparse::bsrmv_adaptive_template_dispatch(rocsparse_handle   
                                                              const T* beta_device_host,
                                                              Y*       y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(trans != rocsparse_operation_none)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -427,6 +433,8 @@ rocsparse_status rocsparse::bsrmv_template(rocsparse_handle          handle,
                                            const T*                  beta_device_host,
                                            Y*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(7, descr);
 
@@ -724,6 +732,7 @@ INSTANTIATE_MIXED(rocsparse_double_complex,
                                      rocsparse_mat_info        info)              \
     try                                                                           \
     {                                                                             \
+        ROCSPARSE_ROUTINE_TRACE;                                                  \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmv_analysis_template(handle,      \
                                                                      dir,         \
                                                                      trans,       \
@@ -770,6 +779,7 @@ C_IMPL(rocsparse_zbsrmv_analysis, rocsparse_double_complex);
                                      TYPE*                     y)           \
     try                                                                     \
     {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmv_template(handle,         \
                                                             dir,            \
                                                             trans,          \
@@ -803,6 +813,7 @@ C_IMPL(rocsparse_zbsrmv, rocsparse_double_complex);
 extern "C" rocsparse_status rocsparse_bsrmv_clear(rocsparse_handle handle, rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_csrmv_clear(handle, info));
     return rocsparse_status_success;
 }

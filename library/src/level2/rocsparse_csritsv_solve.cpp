@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,6 +52,8 @@ namespace rocsparse
                                         rocsparse_solve_policy               policy,
                                         void*                                temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Check for valid handle and matrix descriptor
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(8, descr);
@@ -203,6 +205,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      void*                                temp_buffer)       \
     try                                                                                      \
     {                                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csritsv_solve_impl(handle,                      \
                                                                 host_nmaxiter,               \
                                                                 host_tol,                    \

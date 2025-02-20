@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -278,6 +278,8 @@ namespace rocsparse
                                    size_t*                     buffer_size,
                                    void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::check_spmv_alg(mat->format, alg)));
 
         switch(mat->format)
@@ -615,6 +617,8 @@ namespace rocsparse
                                            rocsparse_datatype  ctype,
                                            Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
 #define DISPATCH_COMPUTE_TYPE_I32R(ITYPE, JTYPE, CTYPE, atype, xtype, ytype)                  \
     if(atype == rocsparse_datatype_i8_r && xtype == rocsparse_datatype_i8_r                   \
        && ytype == rocsparse_datatype_i32_r)                                                  \
@@ -828,6 +832,8 @@ extern "C" rocsparse_status rocsparse_spmv(rocsparse_handle            handle, /
                                            void*                       temp_buffer) //11
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Logging
     rocsparse::log_trace(handle,
                          "rocsparse_spmv",

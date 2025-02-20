@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,8 @@ rocsparse_status rocsparse::coosv_buffer_size_template(rocsparse_handle         
                                                        rocsparse_mat_info        info,
                                                        size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(4, descr);
@@ -157,6 +159,8 @@ rocsparse_status rocsparse::coosv_analysis_template(rocsparse_handle          ha
                                                     rocsparse_solve_policy    solve,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(4, descr);
@@ -313,6 +317,8 @@ rocsparse_status rocsparse::coosv_solve_template(rocsparse_handle          handl
                                                  rocsparse_solve_policy    policy,
                                                  void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(5, descr);

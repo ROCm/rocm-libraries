@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,8 @@ namespace rocsparse
                                     rocsparse_index_base idx_base,
                                     void*                temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
 #define GEMVI_DIM 1024
         // If nnz is zero, only compute beta * y
         if(nnz == 0)
@@ -161,6 +163,8 @@ namespace rocsparse
                                     rocsparse_index_base idx_base, //12
                                     void*                temp_buffer) //13
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Check for valid handle
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -281,6 +285,7 @@ extern "C" {
                            size_t*             buffer_size) \
     try                                                     \
     {                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                            \
         *buffer_size = 0;                                   \
         return rocsparse_status_success;                    \
     }                                                       \
@@ -317,6 +322,7 @@ CAPI_IMPL(rocsparse_zgemvi_buffer_size, rocsparse_double_complex);
     {                                                                          \
         try                                                                    \
         {                                                                      \
+            ROCSPARSE_ROUTINE_TRACE;                                           \
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::gemvi_template(handle,        \
                                                                 trans,         \
                                                                 m,             \

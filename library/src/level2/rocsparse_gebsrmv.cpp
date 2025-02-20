@@ -184,6 +184,8 @@ namespace rocsparse
     rocsparse_status gebsrmv_template_dispatch_specialization(rocsparse_int row_block_dim,
                                                               Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(row_block_dim == 1)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsrmv_template_row_block_dim_1(ts...));
@@ -245,6 +247,7 @@ rocsparse_status rocsparse::gebsrmv_template_dispatch(rocsparse_handle          
                                                       const T*                  beta,
                                                       T*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // row_block_dim == col_block_dim is the BSR case
     if(row_block_dim == col_block_dim)
@@ -307,6 +310,8 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
                                              const T*                  beta, //14
                                              T*                        y) //15
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(7, descr);
@@ -456,6 +461,7 @@ rocsparse_status rocsparse::gebsrmv_template(rocsparse_handle          handle, /
                                      TYPE*                     y)             \
     try                                                                       \
     {                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                              \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsrmv_template(handle,         \
                                                               dir,            \
                                                               trans,          \

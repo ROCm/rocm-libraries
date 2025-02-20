@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,6 +46,8 @@ rocsparse_status rocsparse::bsrxmv_template_dispatch(rocsparse_handle          h
                                                      const T*                  beta_device_host,
                                                      T*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // LCOV_EXCL_START
     // Run different bsrxmv kernels
     if(handle->wavefront_size == 32)
@@ -237,6 +239,7 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
                                             const T*                  beta_device_host,
                                             T*                        y)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     //
     // Check for valid handle and matrix descriptor
@@ -406,6 +409,7 @@ rocsparse_status rocsparse::bsrxmv_template(rocsparse_handle          handle,
                                      TYPE*                     y)            \
     try                                                                      \
     {                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrxmv_template(handle,         \
                                                              dir,            \
                                                              trans,          \

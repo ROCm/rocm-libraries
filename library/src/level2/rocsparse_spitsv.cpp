@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,8 @@ namespace rocsparse
                                      size_t*                     buffer_size,
                                      void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(mat->format != rocsparse_format_csr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -121,6 +123,8 @@ namespace rocsparse
                                              rocsparse_datatype  ctype,
                                              Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(ctype)
         {
 
@@ -218,6 +222,7 @@ extern "C" rocsparse_status rocsparse_spitsv(rocsparse_handle            handle,
                                              void*                       temp_buffer) // 13
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Check for invalid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
