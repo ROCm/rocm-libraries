@@ -90,7 +90,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_f8_bf8_fnuz_dst_bf16_smoke
   category: smoke
@@ -106,7 +106,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: bf16_r
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 ### GFX12 FP8
 - name: matmul_f8_bf8_dst_fp32_gfx12_smoke
@@ -220,7 +220,7 @@ Tests:
   bias_vector: [0, 1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_real_1b_fnuz_dst_1b_fnuz_smallsize_smoke
   category: smoke
@@ -276,7 +276,7 @@ Tests:
   bias_type: f16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_real_1b_fnuz_dst_bf8_fnuz_SCDInt1_smoke
   category: smoke
@@ -294,7 +294,7 @@ Tests:
   bias_vector: [0,1]
   bias_type: f16_r
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_real_1b_fnuz_dst_bf8_fnuz_SCDNotInt_smoke
   category: smoke
@@ -313,7 +313,7 @@ Tests:
   bias_type: f16_r
   unit_check: 0
   norm_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_gemm_xf32_smoke
   category: smoke
@@ -324,7 +324,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_gemm_double_smoke
   category: smoke
@@ -360,7 +360,7 @@ Tests:
   scaleAlpha_vector: [0, 1]
   activation_type: relu
   unit_check: 1
-  gpu_arch: '94[0-2]'
+  gpu_arch: '942'
 
 - name: matmul_gemm_i8_dst_i8_1xxx_smoke
   category: smoke

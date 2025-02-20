@@ -33858,7 +33858,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [9, 4, 0]
+    ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
@@ -34140,7 +34140,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [9, 4, 0]
+    ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
@@ -34422,7 +34422,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [9, 4, 0]
+    ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
@@ -34704,7 +34704,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: false
     GuaranteeNoPartialB: true
-    ISA: [9, 4, 0]
+    ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
@@ -34986,7 +34986,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [9, 4, 0]
+    ISA: [9, 4, 2]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
