@@ -407,6 +407,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
 
         // get factors vector
         all_factors = kernel->factors;
+
+        if(ppType != PPT_NONE)
+            all_factors.insert(all_factors.end(), specs.factors_pp.begin(), specs.factors_pp.end());
     }
 
     // generated functions default to forward in-place interleaved.
@@ -451,9 +454,6 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         src += large_twiddles_h;
     // append the neccessary functions only
     append_radix_h(src, all_factors);
-
-    if(ppType != PPT_NONE)
-        append_radix_h(src, specs.factors_pp);
 
     // SBCCs don't need this
     if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC)

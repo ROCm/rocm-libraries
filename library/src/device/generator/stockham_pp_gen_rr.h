@@ -29,12 +29,14 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         : StockhamKernelRR(specs)
     {
         // TODO: revisit this. Test with factors_pp.size() > 1
-        max_factor_pp = *std::max_element(specs.factors_pp.begin(), specs.factors_pp.end());
+        max_factor_pp   = *std::max_element(specs.factors_pp.begin(), specs.factors_pp.end());
+        prod_factors_pp = std::accumulate(
+            specs.factors_pp.begin(), specs.factors_pp.end(), 1, std::multiplies<unsigned int>());
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
     }
 
-    unsigned int max_factor_pp;
+    unsigned int max_factor_pp, prod_factors_pp;
     Variable     offset_pp{"offset_pp", "size_t"};
     Variable     stride_lds_pp{"stride_lds_pp", "size_t"};
     Variable     offset_lds_pp{"offset_lds_pp", "size_t"};
@@ -84,6 +86,25 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return stmts;
     }
 
+    StatementList load_global_generator(unsigned int h,
+                                        unsigned int hr,
+                                        unsigned int width,
+                                        unsigned int dt,
+                                        Expression   guard) const
+    {
+        if(hr == 0)
+            hr = h;
+        StatementList load;
+        for(unsigned int w = 0; w < width; ++w)
+        {
+            auto tid = Parens{thread + dt + h * threads_per_transform};
+            auto idx = Parens{tid + w * length / width};
+            load += Assign{R[hr * width + w],
+                           LoadGlobal{buf, offset_pp + Parens{Expression{idx}} * stride0}};
+        }
+        return load;
+    }
+
     StatementList load_from_global(bool load_registers) override
     {
         StatementList stmts;
@@ -117,7 +138,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             unsigned int width  = factors[0];
             auto         height = static_cast<float>(length) / width / threads_per_transform;
 
-            auto load_global = std::mem_fn(&StockhamKernel::load_global_generator);
+            auto load_global = std::mem_fn(&StockhamPartialPassKernelRR::load_global_generator);
             stmts += add_work(std::bind(load_global, this, _1, _2, _3, _4, _5),
                               width,
                               height,
@@ -154,17 +175,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             stmts += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"}, stmts_real2c_post};
         }
         else
-        {
-            auto width     = factors.back();
-            auto cumheight = product(factors.begin(), factors.begin() + (factors.size() - 1));
-            auto height    = static_cast<float>(length) / width / threads_per_transform;
-
-            auto store_global = std::mem_fn(&StockhamKernel::store_global_generator);
-            stmts += add_work(std::bind(store_global, this, _1, _2, _3, _4, _5, cumheight),
-                              width,
-                              height,
-                              ThreadGuardMode::GUARD_BY_IF);
-        }
+            throw std::runtime_error(
+                "Direct store from registers not allowed in partial pass SBRR kernels");
 
         return {If{inbound, stmts}};
     }
@@ -479,14 +491,13 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         // If we're doing direct-from-reg, this function simply returns.
         body += LineBreak{};
         body += CommentLines{"call a post-store from registers to lds (if necessary)"};
+
+        // Post stores must be in LDS since partial steps 1/2 are always in LDS.
         StatementList postStore;
         postStore += Call{"lds_from_reg_output_length" + std::to_string(length) + "_device",
                           pre_post_lds_tmpl,
                           pre_post_lds_args};
-        if(!direct_to_from_reg)
-            body += postStore;
-        else
-            body += If{!direct_store_from_reg, postStore};
+        body += postStore;
 
         // partial pass here
         body += perform_partial_pass_step_1_2();
@@ -499,21 +510,12 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};
+
+        // Cannot have direct from register stores
+        // to global mem since partial steps 1/2
+        // are always in LDS
         storelds += store_to_global(false);
-
-        if(!direct_to_from_reg)
-        {
-            body += storelds;
-        }
-        else
-        {
-            StatementList storer;
-            storer += CommentLines{"store registers into global"};
-            storer += store_to_global(true);
-
-            body += If{direct_store_from_reg, storer};
-            body += Else{storelds};
-        }
+        body += storelds;
 
         f.templates = global_templates();
         f.arguments = global_arguments();
