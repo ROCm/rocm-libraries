@@ -146,9 +146,9 @@ def main():
     dir_of_this_repo = pathlib.Path(os.path.join(dir_of_this_script, '../../../')).resolve()
     probYaml_folder = pathlib.Path(os.path.join(dir_of_this_script, 'problems/')).resolve()
     executable_folder = pathlib.Path(os.path.join(dir_of_this_repo, "build/release/clients/staging/")).resolve()
-    # print(f'dir of this script = {dir_of_this_script}')
-    # print(f'dir of this repos = {dir_of_this_repo}')
-    # print(f'dir of bench yaml problems = {probYaml_folder}')
+    print(f'info: path of this script = {dir_of_this_script}')
+    print(f'info: path of this repos = {dir_of_this_repo}')
+    print(f'info: path of bench yaml problems = {probYaml_folder}')
 
     parser.add_argument('-w',
                         '--workspace',

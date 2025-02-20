@@ -12,7 +12,7 @@ Definitions:
 Tests:
 - name: matmul_f8f16_f16
   function:
-    matmul: *fp8fp16_precision_dst_fp16
+    matmul: *fp8fp16_fnuz_precision_dst_fp16
   matrix_size:
     - { M:  16,    N:  16,    K:  1024  }
     - { M:  16,    N:  16,    K:  8192  }
