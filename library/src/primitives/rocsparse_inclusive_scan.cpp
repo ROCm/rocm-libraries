@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,8 @@ rocsparse_status rocsparse::primitives::inclusive_scan_buffer_size(rocsparse_han
                                                                    size_t           length,
                                                                    size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_HIP_ERROR(rocprim::inclusive_scan(nullptr,
                                                 *buffer_size,
                                                 (I*)nullptr,
@@ -48,6 +50,8 @@ template <typename I, typename J>
 rocsparse_status rocsparse::primitives::inclusive_scan(
     rocsparse_handle handle, I* input, J* output, size_t length, size_t buffer_size, void* buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_HIP_ERROR(rocprim::inclusive_scan(
         buffer, buffer_size, input, output, length, rocprim::plus<J>(), handle->stream));
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,8 @@ rocsparse_status rocsparse::primitives::radix_sort_pairs_buffer_size(rocsparse_h
                                                                      size_t*          buffer_size,
                                                                      bool using_double_buffers)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     K* ptr1 = reinterpret_cast<K*>(0x4);
     V* ptr2 = reinterpret_cast<V*>(0x4);
 
@@ -79,6 +81,8 @@ rocsparse_status rocsparse::primitives::radix_sort_pairs(rocsparse_handle  handl
                                                          size_t            buffer_size,
                                                          void*             buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     rocprim::double_buffer<K> rocprim_keys(keys.current(), keys.alternate());
     rocprim::double_buffer<V> rocprim_values(values.current(), values.alternate());
     RETURN_IF_HIP_ERROR(rocprim::radix_sort_pairs(buffer,
@@ -114,6 +118,8 @@ rocsparse_status rocsparse::primitives::radix_sort_pairs(rocsparse_handle handle
                                                          size_t           buffer_size,
                                                          void*            buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_HIP_ERROR(rocprim::radix_sort_pairs(buffer,
                                                   buffer_size,
                                                   keys_input,

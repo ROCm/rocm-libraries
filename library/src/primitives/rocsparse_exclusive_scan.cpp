@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ rocsparse_status rocsparse::primitives::exclusive_scan_buffer_size(rocsparse_han
                                                                    size_t           length,
                                                                    size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_HIP_ERROR(rocprim::exclusive_scan(nullptr,
                                                 *buffer_size,
                                                 (I*)nullptr,
@@ -55,6 +57,8 @@ rocsparse_status rocsparse::primitives::exclusive_scan(rocsparse_handle handle,
                                                        size_t           buffer_size,
                                                        void*            buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_HIP_ERROR(rocprim::exclusive_scan(buffer,
                                                 buffer_size,
                                                 input,
