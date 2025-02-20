@@ -93,7 +93,7 @@ HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 sc1", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0 sc1", "s_waitcnt", "vmcnt");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0 sc1", "s_waitcnt", "vmcnt");
-#elif defined(__gfx942__)
+#elif defined(__gfx942__) || defined(__gfx950__)
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 nt", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0", "s_waitcnt", "vmcnt");
