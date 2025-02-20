@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,8 @@ ROCSPARSE_KERNEL(1) void init_kernel(){};
  ******************************************************************************/
 _rocsparse_handle::_rocsparse_handle()
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Default device is active device
     THROW_IF_HIP_ERROR(hipGetDevice(&device));
     THROW_IF_HIP_ERROR(hipGetDeviceProperties(&properties, device));
@@ -146,6 +148,8 @@ _rocsparse_handle::_rocsparse_handle()
  ******************************************************************************/
 _rocsparse_handle::~_rocsparse_handle()
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(buffer));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(sone));
     PRINT_IF_HIP_ERROR(rocsparse_hipFree(done));
@@ -185,6 +189,8 @@ _rocsparse_handle::~_rocsparse_handle()
  ******************************************************************************/
 rocsparse_status _rocsparse_handle::set_stream(hipStream_t user_stream)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // TODO check if stream is valid
     stream = user_stream;
 
@@ -199,6 +205,8 @@ rocsparse_status _rocsparse_handle::set_stream(hipStream_t user_stream)
  ******************************************************************************/
 rocsparse_status _rocsparse_handle::get_stream(hipStream_t* user_stream) const
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     *user_stream = stream;
     return rocsparse_status_success;
 }
@@ -208,6 +216,8 @@ rocsparse_status _rocsparse_handle::get_stream(hipStream_t* user_stream) const
  ******************************************************************************/
 rocsparse_status _rocsparse_handle::set_pointer_mode(rocsparse_pointer_mode user_mode)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // TODO check if stream is valid
     this->pointer_mode = user_mode;
 
@@ -222,6 +232,8 @@ rocsparse_status _rocsparse_handle::set_pointer_mode(rocsparse_pointer_mode user
  ******************************************************************************/
 rocsparse_status _rocsparse_handle::get_pointer_mode(rocsparse_pointer_mode* user_mode) const
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     *user_mode = this->pointer_mode;
     return rocsparse_status_success;
 }
@@ -234,6 +246,8 @@ rocsparse_status _rocsparse_handle::get_pointer_mode(rocsparse_pointer_mode* use
  *******************************************************************************/
 rocsparse_status rocsparse::create_csrmv_info(rocsparse_csrmv_info* info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_invalid_pointer;
@@ -259,6 +273,8 @@ rocsparse_status rocsparse::create_csrmv_info(rocsparse_csrmv_info* info)
 rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
                                             const rocsparse_csrmv_info src)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(dest == nullptr || src == nullptr || dest == src)
     {
         return rocsparse_status_invalid_pointer;
@@ -463,6 +479,8 @@ rocsparse_status rocsparse::copy_csrmv_info(rocsparse_csrmv_info       dest,
  *******************************************************************************/
 rocsparse_status rocsparse::destroy_csrmv_info(rocsparse_csrmv_info info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
@@ -510,6 +528,8 @@ rocsparse_status rocsparse::destroy_csrmv_info(rocsparse_csrmv_info info)
  *******************************************************************************/
 rocsparse_status rocsparse::create_trm_info(rocsparse_trm_info* info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_invalid_pointer;
@@ -534,6 +554,8 @@ rocsparse_status rocsparse::create_trm_info(rocsparse_trm_info* info)
  *******************************************************************************/
 rocsparse_status rocsparse::copy_trm_info(rocsparse_trm_info dest, const rocsparse_trm_info src)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(dest == nullptr || src == nullptr || dest == src)
     {
         return rocsparse_status_invalid_pointer;
@@ -685,6 +707,8 @@ rocsparse_status rocsparse::copy_trm_info(rocsparse_trm_info dest, const rocspar
  *******************************************************************************/
 rocsparse_status rocsparse::destroy_trm_info(rocsparse_trm_info info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
@@ -740,6 +764,8 @@ rocsparse_status rocsparse::destroy_trm_info(rocsparse_trm_info info)
  *******************************************************************************/
 bool rocsparse::check_trm_shared(const rocsparse_mat_info info, rocsparse_trm_info trm)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return false;
@@ -791,6 +817,8 @@ bool rocsparse::check_trm_shared(const rocsparse_mat_info info, rocsparse_trm_in
  *******************************************************************************/
 rocsparse_status rocsparse::create_csrgemm_info(rocsparse_csrgemm_info* info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_invalid_pointer;
@@ -816,6 +844,8 @@ rocsparse_status rocsparse::create_csrgemm_info(rocsparse_csrgemm_info* info)
 rocsparse_status rocsparse::copy_csrgemm_info(rocsparse_csrgemm_info       dest,
                                               const rocsparse_csrgemm_info src)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(dest == nullptr || src == nullptr || dest == src)
     {
         return rocsparse_status_invalid_pointer;
@@ -832,6 +862,8 @@ rocsparse_status rocsparse::copy_csrgemm_info(rocsparse_csrgemm_info       dest,
  *******************************************************************************/
 rocsparse_status rocsparse::destroy_csrgemm_info(rocsparse_csrgemm_info info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
@@ -857,6 +889,8 @@ rocsparse_status rocsparse::destroy_csrgemm_info(rocsparse_csrgemm_info info)
  *******************************************************************************/
 rocsparse_status rocsparse::create_csritsv_info(rocsparse_csritsv_info* info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_invalid_pointer;
@@ -882,6 +916,8 @@ rocsparse_status rocsparse::create_csritsv_info(rocsparse_csritsv_info* info)
 rocsparse_status rocsparse::copy_csritsv_info(rocsparse_csritsv_info       dest,
                                               const rocsparse_csritsv_info src)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(dest == nullptr || src == nullptr || dest == src)
     {
         return rocsparse_status_invalid_pointer;
@@ -898,6 +934,8 @@ rocsparse_status rocsparse::copy_csritsv_info(rocsparse_csritsv_info       dest,
  *******************************************************************************/
 rocsparse_status rocsparse::destroy_csritsv_info(rocsparse_csritsv_info info)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
