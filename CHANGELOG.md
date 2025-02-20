@@ -3,6 +3,12 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
+## hipRAND 2.12.0 for ROCm 6.5
+
+### Added 
+
+* gfx950 support
+
 ## hipRAND 2.11.0 for ROCm 6.2.0
 
 ### Added
