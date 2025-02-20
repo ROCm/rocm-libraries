@@ -84,10 +84,12 @@ namespace rocwmma
         using Loader = OpaqueLoad<typename IOLayout::DataLayout, typename IOLayout::MatrixLayout>;
 
         using PostLoadXForm = register_layout_transform<typename IOLayout::StorageLayout,
-                                                        typename IOLayout::FragmentLayout>;
+                                                        typename IOLayout::FragmentLayout,
+                                                        1u>;
 
         using PreStoreXForm = register_layout_transform<typename IOLayout::FragmentLayout,
-                                                        typename IOLayout::StorageLayout>;
+                                                        typename IOLayout::StorageLayout,
+                                                        1u>;
 
         using Storer = OpaqueStore<typename IOLayout::DataLayout, typename IOLayout::MatrixLayout>;
     };
@@ -109,10 +111,12 @@ namespace rocwmma
         using Broadcaster = Broadcast<DataT, IOTraits::UnpackedSize>;
 
         using PreMmaXForm = register_layout_transform<typename IOLayout::FragmentLayout,
-                                                      typename IOLayout::MmaLayout>;
+                                                      typename IOLayout::MmaLayout,
+                                                      1u>;
 
         using PostMmaXForm = register_layout_transform<typename IOLayout::MmaLayout,
-                                                       typename IOLayout::FragmentLayout>;
+                                                       typename IOLayout::FragmentLayout,
+                                                       1u>;
     };
     /** @}*/
 

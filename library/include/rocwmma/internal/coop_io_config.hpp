@@ -84,13 +84,16 @@ namespace rocwmma
                                        WaveCount>;
 
         using PostLoadXForm = register_layout_transform<typename IOLayout::StorageLayout,
-                                                        typename IOLayout::FragmentLayout>;
+                                                        typename IOLayout::FragmentLayout,
+                                                        WaveCount>;
 
         using PreMmaXForm = register_layout_transform<typename IOLayout::FragmentLayout,
-                                                      typename IOLayout::MmaLayout>;
+                                                      typename IOLayout::MmaLayout,
+                                                      WaveCount>;
 
         using PreStoreXForm = register_layout_transform<typename IOLayout::FragmentLayout,
-                                                        typename IOLayout::StorageLayout>;
+                                                        typename IOLayout::StorageLayout,
+                                                        WaveCount>;
 
         using Storer = CooperativeStore<typename IOLayout::DataLayout,
                                         typename IOLayout::MatrixLayout,

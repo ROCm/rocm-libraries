@@ -455,15 +455,16 @@ namespace rocwmma
         // the transform or ensure your layout transform mapping is correct.
 
         // Interface to transform from one register layout to another.
-        template <typename RegisterLayoutSrc, typename RegisterLayoutDst, typename Enabler = void>
+        template <typename RegisterLayoutSrc, typename RegisterLayoutDst, uint32_t WaveCount, typename Enabler = void>
         struct register_layout_transform;
 
         // Passthrough transform (NOP):
         // - Layouts are the same
-        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs>
+        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs, uint32_t WaveCount>
         struct register_layout_transform<
             RegisterLayoutLhs,
             RegisterLayoutRhs,
+            WaveCount,
             enable_if_t<is_layout_same_v<RegisterLayoutLhs, RegisterLayoutRhs>>>
         {
             template <typename VecT>
@@ -477,10 +478,11 @@ namespace rocwmma
         // Unsupported transform:
         // - Invalid RegisterLayouts
         // - Non-orthogonal (no transform path)
-        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs>
+        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs, uint32_t WaveCount>
         struct register_layout_transform<
             RegisterLayoutLhs,
             RegisterLayoutRhs,
+            WaveCount,
             enable_if_t<!is_layout_same_v<RegisterLayoutLhs, RegisterLayoutRhs>
                         && (!traits_lhs::is_register_layout || !traits_rhs::is_register_layout
                             || !is_layout_orthogonal_v<RegisterLayoutLhs, RegisterLayoutRhs>)>>
@@ -497,10 +499,11 @@ namespace rocwmma
         // Valid transform:
         // - RegisterLayouts are valid
         // - Orthogonal (transform path exists)
-        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs>
+        template <typename RegisterLayoutLhs, typename RegisterLayoutRhs, uint32_t WaveCount>
         struct register_layout_transform<
             RegisterLayoutLhs,
             RegisterLayoutRhs,
+            WaveCount,
             enable_if_t<(traits_lhs::is_register_layout && traits_rhs::is_register_layout)
                         && is_layout_orthogonal_v<RegisterLayoutLhs, RegisterLayoutRhs>>>
         {
@@ -516,8 +519,21 @@ namespace rocwmma
                                                                       traits_rhs::Format,
                                                                       storage_traits>;
 
-                // Forward to functional implementation
-                return transform_impl::exec(forward<VecT>(v));
+                if constexpr( WaveCount > 1 && storage_traits::is_interleaved)
+                {
+                    // Functionally, cooperative fragments have a reduced register footprint
+                    auto res = decay_t<VecT>{};
+                    using VecTraits = VecTraits<decay_t<VecT>>;
+                    using VecFwdT = typename VecTraits::template VecT<typename VecTraits::DataT, VecTraits::size() / WaveCount>;
+
+                    (VecFwdT&)res = transform_impl::exec((VecFwdT&)v);
+                    // Forward to functional implementation
+                    return res;
+                }
+                else
+                {
+                    return transform_impl::exec(forward<VecT>(v));
+                }
             }
         };
 
