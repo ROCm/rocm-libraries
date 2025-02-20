@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,8 @@ extern "C" {
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, handle);
     *handle = new _rocsparse_handle();
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
@@ -63,6 +65,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     rocsparse::log_trace(handle, "rocsparse_destroy_handle");
     delete handle;
@@ -164,6 +168,8 @@ const char* rocsparse_get_status_description(rocsparse_status status)
 rocsparse_status rocsparse_set_pointer_mode(rocsparse_handle handle, rocsparse_pointer_mode mode)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_ENUM(1, mode);
     handle->pointer_mode = mode;
@@ -183,6 +189,8 @@ catch(...)
 rocsparse_status rocsparse_get_pointer_mode(rocsparse_handle handle, rocsparse_pointer_mode* mode)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, mode);
     *mode = handle->pointer_mode;
@@ -203,6 +211,8 @@ catch(...)
 rocsparse_status rocsparse_set_stream(rocsparse_handle handle, hipStream_t stream_id)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     rocsparse::log_trace(handle, "rocsparse_set_stream", stream_id);
 
@@ -220,6 +230,8 @@ catch(...)
 rocsparse_status rocsparse_get_stream(rocsparse_handle handle, hipStream_t* stream_id)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     rocsparse::log_trace(handle, "rocsparse_get_stream", *stream_id);
 
@@ -240,6 +252,8 @@ catch(...)
 rocsparse_status rocsparse_get_version(rocsparse_handle handle, int* version)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     *version = ROCSPARSE_VERSION_MAJOR * 100000 + ROCSPARSE_VERSION_MINOR * 100
                + ROCSPARSE_VERSION_PATCH;
@@ -259,6 +273,8 @@ catch(...)
 rocsparse_status rocsparse_get_git_rev(rocsparse_handle handle, char* rev)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, rev);
 
@@ -285,6 +301,8 @@ catch(...)
 rocsparse_status rocsparse_create_mat_descr(rocsparse_mat_descr* descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     *descr = new _rocsparse_mat_descr;
     return rocsparse_status_success;
@@ -300,6 +318,8 @@ catch(...)
 rocsparse_status rocsparse_copy_mat_descr(rocsparse_mat_descr dest, const rocsparse_mat_descr src)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, dest);
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
@@ -323,6 +343,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_mat_descr(rocsparse_mat_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     delete descr;
     return rocsparse_status_success;
 }
@@ -337,6 +359,8 @@ catch(...)
 rocsparse_status rocsparse_set_mat_index_base(rocsparse_mat_descr descr, rocsparse_index_base base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, base);
     descr->base = base;
@@ -352,6 +376,8 @@ catch(...)
  *******************************************************************************/
 rocsparse_index_base rocsparse_get_mat_index_base(const rocsparse_mat_descr descr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If descriptor is invalid, default index base is returned
     if(descr == nullptr)
     {
@@ -366,6 +392,7 @@ rocsparse_index_base rocsparse_get_mat_index_base(const rocsparse_mat_descr desc
 rocsparse_status rocsparse_set_mat_type(rocsparse_mat_descr descr, rocsparse_matrix_type type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, type);
@@ -383,6 +410,8 @@ catch(...)
  *******************************************************************************/
 rocsparse_matrix_type rocsparse_get_mat_type(const rocsparse_mat_descr descr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If descriptor is invalid, default matrix type is returned
     if(descr == nullptr)
     {
@@ -395,6 +424,7 @@ rocsparse_status rocsparse_set_mat_fill_mode(rocsparse_mat_descr descr,
                                              rocsparse_fill_mode fill_mode)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, fill_mode);
@@ -409,6 +439,8 @@ catch(...)
 
 rocsparse_fill_mode rocsparse_get_mat_fill_mode(const rocsparse_mat_descr descr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If descriptor is invalid, default fill mode is returned
     if(descr == nullptr)
     {
@@ -421,6 +453,8 @@ rocsparse_status rocsparse_set_mat_diag_type(rocsparse_mat_descr descr,
                                              rocsparse_diag_type diag_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, diag_type);
     descr->diag_type = diag_type;
@@ -433,6 +467,8 @@ catch(...)
 
 rocsparse_diag_type rocsparse_get_mat_diag_type(const rocsparse_mat_descr descr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If descriptor is invalid, default diagonal type is returned
     if(descr == nullptr)
     {
@@ -445,6 +481,8 @@ rocsparse_status rocsparse_set_mat_storage_mode(rocsparse_mat_descr    descr,
                                                 rocsparse_storage_mode storage_mode)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, storage_mode);
     descr->storage_mode = storage_mode;
@@ -457,6 +495,8 @@ catch(...)
 
 rocsparse_storage_mode rocsparse_get_mat_storage_mode(const rocsparse_mat_descr descr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If descriptor is invalid, default fill mode is returned
     if(descr == nullptr)
     {
@@ -475,6 +515,8 @@ rocsparse_storage_mode rocsparse_get_mat_storage_mode(const rocsparse_mat_descr 
 rocsparse_status rocsparse_create_hyb_mat(rocsparse_hyb_mat* hyb)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
     *hyb = new _rocsparse_hyb_mat;
     return rocsparse_status_success;
@@ -490,6 +532,8 @@ catch(...)
 rocsparse_status rocsparse_copy_hyb_mat(rocsparse_hyb_mat dest, const rocsparse_hyb_mat src)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, dest);
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
@@ -659,6 +703,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_hyb_mat(rocsparse_hyb_mat hyb)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
     // Clean up ELL part
     if(hyb->ell_col_ind != nullptr)
@@ -702,6 +748,8 @@ catch(...)
 rocsparse_status rocsparse_create_mat_info(rocsparse_mat_info* info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, info);
     *info = new _rocsparse_mat_info;
     return rocsparse_status_success;
@@ -717,6 +765,8 @@ catch(...)
 rocsparse_status rocsparse_copy_mat_info(rocsparse_mat_info dest, const rocsparse_mat_info src)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, dest);
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
@@ -1060,6 +1110,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_mat_info(rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
@@ -1320,6 +1372,8 @@ catch(...)
 rocsparse_status rocsparse_create_color_info(rocsparse_color_info* info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, info);
     *info = new _rocsparse_color_info;
     return rocsparse_status_success;
@@ -1336,6 +1390,8 @@ rocsparse_status rocsparse_copy_color_info(rocsparse_color_info       dest,
                                            const rocsparse_color_info src)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, dest);
     ROCSPARSE_CHECKARG_POINTER(1, src);
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
@@ -1353,6 +1409,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_color_info(rocsparse_color_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(info == nullptr)
     {
         return rocsparse_status_success;
@@ -1381,6 +1439,8 @@ rocsparse_status rocsparse_create_spvec_descr(rocsparse_spvec_descr* descr,
                                               rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_SIZE(2, nnz);
@@ -1425,6 +1485,8 @@ rocsparse_status rocsparse_create_const_spvec_descr(rocsparse_const_spvec_descr*
                                                     rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_SIZE(2, nnz);
@@ -1467,6 +1529,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_spvec_descr(rocsparse_const_spvec_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
 
     if(descr->init == false)
@@ -1497,6 +1561,8 @@ rocsparse_status rocsparse_spvec_get(const rocsparse_spvec_descr descr,
                                      rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, size);
@@ -1534,6 +1600,8 @@ rocsparse_status rocsparse_const_spvec_get(rocsparse_const_spvec_descr descr,
                                            rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, size);
@@ -1567,6 +1635,8 @@ rocsparse_status rocsparse_spvec_get_index_base(rocsparse_const_spvec_descr desc
                                                 rocsparse_index_base*       idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, idx_base);
@@ -1586,6 +1656,8 @@ catch(...)
 rocsparse_status rocsparse_spvec_get_values(const rocsparse_spvec_descr descr, void** values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -1601,6 +1673,8 @@ rocsparse_status rocsparse_const_spvec_get_values(rocsparse_const_spvec_descr de
                                                   const void**                values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -1618,6 +1692,8 @@ catch(...)
 rocsparse_status rocsparse_spvec_set_values(rocsparse_spvec_descr descr, void* values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -1649,6 +1725,8 @@ rocsparse_status rocsparse_create_coo_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -1712,6 +1790,8 @@ rocsparse_status rocsparse_create_const_coo_descr(rocsparse_const_spmat_descr* d
                                                   rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -1784,6 +1864,8 @@ rocsparse_status rocsparse_create_coo_aos_descr(rocsparse_spmat_descr* descr,
                                                 rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -1852,6 +1934,8 @@ rocsparse_status rocsparse_create_csr_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -1924,6 +2008,8 @@ rocsparse_status rocsparse_create_const_csr_descr(rocsparse_const_spmat_descr* d
                                                   rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2005,6 +2091,8 @@ rocsparse_status rocsparse_create_csc_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2070,6 +2158,8 @@ rocsparse_status rocsparse_create_const_csc_descr(rocsparse_const_spmat_descr* d
                                                   rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2142,6 +2232,8 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2218,6 +2310,8 @@ rocsparse_status rocsparse_create_bell_descr(rocsparse_spmat_descr* descr,
                                              rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2287,6 +2381,8 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
                                                    rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -2367,6 +2463,8 @@ rocsparse_status rocsparse_create_bsr_descr(rocsparse_spmat_descr* descr,
                                             rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, mb);
     ROCSPARSE_CHECKARG_SIZE(2, nb);
@@ -2432,6 +2530,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_spmat_descr(rocsparse_const_spmat_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
 
     // Check if descriptor has been initialized
@@ -2468,6 +2568,8 @@ rocsparse_status rocsparse_coo_get(const rocsparse_spmat_descr descr,
                                    rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2511,6 +2613,8 @@ rocsparse_status rocsparse_const_coo_get(rocsparse_const_spmat_descr descr,
                                          rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2557,6 +2661,8 @@ rocsparse_status rocsparse_coo_aos_get(const rocsparse_spmat_descr descr,
                                        rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2597,6 +2703,8 @@ rocsparse_status rocsparse_const_coo_aos_get(rocsparse_const_spmat_descr descr,
                                              rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2643,6 +2751,8 @@ rocsparse_status rocsparse_csr_get(const rocsparse_spmat_descr descr,
                                    rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2689,6 +2799,8 @@ rocsparse_status rocsparse_const_csr_get(rocsparse_const_spmat_descr descr,
                                          rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2741,6 +2853,8 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
                                          rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid pointers
     if(descr == nullptr)
     {
@@ -2808,6 +2922,8 @@ rocsparse_status rocsparse_bsr_get(const rocsparse_spmat_descr descr,
                                    rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid pointers
     if(descr == nullptr)
     {
@@ -2877,6 +2993,8 @@ rocsparse_status rocsparse_csc_get(const rocsparse_spmat_descr descr,
                                    rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2923,6 +3041,8 @@ rocsparse_status rocsparse_const_csc_get(rocsparse_const_spmat_descr descr,
                                          rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -2971,6 +3091,8 @@ rocsparse_status rocsparse_ell_get(const rocsparse_spmat_descr descr,
                                    rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -3011,6 +3133,8 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
                                          rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -3057,6 +3181,8 @@ rocsparse_status rocsparse_bell_get(const rocsparse_spmat_descr descr,
                                     rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -3103,6 +3229,8 @@ rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
                                           rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -3145,6 +3273,8 @@ rocsparse_status rocsparse_coo_set_pointers(rocsparse_spmat_descr descr,
                                             void*                 coo_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, coo_row_ind);
@@ -3173,6 +3303,8 @@ rocsparse_status
     rocsparse_coo_aos_set_pointers(rocsparse_spmat_descr descr, void* coo_ind, void* coo_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, coo_ind);
@@ -3200,6 +3332,8 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
                                             void*                 csr_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
 
@@ -3236,6 +3370,8 @@ rocsparse_status rocsparse_csc_set_pointers(rocsparse_spmat_descr descr,
                                             void*                 csc_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
 
@@ -3270,6 +3406,8 @@ rocsparse_status
     rocsparse_ell_set_pointers(rocsparse_spmat_descr descr, void* ell_col_ind, void* ell_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, ell_col_ind);
@@ -3297,6 +3435,8 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
                                             void*                 bsr_val)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
 
@@ -3333,6 +3473,8 @@ rocsparse_status rocsparse_spmat_get_size(rocsparse_const_spmat_descr descr,
                                           int64_t*                    nnz)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -3357,6 +3499,8 @@ rocsparse_status rocsparse_spmat_get_format(rocsparse_const_spmat_descr descr,
                                             rocsparse_format*           format)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, format);
@@ -3377,6 +3521,8 @@ rocsparse_status rocsparse_spmat_get_index_base(rocsparse_const_spmat_descr desc
                                                 rocsparse_index_base*       idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, idx_base);
@@ -3396,6 +3542,8 @@ catch(...)
 rocsparse_status rocsparse_spmat_get_values(rocsparse_spmat_descr descr, void** values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3412,6 +3560,8 @@ rocsparse_status rocsparse_const_spmat_get_values(rocsparse_const_spmat_descr de
                                                   const void**                values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3431,6 +3581,8 @@ catch(...)
 rocsparse_status rocsparse_spmat_set_values(rocsparse_spmat_descr descr, void* values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3452,6 +3604,8 @@ rocsparse_status rocsparse_spmat_get_strided_batch(rocsparse_const_spmat_descr d
                                                    rocsparse_int*              batch_count)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, batch_count);
@@ -3471,6 +3625,8 @@ catch(...)
 rocsparse_status rocsparse_spmat_get_nnz(rocsparse_const_spmat_descr descr, int64_t* nnz)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, nnz);
@@ -3518,6 +3674,8 @@ catch(...)
 rocsparse_status rocsparse_spmat_set_nnz(rocsparse_spmat_descr descr, int64_t nnz)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_SIZE(1, nnz);
@@ -3581,6 +3739,8 @@ rocsparse_status rocsparse_spmat_set_strided_batch(rocsparse_spmat_descr descr,
                                                    rocsparse_int         batch_count)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
@@ -3603,6 +3763,8 @@ rocsparse_status rocsparse_coo_set_strided_batch(rocsparse_spmat_descr descr,
                                                  int64_t               batch_stride)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
@@ -3628,6 +3790,8 @@ rocsparse_status rocsparse_csr_set_strided_batch(rocsparse_spmat_descr descr,
                                                  int64_t               columns_values_batch_stride)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
@@ -3659,6 +3823,8 @@ rocsparse_status rocsparse_csc_set_strided_batch(rocsparse_spmat_descr descr,
                                                  int64_t               rows_values_batch_stride)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
@@ -3688,6 +3854,8 @@ rocsparse_status rocsparse_spmat_get_attribute(rocsparse_const_spmat_descr descr
                                                size_t                      data_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, attribute);
     ROCSPARSE_CHECKARG_POINTER(2, data);
@@ -3751,6 +3919,8 @@ rocsparse_status rocsparse_spmat_set_attribute(rocsparse_spmat_descr     descr,
                                                size_t                    data_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_ENUM(1, attribute);
     ROCSPARSE_CHECKARG_POINTER(2, data);
@@ -3815,6 +3985,8 @@ rocsparse_status rocsparse_create_dnvec_descr(rocsparse_dnvec_descr* descr,
                                               rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
@@ -3841,6 +4013,8 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
                                                     rocsparse_datatype           data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, size);
     ROCSPARSE_CHECKARG_ARRAY(2, size, values);
@@ -3869,6 +4043,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_dnvec_descr(rocsparse_const_dnvec_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
 
     delete descr;
@@ -3888,6 +4064,8 @@ rocsparse_status rocsparse_dnvec_get(const rocsparse_dnvec_descr descr,
                                      rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, size);
@@ -3911,6 +4089,8 @@ rocsparse_status rocsparse_const_dnvec_get(rocsparse_const_dnvec_descr descr,
                                            rocsparse_datatype*         data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, size);
@@ -3934,6 +4114,8 @@ catch(...)
 rocsparse_status rocsparse_dnvec_get_values(const rocsparse_dnvec_descr descr, void** values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3951,6 +4133,8 @@ rocsparse_status rocsparse_const_dnvec_get_values(rocsparse_const_dnvec_descr de
                                                   const void**                values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3970,6 +4154,8 @@ catch(...)
 rocsparse_status rocsparse_dnvec_set_values(rocsparse_dnvec_descr descr, void* values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -3999,6 +4185,8 @@ rocsparse_status rocsparse_create_dnmat_descr(rocsparse_dnmat_descr* descr,
                                               rocsparse_order        order)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -4054,6 +4242,8 @@ rocsparse_status rocsparse_create_const_dnmat_descr(rocsparse_const_dnmat_descr*
                                                     rocsparse_order              order)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
@@ -4106,6 +4296,8 @@ catch(...)
 rocsparse_status rocsparse_destroy_dnmat_descr(rocsparse_const_dnmat_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     delete descr;
     return rocsparse_status_success;
@@ -4127,6 +4319,8 @@ rocsparse_status rocsparse_dnmat_get(const rocsparse_dnmat_descr descr,
                                      rocsparse_order*            order)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -4159,6 +4353,8 @@ rocsparse_status rocsparse_const_dnmat_get(rocsparse_const_dnmat_descr descr,
                                            rocsparse_order*            order)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, rows);
@@ -4188,6 +4384,8 @@ catch(...)
 rocsparse_status rocsparse_dnmat_get_values(const rocsparse_dnmat_descr descr, void** values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -4204,6 +4402,8 @@ rocsparse_status rocsparse_const_dnmat_get_values(rocsparse_const_dnmat_descr de
                                                   const void**                values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -4223,6 +4423,8 @@ catch(...)
 rocsparse_status rocsparse_dnmat_set_values(rocsparse_dnmat_descr descr, void* values)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, values);
@@ -4246,6 +4448,8 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
                                                    int64_t*                    batch_stride)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG_POINTER(1, batch_count);
@@ -4270,6 +4474,8 @@ rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
                                                    int64_t               batch_stride)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG(0, descr, (descr->init == false), rocsparse_status_not_initialized);
     ROCSPARSE_CHECKARG(1, batch_count, (batch_count <= 0), rocsparse_status_invalid_value);
@@ -4314,6 +4520,8 @@ rocsparse_status rocsparse_create_csr_descr_SWDEV_453599(rocsparse_spmat_descr* 
                                                          rocsparse_datatype     data_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_SIZE(1, rows);
     ROCSPARSE_CHECKARG_SIZE(2, cols);
