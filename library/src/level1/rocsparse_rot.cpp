@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ namespace rocsparse
                                   rocsparse_spvec_descr x,
                                   rocsparse_dnvec_descr y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::roti_template<I, T>)(handle,
                                                                    (I)x->nnz,
                                                                    (T*)x->val_data,
@@ -59,6 +61,8 @@ extern "C" rocsparse_status rocsparse_rot(rocsparse_handle      handle,
                                           rocsparse_dnvec_descr y)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for invalid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 

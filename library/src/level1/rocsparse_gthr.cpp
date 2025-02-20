@@ -37,6 +37,8 @@ rocsparse_status rocsparse::gthr_template(rocsparse_handle     handle,
                                           const I*             x_ind,
                                           rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -133,6 +135,7 @@ INSTANTIATE(int64_t, rocsparse_double_complex)
                                      rocsparse_index_base idx_base)            \
     try                                                                        \
     {                                                                          \
+        ROCSPARSE_ROUTINE_TRACE;                                               \
         RETURN_IF_ROCSPARSE_ERROR(                                             \
             rocsparse::gthr_template(handle, nnz, y, x_val, x_ind, idx_base)); \
         return rocsparse_status_success;                                       \

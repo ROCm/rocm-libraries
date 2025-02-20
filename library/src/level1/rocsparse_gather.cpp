@@ -36,6 +36,8 @@ namespace rocsparse
                                      rocsparse_const_dnvec_descr y,
                                      rocsparse_spvec_descr       x)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_template<I, T>)(handle,
                                                                    (I)x->nnz,
                                                                    (const T*)y->const_values,
@@ -57,6 +59,8 @@ extern "C" rocsparse_status rocsparse_gather(rocsparse_handle            handle,
                                              rocsparse_spvec_descr       x)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for invalid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 

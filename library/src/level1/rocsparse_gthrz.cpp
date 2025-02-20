@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ rocsparse_status rocsparse::gthrz_template(rocsparse_handle     handle,
                                            const rocsparse_int* x_ind,
                                            rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -94,6 +96,8 @@ extern "C" rocsparse_status rocsparse_sgthrz(rocsparse_handle     handle,
                                              rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
 }
@@ -110,6 +114,8 @@ extern "C" rocsparse_status rocsparse_dgthrz(rocsparse_handle     handle,
                                              rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
 }
@@ -126,6 +132,8 @@ extern "C" rocsparse_status rocsparse_cgthrz(rocsparse_handle         handle,
                                              rocsparse_index_base     idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
 }
@@ -142,6 +150,8 @@ extern "C" rocsparse_status rocsparse_zgthrz(rocsparse_handle          handle,
                                              rocsparse_index_base      idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
 }

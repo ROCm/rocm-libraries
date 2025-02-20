@@ -41,6 +41,8 @@ namespace rocsparse
                                         size_t*                     buffer_size,
                                         void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // If temp_buffer is nullptr, return buffer_size
         if(temp_buffer == nullptr)
         {
@@ -77,6 +79,8 @@ namespace rocsparse
                                            size_t*                     buffer_size,
                                            void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // If temp_buffer is nullptr, return buffer_size
         if(temp_buffer == nullptr)
         {
@@ -135,6 +139,8 @@ extern "C" rocsparse_status rocsparse_spvv(rocsparse_handle            handle,
                                            void*                       temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for invalid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 

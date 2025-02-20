@@ -41,6 +41,8 @@ rocsparse_status rocsparse::sctr_template(rocsparse_handle     handle,
                                           T*                   y,
                                           rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -94,6 +96,8 @@ extern "C" rocsparse_status rocsparse_ssctr(rocsparse_handle     handle,
                                             rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
 }
@@ -110,6 +114,8 @@ extern "C" rocsparse_status rocsparse_dsctr(rocsparse_handle     handle,
                                             rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
 }
@@ -126,6 +132,8 @@ extern "C" rocsparse_status rocsparse_csctr(rocsparse_handle               handl
                                             rocsparse_index_base           idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
 }
@@ -142,6 +150,8 @@ extern "C" rocsparse_status rocsparse_zsctr(rocsparse_handle                hand
                                             rocsparse_index_base            idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
 }
@@ -158,6 +168,8 @@ extern "C" rocsparse_status rocsparse_isctr(rocsparse_handle     handle,
                                             rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
 }

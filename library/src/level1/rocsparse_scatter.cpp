@@ -36,6 +36,8 @@ namespace rocsparse
                                       rocsparse_const_spvec_descr x,
                                       rocsparse_dnvec_descr       y)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::sctr_template<I, T>)(handle,
                                                                    (I)x->nnz,
                                                                    (const T*)x->const_val_data,
@@ -57,6 +59,8 @@ extern "C" rocsparse_status rocsparse_scatter(rocsparse_handle            handle
                                               rocsparse_dnvec_descr       y)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for invalid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
