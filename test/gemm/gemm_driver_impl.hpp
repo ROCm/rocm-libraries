@@ -260,7 +260,9 @@ namespace rocwmma
         __device__ inline void GemmDriver<GemmDriverT_impl>::localReadA(
             MfmaFragA& fragsA, GetDataType_t<MfmaFragA> const* ldsAddrA, uint32_t ldlds)
         {
-            rocwmma::load_matrix_sync(reinterpret_cast<LRFragA&>(fragsA), ldsAddrA, ldlds);
+            LRFragA lrFragA;
+            rocwmma::load_matrix_sync(lrFragA, ldsAddrA, ldlds);
+            fragsA.mStorage = LdsMapping::formatLRFragA(lrFragA).mStorage;
         }
 
         template <GemmDriverT>
@@ -281,7 +283,9 @@ namespace rocwmma
         __device__ inline void GemmDriver<GemmDriverT_impl>::localReadB(
             MfmaFragB& fragsB, GetDataType_t<MfmaFragB> const* ldsAddrB, uint32_t ldlds)
         {
-            rocwmma::load_matrix_sync(reinterpret_cast<LRFragB&>(fragsB), ldsAddrB, ldlds);
+            LRFragB lrFragB;
+            rocwmma::load_matrix_sync(lrFragB, ldsAddrB, ldlds);
+            fragsB.mStorage = LdsMapping::formatLRFragB(lrFragB).mStorage;
         }
 
         template <GemmDriverT>
