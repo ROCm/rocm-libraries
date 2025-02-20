@@ -322,7 +322,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
         pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
-        // TODO: handle direct_to_from_reg
         StatementList preLoad;
         preLoad += Call{"lds_to_reg_input_pp_step_1_2_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
