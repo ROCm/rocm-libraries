@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -171,6 +171,7 @@ rocsparse_status
                                                                 rocsparse_int    batch_stride,
                                                                 size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(
         handle,
@@ -237,6 +238,8 @@ namespace rocsparse
                                                                 rocsparse_int    batch_stride,
                                                                 void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
         // Run special algorithm if m is power of 2
@@ -329,6 +332,8 @@ namespace rocsparse
                                                                 rocsparse_int    batch_stride,
                                                                 void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(m > 512, "This function is designed for m > 512.");
 
         char* ptr = reinterpret_cast<char*>(temp_buffer);
@@ -423,6 +428,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
                                                                  rocsparse_int    batch_stride,
                                                                  void*            temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xgtsv_no_pivot_strided_batch"),
                          m,
@@ -482,6 +489,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_strided_batch_template(rocsparse_handl
                                      size_t*          buffer_size)                             \
     try                                                                                        \
     {                                                                                          \
+        ROCSPARSE_ROUTINE_TRACE;                                                               \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_buffer_size_template( \
             handle, m, dl, d, du, x, batch_count, batch_stride, buffer_size));                 \
         return rocsparse_status_success;                                                       \
@@ -510,6 +518,7 @@ C_IMPL(rocsparse_zgtsv_no_pivot_strided_batch_buffer_size, rocsparse_double_comp
                                      void*            temp_buffer)                 \
     try                                                                            \
     {                                                                              \
+        ROCSPARSE_ROUTINE_TRACE;                                                   \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_strided_batch_template( \
             handle, m, dl, d, du, x, batch_count, batch_stride, temp_buffer));     \
         return rocsparse_status_success;                                           \

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,8 @@ namespace rocsparse
                                            rocsparse_solve_policy    solve,
                                            void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Differentiate the analysis policies
         if(analysis == rocsparse_analysis_policy_reuse)
         {
@@ -140,6 +142,8 @@ namespace rocsparse
                                                          rocsparse_solve_policy    solve,
                                                          void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(m == 0)
         {
             return rocsparse_status_success;
@@ -160,6 +164,8 @@ namespace rocsparse
                                                       rocsparse_solve_policy    solve, //9
                                                       void*                     temp_buffer) //10
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         ROCSPARSE_CHECKARG_SIZE(1, m);
@@ -217,6 +223,7 @@ namespace rocsparse
                                            rocsparse_solve_policy    solve,
                                            void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Logging
         rocsparse::log_trace(handle,
@@ -276,6 +283,8 @@ extern "C" rocsparse_status rocsparse_scsrilu0_analysis(rocsparse_handle        
                                                         void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_analysis_impl(handle,
                                                                m,
                                                                nnz,
@@ -307,6 +316,8 @@ extern "C" rocsparse_status rocsparse_dcsrilu0_analysis(rocsparse_handle        
                                                         void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_analysis_impl(handle,
                                                                m,
                                                                nnz,
@@ -338,6 +349,8 @@ extern "C" rocsparse_status rocsparse_ccsrilu0_analysis(rocsparse_handle        
                                                         void*                          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_analysis_impl(handle,
                                                                m,
                                                                nnz,
@@ -369,6 +382,8 @@ extern "C" rocsparse_status rocsparse_zcsrilu0_analysis(rocsparse_handle        
                                                         void*                           temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_analysis_impl(handle,
                                                                m,
                                                                nnz,

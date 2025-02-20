@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,8 @@ rocsparse_status
                                                            rocsparse_int batch_stride,
                                                            size_t*       buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -126,6 +128,8 @@ rocsparse_status rocsparse::gpsv_interleaved_batch_template(rocsparse_handle    
                                                             rocsparse_int batch_stride,
                                                             void*         temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -275,6 +279,7 @@ rocsparse_status rocsparse::gpsv_interleaved_batch_template(rocsparse_handle    
                                      size_t*                        buffer_size)            \
     try                                                                                     \
     {                                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gpsv_interleaved_batch_buffer_size_template(   \
             handle, alg, m, ds, dl, d, du, dw, x, batch_count, batch_stride, buffer_size)); \
         return rocsparse_status_success;                                                    \
@@ -305,6 +310,7 @@ C_IMPL(rocsparse_zgpsv_interleaved_batch_buffer_size, rocsparse_double_complex);
                                      void*                          temp_buffer)            \
     try                                                                                     \
     {                                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gpsv_interleaved_batch_template(               \
             handle, alg, m, ds, dl, d, du, dw, x, batch_count, batch_stride, temp_buffer)); \
         return rocsparse_status_success;                                                    \

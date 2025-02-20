@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,8 @@ namespace rocsparse
                                                      rocsparse_mat_info        info,
                                                      size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(handle,
                                                                         rocsparse_operation_none,
                                                                         m,
@@ -62,6 +64,8 @@ namespace rocsparse
                                                             rocsparse_mat_info        info,
                                                             size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_continue;
     }
 
@@ -75,6 +79,8 @@ namespace rocsparse
                                                          rocsparse_mat_info        info,
                                                          size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_SIZE(1, m);
 
@@ -115,6 +121,8 @@ namespace rocsparse
                                                      rocsparse_mat_info        info,
                                                      size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xcsrilu0_buffer_size"),
                              m,
@@ -153,6 +161,7 @@ namespace rocsparse
                                      size_t*                   buffer_size)                \
     try                                                                                    \
     {                                                                                      \
+        ROCSPARSE_ROUTINE_TRACE;                                                           \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_buffer_size_impl(                     \
             handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size)); \
         return rocsparse_status_success;                                                   \

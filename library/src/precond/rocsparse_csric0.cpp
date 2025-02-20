@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,8 @@ rocsparse_status rocsparse::csric0_analysis_template(rocsparse_handle          h
                                                      rocsparse_solve_policy    solve, //9
                                                      void*                     temp_buffer) //10
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     rocsparse::log_trace(handle,
@@ -186,6 +188,8 @@ rocsparse_status rocsparse::csric0_template(rocsparse_handle          handle, //
                                             rocsparse_solve_policy    policy, //8
                                             void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -540,6 +544,8 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(handle,
                                                                         rocsparse_operation_none,
                                                                         m,
@@ -564,6 +570,8 @@ namespace rocsparse
                                              rocsparse_mat_info        info,
                                              size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         rocsparse::log_trace(handle,
@@ -613,6 +621,7 @@ namespace rocsparse
                                      size_t*                   buffer_size)                \
     try                                                                                    \
     {                                                                                      \
+        ROCSPARSE_ROUTINE_TRACE;                                                           \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_buffer_size_impl(                      \
             handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, buffer_size)); \
         return rocsparse_status_success;                                                   \
@@ -641,6 +650,8 @@ extern "C" rocsparse_status rocsparse_scsric0_analysis(rocsparse_handle         
                                                        void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_analysis_template(handle,
                                                                   m,
                                                                   nnz,
@@ -672,6 +683,8 @@ extern "C" rocsparse_status rocsparse_dcsric0_analysis(rocsparse_handle         
                                                        void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_analysis_template(handle,
                                                                   m,
                                                                   nnz,
@@ -703,6 +716,8 @@ extern "C" rocsparse_status rocsparse_ccsric0_analysis(rocsparse_handle         
                                                        void*                          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_analysis_template(handle,
                                                                   m,
                                                                   nnz,
@@ -734,6 +749,8 @@ extern "C" rocsparse_status rocsparse_zcsric0_analysis(rocsparse_handle         
                                                        void*                           temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_analysis_template(handle,
                                                                   m,
                                                                   nnz,
@@ -755,6 +772,8 @@ catch(...)
 extern "C" rocsparse_status rocsparse_csric0_clear(rocsparse_handle handle, rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     rocsparse::log_trace(handle, "rocsparse_csric0_clear", (const void*&)info);
@@ -788,6 +807,8 @@ extern "C" rocsparse_status rocsparse_scsric0(rocsparse_handle          handle,
                                               void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer));
     return rocsparse_status_success;
@@ -809,6 +830,8 @@ extern "C" rocsparse_status rocsparse_dcsric0(rocsparse_handle          handle,
                                               void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer));
     return rocsparse_status_success;
@@ -830,6 +853,8 @@ extern "C" rocsparse_status rocsparse_ccsric0(rocsparse_handle          handle,
                                               void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer));
     return rocsparse_status_success;
@@ -851,6 +876,8 @@ extern "C" rocsparse_status rocsparse_zcsric0(rocsparse_handle          handle,
                                               void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csric0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer));
     return rocsparse_status_success;
@@ -865,6 +892,8 @@ extern "C" rocsparse_status rocsparse_csric0_zero_pivot(rocsparse_handle   handl
                                                         rocsparse_int*     position)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -952,6 +981,7 @@ extern "C" rocsparse_status rocsparse_csric0_singular_pivot(rocsparse_handle   h
                                                             rocsparse_int*     position)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -1030,6 +1060,8 @@ extern "C" rocsparse_status
     rocsparse_csric0_set_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     if(handle == nullptr)
     {
@@ -1062,6 +1094,8 @@ extern "C" rocsparse_status
     rocsparse_csric0_get_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double* tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     if(handle == nullptr)
     {

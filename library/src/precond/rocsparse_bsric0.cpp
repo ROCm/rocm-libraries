@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -142,6 +142,7 @@ rocsparse_status rocsparse::bsric0_analysis_template(rocsparse_handle          h
                                                      rocsparse_solve_policy    solve, //11
                                                      void*                     temp_buffer) //12
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -256,6 +257,8 @@ namespace rocsparse
                                 rocsparse_mat_info   info,
                                 int*                 done_array)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         dim3 bsric0_blocks(mb);
 
         if(handle->wavefront_size == 32)
@@ -380,6 +383,8 @@ rocsparse_status rocsparse::bsric0_template(rocsparse_handle          handle,
                                             rocsparse_solve_policy    policy,
                                             void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     rocsparse::log_trace(handle,
@@ -471,6 +476,8 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(handle,
                                                                         rocsparse_operation_none,
                                                                         mb,
@@ -497,6 +504,8 @@ namespace rocsparse
                                              rocsparse_mat_info        info, //9
                                              size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         rocsparse::log_trace(handle,
@@ -562,6 +571,7 @@ namespace rocsparse
                                      size_t*                   buffer_size)         \
     try                                                                             \
     {                                                                               \
+        ROCSPARSE_ROUTINE_TRACE;                                                    \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsric0_buffer_size_impl(handle,        \
                                                                      dir,           \
                                                                      mb,            \
@@ -602,6 +612,7 @@ CIMPL(rocsparse_zbsric0_buffer_size, rocsparse_double_complex);
                                      void*                     temp_buffer)          \
     try                                                                              \
     {                                                                                \
+        ROCSPARSE_ROUTINE_TRACE;                                                     \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsric0_analysis_template(handle,        \
                                                                       dir,           \
                                                                       mb,            \
@@ -643,6 +654,7 @@ CIMPL(rocsparse_zbsric0_analysis, rocsparse_double_complex);
                                      void*                     temp_buffer) \
     try                                                                     \
     {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsric0_template(handle,        \
                                                              dir,           \
                                                              mb,            \
@@ -671,6 +683,8 @@ CIMPL(rocsparse_zbsric0, rocsparse_double_complex);
 extern "C" rocsparse_status rocsparse_bsric0_clear(rocsparse_handle handle, rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     rocsparse::log_trace(handle, "rocsparse_bsric0_clear", (const void*&)info);
@@ -696,6 +710,8 @@ extern "C" rocsparse_status rocsparse_bsric0_zero_pivot(rocsparse_handle   handl
                                                         rocsparse_int*     position)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging

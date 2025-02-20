@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -97,6 +97,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_buffer_size_template(rocsparse_handle 
                                                                rocsparse_int    ldb,
                                                                size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -165,6 +167,8 @@ namespace rocsparse
                                                   rocsparse_int    ldb,
                                                   void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(m <= 512, "This function is designed for m <= 512.");
 
         // Run special algorithm if m is power of 2
@@ -327,6 +331,8 @@ namespace rocsparse
                                                    rocsparse_int    ldb,
                                                    void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(m > 512 && m <= 65536,
                               "This function is designed for m > 512 and m <= 65536.");
 
@@ -484,6 +490,8 @@ namespace rocsparse
                                                   rocsparse_int    ldb,
                                                   void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse_host_assert(m > 65536, "This function is designed for m > 65536.");
 
         char* ptr = reinterpret_cast<char*>(temp_buffer);
@@ -561,6 +569,8 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
                                                    rocsparse_int    ldb,
                                                    void*            temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xgtsv_no_pivot"),
                          m,
@@ -630,6 +640,7 @@ rocsparse_status rocsparse::gtsv_no_pivot_template(rocsparse_handle handle,
                                      size_t*          buffer_size)               \
     try                                                                          \
     {                                                                            \
+        ROCSPARSE_ROUTINE_TRACE;                                                 \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gtsv_no_pivot_buffer_size_template( \
             handle, m, n, dl, d, du, B, ldb, buffer_size));                      \
         return rocsparse_status_success;                                         \
@@ -658,6 +669,7 @@ C_IMPL(rocsparse_zgtsv_no_pivot_buffer_size, rocsparse_double_complex);
                                      void*            temp_buffer)                            \
     try                                                                                       \
     {                                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                                              \
         RETURN_IF_ROCSPARSE_ERROR(                                                            \
             rocsparse::gtsv_no_pivot_template(handle, m, n, dl, d, du, B, ldb, temp_buffer)); \
         return rocsparse_status_success;                                                      \

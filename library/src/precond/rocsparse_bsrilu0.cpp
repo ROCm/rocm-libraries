@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -141,6 +141,8 @@ namespace rocsparse
                                                     const void*        boost_tol,
                                                     const T*           boost_val)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         rocsparse::log_trace(handle,
@@ -185,6 +187,8 @@ rocsparse_status rocsparse::bsrilu0_analysis_template(rocsparse_handle          
                                                       rocsparse_solve_policy    solve, //11
                                                       void*                     temp_buffer) //12
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -466,6 +470,8 @@ namespace rocsparse
                                  const void*          boost_tol,
                                  const T*             boost_val)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const float*      boost_tol_32  = (info->boost_enable) ? (const float*)boost_tol : nullptr;
         const double*     boost_tol_64  = (info->boost_enable) ? (const double*)boost_tol : nullptr;
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
@@ -518,6 +524,8 @@ namespace rocsparse
                                  const void*          boost_tol,
                                  const T*             boost_val)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const float*      boost_tol_32  = (info->boost_enable) ? (const float*)boost_tol : nullptr;
         const double*     boost_tol_64  = (info->boost_enable) ? (const double*)boost_tol : nullptr;
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
@@ -565,6 +573,7 @@ rocsparse_status rocsparse::bsrilu0_template(rocsparse_handle          handle,
                                              rocsparse_solve_policy    policy,
                                              void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
@@ -641,6 +650,8 @@ extern "C" rocsparse_status rocsparse_bsrilu0_clear(rocsparse_handle   handle,
                                                     rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     // Logging
     rocsparse::log_trace(handle, "rocsparse_bsrilu0_clear", (const void*&)info);
@@ -677,6 +688,8 @@ namespace rocsparse
                                                   rocsparse_mat_info        info,
                                                   size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(handle,
                                                                         rocsparse_operation_none,
                                                                         mb,
@@ -703,6 +716,8 @@ namespace rocsparse
                                               rocsparse_mat_info        info,
                                               size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         rocsparse::log_trace(handle,
@@ -767,6 +782,7 @@ namespace rocsparse
                                      size_t*                   buffer_size)          \
     try                                                                              \
     {                                                                                \
+        ROCSPARSE_ROUTINE_TRACE;                                                     \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0_buffer_size_impl(handle,        \
                                                                       dir,           \
                                                                       mb,            \
@@ -799,6 +815,7 @@ CIMPL(rocsparse_zbsrilu0_buffer_size, rocsparse_double_complex);
                                      const V*           boost_val)           \
     try                                                                      \
     {                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0_numeric_boost_template( \
             handle, info, enable_boost, sizeof(U), boost_tol, boost_val));   \
         return rocsparse_status_success;                                     \
@@ -832,6 +849,7 @@ CIMPL(rocsparse_dcbsrilu0_numeric_boost, double, rocsparse_float_complex);
                                      void*                     temp_buffer)           \
     try                                                                               \
     {                                                                                 \
+        ROCSPARSE_ROUTINE_TRACE;                                                      \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrilu0_analysis_template(handle,        \
                                                                        dir,           \
                                                                        mb,            \
@@ -872,6 +890,7 @@ extern "C" rocsparse_status rocsparse_sbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
                                                            dir,
                                                            mb,
@@ -906,6 +925,7 @@ extern "C" rocsparse_status rocsparse_dbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
                                                            dir,
                                                            mb,
@@ -939,6 +959,7 @@ extern "C" rocsparse_status rocsparse_cbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
                                                            dir,
                                                            mb,
@@ -972,6 +993,7 @@ extern "C" rocsparse_status rocsparse_zbsrilu0(rocsparse_handle          handle,
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrilu0_template(handle,
                                                            dir,
                                                            mb,
@@ -996,6 +1018,8 @@ extern "C" rocsparse_status rocsparse_bsrilu0_zero_pivot(rocsparse_handle   hand
                                                          rocsparse_int*     position)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
