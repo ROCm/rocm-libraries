@@ -1282,7 +1282,8 @@ public:
              size_t default_bytes,
              size_t default_batch_iterations  = 10,
              size_t default_warmup_iterations = 5,
-             bool   default_cold              = true)
+             bool   default_cold              = true,
+             int    default_trials            = -1)
     {
         cli::Parser parser(argc, argv);
 
@@ -1290,7 +1291,8 @@ public:
                                   default_bytes,
                                   default_batch_iterations,
                                   default_warmup_iterations,
-                                  default_cold);
+                                  default_cold,
+                                  default_trials);
 
         parser.run_and_exit_if_error();
 
@@ -1396,7 +1398,8 @@ private:
                                    size_t       default_bytes,
                                    size_t       default_batch_iterations,
                                    size_t       default_warmup_iterations,
-                                   bool         default_cold)
+                                   bool         default_cold,
+                                   int          default_trials)
     {
         parser.set_optional<size_t>("size", "size", default_bytes, "size in bytes");
         parser.set_optional<size_t>("batch_iterations",
@@ -1413,7 +1416,7 @@ private:
                                   "don't clear the gpu cache on every batch iteration");
 
         parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-        parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+        parser.set_optional<int>("trials", "trials", default_trials, "number of iterations");
         parser.set_optional<std::string>("name_format",
                                          "name_format",
                                          "human",
