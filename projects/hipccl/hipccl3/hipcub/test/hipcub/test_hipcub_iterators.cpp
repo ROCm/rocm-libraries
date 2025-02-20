@@ -344,10 +344,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
-    {
+    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0 || deviceName.rfind("gfx95") == 0) {
         // This is a gfx94x or gfx120x device, so skip this test
-        GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
+        GTEST_SKIP() << "Test not run on gfx94x, gfx120x or gfx95x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));
@@ -419,10 +418,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
-    {
+    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0 || deviceName.rfind("gfx95") == 0){
         // This is a gfx94x or gfx120x device, so skip this test
-        GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
+        GTEST_SKIP() << "Test not run on gfx94x, gfx120x or gfx95x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));
@@ -494,10 +492,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device_id));
     std::string deviceName = std::string(props.gcnArchName);
-    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0)
-    {
+    if (deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120") == 0 || deviceName.rfind("gfx95") == 0) {
         // This is a gfx94x or gfx120x device, so skip this test
-        GTEST_SKIP() << "Test not run on gfx94x or gfx120x as texture cache API is not supported";
+        GTEST_SKIP() << "Test not run on gfx94x, gfx120x or gfx95x as texture cache API is not supported";
     }
 
     HIP_CHECK(hipSetDevice(device_id));

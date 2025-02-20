@@ -93,7 +93,7 @@ HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CA, "sc0", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CG, "sc1", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CV, "sc0 sc1", "s_waitcnt", "vmcnt");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_VOLATILE, "sc0 sc1", "s_waitcnt", "vmcnt");
-#elif defined(__gfx942__)
+#elif defined(__gfx942__) || defined(__gfx950__)
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CA, "sc0", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CG, "sc0 nt", "s_waitcnt", "");
 HIPCUB_ASM_THREAD_LOAD_GROUP(LOAD_CV, "sc0", "s_waitcnt", "vmcnt");
