@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,8 @@ rocsparse_status rocsparse::check_matrix_coo_core(rocsparse_handle       handle,
                                                   rocsparse_data_status* data_status,
                                                   void*                  temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     *data_status = rocsparse_data_status_success;
 
     // Temporary buffer entry points
@@ -103,6 +105,8 @@ namespace rocsparse
                                                          rocsparse_data_status* data_status,
                                                          void*                  temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(nnz == 0)
         {
             *data_status = rocsparse_data_status_success;
@@ -127,6 +131,8 @@ rocsparse_status rocsparse::check_matrix_coo_checkarg(rocsparse_handle       han
                                                       rocsparse_data_status* data_status, //11
                                                       void*                  temp_buffer) //12
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_SIZE(1, m);
     ROCSPARSE_CHECKARG_SIZE(2, n);
@@ -236,6 +242,7 @@ INSTANTIATE(int64_t, rocsparse_double_complex);
                                      void*                  temp_buffer)        \
     try                                                                         \
     {                                                                           \
+        ROCSPARSE_ROUTINE_TRACE;                                                \
         RETURN_IF_ROCSPARSE_ERROR(                                              \
             (rocsparse::check_matrix_coo_impl<T, rocsparse_int>(handle,         \
                                                                 m,              \

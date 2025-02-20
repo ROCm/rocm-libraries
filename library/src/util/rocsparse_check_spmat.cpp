@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,7 @@ namespace rocsparse
                                           size_t*                     buffer_size,
                                           void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         switch(mat->format)
         {
@@ -281,6 +282,8 @@ namespace rocsparse
                                                   rocsparse_format    format,
                                                   Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
 #define DISPATCH_COMPUTE_TYPE(ITYPE, JTYPE, CTYPE)                                                 \
     switch(CTYPE)                                                                                  \
     {                                                                                              \
@@ -369,6 +372,7 @@ extern "C" rocsparse_status rocsparse_check_spmat(rocsparse_handle            ha
                                                   void*                       temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,

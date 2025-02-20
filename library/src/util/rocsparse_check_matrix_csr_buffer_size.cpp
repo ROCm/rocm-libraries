@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,8 @@ rocsparse_status rocsparse::check_matrix_csr_buffer_size_core(rocsparse_handle  
                                                               rocsparse_storage_mode storage,
                                                               size_t*                buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     *buffer_size = 0;
     *buffer_size += ((sizeof(rocsparse_data_status) - 1) / 256 + 1) * 256; // data status
 
@@ -84,6 +86,8 @@ namespace rocsparse
                                                  rocsparse_storage_mode storage,
                                                  size_t*                buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_continue;
     }
 }
@@ -103,6 +107,8 @@ rocsparse_status
                                                      rocsparse_storage_mode storage, //10
                                                      size_t*                buffer_size) //11
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     ROCSPARSE_CHECKARG_SIZE(1, m);
@@ -216,6 +222,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      size_t*                buffer_size)                       \
     try                                                                                        \
     {                                                                                          \
+        ROCSPARSE_ROUTINE_TRACE;                                                               \
         RETURN_IF_ROCSPARSE_ERROR(                                                             \
             (rocsparse::check_matrix_csr_buffer_size_impl<TYPE, rocsparse_int, rocsparse_int>( \
                 handle,                                                                        \
