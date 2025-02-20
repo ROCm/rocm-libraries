@@ -67,7 +67,11 @@ def _replaceActBranchLabel(module, labels):
     for item in module.items():
         if isinstance(item, Module):
             if "InsertActFunctionCallAddrCalc" in item.name:
-                labelLeft = labels[1:]
+                labelFirst = labels[0]
+                numUnderScores = labelFirst.count('_')
+                partFirst  = labelFirst.rpartition("_")
+                lastPostfix = partFirst[-1]
+                labelLeft  = labels[1:]
                 replaceLabel = False
                 for inst in item.items():
                     if isinstance(inst, SAddI32) and inst.comment == "target branch offset":
@@ -80,8 +84,16 @@ def _replaceActBranchLabel(module, labels):
                             # The label is generated in the format of XXXX_1, XXXX_2
                             # and string.rpartition returns ('XXXX', '_', '1').
                             # We only need the first string.
-                            part = inst.srcs[0].rpartition("_")
-                            inst.srcs[0] = part[0]
+                            numUS = inst.srcs[0].count('_')
+                            if numUnderScores == numUS:
+                                part = inst.srcs[0].rpartition("_")
+                                inst.srcs[0] = part[0] + "_" + lastPostfix
+                            elif numUnderScores == numUS - 1:
+                                part = inst.srcs[0].rpartition("_")
+                                inst.srcs[0] = part[0]
+                            else:
+                                assert 0, "Incorrect Activation Label"
+                            
             else:
                 _replaceActBranchLabel(item, labels)
 

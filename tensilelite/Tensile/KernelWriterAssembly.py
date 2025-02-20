@@ -565,38 +565,52 @@ class KernelWriterAssembly(KernelWriter):
     PLR = self.states.numVgprBuffer
     numBi = PLR
     ri = 0
+    moduleVgprMacro = Module("VALU/G2L Vgpr Macro")
+    moduleVgprMacroValuA = Module("VALUA Vgpr Macro")
+    moduleVgprMacroValuB = Module("VALUB Vgpr Macro")
+    moduleVgprMacroValuAPack = Module("VALUA Pack Vgpr Macro")
+    moduleVgprMacroValuBPack = Module("VALUB Pack Vgpr Macro")
+    moduleVgprMacroValuM = Module("VALUMetadata Vgpr Macro")
+    moduleVgprMacroValuMPack = Module("VALUMetadata Pack Vgpr Macro")
+    moduleVgprMacroG2LA = Module("G2LA Vgpr Macro")
+    moduleVgprMacroG2LB = Module("G2LB Vgpr Macro")
+    module.add(RegSet("v", "vgprBase", self.states.startVgpr))
     if self.states.a.numVgprValu > 0: # Do not generate vgprValuA if numVgprValuA is 0
       numBiFactor = numBi
       if kernel["DirectToVgprA"] and (self.states.packDTVA or self.states.convDTVA):
         # DirectToVgpr case, we need LoopIters * 2 buffers
         numBiFactor = kernel["LoopIters"] * 2
       if self.states.lrvwTileA > 1:
+        moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
-            module.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), self.states.a.startVgprValu+ri))
+            moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
             ri += self.states.a.numVgprValuPerBlock
           if (tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]):
             ri = 0
         ri = 0
         if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
               for data in range(0,kernel["MIInputPerThreadA"]):
-                module.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data), self.states.a.startVgprValuPack+ri))
+                moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
                 ri += ceil(kernel["VectorWidthA"] * tPA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"]
       else:
+        moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_BASE", "vgprBase", self.states.a.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
-            module.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), self.states.a.startVgprValu+ri))
+            moduleVgprMacroValuA.add(RegSet("v", "vgprValuA_X%u_I%u"%(bi,iui), "vgprValuA_X0_I0_BASE", ri))
             ri += self.states.a.numVgprValuPerBlock
         ri = 0
         if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+          moduleVgprMacro.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", "vgprBase", self.states.a.startVgprValuPack - self.states.startVgpr))
           for data in range(1,int(self.states.bpr/tPA["bpeDS"])):
             for bi in range(0,numBiFactor): # buffer indices
               if bi % self.states.numVgprBufferPackA == 0:
                 ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * self.states.a.numVgprValuPerBlock
               for iui in range(0, kernel["InnerUnroll"]):
-                module.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data), self.states.a.startVgprValuPack+ri))
+                moduleVgprMacroValuAPack.add(RegSet("v", "vgprValuA_X%u_I%u_D%u"%(bi,iui,data),"vgprValuA_X0_I0_D0_PACK", ri))
                 ri += self.states.a.numVgprValuPerBlock
 
     ri = 0
@@ -606,67 +620,75 @@ class KernelWriterAssembly(KernelWriter):
         # DirectToVgpr case, we need LoopIters * 2 buffers
         numBiFactor = kernel["LoopIters"] * 2
       if self.states.lrvwTileB > 1:
+        moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
-            module.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), self.states.b.startVgprValu+ri))
+            moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
             ri += self.states.b.numVgprValuPerBlock
           if (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]):
             ri = 0
         ri = 0
         if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
           for bi in range(0,numBiFactor): # buffer indices
             for iui in range(0, kernel["InnerUnroll"]):
               for data in range(0,kernel["MIInputPerThreadB"]):
-                module.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), self.states.b.startVgprValuPack+ri))
+                moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
                 ri += ceil(kernel["VectorWidthB"] * tPB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"]
       else:
+        moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_BASE", "vgprBase", self.states.b.startVgprValu - self.states.startVgpr))
         for bi in range(0,numBiFactor): # buffer indices
           for iui in range(0, kernel["InnerUnroll"]):
-            module.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), self.states.b.startVgprValu+ri))
+            moduleVgprMacroValuB.add(RegSet("v", "vgprValuB_X%u_I%u"%(bi,iui), "vgprValuB_X0_I0_BASE", ri))
             ri += self.states.b.numVgprValuPerBlock
         ri = 0
         if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+          moduleVgprMacro.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", "vgprBase", self.states.b.startVgprValuPack - self.states.startVgpr))
           for data in range(1,int(self.states.bpr/tPB["bpeDS"])):
             for bi in range(0,numBiFactor): # buffer indices
               if bi % self.states.numVgprBufferPackB == 0:
                 ri = (data-1) * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * self.states.b.numVgprValuPerBlock
               for iui in range(0, kernel["InnerUnroll"]):
-                module.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), self.states.b.startVgprValuPack+ri))
+                moduleVgprMacroValuBPack.add(RegSet("v", "vgprValuB_X%u_I%u_D%u"%(bi,iui,data), "vgprValuB_X0_I0_D0_PACK", ri))
                 ri += self.states.b.numVgprValuPerBlock
 
     if kernel["ConvertAfterDS"]:
       cvtTemp = max(self.states.a.startVgprValuCvtTemp, self.states.b.startVgprValuCvtTemp)
       if (cvtTemp != -1):
-         module.add(RegSet("v", "vgprCvtTemp", cvtTemp))
+         moduleVgprMacro.add(RegSet("v", "vgprCvtTemp", "vgprBase", cvtTemp - self.states.startVgpr))
 
     if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
-      module.add(RegSet("v", "vgprValuSum", self.states.bias.startVgprValu))
+      moduleVgprMacro.add(RegSet("v", "vgprValuSum", "vgprBase", self.states.bias.startVgprValu - self.states.startVgpr))
 
     if kernel["ProblemType"]["Sparse"]:
       if kernel["DirectToVgprSparseMetadata"]:
-        module.add(RegSet("v", "vgprValuMetadata", self.states.m.startVgprValu))
+        moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
+        moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata", "vgprValuMetadata_X0_I0_BASE", 0))
       else:
         ri = 0
         if self.states.m.numVgprValu > 0: # Do not generate vgprValu if numVgprValu is 0
           if self.states.lrvwTileMetadata > 1:
+            moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
             for bi in range(0,PLR): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                module.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), self.states.m.startVgprValu+ri))
+                moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
                 ri += self.states.m.numVgprValuPerBlock
               if not kernel["UnrollMajorLDSMetadata"]:
                 ri = 0
             ri = 0
             if not kernel["UnrollMajorLDSMetadata"]:
               miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
+              moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_D_PACK", "vgprBase", self.states.m.startVgprValuPack - self.states.startVgpr))
               for data in range(0,kernel["MIInputPerThreadMetadata"]):
                 for bi in range(0,PLR): # buffer indices
                   for iui in range(0, kernel["InnerUnroll"]):
-                    module.add(RegSet("v", "vgprValuMetadata_X%u_I%u_D%u"%(bi,iui,data), self.states.m.startVgprValuPack+ri))
+                    moduleVgprMacroValuMPack.add(RegSet("v", "vgprValuMetadata_X%u_I%u_D%u"%(bi,iui,data), "vgprValuMetadata_X0_I0_D_PACK", ri))
                     ri += ceil(kernel["VectorWidthMetadata"] * tPM["bpe"] / self.states.bpr) * miWaveTile // kernel["VectorWidthMetadata"]
           else:
+            moduleVgprMacro.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", "vgprBase", self.states.m.startVgprValu - self.states.startVgpr))
             for bi in range(0,PLR): # buffer indices
               for iui in range(0, kernel["InnerUnroll"]):
-                module.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), self.states.m.startVgprValu+ri))
+                moduleVgprMacroValuM.add(RegSet("v", "vgprValuMetadata_X%u_I%u"%(bi,iui), "vgprValuMetadata_X0_I0_BASE", ri))
                 ri += self.states.m.numVgprValuPerBlock
 
     if not kernel["LocalWriteUseSgprA"] and self.states.a.numVgprLocalWriteAddr > 0:
@@ -701,31 +723,34 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("v", "vgprGlobalReadAddrB", \
           self.startVgprGlobalReadAddressesB))
 
+    if self.states.a.startVgprG2L is not None:
+      moduleVgprMacro.add(RegSet("v", "vgprG2LA_BASE", "vgprBase", self.states.a.startVgprG2L - self.states.startVgpr))
+    if self.states.b.startVgprG2L is not None:
+      moduleVgprMacro.add(RegSet("v", "vgprG2LB_BASE", "vgprBase", self.states.b.startVgprG2L - self.states.startVgpr))
     if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
-      module.add(RegSet("v", "vgprG2LA", self.states.a.startVgprG2L))
+      moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0))
       if kernel["DirectToVgprA"]:
         # additional definition G2LA2 for swapping register sets
-        module.add(RegSet("v", "vgprG2LA2", self.states.a.startVgprG2L + self.states.a.numVgprG2LAllocated//2))
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated//2))
     if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:
-      module.add(RegSet("v", "vgprG2LB", self.states.b.startVgprG2L))
+      moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB", "vgprG2LB_BASE", 0))
       if kernel["DirectToVgprB"]:
         # additional definition G2LB2 for swapping register sets
-        module.add(RegSet("v", "vgprG2LB2", self.states.b.startVgprG2L + self.states.b.numVgprG2LAllocated//2))
+        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated//2))
     if kernel["UnrollLoopSwapGlobalReadOrder"] and not kernel["DirectToLdsA"] and not kernel["DirectToLdsB"]:
       if kernel["ULSGRODoubleG2L"] == 0:
-        module.add(RegSet("v", "vgprG2LB2", self.states.a.startVgprG2L))
-        module.add(RegSet("v", "vgprG2LA2", self.states.a.startVgprG2L + self.states.b.numVgprG2LAllocated))
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LB2", "vgprG2LA_BASE", 0))
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.b.numVgprG2LAllocated))
       else:
-        module.add(RegSet("v", "vgprG2LA2", self.states.a.startVgprG2L + self.states.a.numVgprG2LAllocated))
-        module.add(RegSet("v", "vgprG2LB2", self.states.b.startVgprG2L + self.states.b.numVgprG2LAllocated))
+        moduleVgprMacroG2LA.add(RegSet("v", "vgprG2LA2", "vgprG2LA_BASE", self.states.a.numVgprG2LAllocated))
+        moduleVgprMacroG2LB.add(RegSet("v", "vgprG2LB2", "vgprG2LB_BASE", self.states.b.numVgprG2LAllocated))
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-      module.add(RegSet("v", "vgprG2LMetadata", self.states.m.startVgprG2L))
+      moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
 
     if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])) \
         and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
-      module.add(RegSet("v", "vgprPackTemp", self.states.a.startVgprValuPackTemp))
-
+      moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
 
     if self.states.globalReadIncsUseVgpr:
       module.add(RegSet("v", "vgprGlobalReadIncsA", \
@@ -761,6 +786,26 @@ class KernelWriterAssembly(KernelWriter):
     #module.addComment0("Occu: %u waves/simd" % self.numWavesPerSimd )
     # module.addComment0("Num VGPR=%u"%self.vgprPool.size())
     # module.addComment0("Num AccVGPR=%u"%self.agprPool.size())
+    self.moduleVgprMacro = moduleVgprMacro
+    self.moduleVgprMacroValuA = moduleVgprMacroValuA
+    self.moduleVgprMacroValuB = moduleVgprMacroValuB
+    self.moduleVgprMacroValuAPack = moduleVgprMacroValuAPack
+    self.moduleVgprMacroValuBPack = moduleVgprMacroValuBPack
+    self.moduleVgprMacroValuM = moduleVgprMacroValuM
+    self.moduleVgprMacroValuMPack = moduleVgprMacroValuMPack
+    self.moduleVgprMacroValuA = moduleVgprMacroValuA
+    self.moduleVgprMacroG2LA = moduleVgprMacroG2LA
+    self.moduleVgprMacroG2LB = moduleVgprMacroG2LB
+    module.addComment2("VGPR Macro Assignments")
+    module.add(self.moduleVgprMacro)
+    module.add(self.moduleVgprMacroValuA)
+    module.add(self.moduleVgprMacroValuB)
+    module.add(self.moduleVgprMacroValuAPack)
+    module.add(self.moduleVgprMacroValuBPack)
+    module.add(self.moduleVgprMacroValuM)
+    module.add(self.moduleVgprMacroValuMPack)
+    module.add(self.moduleVgprMacroG2LA)
+    module.add(self.moduleVgprMacroG2LB)
 
     ########################################
     # SGPR Macros
@@ -4163,6 +4208,241 @@ class KernelWriterAssembly(KernelWriter):
     return imod
 
   ##############################################################################
+  # Set parameters UNDEF in the macro module
+  ##############################################################################
+  def undefineMacroModule(self, macroModule):
+    imod = Module()
+    for inst in macroModule.items():
+      if isinstance(inst, (RegSet, ValueSet)):
+        imod.add(ValueSet(name=inst.name, value="UNDEF", format = -1))
+      elif isinstance(inst, Module):
+        imod.add(self.undefineMacroModule(inst))
+    return imod
+
+  ##############################################################################
+  # Check in VGPRs which is allocated for tail loop
+  ##############################################################################
+  def tailLoopFreeVgpr(self, vgprBase, moduleMacro):
+    imod = Module("tailLoopFreeVgpr")
+    if vgprBase != -1:
+      imod.add(self.undefineMacroModule(moduleMacro))
+      self.vgprPool.checkIn(vgprBase)
+    return imod
+
+  ##############################################################################
+  # Check out VGPRs which is used for tail loop
+  # The functions will retuen either
+  # a single pair of (imod, vgprBase)
+  # or
+  # a array of pairs of (imod, vgprBase)'s
+  # User must call tailLoopFreeVgpr(vgprBase, imod) to release the resources.
+  ##############################################################################
+  def tailLoopAllocValuVgpr(self, kernel, tensorParametersA, tensorParametersB, tensorParametersM):
+    imodA            = Module("tailLoopAllocValuAVgpr")
+    vgprBaseA        = -1
+    numValuA         = 0
+    numVgprValuPackA = 0
+    if self.states.a.numVgprValu > 0 and not kernel["DirectToVgprA"]:
+      numValuA = self.states.a.numVgprValu
+      if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+        if self.states.lrvwTileA > 1:
+          numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
+          if self.states.packDTVA:
+            # pack DTV case, double the number
+            numVgprValuPackA *= 2
+        else:
+          numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
+      vgprBaseA = self.vgprPool.checkOutAligned(numValuA + numVgprValuPackA, 2)
+      imodA.add(RegSet("v", "vgprValuA_X0_I0_BASE", vgprBaseA))
+      imodA.add(self.moduleVgprMacroValuA)
+      if numVgprValuPackA > 0:
+        imodA.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", vgprBaseA + numValuA))
+        imodA.add(self.moduleVgprMacroValuAPack)
+
+    imodB            = Module("tailLoopAllocValuBVgpr")
+    vgprBaseB        = -1
+    numValuB         = 0
+    numVgprValuPackB = 0
+    if self.states.b.numVgprValu > 0 and not kernel["DirectToVgprB"]:
+      numValuB = self.states.b.numVgprValu
+      if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+        if self.states.lrvwTileB > 1:
+          numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
+          if self.states.packDTVB:
+            # pack DTV case, double the number
+            numVgprValuPackB *= 2
+        else:
+          numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
+      vgprBaseB = self.vgprPool.checkOutAligned(numValuB + numVgprValuPackB, 2)
+      imodB.add(RegSet("v", "vgprValuB_X0_I0_BASE", vgprBaseB))
+      imodB.add(self.moduleVgprMacroValuB)
+      if numVgprValuPackB > 0:
+        imodB.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", vgprBaseB + numValuB))
+        imodB.add(self.moduleVgprMacroValuBPack)
+
+    imodM                   = Module("tailLoopAllocValuMetadataVgpr")
+    vgprBaseM               = -1
+    numValuM                = 0
+    numVgprValuPackMetadata = 0
+    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+      numValuM = self.states.m.numVgprValu
+      if not kernel["UnrollMajorLDSMetadata"]:
+        if self.states.lrvwTileMetadata > 1:
+          miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
+          numVgprValuPackMetadata = roundUp(kernel["VectorWidthMetadata"] * tensorParametersM["bpe"] / self.states.bpr) * miWaveTile // kernel["VectorWidthMetadata"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadMetadata"]
+        else:
+          numVgprValuPackMetadata = self.states.m.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackMetadata * (int(4/tensorParametersM["bpe"]) - 1)
+      # No PGR metadata for tail loop.
+      vgprBaseM = self.vgprPool.checkOutAligned(max(numValuM + numVgprValuPackMetadata, self.states.m.numVgprG2LAllocated), 2)
+      imodM.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", vgprBaseM))
+      imodM.add(self.moduleVgprMacroValuM)
+      if numVgprValuPackMetadata > 0:
+        imodM.add(RegSet("v", "vgprValuMetadata_X0_I0_D_PACK", vgprBaseM + numValuM))
+        imodM.add(self.moduleVgprMacroValuMPack)
+
+    imodMisc        = Module("tailLoopAllocValuMiscVgpr")
+    vgprBaseMisc    = -1
+    numVgprPackTemp = 0
+    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])) \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
+      numVgprPackTemp = 1
+    numVgprCvtTemp = 0
+    if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
+      numVgprCvtTemp = 2
+    if numVgprPackTemp + numVgprCvtTemp > 0:
+      vgprBaseMisc = self.vgprPool.checkOut(numVgprPackTemp + numVgprCvtTemp)
+      if numVgprPackTemp > 0:
+        imodMisc.add(RegSet("v", "vgprPackTemp", vgprBaseMisc))
+      if numVgprCvtTemp > 0:
+        imodMisc.add(RegSet("v", "vgprCvtTemp", vgprBaseMisc + numVgprPackTemp))
+
+    return ([vgprBaseA, imodA],[vgprBaseB, imodB],[vgprBaseM, imodM],[vgprBaseMisc, imodMisc])
+
+  def tailLoopAllocG2LVgpr(self, kernel):
+    imod     = Module("tailLoopAllocG2LVgpr")
+    vgprBase = -1
+    numG2LA  = 0
+    numG2LB  = 0
+    numG2LMetadata  = 0
+    if not kernel["DirectToVgprA"]:
+      if kernel["ULSGRODoubleG2L"] == 1:
+        numG2LA = self.states.a.numVgprG2LAllocated*2
+      else:
+        numG2LA = self.states.a.numVgprG2LAllocated
+    if not kernel["DirectToVgprB"]:
+      if kernel["ULSGRODoubleG2L"] == 1:
+        numG2LB = self.states.b.numVgprG2LAllocated*2
+      else:
+        numG2LB = self.states.b.numVgprG2LAllocated
+    if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+      numG2LMetadata = self.states.m.numVgprG2LAllocated
+
+    if numG2LB > 0:
+      # TODO: B alignment hack
+      numG2LA = ((numG2LA+1)//2)*2
+    if numG2LA + numG2LB + numG2LMetadata > 0:
+      vgprBase = self.vgprPool.checkOutAligned(numG2LA + numG2LB + numG2LMetadata, 2)
+      imod.addComment0("Check out VGPR (numG2LA,numG2LB,numG2LMetadata) = (%d,%d,%d)"%(numG2LA,numG2LB,numG2LMetadata))
+    if numG2LA > 0:
+      imod.add(RegSet("v", "vgprG2LA_BASE", vgprBase))
+      imod.add(self.moduleVgprMacroG2LA)
+    if numG2LB > 0:
+      imod.add(RegSet("v", "vgprG2LB_BASE", vgprBase + numG2LA))
+      imod.add(self.moduleVgprMacroG2LB)
+    if numG2LMetadata > 0:
+      imod.add(RegSet("v", "vgprG2LMetadata", vgprBase + numG2LA + numG2LB))
+
+    return imod, vgprBase
+
+  def tailLoopAllocDTVVgpr(self, kernel, tensorParametersA, tensorParametersB):
+    imodA     = Module("tailLoopAllocDTVVgprA")
+    vgprBaseA = -1
+    if kernel["DirectToVgprA"]:
+      if self.states.packDTVA or self.states.convDTVA:
+        numValuA = self.states.a.numVgprValu
+        numVgprValuPackA = 0
+        if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+          if self.states.lrvwTileA > 1:
+            numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
+            if self.states.packDTVA:
+              # pack DTV case, double the number
+              numVgprValuPackA *= 2
+          else:
+            numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
+        
+        vgprBaseA = self.vgprPool.checkOutAligned(numValuA + numVgprValuPackA, 2)
+        imodA.add(RegSet("v", "vgprValuA_X0_I0_BASE", vgprBaseA))
+        if numVgprValuPackA > 0:
+          imodA.add(RegSet("v", "vgprValuA_X0_I0_D0_PACK", vgprBaseA + numValuA))
+        if self.states.packDTVA:
+          #DTVA is a.startVgprValuPack
+          imodA.add(RegSet("v", "vgprG2LA_BASE", vgprBaseA + numValuA))
+        elif self.states.convDTVA:
+          #DTVA is a.startVgprValu
+          imodA.add(RegSet("v", "vgprG2LA_BASE", vgprBaseA))
+        imodA.add(self.moduleVgprMacroG2LA)
+        imodA.add(self.moduleVgprMacroValuA)
+        imodA.add(self.moduleVgprMacroValuAPack)
+      else:
+        #DTVA is G2LA itself
+        if kernel["ULSGRODoubleG2L"] == 1:
+          numG2LA = self.states.a.numVgprG2LAllocated*2
+        else:
+          numG2LA = self.states.a.numVgprG2LAllocated
+        vgprBaseA = self.vgprPool.checkOutAligned(numG2LA, 2)
+        imodA.add(RegSet("v", "vgprG2LA_BASE", vgprBaseA))
+        imodA.add(self.moduleVgprMacroG2LA)
+
+    imodB     = Module("tailLoopAllocDTVVgprA")
+    vgprBaseB = -1
+    if kernel["DirectToVgprB"]:
+      if self.states.packDTVB or self.states.convDTVB:
+        numValuB = self.states.b.numVgprValu
+        numVgprValuPackB = 0
+        if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+          if self.states.lrvwTileB > 1:
+            numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
+            if self.states.packDTVB:
+              # pack DTV case, double the number
+              numVgprValuPackB *= 2
+          else:
+            numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
+
+        vgprBaseB = self.vgprPool.checkOutAligned(numValuB + numVgprValuPackB, 2)
+        imodB.add(RegSet("v", "vgprValuB_X0_I0_BASE", vgprBaseB))
+        if numVgprValuPackB > 0:
+          imodB.add(RegSet("v", "vgprValuB_X0_I0_D0_PACK", vgprBaseB + numValuB))
+        if self.states.packDTVB:
+          #DTVB is b.startVgprValuPack
+          imodB.add(RegSet("v", "vgprG2LB_BASE", vgprBaseB + numValuB))
+        elif self.states.convDTVB:
+          #DTVB is b.startVgprValu
+          imodB.add(RegSet("v", "vgprG2LB_BASE", vgprBaseB))
+        imodB.add(self.moduleVgprMacroG2LB)
+        imodB.add(self.moduleVgprMacroValuB)
+        imodB.add(self.moduleVgprMacroValuBPack)
+      else:
+        #DTVB is G2LB itself
+        if kernel["ULSGRODoubleG2L"] == 1:
+          numG2LB = self.states.b.numVgprG2LAllocated*2
+        else:
+          numG2LB = self.states.b.numVgprG2LAllocated
+        vgprBaseB = self.vgprPool.checkOutAligned(numG2LB, 2)
+        imodB.add(RegSet("v", "vgprG2LB_BASE", vgprBaseB))
+        imodB.add(self.moduleVgprMacroG2LB)
+
+    imodM     = Module("tailLoopAllocDTVVgprA")
+    vgprBaseM = -1
+    if kernel["ProblemType"]["Sparse"]:
+      if kernel["DirectToVgprSparseMetadata"]:
+        numValuM = self.states.m.numVgprValu
+        vgprBaseM = self.vgprPool.checkOut(numValuM)
+        imodM.add(RegSet("v", "vgprValuMetadata_X0_I0_BASE", vgprBaseM))
+        imodM.add(self.moduleVgprMacroValuM)
+
+    return ([vgprBaseA, imodA],[vgprBaseB, imodB],[vgprBaseM, imodM])
+
+  ##############################################################################
   # Using wider load instructions to improve the GR efficiency in tail loop.
   # If loading size is smaller than a dword(32bit), it will return 0 instead.
   # Need to call buffer_load_d16 to load the data which is out of boundary. 
@@ -5193,7 +5473,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # End Summation
   ##############################################################################
-  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None):
+  def endSummation(self, kernel, tPA, tPB, noSkipLoad = True, label = None, isOptNLL = False):
     module = Module("endSummation")
 
     module.add(Label((self.labels.getUniqueNamePrefix("Summation_End") if label is None else label), ""))
@@ -5201,27 +5481,28 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["StorePriorityOpt"]:
       module.add(SSetPrior(prior=0, comment="optimization store"))
 
-    vbegin = self.states.a.startVgprValu
-    vsize = self.states.lastVgprForReads - vbegin
+    if isOptNLL:
+      vbegin = self.states.startVgprMisc
+      vsize = self.states.lastVgprForReads - vbegin
+      if self.states.a.startVgprLocalReadAddr > self.states.lastVgprForReads:
+        vsize = self.states.a.startVgprLocalReadAddr + self.states.a.numVgprLocalReadAddr - vbegin
+      if self.states.b.startVgprLocalReadAddr > self.states.lastVgprForReads:
+        vsize = self.states.b.startVgprLocalReadAddr + self.states.b.numVgprLocalReadAddr - vbegin
+      self.vgprPool.add(vbegin, vsize, "endSummation")
+      module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
+                        (vbegin, vbegin+vsize))
 
     # Write bias A, B data to LDS
     if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
-      # Free some vgpr
-      vbegin = self.states.a.startVgprValu
-      vsize = self.states.bias.startVgprValu - vbegin
-      self.vgprPool.add(vbegin, vsize, "free vgpr except sum K")
-      module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
-                        (vbegin, vbegin+vsize))
-      # Update vbegin and vsize
-      vbegin = self.states.bias.startVgprValu
-      vsize = self.states.lastVgprForReads - vbegin
-
+      
       tP = tPA if kernel["ProblemType"]["BiasSrc"] == "A" else tPB
       module.add(self.exclasses.biasSumUnroll.storeSumLDS(self, kernel, tP))
 
-    self.vgprPool.add(vbegin, vsize, "endSummation")
-    module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
-                      (vbegin, vbegin+vsize))
+      vbegin = self.states.bias.startVgprValu
+      vsize = self.states.bias.numVgprValu
+      self.vgprPool.add(vbegin, vsize, "free vgpr of biasSumUnroll")
+      module.addComment0("endSummation: add vgpr [%u...%u) to pool" % \
+                        (vbegin, vbegin+vsize))
 
     lastRegTag=None
 
@@ -6270,7 +6551,7 @@ class KernelWriterAssembly(KernelWriter):
               endSumLabel = "Summation_End_OptNLL"
 
               module.addComment0("Stores for OptNLL")
-              module.add(self.endSummation(kernel, tPA, tPB, False, endSumLabel))
+              module.add(self.endSummation(kernel, tPA, tPB, False, endSumLabel, isOptNLL))
 
               # perhaps could work with LSU>1 by adding other indices here, but not tested
               assert (kernel["LocalSplitU"] == 1)
@@ -8098,9 +8379,9 @@ class KernelWriterAssembly(KernelWriter):
                     Hcvt2BMap[f16Tobf16Idx] = 0
                   f16Tobf16Idx += Hcvt2BMap[f16Tobf16Idx]
                   sdwa = SDWAModifiers(src0_sel=SelectBit.WORD_1)
-                  localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp+f16Tobf16Idx), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx))))
-                  localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp+1+f16Tobf16Idx), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)),sdwa=sdwa))
-                  localWriteCVTCode.add(VPackF16toB32(dst=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), src0=vgpr(vgprTmp+f16Tobf16Idx), src1=vgpr(vgprTmp+1+f16Tobf16Idx),
+                  localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx))))
+                  localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp+1), src=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)),sdwa=sdwa))
+                  localWriteCVTCode.add(VPackF16toB32(dst=vgpr(destVgprPrefix + "+%u"%(f16Tobf16Idx)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp+1),
                                     vop3=VOP3PModifiers(op_sel=[1,1,0])))
                 self.vgprPool.checkIn(vgprTmp)
 
@@ -9915,7 +10196,7 @@ class KernelWriterAssembly(KernelWriter):
           tile01      = tP["tile01Idx"]
           maxKId      = self.states.lraTileProperties[tile01].maxKId
           biasMaxVgpr = kernel["VectorWidthA"] * kernel["ProblemType"]["ComputeDataType"].numRegisters() * maxKId
-          maxAlign    = max(1, (kernel["VectorWidthA"] - 1) // 2 * 2)
+          maxAlign    = max(1, (kernel["VectorWidthA"] + 1) // 2 * 2)
           tmpVgpr     = self.vgprPool.checkOutAligned(biasMaxVgpr, maxAlign, "store tmps")
           tmpVgprRes  = RegisterPoolResource(idx=tmpVgpr, size=biasMaxVgpr)
 
