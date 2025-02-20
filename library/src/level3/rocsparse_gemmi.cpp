@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,7 @@ namespace rocsparse
                                        T*                        C,
                                        rocsparse_int             ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Stream
         hipStream_t stream = handle->stream;
@@ -136,6 +137,8 @@ namespace rocsparse
                                               T*                        C,
                                               rocsparse_int             ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(m == 0 || n == 0)
         {
             return rocsparse_status_success;
@@ -162,6 +165,8 @@ namespace rocsparse
                                            T*                        C, //15
                                            rocsparse_int             ldc) //16
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -248,6 +253,7 @@ rocsparse_status rocsparse::gemmi_template(rocsparse_handle          handle,
                                            T*                        C,
                                            rocsparse_int             ldc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     const rocsparse_status status = rocsparse::gemmi_quickreturn(handle,
                                                                  trans_A,
@@ -314,6 +320,7 @@ namespace rocsparse
                                 T*                        C,
                                 rocsparse_int             ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xgemmi"),
@@ -399,6 +406,7 @@ namespace rocsparse
                                      rocsparse_int             ldc)         \
     try                                                                     \
     {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gemmi_impl(handle,             \
                                                         trans_A,            \
                                                         trans_B,            \

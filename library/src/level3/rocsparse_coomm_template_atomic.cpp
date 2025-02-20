@@ -118,6 +118,8 @@ namespace rocsparse
                                                     int64_t                   batch_stride_C,
                                                     rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         I main      = 0;
         I remainder = n;
 
@@ -208,6 +210,8 @@ namespace rocsparse
                                            int64_t                   batch_stride_C,
                                            rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -176,6 +176,8 @@ namespace rocsparse
                                             rocsparse_order           order_C)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         hipStream_t stream = handle->stream;
         const J     m      = mb * block_dim;
         rocsparse_host_assert(block_dim == 2, "This function is designed for block_dim = 2.");
@@ -275,6 +277,8 @@ namespace rocsparse
                                             rocsparse_order           order_C)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         hipStream_t stream = handle->stream;
         const J     m      = mb * block_dim;
         rocsparse_host_assert(block_dim == 2, "This function is designed for block_dim = 2.");

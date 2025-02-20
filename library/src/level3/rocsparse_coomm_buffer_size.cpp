@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -73,6 +73,8 @@ namespace rocsparse
                                                           const I*                  coo_col_ind,
                                                           size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Quick return if possible
         if(m == 0 || n == 0 || k == 0)
         {
@@ -97,6 +99,8 @@ namespace rocsparse
                                                        const I*                  coo_col_ind, //11
                                                        size_t*                   buffer_size) //12
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, alg);
@@ -158,6 +162,7 @@ namespace rocsparse
                                                    const I*                  coo_col_ind,
                                                    size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         switch(alg)
         {
@@ -211,6 +216,8 @@ rocsparse_status rocsparse::coomm_buffer_size_template(rocsparse_handle         
                                                        const I*                  coo_col_ind,
                                                        size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_status status = rocsparse::coomm_buffer_size_quickreturn<T>(handle,
                                                                                 trans_A,
                                                                                 alg,
@@ -264,6 +271,7 @@ namespace rocsparse
                                             const I*                  coo_col_ind,
                                             size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         rocsparse::log_trace(handle,
                              "rocsparse_coomm_buffer_size",

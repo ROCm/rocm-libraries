@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "../level2/rocsparse_bsrmv.hpp"
 #include "rocsparse_bsrmm.hpp"
+#include "utility.h"
 
 namespace rocsparse
 {
@@ -181,6 +182,8 @@ namespace rocsparse
                                              int64_t                   batch_stride_C,
                                              rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(block_dim == 2)
         {
             RETURN_IF_ROCSPARSE_ERROR(
@@ -317,6 +320,8 @@ namespace rocsparse
                                              int64_t                   batch_stride_C,
                                              rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(block_dim == 2)
         {
             RETURN_IF_ROCSPARSE_ERROR(
@@ -485,6 +490,8 @@ namespace rocsparse
                                            int64_t                   batch_stride_C,
                                            rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
 

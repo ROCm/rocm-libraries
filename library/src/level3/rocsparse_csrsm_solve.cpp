@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -92,6 +92,8 @@ namespace rocsparse
                                                  rocsparse_solve_policy    policy,
                                                  void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -523,6 +525,8 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                              rocsparse_solve_policy    policy,
                                              void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(nrhs == 1)
     {
         //
@@ -610,6 +614,8 @@ rocsparse_status rocsparse::csrsm_solve_quickreturn(rocsparse_handle          ha
                                                     rocsparse_solve_policy    policy,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(m == 0 || nrhs == 0)
     {
@@ -638,6 +644,8 @@ namespace rocsparse
                                           rocsparse_solve_policy    policy, //14
                                           void*                     temp_buffer) //15
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -723,6 +731,7 @@ namespace rocsparse
                                       rocsparse_solve_policy    policy,
                                       void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xcsrsm_solve"),
@@ -845,6 +854,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      void*                     temp_buffer)           \
     try                                                                               \
     {                                                                                 \
+        ROCSPARSE_ROUTINE_TRACE;                                                      \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_solve_impl(handle,                 \
                                                               trans_A,                \
                                                               trans_B,                \

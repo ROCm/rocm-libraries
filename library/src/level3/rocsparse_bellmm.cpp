@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,8 @@ namespace rocsparse
                                               int64_t                   ldc,
                                               rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_general(handle,
                                                                      trans_A,
                                                                      trans_B,
@@ -119,6 +121,8 @@ rocsparse_status rocsparse::bellmm_template_buffer_size(rocsparse_handle        
                                                         rocsparse_order           order_C,
                                                         size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     *buffer_size = 0;
     return rocsparse_status_success;
 }
@@ -146,6 +150,8 @@ rocsparse_status rocsparse::bellmm_template_preprocess(rocsparse_handle         
                                                        rocsparse_order           order_C,
                                                        void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     return rocsparse_status_success;
 }
 
@@ -179,6 +185,8 @@ namespace rocsparse
                                                rocsparse_order           order_C,
                                                void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(mb == 0 || n == 0 || kb == 0 || bell_cols == 0)
         {
             return rocsparse_status_success;
@@ -214,6 +222,8 @@ namespace rocsparse
                                             rocsparse_order           order_C, //25
                                             void*                     temp_buffer) //26
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(12, descr);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
@@ -343,6 +353,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                                             rocsparse_order           order_C,
                                             void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xbellmm"),

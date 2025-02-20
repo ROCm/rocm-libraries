@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,6 +86,8 @@ namespace rocsparse
                                            rocsparse_spsm_alg          alg,
                                            void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // 1) B col order + transposed and C row order
         // 2) B row order + non-transposed and C row order
         void* csrsm_buffer = temp_buffer;
@@ -187,6 +189,8 @@ namespace rocsparse
                                             rocsparse_spsm_alg          alg,
                                             void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // 1) B col order + transposed and C col order
         // 2) B row order + non-transposed and C col order
         void* spsm_buffer = temp_buffer;
@@ -317,6 +321,8 @@ namespace rocsparse
                                             rocsparse_spsm_alg          alg,
                                             void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // 1) B row order + transposed and C row order
         // 2) B col order + non-transposed and C row order
         void* csrsm_buffer = temp_buffer;
@@ -418,6 +424,8 @@ namespace rocsparse
                                              rocsparse_spsm_alg          alg,
                                              void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // 1) B row order + transposed and C col order
         // 2) B col order + non-transposed and C col order
         void* spsm_buffer = temp_buffer;
@@ -550,6 +558,8 @@ namespace rocsparse
                                    size_t*                     buffer_size,
                                    void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::spsm_case spsm_case = spsm_get_case(trans_B, matB->order, matC->order);
 
         switch(stage)
@@ -745,6 +755,8 @@ namespace rocsparse
                                            rocsparse_datatype  ctype,
                                            Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(ctype)
         {
 #define DATATYPE_CASE(ENUMVAL, TYPE)                                            \
@@ -842,6 +854,7 @@ extern "C" rocsparse_status rocsparse_spsm(rocsparse_handle            handle, /
                                            void*                       temp_buffer) //11
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle,
                          "rocsparse_spsm",

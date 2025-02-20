@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,8 @@ namespace rocsparse
                                                 J                         block_dim,
                                                 size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         *buffer_size = 0;
         return rocsparse_status_success;
     }
@@ -68,6 +70,8 @@ namespace rocsparse
                                              J                         block_dim,
                                              void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_success;
     }
 
@@ -133,6 +137,8 @@ rocsparse_status rocsparse::bsrmm_template_dispatch(rocsparse_handle    handle,
                                                     int64_t                   batch_stride_C,
                                                     rocsparse_order           order_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // If block dimension is one we can simply call csrmm
     if(block_dim == 1)
     {
@@ -243,6 +249,8 @@ namespace rocsparse
                                        int64_t                   batch_stride_C,
                                        rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm_template_dispatch(handle,
                                                                      dir,
                                                                      trans_A,
@@ -300,6 +308,8 @@ namespace rocsparse
                                               int64_t                   batch_count_C,
                                               int64_t                   batch_stride_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(mb == 0 || n == 0 || kb == 0)
         {
             // matrix never accessed however still need to update C matrix
@@ -354,6 +364,8 @@ namespace rocsparse
                                            int64_t                   batch_count_C,
                                            int64_t                   batch_stride_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_ENUM(2, trans_A);
@@ -539,6 +551,8 @@ rocsparse_status rocsparse::bsrmm_template(rocsparse_handle          handle,
                                            int64_t                   batch_stride_C,
                                            rocsparse_order           order_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_status status = rocsparse::bsrmm_quickreturn(handle,
                                                                  dir,
                                                                  trans_A,
@@ -635,6 +649,7 @@ namespace rocsparse
                                 int64_t                   batch_stride_C,
                                 rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xbsrmm"),
@@ -1006,6 +1021,7 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
                                      rocsparse_int             ldc)                          \
     try                                                                                      \
     {                                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm_impl<TYPE>(handle,                        \
                                                               dir,                           \
                                                               trans_A,                       \

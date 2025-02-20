@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,8 @@ namespace rocsparse
     template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
     static rocsparse_status sddmm_buffer_size_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_default:
@@ -58,6 +60,8 @@ namespace rocsparse
                                                               rocsparse_sddmm_alg alg,
                                                               Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(format)
         {
         case rocsparse_format_coo:
@@ -116,6 +120,8 @@ namespace rocsparse
                                                        rocsparse_sddmm_alg alg,
                                                        Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(ctype)
         {
 
@@ -211,6 +217,7 @@ extern "C" rocsparse_status rocsparse_sddmm_buffer_size(rocsparse_handle        
                                                         size_t*                     buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -289,6 +296,8 @@ namespace rocsparse
     template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
     static rocsparse_status sddmm_preprocess_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_default:
@@ -314,6 +323,8 @@ namespace rocsparse
                                                              rocsparse_sddmm_alg alg,
                                                              Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(format)
         {
         case rocsparse_format_coo:
@@ -378,6 +389,8 @@ namespace rocsparse
                                                       rocsparse_sddmm_alg alg,
                                                       Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(ctype)
         {
 #define DATATYPE_CASE(ENUMVAL, TYPE)                                                      \
@@ -472,6 +485,8 @@ extern "C" rocsparse_status rocsparse_sddmm_preprocess(rocsparse_handle         
                                                        void*                       temp_buffer) //10
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     rocsparse::log_trace(handle,
                          "rocsparse_sddmm_preprocess",
                          trans_A,
@@ -552,6 +567,8 @@ namespace rocsparse
     template <rocsparse_format FORMAT, typename I, typename J, typename T, typename... Ts>
     static rocsparse_status sddmm_dispatch_alg(rocsparse_sddmm_alg alg, Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_sddmm_alg_default:
@@ -574,6 +591,8 @@ namespace rocsparse
     static rocsparse_status
         sddmm_dispatch_format(rocsparse_format format, rocsparse_sddmm_alg alg, Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(format)
         {
         case rocsparse_format_coo:
@@ -632,6 +651,8 @@ namespace rocsparse
                                            rocsparse_sddmm_alg alg,
                                            Ts&&... ts)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(ctype)
         {
 
@@ -726,6 +747,7 @@ extern "C" rocsparse_status rocsparse_sddmm(rocsparse_handle            handle, 
                                             void*                       temp_buffer) //19
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,

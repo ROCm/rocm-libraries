@@ -45,6 +45,8 @@ namespace rocsparse
                                                           const I*                  coo_col_ind,
                                                           size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
 #define LOOPS 4
 #define COOMMN_DIM 256
         const I nblocks = (nnz - 1) / (COOMMN_DIM * LOOPS) + 1;
@@ -146,6 +148,8 @@ namespace rocsparse
                                               rocsparse_order           order_C,
                                               void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
 

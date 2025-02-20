@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -48,6 +48,7 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
                                                 rocsparse_solve_policy    solve,
                                                 void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     if(nrhs == 1)
     {
@@ -258,6 +259,8 @@ rocsparse_status rocsparse::csrsm_analysis_quickreturn(rocsparse_handle         
                                                        rocsparse_solve_policy    solve,
                                                        void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || nrhs == 0)
     {
         return rocsparse_status_success;
@@ -286,6 +289,8 @@ namespace rocsparse
                                                     rocsparse_solve_policy    solve, //15
                                                     void*                     temp_buffer) //16
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -370,6 +375,7 @@ namespace rocsparse
                                                 rocsparse_solve_policy    solve,
                                                 void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Logging
         rocsparse::log_trace(handle,
@@ -494,6 +500,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      void*                     temp_buffer)     \
     try                                                                         \
     {                                                                           \
+        ROCSPARSE_ROUTINE_TRACE;                                                \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis_impl(handle,        \
                                                                  trans_A,       \
                                                                  trans_B,       \

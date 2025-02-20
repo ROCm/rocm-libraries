@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -74,6 +74,8 @@ namespace rocsparse
                                                 const J*                  csr_col_ind,
                                                 void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_csrmm_alg_nnz_split:
@@ -132,6 +134,8 @@ namespace rocsparse
                                                        const J*                  csr_col_ind,
                                                        void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(m == 0 || n == 0 || k == 0)
         {
             return rocsparse_status_success;
@@ -154,6 +158,8 @@ namespace rocsparse
                                                     const J*                  csr_col_ind, //10
                                                     void*                     temp_buffer) //11
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, alg);
@@ -213,6 +219,8 @@ rocsparse_status rocsparse::csrmm_analysis_template(rocsparse_handle          ha
                                                     const J*                  csr_col_ind,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_status status = rocsparse::csrmm_analysis_quickreturn<T>(
         handle, trans_A, alg, m, n, k, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer);
 
@@ -244,6 +252,8 @@ namespace rocsparse
                                          const J*                  csr_col_ind,
                                          void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const rocsparse_status status = rocsparse::csrmm_analysis_checkarg<T>(handle,
                                                                               trans_A,
                                                                               alg,

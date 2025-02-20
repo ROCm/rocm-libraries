@@ -48,6 +48,8 @@ namespace rocsparse
                                                           const J*                  csr_col_ind,
                                                           size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(trans_A)
         {
         case rocsparse_operation_none:
@@ -84,6 +86,8 @@ namespace rocsparse
                                                        const J*                  csr_col_ind,
                                                        void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(trans_A)
         {
         case rocsparse_operation_none:
@@ -210,6 +214,8 @@ namespace rocsparse
                                                        rocsparse_order           order_C,
                                                        void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Scale C with beta
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::scale_2d_array(handle, m, n, ldc, 1, 0, beta_device_host, dense_C, order_C));
@@ -375,6 +381,8 @@ namespace rocsparse
                                                 rocsparse_order           order_C,
                                                 void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Scale C with beta
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse::scale_2d_array(handle, m, n, ldc, 1, 0, beta_device_host, dense_C, order_C));
@@ -489,6 +497,8 @@ namespace rocsparse
                                               void*                     temp_buffer,
                                               bool                      force_conj_A)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose || force_conj_A);
         bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
 

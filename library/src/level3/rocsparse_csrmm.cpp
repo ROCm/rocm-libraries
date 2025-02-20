@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -136,6 +136,8 @@ namespace rocsparse
                                              void*                     temp_buffer,
                                              bool                      force_conj_A)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(alg)
         {
         case rocsparse_csrmm_alg_default:
@@ -333,6 +335,8 @@ namespace rocsparse
                                        void*                     temp_buffer,
                                        bool                      force_conj_A)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool Ci_A_Bi  = (batch_count_A == 1 && batch_count_B == batch_count_C);
         const bool Ci_Ai_B  = (batch_count_B == 1 && batch_count_A == batch_count_C);
         const bool Ci_Ai_Bi = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
@@ -396,6 +400,8 @@ namespace rocsparse
                                               int64_t                   batch_count_C,
                                               int64_t                   batch_stride_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(m == 0 || n == 0 || k == 0)
         {
             // matrix never accessed however still need to update C matrix
@@ -451,6 +457,8 @@ namespace rocsparse
                                            int64_t                   batch_count_C,
                                            int64_t                   batch_stride_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -608,6 +616,8 @@ rocsparse_status rocsparse::csrmm_template(rocsparse_handle          handle,
                                            void*                     temp_buffer,
                                            bool                      force_conj_A)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_status status = rocsparse::csrmm_quickreturn(handle,
                                                                  trans_A,
                                                                  trans_B,
@@ -699,6 +709,8 @@ namespace rocsparse
                                 void*                     temp_buffer,
                                 bool                      force_conj_A)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xcsrmm"),
                              trans_A,

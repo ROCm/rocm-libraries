@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -98,6 +98,8 @@ namespace rocsparse
                                                 int64_t                   ldx,
                                                 void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
 #define LAUNCH_LARGE_KERNEL(K_, M_, S_)                                     \
     dim3 bsrsm_blocks(((nrhs - 1) / NCOL + 1) * mb);                        \
     dim3 bsrsm_threads(NCOL* M_);                                           \

@@ -155,6 +155,8 @@ namespace rocsparse
                                                 int64_t                   batch_stride_C,
                                                 rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(n <= 32)
         {
 #define CSRMMNN_DIM 256
@@ -297,6 +299,8 @@ namespace rocsparse
                                                 int64_t                   batch_stride_C,
                                                 rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         J start = 0;
         J end   = n;
 
@@ -603,6 +607,8 @@ namespace rocsparse
                                                 int64_t                   batch_stride_C,
                                                 rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Scale C with beta
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
             handle, k, n, ldc, batch_count_C, batch_stride_C, beta_device_host, dense_C, order_C));
@@ -669,6 +675,8 @@ namespace rocsparse
                                                 int64_t                   batch_stride_C,
                                                 rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Scale C with beta
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
             handle, k, n, ldc, batch_count_C, batch_stride_C, beta_device_host, dense_C, order_C));
@@ -763,6 +771,8 @@ namespace rocsparse
                                               rocsparse_order           order_C,
                                               bool                      force_conj_A)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool conj_A = (trans_A == rocsparse_operation_conjugate_transpose || force_conj_A);
         const bool conj_B = (trans_B == rocsparse_operation_conjugate_transpose);
         // Run different csrmv kernels

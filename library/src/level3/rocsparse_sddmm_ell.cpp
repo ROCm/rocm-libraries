@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -190,6 +190,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                         rocsparse_sddmm_alg  alg,
                                         size_t*              buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         buffer_size[0] = 0;
         return rocsparse_status_success;
     }
@@ -217,6 +219,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                        rocsparse_sddmm_alg  alg,
                                        void*                buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_success;
     }
 
@@ -243,6 +247,7 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                     rocsparse_sddmm_alg  alg,
                                     void*                buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         static constexpr int NB = 512;
 
@@ -328,6 +333,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                         rocsparse_sddmm_alg  alg,
                                         size_t*              buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(nnz == 0)
         {
             *buffer_size = 0;
@@ -361,6 +368,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                        rocsparse_sddmm_alg  alg,
                                        void*                buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_success;
     }
 
@@ -387,6 +396,8 @@ struct rocsparse::rocsparse_sddmm_st<rocsparse_format_ell, rocsparse_sddmm_alg_d
                                     rocsparse_sddmm_alg  alg,
                                     void*                buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(nnz == 0)
         {
             return rocsparse_status_success;

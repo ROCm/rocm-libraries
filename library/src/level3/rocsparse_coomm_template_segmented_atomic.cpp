@@ -108,6 +108,8 @@ namespace rocsparse
                                                      int64_t                   batch_stride_C,
                                                      rocsparse_order           order_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,7 @@ rocsparse_status rocsparse::coosm_buffer_size_core(rocsparse_handle          han
                                                    rocsparse_solve_policy    policy,
                                                    size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     if(std::is_same<I, int32_t>() && nnz < std::numeric_limits<int32_t>::max())
     {
@@ -120,6 +121,8 @@ rocsparse_status rocsparse::coosm_buffer_size_quickreturn(rocsparse_handle    ha
                                                           rocsparse_solve_policy    policy,
                                                           size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || nrhs == 0)
     {
         *buffer_size = 0;

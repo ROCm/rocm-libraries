@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,8 @@ rocsparse_status rocsparse::cscmm_buffer_size_template(rocsparse_handle         
                                                        const J*                  csc_row_ind,
                                                        size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(trans_A)
     {
     case rocsparse_operation_none:
@@ -96,6 +98,8 @@ rocsparse_status rocsparse::cscmm_analysis_template(rocsparse_handle          ha
                                                     const J*                  csc_row_ind,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(trans_A)
     {
     case rocsparse_operation_none:
@@ -167,6 +171,8 @@ rocsparse_status rocsparse::cscmm_template(rocsparse_handle          handle,
                                            rocsparse_order           order_C,
                                            void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(trans_A)
     {
     case rocsparse_operation_none:

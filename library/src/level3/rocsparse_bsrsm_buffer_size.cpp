@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,7 @@ rocsparse_status rocsparse::bsrsm_buffer_size_quickreturn(rocsparse_handle      
                                                           rocsparse_mat_info        info,
                                                           size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     if(mb == 0 || nrhs == 0)
     {
@@ -71,6 +72,8 @@ namespace rocsparse
                                                        rocsparse_mat_info        info, //12
                                                        size_t*                   buffer_size) //13
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_ENUM(2, trans_A);
@@ -136,8 +139,7 @@ rocsparse_status rocsparse::bsrsm_buffer_size_core(rocsparse_handle          han
                                                    rocsparse_mat_info        info,
                                                    size_t*                   buffer_size)
 {
-    // Stream
-    // hipStream_t stream = handle->stream;
+    ROCSPARSE_ROUTINE_TRACE;
 
     // rocsparse_int max_nnz
     *buffer_size = 256;
@@ -195,6 +197,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status bsrsm_buffer_size_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xbsrsm_buffer_size", p...);
 
         const rocsparse_status status = rocsparse::bsrsm_buffer_size_checkarg(p...);
@@ -233,6 +237,7 @@ namespace rocsparse
                                      size_t*                   buffer_size)        \
     try                                                                            \
     {                                                                              \
+        ROCSPARSE_ROUTINE_TRACE;                                                   \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsm_buffer_size_impl(handle,        \
                                                                     dir,           \
                                                                     trans_A,       \

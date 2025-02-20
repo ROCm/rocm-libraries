@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@ extern "C" rocsparse_status rocsparse_bsrsm_zero_pivot(rocsparse_handle   handle
                                                        rocsparse_int*     position)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(
@@ -120,6 +121,7 @@ catch(...)
 extern "C" rocsparse_status rocsparse_bsrsm_clear(rocsparse_handle handle, rocsparse_mat_info info)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle, "rocsparse_bsrsm_clear", (const void*&)info);
 

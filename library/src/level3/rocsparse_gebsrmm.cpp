@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,8 @@ rocsparse_status rocsparse::gebsrmm_template_dispatch(rocsparse_handle          
                                                       T*                        C,
                                                       int64_t                   ldc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_int block_dim = rocsparse::max(row_block_dim, col_block_dim);
     if(row_block_dim == col_block_dim)
     {
@@ -281,6 +283,8 @@ namespace rocsparse
                                                 T*                        C,
                                                 int64_t                   ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Quick return if possible
         if(mb == 0 || n == 0 || kb == 0)
         {
@@ -325,6 +329,8 @@ namespace rocsparse
                                              T*                        C, //18
                                              int64_t                   ldc) //19
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(9, descr);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
@@ -485,6 +491,8 @@ namespace rocsparse
                                          T*                        C,
                                          rocsparse_int             ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsrmm_template_dispatch(handle,
                                                                        dir,
                                                                        trans_A,
@@ -544,6 +552,7 @@ namespace rocsparse
                                   T*                        C,
                                   rocsparse_int             ldc)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Logging TODO bench logging
         rocsparse::log_trace(handle,
@@ -648,6 +657,7 @@ namespace rocsparse
                                      rocsparse_int             ldc)           \
     try                                                                       \
     {                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                              \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsrmm_impl(handle,             \
                                                           dir,                \
                                                           trans_A,            \

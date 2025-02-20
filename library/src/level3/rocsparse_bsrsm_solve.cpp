@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,8 @@ namespace rocsparse
                                                           rocsparse_solve_policy    policy,
                                                           void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsm_solve_template_large(handle,
                                                                         dir,
                                                                         trans_A,
@@ -116,6 +118,8 @@ rocsparse_status rocsparse::bsrsm_solve_quickreturn(rocsparse_handle          ha
                                                     rocsparse_solve_policy    policy,
                                                     void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(mb == 0 || nrhs == 0)
     {
         return rocsparse_status_success;
@@ -146,6 +150,8 @@ namespace rocsparse
                                                  rocsparse_solve_policy    policy, //18
                                                  void*                     temp_buffer) //19
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_ENUM(2, trans_A);
@@ -247,6 +253,7 @@ rocsparse_status rocsparse::bsrsm_solve_core(rocsparse_handle          handle,
                                              rocsparse_solve_policy    policy,
                                              void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsm_solve_template_dispatch(handle,
                                                                        dir,
@@ -295,6 +302,7 @@ namespace rocsparse
                                       rocsparse_solve_policy    policy,
                                       void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xbsrsm_solve"),
@@ -397,6 +405,7 @@ namespace rocsparse
                                      void*                     temp_buffer)  \
     try                                                                      \
     {                                                                        \
+        ROCSPARSE_ROUTINE_TRACE;                                             \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrsm_solve_impl(handle,        \
                                                               dir,           \
                                                               trans_A,       \
