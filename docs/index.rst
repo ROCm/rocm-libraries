@@ -21,6 +21,7 @@ Our documentation is structured as follows:
     * :ref:`Data type support <data-type-support>`
     * :ref:`Device & stream management <device-stream-manage>`
     * :ref:`Storage formats <storage-format>`
+    * :ref:`MI300 features <mi300-features>`
     * :ref:`Porting from CUDA <porting>`
     * :doc:`API library <../doxygen/html/index>`
 

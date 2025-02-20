@@ -21,6 +21,8 @@ subtrees:
       title: Device & stream management
     - file: reference/storage-format.rst
       title: Storage formats
+    - file: reference/mi300-features.rst
+      title: MI300 features
     - file: reference/porting.rst
       title: Porting from CUDA
     - file: doxygen/html/index
