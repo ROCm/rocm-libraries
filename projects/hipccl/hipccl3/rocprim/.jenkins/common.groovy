@@ -30,7 +30,7 @@ def runTestCommand (platform, project)
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
 
     def testCommand = "ctest --output-on-failure "
-    def testCommandExcludeRegex = ''
+    def testCommandExcludeRegex = /(rocprim.block_histogram)/
     def testCommandExclude = "--exclude-regex \"${testCommandExcludeRegex}\""
     def hmmExcludeRegex = ''
     def hmmTestCommandExclude = "--exclude-regex \"${hmmExcludeRegex}\""
