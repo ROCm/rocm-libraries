@@ -39,7 +39,6 @@
 #include "../block/block_load.hpp"
 #include "../iterator/counting_iterator.hpp"
 #include "../iterator/reverse_iterator.hpp"
-#include "../thread/radix_key_codec.hpp"
 #include "detail/device_segmented_radix_sort.hpp"
 #include "device_partition.hpp"
 #include "device_segmented_radix_sort_config.hpp"

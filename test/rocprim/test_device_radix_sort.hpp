@@ -32,7 +32,6 @@
 #include <rocprim/device/device_radix_sort.hpp>
 #include <rocprim/device/device_radix_sort_config.hpp>
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types/double_buffer.hpp>
 
 #include "../../common/utils_device_ptr.hpp"

@@ -27,7 +27,10 @@ This is a complete list of affected functions and how their default accumulator 
 * Added function `is_build_in` into `rocprim::traits::get`.
 * Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
 * Marked the initialisation constructor of `rocprim::reverse_iterator<Iter>` `explicit`, use `rocprim::make_reverse_iterator`.
-* Drop `c++14` support for rocprim.
+* Dropped `c++14` support for rocprim.
+* Merged `radix_key_codec` into type_traits system.
+* Renamed `type_traits_interface.hpp` to `type_traits.hpp`, rename the original `type_traits.hpp` to `type_traits_functions.hpp`.
+* Removed `radix_sort.hpp`
 
 ### Removed
 

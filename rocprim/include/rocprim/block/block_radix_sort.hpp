@@ -27,7 +27,6 @@
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 #include "../intrinsics/thread.hpp"
-#include "../thread/radix_key_codec.hpp"
 #include "../types.hpp"
 
 #include "../warp/warp_exchange.hpp"
@@ -1117,7 +1116,8 @@ private:
                    unsigned int  end_bit,
                    Decomposer    decomposer)
     {
-        using key_codec = ::rocprim::radix_key_codec<Key, Descending>;
+        using key_codec
+            = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
 
         // 'rank_keys' may be invoked multiple times. We encode the key once and move the
         // encoded during the majority of sort to save on some compute.

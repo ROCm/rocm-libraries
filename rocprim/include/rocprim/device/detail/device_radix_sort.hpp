@@ -39,7 +39,6 @@
 #include "../../block/block_radix_sort.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_store_func.hpp"
-#include "../../thread/radix_key_codec.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -155,8 +154,8 @@ struct radix_digit_count_helper
         constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-
-        using key_codec    = ::rocprim::radix_key_codec<key_type, Descending>;
+        using key_codec
+            = decltype(::rocprim::traits::get<key_type>().template radix_key_codec<Descending>());
         using bit_key_type = typename key_codec::bit_key_type;
 
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -267,8 +266,8 @@ struct radix_sort_single_helper
         const unsigned int valid_in_last_block = size - block_offset;
 
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-
-        using key_codec = radix_key_codec<key_type, Descending>;
+        using key_codec
+            = decltype(::rocprim::traits::get<key_type>().template radix_key_codec<Descending>());
 
         key_type keys[ItemsPerThread];
         value_type values[ItemsPerThread];
@@ -348,7 +347,8 @@ struct radix_sort_and_scatter_helper
     static constexpr unsigned int digits_per_thread = 1;
     static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
 
-    using key_codec       = radix_key_codec<Key, Descending>;
+    using key_codec
+        = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
     using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
 
     static constexpr bool load_warp_striped
@@ -708,7 +708,8 @@ struct radix_merge_compare<Descending, true, T, Decomposer>
 
     ROCPRIM_HOST_DEVICE bool operator()(T lhs, T rhs) const
     {
-        using codec_t = radix_key_codec<T, Descending>;
+        using codec_t
+            = decltype(::rocprim::traits::get<T>().template radix_key_codec<Descending>());
 
         // Encoding the values considers the ascending / descending nature of the sort
         codec_t::encode_inplace(lhs, decomposer_);
@@ -773,7 +774,8 @@ struct onesweep_histograms_helper
         = radix_size * max_digit_places * atomic_stripes;
 
     using counter_type = uint32_t;
-    using key_codec    = radix_key_codec<KeyType, Descending>;
+    using key_codec
+        = decltype(::rocprim::traits::get<KeyType>().template radix_key_codec<Descending>());
 
     struct storage_type
     {
@@ -1050,7 +1052,8 @@ struct onesweep_iteration_helper
     static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     static constexpr bool         with_values = !std::is_same<Value, rocprim::empty_type>::value;
 
-    using key_codec       = radix_key_codec<Key, Descending>;
+    using key_codec
+        = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
     using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
 
     static constexpr bool load_warp_striped

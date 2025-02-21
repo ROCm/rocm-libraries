@@ -49,7 +49,7 @@ Available traits
 .. doxygenstruct:: rocprim::traits::float_bit_mask
   :members:
 
-.. doxygenstruct:: rocprim::traits::is_fundamental
+.. doxygenstruct:: rocprim::traits::radix_key_codec
   :members:
 
 Type traits wrappers

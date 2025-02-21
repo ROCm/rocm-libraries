@@ -39,7 +39,7 @@
 #include <rocprim/block/block_store_func.hpp>
 #include <rocprim/config.hpp>
 #include <rocprim/functional.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
 

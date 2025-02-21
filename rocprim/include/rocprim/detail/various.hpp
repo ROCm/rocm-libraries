@@ -329,25 +329,6 @@ constexpr std::add_const_t<T>* as_const_ptr(T* ptr)
     return ptr;
 }
 
-template<class Tuple, class Function, size_t... Indices>
-ROCPRIM_HOST_DEVICE inline void
-    for_each_in_tuple_impl(Tuple&& t, Function&& f, ::rocprim::index_sequence<Indices...>)
-{
-    int swallow[]
-        = {(std::forward<Function>(f)(::rocprim::get<Indices>(std::forward<Tuple>(t))), 0)...};
-    (void)swallow;
-}
-
-template<class Tuple, class Function>
-ROCPRIM_HOST_DEVICE inline auto for_each_in_tuple(Tuple&& t, Function&& f)
-    -> void_t<tuple_size<std::remove_reference_t<Tuple>>>
-{
-    static constexpr size_t size = tuple_size<std::remove_reference_t<Tuple>>::value;
-    for_each_in_tuple_impl(std::forward<Tuple>(t),
-                           std::forward<Function>(f),
-                           ::rocprim::make_index_sequence<size>());
-}
-
 /// \brief Reinterprets the pointer as another type and increments it to match the alignment of
 /// the new type.
 ///
@@ -395,22 +376,10 @@ ROCPRIM_HOST_DEVICE ROCPRIM_INLINE DstPtr cast_align_down(Src* pointer)
 }
 
 template<typename Destination, typename Source>
-ROCPRIM_HOST_DEVICE auto bit_cast(const Source& source)
-    -> std::enable_if_t<sizeof(Destination) == sizeof(Source)
-                            && std::is_trivially_copyable<Destination>::value
-                            && std::is_trivially_copyable<Source>::value,
-                        Destination>
+ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+auto bit_cast(const Source& source)
 {
-#if defined(__has_builtin) && __has_builtin(__builtin_bit_cast)
-    return __builtin_bit_cast(Destination, source);
-#else
-    static_assert(
-        std::is_trivially_constructable<Destination>::value,
-        "Fallback implementation of bit_cast requires Destination to be trivially constructible");
-    Destination dest;
-    memcpy(&dest, &source, sizeof(Destination));
-    return dest;
-#endif
+    return ::rocprim::traits::radix_key_codec::bit_cast<Destination, Source>(source);
 }
 
 template<typename... Ts>

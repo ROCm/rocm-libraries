@@ -24,7 +24,6 @@
 #define COMMON_UTILS_DATA_GENERATION_HPP_
 
 #include <rocprim/type_traits.hpp>
-#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
 #include <iterator>

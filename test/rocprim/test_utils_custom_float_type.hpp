@@ -24,8 +24,7 @@
 #include "test_utils_custom_test_types.hpp"
 
 #include <rocprim/config.hpp>
-#include <rocprim/thread/radix_key_codec.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <cmath>
@@ -119,10 +118,5 @@ struct rocprim::traits::define<test_utils::custom_float_type>
     using float_bit_mask
         = rocprim::traits::float_bit_mask::values<uint32_t, 0x80000000, 0x7F800000, 0x007FFFFF>;
 };
-
-template<>
-struct rocprim::detail::radix_key_codec_base<test_utils::custom_float_type>
-    : rocprim::detail::radix_key_codec_floating<test_utils::custom_float_type, unsigned int>
-{};
 
 #endif //ROCPRIM_TEST_UTILS_CUSTOM_FLOAT_TYPE_HPP_

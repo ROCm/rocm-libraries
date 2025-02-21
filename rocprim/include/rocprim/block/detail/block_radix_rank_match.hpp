@@ -26,8 +26,6 @@
 #include "../../functional.hpp"
 #include "../../types.hpp"
 
-#include "../../thread/radix_key_codec.hpp"
-
 #include "../block_scan.hpp"
 #include "../config.hpp"
 #include "rocprim/intrinsics/arch.hpp"
@@ -204,7 +202,8 @@ private:
                                        const unsigned int begin_bit,
                                        const unsigned int pass_bits)
     {
-        using key_codec    = ::rocprim::radix_key_codec<Key, Descending>;
+        using key_codec
+            = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
         using bit_key_type = typename key_codec::bit_key_type;
 
         bit_key_type bit_keys[ItemsPerThread];

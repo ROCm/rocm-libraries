@@ -23,7 +23,7 @@
 #include "test_utils_custom_float_type.hpp"
 
 #include <rocprim/config.hpp>
-#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <ostream>

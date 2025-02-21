@@ -34,7 +34,6 @@
 #include "type_traits.hpp"
 #include "iterator.hpp"
 
-#include "thread/radix_key_codec.hpp"
 #include "thread/thread_load.hpp"
 #include "thread/thread_operators.hpp"
 #include "thread/thread_reduce.hpp"

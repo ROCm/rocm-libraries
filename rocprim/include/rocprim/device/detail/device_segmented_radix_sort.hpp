@@ -40,8 +40,6 @@
 #include "../../warp/warp_load.hpp"
 #include "../../warp/warp_store.hpp"
 
-#include "../../thread/radix_key_codec.hpp"
-
 #include "../device_segmented_radix_sort_config.hpp"
 #include "device_radix_sort.hpp"
 
@@ -274,7 +272,8 @@ template<
 >
 class segmented_radix_sort_single_block_helper
 {
-    using key_codec    = radix_key_codec<Key, Descending>;
+    using key_codec
+        = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
     using bit_key_type = typename key_codec::bit_key_type;
     using sort_type    = ::rocprim::block_radix_sort<Key,
                                                   BlockSize,
@@ -530,7 +529,9 @@ class segmented_warp_sort_helper<
     static constexpr unsigned int logical_warp_size = Config::logical_warp_size;
     static constexpr unsigned int items_per_thread = Config::items_per_thread;
 
-    using key_codec    = ::rocprim::radix_key_codec<Key, Descending>;
+    using key_codec
+        = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
+
     using bit_key_type = typename key_codec::bit_key_type;
 
     using keys_load_type    = ::rocprim::warp_load<Key, items_per_thread, logical_warp_size>;
