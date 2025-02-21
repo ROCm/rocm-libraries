@@ -5,7 +5,7 @@ It sits between the application and a 'worker' SPARSE library, marshalling
 inputs into the backend library and marshalling results back to the
 application. hipSPARSELt exports an interface that does not require the client
 to change, regardless of the chosen backend. Currently, hipSPARSELt supports
-[rocSPARSELt](library/src/hcc_detial/rocsparselt) and [NVIDIA CUDA cuSPARSELt v0.6.3](https://docs.nvidia.com/cuda/cusparselt)
+[rocSPARSELt](library/src/hcc_detail/rocsparselt) and [NVIDIA CUDA cuSPARSELt v0.6.3](https://docs.nvidia.com/cuda/cusparselt)
 as backends.
 
 > [!NOTE]
@@ -86,7 +86,7 @@ To set these options during the build process, use the following CMake command:
       * Batched bias vector
     * Activation function fuse in spmm kernel support:
       * ReLU
-      * ClippedReLU (ReLU with uppoer bound and threshold setting)
+      * ClippedReLU (ReLU with upper bound and threshold setting)
       * GeLU
       * GeLU Scaling (Implied enable GeLU)
       * Abs
@@ -97,7 +97,7 @@ To set these options during the build process, use the following CMake command:
       * Add support for Mixed-precision computation
         * FP8 input/output, FP32 Matrix Core accumulate
         * BF8 input/output, FP32 Matrix Core accumulate
-      * Add kernel selection and genroator, used to provide the appropriate
+      * Add kernel selection and generator, used to provide the appropriate
         solution for the specific problem.
 * CUDA
   * Support cusparseLt v0.6.3
