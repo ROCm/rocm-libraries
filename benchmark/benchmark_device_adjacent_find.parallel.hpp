@@ -188,9 +188,6 @@ struct device_adjacent_find_benchmark : public config_autotune_interface
             HIP_CHECK(hipEventRecord(stop, stream));
             HIP_CHECK(hipEventSynchronize(stop));
 
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
             float elapsed_mseconds;
             HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
             state.SetIterationTime(elapsed_mseconds / 1000);
