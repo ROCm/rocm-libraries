@@ -206,13 +206,20 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return {R, lds_complex, stride_lds_pp, offset_lds_pp};
     }
 
+    TemplateList device_lds_reg_inout_pp_templates()
+    {
+        TemplateList tpls;
+        tpls.append(scalar_type);
+        return tpls;
+    }
+
     Function generate_lds_to_reg_input_step_1_2_function()
     {
         std::string function_name
             = "lds_to_reg_input_pp_step_1_2_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.templates = device_lds_reg_inout_templates();
+        f.templates = device_lds_reg_inout_pp_templates();
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
@@ -252,7 +259,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             = "lds_from_reg_output_pp_step_1_2_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.templates = device_lds_reg_inout_templates();
+        f.templates = device_lds_reg_inout_pp_templates();
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
@@ -308,6 +315,11 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return f;
     }
 
+    TemplateList device_lds_reg_inout_pp_step_1_2_device_call_templates()
+    {
+        return {scalar_type};
+    }
+
     // TODO: Move this to a device function
     StatementList perform_partial_pass_step_1_2()
     {
@@ -318,9 +330,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         stmts += Declaration{offset_lds_pp,
                              Parens(block_id * transforms_per_block + thread_id) % length};
 
-        auto pre_post_lds_tmpl = device_lds_reg_inout_device_call_templates();
+        auto pre_post_lds_tmpl = device_lds_reg_inout_pp_step_1_2_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
-        pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
         StatementList preLoad;
         preLoad += Call{"lds_to_reg_input_pp_step_1_2_length" + std::to_string(length) + "_device",
@@ -382,6 +393,15 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             body += Declaration{dim, static_dim};
         }
         body += Declaration{stride0, Parens{stride[0]}};
+    }
+
+    StatementList set_lds_is_real() override
+    {
+        // Half-LDS always disabled in partial-pass.
+        // To make this option work, step_1_2 here
+        // would need to implement half LDS usage in
+        // the off-direction pass.
+        return {Declaration{lds_is_real, Literal{"false"}}};
     }
 
     Function generate_global_function() override
@@ -447,10 +467,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         body += LineBreak{};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
-        body += Declaration{thread_in_device,
-                            Ternary{lds_linear,
-                                    thread_id % threads_per_transform,
-                                    thread_id / transforms_per_block}};
+        body += Declaration{thread_in_device, thread_id % threads_per_transform};
 
         // before starting the transform job (core device function)
         // we call a re-load lds-to-reg function here, but it's not always doing things.
@@ -459,7 +476,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         body += CommentLines{"call a pre-load from lds to registers (if necessary)"};
         auto pre_post_lds_tmpl = device_lds_reg_inout_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_device_call_arguments();
-        pre_post_lds_tmpl.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
+        pre_post_lds_tmpl.set_value(stride_type.name, "SB_UNIT");
         StatementList preLoad;
         preLoad += Call{"lds_to_reg_input_length" + std::to_string(length) + "_device",
                         pre_post_lds_tmpl,
@@ -476,7 +493,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
             auto templates = device_call_templates();
             auto arguments = device_call_arguments(c);
 
-            templates.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
+            templates.set_value(stride_type.name, "SB_UNIT");
 
             body
                 += Call{"forward_length" + std::to_string(length) + "_" + tiling_name() + "_device",

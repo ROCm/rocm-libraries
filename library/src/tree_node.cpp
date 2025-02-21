@@ -296,7 +296,8 @@ void LeafNode::SetupGridParamAndFuncPtr(DevFnCall& fnPtr, GridParam& gp)
                 double_half_lds_alloc = true;
             }
 
-            if(kernel.half_lds && (!double_half_lds_alloc))
+            // no support for half-lds in partial-pass mode
+            if(kernel.half_lds && (!double_half_lds_alloc) && (!applyPartialPass))
                 gp.lds_bytes /= 2;
         }
     }
