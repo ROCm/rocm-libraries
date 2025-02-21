@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,6 +86,8 @@ rocsparse_status rocsparse::csr2bsr_nnz_quickreturn(rocsparse_handle          ha
                                                     I*                        bsr_row_ptr,
                                                     I*                        bsr_nnz)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || n == 0)
     {
         if(bsr_nnz != nullptr)
@@ -128,6 +130,7 @@ namespace rocsparse
                                                  I*                        bsr_row_ptr, //9
                                                  I*                        bsr_nnz) //10
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
@@ -201,6 +204,7 @@ rocsparse_status rocsparse::csr2bsr_nnz_core(rocsparse_handle          handle,
                                              I*                        bsr_row_ptr,
                                              I*                        bsr_nnz)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_ENUM(1, dir);
@@ -484,6 +488,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csr2bsr_nnz_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_csr2bsr_nnz", p...);
         const rocsparse_status status = rocsparse::csr2bsr_nnz_checkarg(p...);
         if(status != rocsparse_status_continue)
@@ -509,6 +515,8 @@ extern "C" rocsparse_status rocsparse_csr2bsr_nnz(rocsparse_handle          hand
                                                   rocsparse_int*            bsr_nnz)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_nnz_impl(handle,
                                                           dir,
                                                           m,

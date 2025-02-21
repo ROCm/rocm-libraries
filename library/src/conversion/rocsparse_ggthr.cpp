@@ -24,6 +24,7 @@
 #include "rocsparse_ggthr.hpp"
 #include "../level1/rocsparse_gthr.hpp"
 #include "control.h"
+#include "utility.h"
 
 rocsparse_status rocsparse::ggthr(rocsparse_handle     handle_,
                                   int64_t              nnz,
@@ -34,6 +35,7 @@ rocsparse_status rocsparse::ggthr(rocsparse_handle     handle_,
                                   void*                perm,
                                   rocsparse_index_base base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
 #define CALL_TEMPLATE(PERM_TYPE, DATA_TYPE)                                    \
     RETURN_IF_ROCSPARSE_ERROR(                                                 \

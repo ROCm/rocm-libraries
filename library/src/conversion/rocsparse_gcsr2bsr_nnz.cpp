@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,8 @@
  * ************************************************************************ */
 
 #include "control.h"
+#include "utility.h"
+
 #include "rocsparse_csr2bsr.hpp"
 #include "rocsparse_gcsr2bsr.hpp"
 
@@ -41,6 +43,7 @@ namespace rocsparse
                                            I*                        bsr_row_ptr,
                                            I*                        nnzb)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         switch(csr_col_ind_indextype)
         {
@@ -89,6 +92,7 @@ rocsparse_status rocsparse::gcsr2bsr_nnz(rocsparse_handle          handle,
                                          void*                     bsr_row_ptr,
                                          int64_t*                  bsr_nnz)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               bsr_row_ptr_indextype != csr_row_ptr_indextype);

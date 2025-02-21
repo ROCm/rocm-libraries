@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsrgemm_multadd.hpp"
 #include "rocsparse_csrgemm_multadd.hpp"
+#include "utility.h"
 
 rocsparse_status
     rocsparse::bsrgemm_multadd_buffer_size_quickreturn(rocsparse_handle          handle,
@@ -49,6 +50,7 @@ rocsparse_status
                                                        rocsparse_mat_info        info_C,
                                                        size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     const rocsparse_status status
         = rocsparse::csrgemm_multadd_buffer_size_quickreturn(handle,

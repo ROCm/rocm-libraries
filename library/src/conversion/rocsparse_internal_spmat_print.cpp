@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,8 @@ namespace rocsparse
     template <typename T>
     static rocsparse_status internal_dnvec_print(std::ostream& out, int64_t nmemb, const void* h)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const T* p = (const T*)h;
         for(int64_t i = 0; i < nmemb; ++i)
             out << "[" << i << "] = " << p[i] << std::endl;
@@ -47,6 +49,8 @@ namespace rocsparse
     static rocsparse_status
         internal_dnmat_print(std::ostream& out, int64_t m, int64_t n, const void* h, int64_t ld)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const T* p = (const T*)h;
         for(int64_t i = 0; i < m; ++i)
         {
@@ -63,6 +67,8 @@ namespace rocsparse
                                                  const void*         dind)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(dind == nullptr || nmemb == 0)
         {
             return rocsparse_status_success;
@@ -97,6 +103,8 @@ namespace rocsparse
         std::ostream& out, rocsparse_indextype indextype, int64_t m, int64_t n, const void* dind)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(dind == nullptr || m == 0 || n == 0)
         {
             return rocsparse_status_success;
@@ -133,6 +141,8 @@ namespace rocsparse
                                                  const void*        dind)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(dind == nullptr || nmemb == 0)
         {
             return rocsparse_status_success;
@@ -197,6 +207,8 @@ namespace rocsparse
         std::ostream& out, rocsparse_datatype datatype, int64_t m, int64_t n, const void* dind)
 
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(dind == nullptr || m == 0 || n == 0)
         {
             return rocsparse_status_success;
@@ -263,6 +275,8 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
                                                  bool                        print_symbolic,
                                                  bool                        print_numeric)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, descr);
     rocsparse_format format;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmat_get_format(descr, &format));

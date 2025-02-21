@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -230,6 +230,8 @@ namespace rocsparse
                                              const rocsparse_int*      bsr_row_ptr_C,
                                              rocsparse_int*            bsr_col_ind_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(block_dim == 1)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -509,6 +511,8 @@ namespace rocsparse
                                          const rocsparse_int*      bsr_row_ptr_C,
                                          rocsparse_int*            bsr_col_ind_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         if(block_dim == 1)
         {
@@ -580,6 +584,8 @@ namespace rocsparse
                                                 const void*               bsr_row_ptr_C,
                                                 void*                     bsr_col_ind_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(mb == 0 || nb == 0 || (nnzb_A == 0 && nnzb_B == 0))
         {
             return rocsparse_status_success;
@@ -610,6 +616,8 @@ namespace rocsparse
                                       const rocsparse_int*      bsr_row_ptr_C, //19
                                       rocsparse_int*            bsr_col_ind_C) //20
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(6, descr_A);
         ROCSPARSE_CHECKARG_POINTER(12, descr_B);
@@ -718,6 +726,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status bsrgeam_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xbsrgeam", p...);
 
         const rocsparse_status status = rocsparse::bsrgeam_checkarg(p...);
@@ -762,6 +772,7 @@ namespace rocsparse
                                      rocsparse_int*            bsr_col_ind_C) \
     try                                                                       \
     {                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                              \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgeam_impl(handle,             \
                                                           dir,                \
                                                           mb,                 \

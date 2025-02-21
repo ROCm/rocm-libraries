@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,8 @@ namespace rocsparse
                                           rocsparse_hyb_mat       hyb,
                                           rocsparse_hyb_partition partition_type)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         hyb->m         = m;
         hyb->n         = n;
         hyb->partition = partition_type;
@@ -102,6 +104,8 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
                                              rocsparse_int             user_ell_width,
                                              rocsparse_hyb_partition   partition_type)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle and matrix descriptor
     // Logging
     rocsparse::log_trace(handle,
@@ -368,6 +372,8 @@ extern "C" rocsparse_status rocsparse_scsr2hyb(rocsparse_handle          handle,
                                                rocsparse_hyb_partition   partition_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2hyb_template(handle,
                                                           m,
                                                           n,
@@ -397,6 +403,8 @@ extern "C" rocsparse_status rocsparse_dcsr2hyb(rocsparse_handle          handle,
                                                rocsparse_hyb_partition   partition_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2hyb_template(handle,
                                                           m,
                                                           n,
@@ -426,6 +434,8 @@ extern "C" rocsparse_status rocsparse_ccsr2hyb(rocsparse_handle               ha
                                                rocsparse_hyb_partition        partition_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2hyb_template(handle,
                                                           m,
                                                           n,
@@ -455,6 +465,8 @@ extern "C" rocsparse_status rocsparse_zcsr2hyb(rocsparse_handle                h
                                                rocsparse_hyb_partition         partition_type)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2hyb_template(handle,
                                                           m,
                                                           n,

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 
 #include "rocsparse_bsrgemm_scal.hpp"
 #include "rocsparse_csrgemm_scal.hpp"
+#include "utility.h"
 
 rocsparse_status rocsparse::bsrgemm_scal_buffer_size_quickreturn(rocsparse_handle          handle,
                                                                  int64_t                   mb,
@@ -36,6 +37,8 @@ rocsparse_status rocsparse::bsrgemm_scal_buffer_size_quickreturn(rocsparse_handl
                                                                  rocsparse_mat_info info_C,
                                                                  size_t*            buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const rocsparse_status status = rocsparse::csrgemm_scal_buffer_size_quickreturn(
         handle, mb, nb, beta, descr_D, nnzb_D, bsr_row_ptr_D, bsr_col_ind_D, info_C, buffer_size);
     if(status != rocsparse_status_continue)

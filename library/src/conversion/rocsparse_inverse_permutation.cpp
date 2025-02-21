@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -59,6 +59,8 @@ namespace rocsparse
                                               I* __restrict__ q_,
                                               rocsparse_index_base base_)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         static constexpr uint32_t BLOCKSIZE = 512;
         dim3                      blocks((n_ - 1) / BLOCKSIZE + 1);
         dim3                      threads(BLOCKSIZE);
@@ -82,6 +84,8 @@ namespace rocsparse
                                                   I* __restrict__ q_,
                                                   rocsparse_index_base base_)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Quick return if possible
         if(n_ == 0)
         {
@@ -98,6 +102,8 @@ namespace rocsparse
                                               I* __restrict__ q,
                                               rocsparse_index_base base)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Logging
         rocsparse::log_trace(
             handle, "rocsparse_inverse_permutation", n, (const void*&)p, (const void*&)q, base);
@@ -142,6 +148,8 @@ extern "C" rocsparse_status rocsparse_inverse_permutation(rocsparse_handle     h
                                                           rocsparse_index_base base_)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::inverse_permutation_impl(handle_, n_, p_, q_, base_));
     return rocsparse_status_success;
 }

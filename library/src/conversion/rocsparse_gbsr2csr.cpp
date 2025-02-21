@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #include "rocsparse_gbsr2csr.hpp"
 #include "control.h"
 #include "handle.h"
+#include "utility.h"
+
 #include "rocsparse_bsr2csr.hpp"
 
 namespace rocsparse
@@ -45,6 +47,7 @@ namespace rocsparse
                                        rocsparse_indextype       csr_col_ind_indextype,
                                        void*                     csr_col_ind)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         if(csr_col_ind_indextype != bsr_col_ind_indextype)
         {
@@ -104,6 +107,8 @@ namespace rocsparse
                                        rocsparse_indextype       csr_col_ind_indextype,
                                        void*                     csr_col_ind)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(csr_row_ptr_indextype)
         {
         case rocsparse_indextype_u16:
@@ -160,6 +165,8 @@ rocsparse_status rocsparse::gbsr2csr(rocsparse_handle          handle,
                                      rocsparse_indextype       csr_col_ind_indextype,
                                      void*                     csr_col_ind)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               bsr_row_ptr_indextype != csr_row_ptr_indextype);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
@@ -227,6 +234,8 @@ rocsparse_status rocsparse::spmat_bsr2csr_buffer_size(rocsparse_handle          
                                                       rocsparse_const_spmat_descr target,
                                                       size_t*                     buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     buffer_size[0] = 0;
     return rocsparse_status_success;
 }
@@ -237,6 +246,8 @@ rocsparse_status rocsparse::spmat_bsr2csr(rocsparse_handle            handle,
                                           size_t                      buffer_size,
                                           void*                       buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               source->row_type != target->row_type);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,

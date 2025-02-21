@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,7 @@ namespace rocsparse
                                                          rocsparse_mat_info info_C, //22
                                                          size_t*            buffer_size) //23
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         ROCSPARSE_CHECKARG_POINTER(22, info_C);
         ROCSPARSE_CHECKARG(
@@ -312,6 +313,8 @@ namespace rocsparse
                                                             rocsparse_mat_info        info_C,
                                                             size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool mul = info_C->csrgemm_info->mul;
         const bool add = info_C->csrgemm_info->add;
 
@@ -429,6 +432,8 @@ namespace rocsparse
                                                      rocsparse_mat_info        info_C,
                                                      size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool mul = info_C->csrgemm_info->mul;
         const bool add = info_C->csrgemm_info->add;
         if(mul == true && add == true)
@@ -518,6 +523,8 @@ namespace rocsparse
                                                 const int64_t      nnzb_B,
                                                 const int64_t      nnzb_D)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         info->csrgemm_info->mul = (alpha != nullptr);
         info->csrgemm_info->add = (beta != nullptr);
 
@@ -561,6 +568,8 @@ rocsparse_status rocsparse::bsrgemm_buffer_size_template(rocsparse_handle       
                                                          rocsparse_mat_info        info_C,
                                                          size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(20, info_C);
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(info_C->csrgemm_info));
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_csrgemm_info(&info_C->csrgemm_info));
@@ -651,6 +660,7 @@ namespace rocsparse
                                                      rocsparse_mat_info        info_C,
                                                      size_t*                   buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Logging
         rocsparse::log_trace(handle,
@@ -862,6 +872,7 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
                                      size_t*                   buffer_size)          \
     try                                                                              \
     {                                                                                \
+        ROCSPARSE_ROUTINE_TRACE;                                                     \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrgemm_buffer_size_impl(handle,        \
                                                                       dir,           \
                                                                       trans_A,       \

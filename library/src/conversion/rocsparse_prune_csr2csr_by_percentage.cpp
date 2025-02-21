@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -89,6 +89,8 @@ namespace rocsparse
                           rocsparse_int* __restrict__ csr_col_ind_C,
                           const T* threshold)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         constexpr rocsparse_int SEGMENTS_PER_BLOCK = BLOCK_SIZE / SEGMENT_SIZE;
         rocsparse_int           grid_size = (m + SEGMENTS_PER_BLOCK - 1) / SEGMENTS_PER_BLOCK;
 
@@ -132,6 +134,7 @@ namespace rocsparse
                                                          rocsparse_mat_info   info, //13
                                                          size_t*              buffer_size) //14
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Logging
         rocsparse::log_trace(
@@ -213,6 +216,7 @@ rocsparse_status
                                                         rocsparse_mat_info info, //12
                                                         void*              temp_buffer) //13
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -396,6 +400,8 @@ rocsparse_status
                                                     rocsparse_mat_info        info, //13
                                                     void*                     temp_buffer) //14
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Logging
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xprune_csr2csr_by_percentage"),
@@ -699,6 +705,8 @@ extern "C" rocsparse_status
                                                        size_t*                   buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::prune_csr2csr_by_percentage_buffer_size_template(handle,
                                                                     m,
@@ -740,6 +748,8 @@ extern "C" rocsparse_status
                                                        size_t*                   buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::prune_csr2csr_by_percentage_buffer_size_template(handle,
                                                                     m,
@@ -780,6 +790,8 @@ extern "C" rocsparse_status
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::prune_csr2csr_nnz_by_percentage_template(handle,
                                                             m,
@@ -819,6 +831,8 @@ extern "C" rocsparse_status
                                                void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::prune_csr2csr_nnz_by_percentage_template(handle,
                                                             m,
@@ -859,6 +873,8 @@ extern "C" rocsparse_status
                                            void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_by_percentage_template(handle,
                                                                               m,
                                                                               n,
@@ -899,6 +915,8 @@ extern "C" rocsparse_status
                                            void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_by_percentage_template(handle,
                                                                               m,
                                                                               n,

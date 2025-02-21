@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,8 @@ namespace rocsparse
                                                           const J*         coo_col_ind,
                                                           size_t*          buffer_size)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         uint32_t startbit = 0;
         uint32_t endbit   = rocsparse::clz(m);
 
@@ -90,6 +92,8 @@ rocsparse_status rocsparse::coosort_buffer_size_template(rocsparse_handle handle
                                                          const J*         coo_col_ind,
                                                          size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Logging
     rocsparse::log_trace(handle,
                          "rocsparse_coosort_buffer_size",
@@ -153,6 +157,8 @@ extern "C" rocsparse_status rocsparse_coosort_buffer_size(rocsparse_handle     h
                                                           size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     return rocsparse::coosort_buffer_size_template(
         handle, m, n, nnz, coo_row_ind, coo_col_ind, buffer_size);
 }
@@ -173,6 +179,7 @@ namespace rocsparse
                                                        J*               perm,
                                                        void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         // Quick return if possible
         if(m == 0 || n == 0 || nnz == 0)
@@ -192,6 +199,8 @@ namespace rocsparse
                                                     J*               perm,
                                                     void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_SIZE(1, m);
         ROCSPARSE_CHECKARG_SIZE(2, n);
@@ -221,6 +230,8 @@ rocsparse_status rocsparse::coosort_by_row_template(rocsparse_handle handle,
                                                     J*               perm,
                                                     void*            temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     if(handle == nullptr)
     {
@@ -461,6 +472,7 @@ extern "C" rocsparse_status rocsparse_coosort_by_row(rocsparse_handle handle,
                                                      void*            temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -504,6 +516,8 @@ namespace rocsparse
                                                           J*               perm,
                                                           void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Quick return if possible
         if(m == 0 || n == 0 || nnz == 0)
         {
@@ -522,6 +536,8 @@ namespace rocsparse
                                                        J*               perm,
                                                        void*            temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_SIZE(1, m);
         ROCSPARSE_CHECKARG_SIZE(2, n);
@@ -552,6 +568,8 @@ rocsparse_status rocsparse::coosort_by_column_template(rocsparse_handle handle,
                                                        J*               perm,
                                                        void*            temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_by_row_template(
         handle, n, m, nnz, coo_col_ind, coo_row_ind, perm, temp_buffer));
     return rocsparse_status_success;
@@ -567,6 +585,7 @@ extern "C" rocsparse_status rocsparse_coosort_by_column(rocsparse_handle handle,
                                                         void*            temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,

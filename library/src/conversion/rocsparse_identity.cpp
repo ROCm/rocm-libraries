@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,8 @@
 template <typename I>
 rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle handle, I n, I* p)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -54,6 +56,8 @@ rocsparse_status rocsparse::create_identity_permutation_core(rocsparse_handle ha
 template <typename I>
 rocsparse_status rocsparse::create_identity_permutation_template(rocsparse_handle handle, I n, I* p)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(n == 0)
     {
@@ -66,6 +70,8 @@ rocsparse_status rocsparse::create_identity_permutation_template(rocsparse_handl
 template <typename I>
 rocsparse_status rocsparse::create_identity_permutation_impl(rocsparse_handle handle, I n, I* p)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Logging
     rocsparse::log_trace(handle, "rocsparse_create_identity_permutation", n, (const void*&)p);
 
@@ -99,6 +105,8 @@ extern "C" rocsparse_status rocsparse_create_identity_permutation(rocsparse_hand
                                                                   rocsparse_int*   p)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_identity_permutation_impl(handle, n, p));
     return rocsparse_status_success;
 }
@@ -113,6 +121,8 @@ extern "C" rocsparse_status rocsparse_set_identity_permutation(rocsparse_handle 
                                                                rocsparse_indextype indextype)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcreate_identity_permutation(handle, n, indextype, p));
     return rocsparse_status_success;
 }

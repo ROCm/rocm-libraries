@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,7 @@ namespace rocsparse
                                                                 int64_t          source_inc_,
                                                                 size_t*          host_num_invalid)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         const SOURCE* source_ = (const SOURCE*)source__;
         const TARGET* target_ = (const TARGET*)target__;
@@ -120,6 +121,8 @@ namespace rocsparse
     static rocsparse_status
         convert_indexing_array_compute_dispatch(rocsparse_indextype source_indextype_, P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(source_indextype_)
         {
         case rocsparse_indextype_u16:
@@ -147,6 +150,8 @@ namespace rocsparse
                                                            rocsparse_indextype source_indextype_,
                                                            P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(target_indextype_)
         {
         case rocsparse_indextype_u16:
@@ -387,6 +392,8 @@ namespace rocsparse
                                                             const void*      source__,
                                                             double*          host_error)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const SOURCE*             source_   = (const SOURCE*)source__;
         const TARGET*             target_   = (const TARGET*)target__;
         static constexpr uint32_t BLOCKSIZE = 1024;
@@ -415,6 +422,8 @@ namespace rocsparse
     static rocsparse_status convert_data_array_compute_dispatch(rocsparse_datatype source_datatype_,
                                                                 P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(source_datatype_)
         {
         case rocsparse_datatype_i8_r:
@@ -479,6 +488,8 @@ namespace rocsparse
                                                        rocsparse_datatype source_datatype_,
                                                        P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         switch(target_datatype_)
         {
         case rocsparse_datatype_i8_r:
@@ -555,6 +566,8 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
                                           const void*         source_,
                                           int64_t             source_inc_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if((source_indextype_ == target_indextype_) && (target_inc_ == 1 && source_inc_ == 1))
     {
         if(target_ != source_)
@@ -597,6 +610,8 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle    handle_,
                                           rocsparse_indextype source_indextype_,
                                           const void*         source_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
         handle_, nitems_, target_indextype_, target_, 1, source_indextype_, source_, 1));
     return rocsparse_status_success;
@@ -619,6 +634,7 @@ rocsparse_status rocsparse::convert_array(rocsparse_handle   handle_,
                                           rocsparse_datatype source_datatype_,
                                           const void*        source_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     if(source_datatype_ == target_datatype_)
     {
@@ -657,6 +673,8 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
                                                 rocsparse_dnvec_descr       target,
                                                 rocsparse_const_dnvec_descr source)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, target);
     ROCSPARSE_CHECKARG_POINTER(1, source);
     ROCSPARSE_CHECKARG(0, target, (target->size != source->size), rocsparse_status_invalid_size);

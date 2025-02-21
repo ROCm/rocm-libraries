@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -81,6 +81,7 @@ rocsparse_status
                                                     const rocsparse_int*      csr_col_ind, //9
                                                     size_t*                   buffer_size) //10
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -127,6 +128,7 @@ rocsparse_status rocsparse::prune_dense2csr_nnz_template(rocsparse_handle       
                                                          rocsparse_int* nnz_total_dev_host_ptr, //8
                                                          void*          temp_buffer) //9
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -284,6 +286,7 @@ rocsparse_status rocsparse::prune_dense2csr_template(rocsparse_handle          h
                                                      rocsparse_int*            csr_col_ind, //9
                                                      void*                     temp_buffer) //10
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -412,6 +415,8 @@ extern "C" rocsparse_status rocsparse_sprune_dense2csr_buffer_size(rocsparse_han
                                                                    size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_buffer_size_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer_size));
     return rocsparse_status_success;
@@ -434,6 +439,8 @@ extern "C" rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_han
                                                                    size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_buffer_size_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer_size));
     return rocsparse_status_success;
@@ -455,6 +462,8 @@ extern "C" rocsparse_status rocsparse_sprune_dense2csr_nnz(rocsparse_handle     
                                                            void*          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_nnz_template(
         handle, m, n, A, lda, threshold, descr, csr_row_ptr, nnz_total_dev_host_ptr, temp_buffer));
     return rocsparse_status_success;
@@ -476,6 +485,8 @@ extern "C" rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle     
                                                            void*          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_nnz_template(
         handle, m, n, A, lda, threshold, descr, csr_row_ptr, nnz_total_dev_host_ptr, temp_buffer));
     return rocsparse_status_success;
@@ -498,6 +509,8 @@ extern "C" rocsparse_status rocsparse_sprune_dense2csr(rocsparse_handle         
                                                        void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
@@ -520,6 +533,8 @@ extern "C" rocsparse_status rocsparse_dprune_dense2csr(rocsparse_handle         
                                                        void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;

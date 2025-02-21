@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,9 +21,11 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_gcoosort.hpp"
 #include "control.h"
+#include "utility.h"
+
 #include "rocsparse_coosort.hpp"
+#include "rocsparse_gcoosort.hpp"
 
 rocsparse_status rocsparse::gcoosort_buffer_size(rocsparse_handle    handle_,
                                                  int64_t             m,
@@ -34,6 +36,8 @@ rocsparse_status rocsparse::gcoosort_buffer_size(rocsparse_handle    handle_,
                                                  const void*         col_data,
                                                  size_t*             buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
 #define CALL_TEMPLATE(IDX_TYPE)                                                  \
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_buffer_size_template<IDX_TYPE>( \
         handle_, m, n, nnz, (const IDX_TYPE*)row_data, (const IDX_TYPE*)col_data, buffer_size))
@@ -70,6 +74,8 @@ rocsparse_status rocsparse::gcoosort_by_row(rocsparse_handle    handle_,
                                             void*               perm,
                                             void*               buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
 #define CALL_TEMPLATE(IDX_TYPE)                                             \
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_by_row_template<IDX_TYPE>( \
         handle_, m, n, nnz, (IDX_TYPE*)row_data, (IDX_TYPE*)col_data, (IDX_TYPE*)perm, buffer))
@@ -106,6 +112,8 @@ rocsparse_status rocsparse::gcoosort_by_column(rocsparse_handle    handle_,
                                                void*               perm,
                                                void*               buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
 #define CALL_TEMPLATE(IDX_TYPE)                                                \
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosort_by_column_template<IDX_TYPE>( \
         handle_, m, n, nnz, (IDX_TYPE*)row_data, (IDX_TYPE*)col_data, (IDX_TYPE*)perm, buffer))

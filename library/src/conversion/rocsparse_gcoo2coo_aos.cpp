@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,8 @@ rocsparse_status rocsparse::gcoo2coo_aos(rocsparse_handle     handle,
                                          void*                target_val,
                                          rocsparse_index_base target_idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(
         handle, nnz, target_ind_type, target_ind, 2, source_row_type, source_row, 1));
 
@@ -66,6 +68,8 @@ rocsparse_status rocsparse::spmat_coo2coo_aos_buffer_size(rocsparse_handle      
                                                           rocsparse_spmat_descr       target_,
                                                           size_t*                     buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     buffer_size_[0] = 0;
     return rocsparse_status_success;
 }
@@ -76,6 +80,8 @@ rocsparse_status rocsparse::spmat_coo2coo_aos(rocsparse_handle            handle
                                               size_t                      buffer_size_,
                                               void*                       buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo2coo_aos(handle,
                                                       source_->rows,
                                                       source_->nnz,

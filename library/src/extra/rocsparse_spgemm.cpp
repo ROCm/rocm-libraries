@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,8 @@ namespace rocsparse
                                             size_t*                     buffer_size,
                                             void*                       temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const rocsparse_format format_A = A->format;
         switch(stage)
         {
@@ -407,6 +409,7 @@ namespace rocsparse
                                                      rocsparse_datatype  ctype,
                                                      Ts&&... params)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         switch(itype)
         {
@@ -574,6 +577,8 @@ namespace rocsparse
                                             size_t*                     buffer_size, //12
                                             void*                       temp_buffer) //13
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -651,6 +656,7 @@ extern "C" rocsparse_status rocsparse_spgemm(rocsparse_handle            handle,
                                              void*                       temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace("rocsparse_spgemm",
                          handle,

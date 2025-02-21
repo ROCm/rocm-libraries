@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -96,6 +96,7 @@ namespace rocsparse
                                                        I*                        bsr_row_ptr,
                                                        J*                        bsr_col_ind)
     {
+        ROCSPARSE_ROUTINE_TRACE;
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
     }
 
@@ -124,6 +125,7 @@ namespace rocsparse
                                                        I*                        bsr_row_ptr,
                                                        J*                        bsr_col_ind)
     {
+        ROCSPARSE_ROUTINE_TRACE;
         hipStream_t stream = handle->stream;
 
         launch_csr2bsr_block_per_row_multipass_kernel(256, 64);
@@ -148,6 +150,7 @@ rocsparse_status rocsparse::csr2bsr_core(rocsparse_handle          handle,
                                          J*                        bsr_col_ind,
                                          int64_t                   nnzb)
 {
+    ROCSPARSE_ROUTINE_TRACE;
     const J mb = (m + block_dim - 1) / block_dim;
     const J nb = (n + block_dim - 1) / block_dim;
 
@@ -311,6 +314,8 @@ rocsparse_status rocsparse::csr2bsr_quickreturn(rocsparse_handle          handle
                                                 void*                     bsr_col_ind,
                                                 int64_t*                  nnzb)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(m == 0 || n == 0)
     {
@@ -353,6 +358,8 @@ namespace rocsparse
                                              void*                     bsr_col_ind, //12
                                              int64_t*                  nnzb)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_SIZE(2, m);
@@ -414,6 +421,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csr2bsr_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xcsr2bsr", p...);
 
         int64_t                nnzb;
@@ -513,6 +522,7 @@ INSTANTIATE(int64_t);
                                      rocsparse_int*            bsr_col_ind) \
     try                                                                     \
     {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2bsr_impl(handle,           \
                                                           dir,              \
                                                           m,                \

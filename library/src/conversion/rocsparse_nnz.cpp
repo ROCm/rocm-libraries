@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,8 @@ namespace rocsparse
                                            rocsparse_order  order,
                                            I*               nnz_per_rows)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         hipStream_t stream = handle->stream;
 
         static constexpr rocsparse_int NNZ_DIM_X = 64;
@@ -75,6 +77,8 @@ namespace rocsparse
                                            rocsparse_order  order,
                                            I*               nnz_per_columns)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         hipStream_t stream = handle->stream;
 
         static constexpr rocsparse_int NB = 256;
@@ -106,6 +110,8 @@ rocsparse_status rocsparse::nnz_template(rocsparse_handle    handle,
                                          int64_t             ld,
                                          I*                  nnz_per_row_columns)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || n == 0)
     {
         return rocsparse_status_success;
@@ -147,6 +153,8 @@ namespace rocsparse
                                   I*                        nnz_total_dev_host_ptr,
                                   rocsparse_order           order)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_SIZE(2, m);
@@ -223,6 +231,7 @@ rocsparse_status rocsparse::nnz_impl(rocsparse_handle          handle,
                                      I*                        nnz_per_row_columns,
                                      I*                        nnz_total_dev_host_ptr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     //
     // Loggings
@@ -361,6 +370,7 @@ extern "C" {
     {                                                                               \
         try                                                                         \
         {                                                                           \
+            ROCSPARSE_ROUTINE_TRACE;                                                \
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_impl(handle,                   \
                                                           dir,                      \
                                                           rocsparse_order_column,   \

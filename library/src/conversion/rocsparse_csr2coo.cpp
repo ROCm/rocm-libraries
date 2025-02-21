@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@ rocsparse_status rocsparse::csr2coo_core(rocsparse_handle     handle,
                                          J*                   coo_row_ind,
                                          rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Stream
     hipStream_t stream = handle->stream;
@@ -160,6 +161,8 @@ rocsparse_status rocsparse::csr2coo_template(rocsparse_handle     handle,
                                              J*                   coo_row_ind,
                                              rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(nnz == 0 || m == 0)
     {
@@ -178,6 +181,7 @@ rocsparse_status rocsparse::csr2coo_impl(rocsparse_handle     handle,
                                          J*                   coo_row_ind,
                                          rocsparse_index_base idx_base)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging TODO bench logging
     rocsparse::log_trace(handle,
@@ -234,6 +238,8 @@ extern "C" rocsparse_status rocsparse_csr2coo(rocsparse_handle     handle,
                                               rocsparse_index_base idx_base)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::csr2coo_impl(handle, csr_row_ptr, nnz, m, coo_row_ind, idx_base));
     return rocsparse_status_success;

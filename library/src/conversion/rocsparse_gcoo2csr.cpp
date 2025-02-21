@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@ rocsparse_status rocsparse::gcoo2csr(rocsparse_handle     handle_,
                                      void*                target_row_,
                                      rocsparse_index_base idx_base_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
 #define DO(SROW, TROW)                                                          \
     do                                                                          \
     {                                                                           \
@@ -90,6 +92,8 @@ rocsparse_status rocsparse::spmat_coo2csr_buffer_size(rocsparse_handle          
                                                       rocsparse_spmat_descr       target_,
                                                       size_t*                     buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     buffer_size_[0] = 0;
     return rocsparse_status_success;
 }
@@ -100,6 +104,8 @@ rocsparse_status rocsparse::spmat_coo2csr(rocsparse_handle            handle,
                                           size_t                      buffer_size_,
                                           void*                       buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo2csr(handle,
                                                   source_->row_type,
                                                   source_->const_row_data,

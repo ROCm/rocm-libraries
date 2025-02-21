@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -280,6 +280,8 @@ namespace rocsparse
                                              const rocsparse_int*      csr_row_ptr_C,
                                              rocsparse_int*            csr_col_ind_C)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Stream
         hipStream_t stream = handle->stream;
 
@@ -365,6 +367,8 @@ rocsparse_status rocsparse::csrgeam_core(rocsparse_handle          handle,
                                          const rocsparse_int*      csr_row_ptr_C,
                                          rocsparse_int*            csr_col_ind_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_dispatch(handle,
                                                           m,
                                                           n,
@@ -407,6 +411,7 @@ rocsparse_status rocsparse::csrgeam_quickreturn(rocsparse_handle          handle
                                                 const rocsparse_int*      csr_row_ptr_C,
                                                 rocsparse_int*            csr_col_ind_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
     {
@@ -438,6 +443,8 @@ namespace rocsparse
                                              const rocsparse_int*      csr_row_ptr_C, //17
                                              rocsparse_int*            csr_col_ind_C) //18
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(3, alpha);
         ROCSPARSE_CHECKARG_POINTER(9, beta);
@@ -540,6 +547,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csrgeam_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xcsrgeam", p...);
 
         const rocsparse_status status = rocsparse::csrgeam_checkarg(p...);
@@ -576,6 +585,7 @@ namespace rocsparse
                                      rocsparse_int*            csr_col_ind_C) \
     try                                                                       \
     {                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                              \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_impl(handle,             \
                                                           m,                  \
                                                           n,                  \

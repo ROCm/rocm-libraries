@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,8 @@
 extern "C" rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(descr)
     {
         switch(descr->alg())

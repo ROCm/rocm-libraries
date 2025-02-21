@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,6 +64,8 @@ namespace rocsparse
                                           const rocsparse_mat_info  info_C, //21
                                           void*                     temp_buffer) //22
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_POINTER(21, info_C);
         ROCSPARSE_CHECKARG(
             21, info_C, (info_C->csrgemm_info == nullptr), rocsparse_status_invalid_pointer);
@@ -332,6 +334,8 @@ rocsparse_status rocsparse::csrgemm_nnz_template(rocsparse_handle          handl
                                                  const rocsparse_mat_info  info_C,
                                                  void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const bool mul = info_C->csrgemm_info->mul;
     const bool add = info_C->csrgemm_info->add;
 
@@ -482,6 +486,8 @@ rocsparse_status rocsparse::csrgemm_nnz_core(rocsparse_handle          handle,
                                              const rocsparse_mat_info  info_C,
                                              void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const bool mul = info_C->csrgemm_info->mul;
     const bool add = info_C->csrgemm_info->add;
     // Either mult, add or multadd need to be performed
@@ -566,6 +572,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csrgemm_nnz_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_csrgemm_nnz", p...);
 
         const rocsparse_status status = rocsparse::csrgemm_nnz_checkarg(p...);
@@ -608,6 +616,8 @@ extern "C" rocsparse_status rocsparse_csrgemm_nnz(rocsparse_handle          hand
                                                   void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_nnz_impl(handle,
                                                           trans_A,
                                                           trans_B,

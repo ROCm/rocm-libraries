@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -116,6 +116,7 @@ namespace rocsparse
                                                          rocsparse_diag_type udiag_,
                                                          P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
         switch(ldiag_)
         {
@@ -220,6 +221,8 @@ rocsparse_status rocsparse::csxsldu_compute_template(rocsparse_handle handle_,
                                                      //
                                                      void* buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     static constexpr uint32_t nthreads_per_block = 1024;
     J                         size               = (dir_ == rocsparse_direction_row) ? m_ : n_;
     J                         sizet              = (dir_ == rocsparse_direction_row) ? n_ : m_;
@@ -508,6 +511,7 @@ INSTANTIATE(template, rocsparse_double_complex, rocsparse_int, rocsparse_int);
                                      void*                buffer_)               \
     try                                                                          \
     {                                                                            \
+        ROCSPARSE_ROUTINE_TRACE;                                                 \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csxsldu_compute_template(handle_,   \
                                                                       dir_,      \
                                                                       m_,        \

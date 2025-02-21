@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,8 @@ rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          
                                                       const rocsparse_mat_descr ell_descr,
                                                       J*                        ell_width)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     hipStream_t stream = handle->stream;
 
     // Quick return if possible
@@ -65,6 +67,8 @@ namespace rocsparse
                                                    const rocsparse_mat_descr ell_descr, //4
                                                    J*                        ell_width) //5
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_SIZE(1, m);
 
@@ -111,6 +115,8 @@ rocsparse_status rocsparse::csr2ell_width_core(rocsparse_handle          handle,
                                                const rocsparse_mat_descr ell_descr,
                                                J*                        ell_width)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     hipStream_t stream = handle->stream;
 
 #define CSR2ELL_DIM 256
@@ -189,6 +195,8 @@ namespace rocsparse
     template <typename... P>
     rocsparse_status csr2ell_width_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_csr2ell_width", p...);
         const rocsparse_status status = rocsparse::csr2ell_width_checkarg(p...);
         if(status != rocsparse_status_continue)
@@ -209,6 +217,8 @@ extern "C" rocsparse_status rocsparse_csr2ell_width(rocsparse_handle          ha
                                                     rocsparse_int*            ell_width)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::csr2ell_width_impl(handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width));
     return rocsparse_status_success;

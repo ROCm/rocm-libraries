@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,6 +106,8 @@ rocsparse_status rocsparse::bsr2csr_core(rocsparse_handle          handle,
                                          I*                        csr_row_ptr,
                                          J*                        csr_col_ind)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -201,6 +203,8 @@ rocsparse_status rocsparse::bsr2csr_quickreturn(rocsparse_handle          handle
                                                 I*                        csr_row_ptr,
                                                 void*                     csr_col_ind)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(mb == 0 || nb == 0)
     {
@@ -232,6 +236,8 @@ namespace rocsparse
                                              I*                        csr_row_ptr, //11
                                              void*                     csr_col_ind) //12
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, dir);
         ROCSPARSE_CHECKARG_SIZE(2, mb);
@@ -307,6 +313,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status bsr2csr_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xbsr2csr", p...);
 
         const rocsparse_status status = rocsparse::bsr2csr_checkarg(p...);
@@ -409,6 +417,7 @@ INSTANTIATE(rocsparse_double_complex, int64_t, int64_t);
                                      rocsparse_int*            csr_col_ind) \
     try                                                                     \
     {                                                                       \
+        ROCSPARSE_ROUTINE_TRACE;                                            \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsr2csr_impl(handle,           \
                                                           dir,              \
                                                           mb,               \

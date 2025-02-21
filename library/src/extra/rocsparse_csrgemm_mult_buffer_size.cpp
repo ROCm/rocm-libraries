@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -93,6 +93,8 @@ rocsparse_status rocsparse::csrgemm_mult_buffer_size_core(rocsparse_handle      
                                                           rocsparse_mat_info        info_C,
                                                           size_t*                   buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // rocprim buffer
     size_t rocprim_size;
     size_t rocprim_max = 0;
@@ -144,6 +146,8 @@ rocsparse_status rocsparse::csrgemm_mult_buffer_size_quickreturn(rocsparse_handl
                                                                  rocsparse_mat_info info_C,
                                                                  size_t*            buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(m == 0 || n == 0 || k == 0 || nnz_A == 0 || nnz_B == 0)
     {
         *buffer_size                         = 0;

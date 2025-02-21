@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -78,6 +78,7 @@ rocsparse_status rocsparse::gebsr2gebsr_buffer_size_template(rocsparse_handle   
                                                              rocsparse_int col_block_dim_C, //12
                                                              size_t*       buffer_size) //13
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xgebsr2csr_buffer_size"),
@@ -186,6 +187,8 @@ namespace rocsparse
                                                     rocsparse_int             col_block_dim_C,
                                                     void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         if(mb == 0 || nb == 0)
         {
             return rocsparse_status_success;
@@ -214,6 +217,7 @@ rocsparse_status rocsparse::gebsr2gebsr_template(rocsparse_handle          handl
                                                  rocsparse_int             col_block_dim_C, //16
                                                  void*                     temp_buffer) //17
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xgebsr2gebsr"),
@@ -511,6 +515,8 @@ extern "C" rocsparse_status rocsparse_gebsr2csr_nnz(rocsparse_handle          ha
                                                     rocsparse_int*            csr_col_ind) //11
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Check for valid handle
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_ENUM(1, direction);
@@ -647,6 +653,8 @@ extern "C" rocsparse_status rocsparse_gebsr2gebsr_nnz(rocsparse_handle          
                                                       void*          temp_buffer) //15
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Logging
     rocsparse::log_trace(handle,
                          "rocsparse_gebsr2gebsr_nnz",
@@ -924,6 +932,8 @@ extern "C" rocsparse_status rocsparse_sgebsr2gebsr_buffer_size(rocsparse_handle 
                                                                size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_buffer_size_template(handle,
                                                                           dir,
                                                                           mb,
@@ -961,6 +971,8 @@ extern "C" rocsparse_status rocsparse_dgebsr2gebsr_buffer_size(rocsparse_handle 
                                                                size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_buffer_size_template(handle,
                                                                           dir,
                                                                           mb,
@@ -999,6 +1011,8 @@ extern "C" rocsparse_status
                                        size_t*                        buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_buffer_size_template(handle,
                                                                           dir,
                                                                           mb,
@@ -1037,6 +1051,8 @@ extern "C" rocsparse_status
                                        size_t*                         buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_buffer_size_template(handle,
                                                                           dir,
                                                                           mb,
@@ -1078,6 +1094,8 @@ extern "C" rocsparse_status rocsparse_sgebsr2gebsr(rocsparse_handle          han
                                                    void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_template(handle,
                                                               dir,
                                                               mb,
@@ -1123,6 +1141,8 @@ extern "C" rocsparse_status rocsparse_dgebsr2gebsr(rocsparse_handle          han
                                                    void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_template(handle,
                                                               dir,
                                                               mb,
@@ -1168,6 +1188,8 @@ extern "C" rocsparse_status rocsparse_cgebsr2gebsr(rocsparse_handle             
                                                    void*                          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_template(handle,
                                                               dir,
                                                               mb,
@@ -1213,6 +1235,8 @@ extern "C" rocsparse_status rocsparse_zgebsr2gebsr(rocsparse_handle             
                                                    void*                           temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gebsr2gebsr_template(handle,
                                                               dir,
                                                               mb,

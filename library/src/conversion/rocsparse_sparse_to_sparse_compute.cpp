@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -78,6 +78,8 @@ typedef rocsparse_status (*convert_type)(rocsparse_handle                       
 //
 FUNCTION_CONVERT(coo, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -111,6 +113,8 @@ FUNCTION_CONVERT(coo, coo_aos)
 //
 FUNCTION_CONVERT(coo, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -144,6 +148,8 @@ FUNCTION_CONVERT(coo, csr)
 //
 FUNCTION_CONVERT(coo, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -154,6 +160,8 @@ FUNCTION_CONVERT(coo, csc)
 //
 FUNCTION_CONVERT(coo, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -164,6 +172,8 @@ FUNCTION_CONVERT(coo, ell)
 //
 FUNCTION_CONVERT(coo, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -174,6 +184,8 @@ FUNCTION_CONVERT(coo, bsr)
 //
 FUNCTION_CONVERT(coo_aos, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -209,6 +221,8 @@ FUNCTION_CONVERT(coo_aos, coo)
 //
 FUNCTION_CONVERT(coo_aos, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -243,6 +257,8 @@ FUNCTION_CONVERT(coo_aos, csr)
 //
 FUNCTION_CONVERT(csr, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -278,6 +294,8 @@ FUNCTION_CONVERT(csr, coo_aos)
 //
 FUNCTION_CONVERT(csr, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -313,6 +331,7 @@ FUNCTION_CONVERT(csr, coo)
 //
 FUNCTION_CONVERT(csr, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     switch(stage_)
     {
@@ -347,6 +366,8 @@ FUNCTION_CONVERT(csr, csc)
 //
 FUNCTION_CONVERT(csr, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -391,6 +412,8 @@ FUNCTION_CONVERT(csr, ell)
 //
 FUNCTION_CONVERT(csr, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -427,6 +450,8 @@ FUNCTION_CONVERT(csr, bsr)
 //
 FUNCTION_CONVERT(csc, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -462,6 +487,8 @@ FUNCTION_CONVERT(csc, csr)
 //
 FUNCTION_CONVERT(ell, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -498,6 +525,8 @@ FUNCTION_CONVERT(ell, csr)
 //
 FUNCTION_CONVERT(bsr, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_analysis:
@@ -531,6 +560,8 @@ FUNCTION_CONVERT(bsr, csr)
 //
 FUNCTION_CONVERT(csc, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -541,6 +572,8 @@ FUNCTION_CONVERT(csc, coo_aos)
 //
 FUNCTION_CONVERT(coo_aos, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -548,6 +581,8 @@ FUNCTION_CONVERT(coo_aos, ell)
 
 FUNCTION_CONVERT(coo_aos, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -555,72 +590,95 @@ FUNCTION_CONVERT(coo_aos, bsr)
 
 FUNCTION_CONVERT(coo_aos, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(csc, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(csc, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(csc, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(ell, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(ell, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(ell, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(ell, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(bsr, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(bsr, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(bsr, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
 }
 FUNCTION_CONVERT(bsr, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sparse_to_csr_to_sparse(
         handle, descr_, source_, target_, stage_, buffer_size_, buffer_));
     return rocsparse_status_success;
@@ -631,6 +689,8 @@ FUNCTION_CONVERT(bsr, ell)
 //
 FUNCTION_CONVERT(coo, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -658,6 +718,8 @@ FUNCTION_CONVERT(coo, coo)
 
 FUNCTION_CONVERT(coo_aos, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -685,6 +747,8 @@ FUNCTION_CONVERT(coo_aos, coo_aos)
 
 FUNCTION_CONVERT(csr, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -713,6 +777,8 @@ FUNCTION_CONVERT(csr, csr)
 
 FUNCTION_CONVERT(csc, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -740,6 +806,8 @@ FUNCTION_CONVERT(csc, csc)
 
 FUNCTION_CONVERT(ell, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -771,6 +839,8 @@ FUNCTION_CONVERT(ell, ell)
 
 FUNCTION_CONVERT(bsr, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(stage_)
     {
     case _rocsparse_sparse_to_sparse_descr::stage_buffer_size_compute:
@@ -798,6 +868,8 @@ FUNCTION_CONVERT(bsr, bsr)
 
 FUNCTION_CONVERT(bell, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 
@@ -806,51 +878,75 @@ FUNCTION_CONVERT(bell, bell)
 //
 FUNCTION_CONVERT(coo, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(coo_aos, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(csr, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(csc, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(ell, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bsr, bell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 
 FUNCTION_CONVERT(bell, coo)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bell, coo_aos)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bell, csr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bell, csc)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bell, ell)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 FUNCTION_CONVERT(bell, bsr)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 
@@ -916,6 +1012,7 @@ static convert_type s_conversion_table[7][7]{
 rocsparse_status rocsparse_mat_descr_are_same(const rocsparse_mat_descr source,
                                               const rocsparse_mat_descr target)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_type_mismatch, source->type != target->type);
 
@@ -944,6 +1041,8 @@ rocsparse_status rocsparse::internal_sparse_to_sparse(rocsparse_handle          
                                                       void*                            buffer,
                                                       bool compute_buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     //
     // Batched not yet supported.
     //

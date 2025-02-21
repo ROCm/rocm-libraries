@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,8 @@ namespace rocsparse
     static rocsparse_status
         extract_nnz_core(rocsparse_handle handle, const rocsparse_extract_descr descr, int64_t* nnz)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(
             nnz, descr->m_device_nnz, sizeof(int64_t), hipMemcpyDeviceToHost, handle->stream));
         return rocsparse_status_success;
@@ -45,6 +47,8 @@ namespace rocsparse
                                                     const rocsparse_extract_descr descr,
                                                     int64_t*                      nnz)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         return rocsparse_status_continue;
     }
 
@@ -55,6 +59,8 @@ namespace rocsparse
                                                  const rocsparse_extract_descr descr,
                                                  int64_t*                      nnz)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(1, descr);
         ROCSPARSE_CHECKARG_POINTER(2, nnz);
@@ -75,6 +81,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status extract_nnz_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const rocsparse_status status = rocsparse::extract_nnz_checkarg(p...);
         if(status != rocsparse_status_continue)
         {
@@ -95,6 +103,8 @@ extern "C" rocsparse_status
     rocsparse_extract_nnz(rocsparse_handle handle, rocsparse_extract_descr descr, int64_t* nnz)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::extract_nnz_impl(handle, descr, nnz));
     return rocsparse_status_success;
 }

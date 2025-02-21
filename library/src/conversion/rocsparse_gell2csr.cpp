@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,8 @@ rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                          void*                     csr_row_ptr,
                                          int64_t*                  csr_nnz)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     switch(ell_col_ind_indextype)
     {
     case rocsparse_indextype_i32:
@@ -162,6 +164,8 @@ rocsparse_status rocsparse::gell2csr(rocsparse_handle          handle,
                                      rocsparse_indextype       csr_col_ind_indextype,
                                      void*                     csr_col_ind)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(ell_val_datatype != csr_val_datatype)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
@@ -403,6 +407,8 @@ rocsparse_status rocsparse::spmat_ell2csr_nnz(rocsparse_handle            handle
                                               rocsparse_const_spmat_descr target,
                                               int64_t*                    out_csr_nnz)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gell2csr_nnz(handle,
                                                       source->rows,
                                                       source->cols,
@@ -423,6 +429,8 @@ rocsparse_status rocsparse::spmat_ell2csr_buffer_size(rocsparse_handle          
                                                       rocsparse_const_spmat_descr target,
                                                       size_t*                     buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     buffer_size[0] = 0;
     return rocsparse_status_success;
 }
@@ -433,6 +441,8 @@ rocsparse_status rocsparse::spmat_ell2csr(rocsparse_handle            handle,
                                           size_t                      buffer_size,
                                           void*                       buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gell2csr(handle,
                                                   source->rows,
                                                   source->cols,

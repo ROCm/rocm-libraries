@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +56,8 @@ namespace rocsparse
     template <typename... P>
     rocsparse_status ell2csr_template(P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const rocsparse_status status = rocsparse::ell2csr_quickreturn(p...);
         if(status != rocsparse_status_continue)
         {
@@ -82,6 +84,8 @@ namespace rocsparse
     template <typename... P>
     rocsparse_status ell2csr_impl(P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("ell2csr_impl", p...);
 
         const rocsparse_status status = rocsparse::ell2csr_checkarg(p...);
@@ -130,6 +134,8 @@ namespace rocsparse
     template <typename... P>
     rocsparse_status ell2csr_nnz_template(P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_ell2csr_nnz", p...);
         const rocsparse_status status = rocsparse::ell2csr_nnz_quickreturn(p...);
         if(status != rocsparse_status_continue)
@@ -144,6 +150,8 @@ namespace rocsparse
     template <typename... P>
     rocsparse_status ell2csr_nnz_impl(P... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_ell2csr_nnz", p...);
         const rocsparse_status status = rocsparse::ell2csr_nnz_checkarg(p...);
         if(status != rocsparse_status_continue)

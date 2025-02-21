@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,6 +51,8 @@ rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,
                                          rocsparse_index_base idx_base,
                                          void*                temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -181,6 +183,7 @@ rocsparse_status rocsparse::csr2csc_template(rocsparse_handle     handle,
                                              rocsparse_index_base idx_base,
                                              void*                temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Quick return if possible
     if(m == 0 || n == 0 || nnz == 0)
@@ -233,6 +236,7 @@ rocsparse_status rocsparse::csr2csc_impl(rocsparse_handle     handle, //0
                                          rocsparse_index_base idx_base, //11
                                          void*                temp_buffer) //12
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -399,6 +403,8 @@ rocsparse_status rocsparse::csr2csc_buffer_size_core(rocsparse_handle handle,
                                                      rocsparse_action copy_values,
                                                      size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
         handle, nnz, 0, 32, buffer_size)));
 
@@ -423,6 +429,8 @@ rocsparse_status rocsparse::csr2csc_buffer_size_template(rocsparse_handle handle
                                                          rocsparse_action copy_values,
                                                          size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Quick return if possible
     if(m == 0 || n == 0 || nnz == 0)
     {
@@ -445,6 +453,8 @@ rocsparse_status rocsparse::csr2csc_buffer_size_impl(rocsparse_handle handle,
                                                      rocsparse_action copy_values,
                                                      size_t*          buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
     // Logging
@@ -524,6 +534,8 @@ extern "C" rocsparse_status rocsparse_csr2csc_buffer_size(rocsparse_handle     h
                                                           size_t*              buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2csc_buffer_size_impl(
         handle, m, n, nnz, csr_row_ptr, csr_col_ind, copy_values, buffer_size));
     return rocsparse_status_success;
@@ -549,6 +561,7 @@ catch(...)
                                      void*                temp_buffer)   \
     try                                                                  \
     {                                                                    \
+        ROCSPARSE_ROUTINE_TRACE;                                         \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2csc_impl(handle,        \
                                                           m,             \
                                                           n,             \

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,8 @@ namespace rocsparse
                           rocsparse_int* __restrict__ csr_col_ind_C,
                           const T* threshold)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         constexpr rocsparse_int SEGMENTS_PER_BLOCK = BLOCK_SIZE / SEGMENT_SIZE;
         rocsparse_int           grid_size = (m + SEGMENTS_PER_BLOCK - 1) / SEGMENTS_PER_BLOCK;
 
@@ -131,6 +133,7 @@ rocsparse_status
                                                   const rocsparse_int*      csr_col_ind_C, //12
                                                   size_t*                   buffer_size) //13
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     rocsparse::log_trace(handle,
                          rocsparse::replaceX<T>("rocsparse_Xprune_csr2csr_buffer_size"),
@@ -203,6 +206,7 @@ rocsparse_status rocsparse::prune_csr2csr_nnz_template(rocsparse_handle         
                                                        rocsparse_int* nnz_total_dev_host_ptr, //11
                                                        void*          temp_buffer) //12
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -341,6 +345,8 @@ namespace rocsparse
                                             rocsparse_int*            csr_col_ind_C, //12
                                             void*                     temp_buffer) //13
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         // Logging
         rocsparse::log_trace(handle,
                              rocsparse::replaceX<T>("rocsparse_Xprune_csr2csr"),
@@ -621,6 +627,8 @@ extern "C" rocsparse_status
                                          size_t*                   buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_buffer_size_template(handle,
                                                                             m,
                                                                             n,
@@ -659,6 +667,8 @@ extern "C" rocsparse_status
                                          size_t*                   buffer_size)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_buffer_size_template(handle,
                                                                             m,
                                                                             n,
@@ -695,6 +705,8 @@ extern "C" rocsparse_status rocsparse_sprune_csr2csr_nnz(rocsparse_handle       
                                                          void*          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_nnz_template(handle,
                                                                     m,
                                                                     n,
@@ -730,6 +742,8 @@ extern "C" rocsparse_status rocsparse_dprune_csr2csr_nnz(rocsparse_handle       
                                                          void*          temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_nnz_template(handle,
                                                                     m,
                                                                     n,
@@ -766,6 +780,8 @@ extern "C" rocsparse_status rocsparse_sprune_csr2csr(rocsparse_handle          h
                                                      void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_template(handle,
                                                                 m,
                                                                 n,
@@ -803,6 +819,8 @@ extern "C" rocsparse_status rocsparse_dprune_csr2csr(rocsparse_handle          h
                                                      void*                     temp_buffer)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_csr2csr_template(handle,
                                                                 m,
                                                                 n,

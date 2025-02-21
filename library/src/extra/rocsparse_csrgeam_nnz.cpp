@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -207,6 +207,8 @@ rocsparse_status rocsparse::csrgeam_nnz_core(rocsparse_handle          handle,
                                              rocsparse_int*            csr_row_ptr_C,
                                              rocsparse_int*            nnz_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     // Stream
     hipStream_t stream = handle->stream;
 
@@ -329,6 +331,7 @@ rocsparse_status rocsparse::csrgeam_nnz_quickreturn(rocsparse_handle          ha
                                                     rocsparse_int*            csr_row_ptr_C,
                                                     rocsparse_int*            nnz_C)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Quick return if possible
     if(m == 0 || n == 0 || (nnz_A == 0 && nnz_B == 0))
@@ -373,6 +376,8 @@ namespace rocsparse
                                                  rocsparse_int*            csr_row_ptr_C, //12
                                                  rocsparse_int*            nnz_C) //13
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_POINTER(3, descr_A);
         ROCSPARSE_CHECKARG_POINTER(7, descr_B);
@@ -444,6 +449,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csrgeam_nnz_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_csrgeam_nnz", p...);
 
         const rocsparse_status status = rocsparse::csrgeam_nnz_checkarg(p...);
@@ -474,6 +481,7 @@ extern "C" rocsparse_status rocsparse_csrgeam_nnz(rocsparse_handle          hand
                                                   rocsparse_int*            nnz_C)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_nnz_impl(handle,
                                                           m,

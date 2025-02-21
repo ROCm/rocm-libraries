@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,8 @@ rocsparse_status rocsparse::csxsldu_buffer_size_template(rocsparse_handle     ha
                                                          rocsparse_direction  udir_,
                                                          size_t*              buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     if(ldir_ != dir_ && udir_ != dir_)
     {
         //
@@ -100,6 +102,7 @@ INSTANTIATE(rocsparse_double_complex);
                                      size_t*              buffer_size_)                   \
     try                                                                                   \
     {                                                                                     \
+        ROCSPARSE_ROUTINE_TRACE;                                                          \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csxsldu_buffer_size_template(handle_,        \
                                                                           dir_,           \
                                                                           m_,             \

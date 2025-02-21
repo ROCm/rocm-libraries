@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -65,6 +65,8 @@ namespace rocsparse
                                          const rocsparse_mat_info  info_C,
                                          void*                     temp_buffer)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         const bool mul = info_C->csrgemm_info->mul;
         const bool add = info_C->csrgemm_info->add;
 
@@ -186,6 +188,8 @@ rocsparse_status rocsparse::csrgemm_template(rocsparse_handle          handle,
                                              const rocsparse_mat_info  info_C,
                                              void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const bool mul = info_C->csrgemm_info->mul;
     const bool add = info_C->csrgemm_info->add;
 
@@ -308,6 +312,8 @@ namespace rocsparse
                                              const rocsparse_mat_info  info_C, //27
                                              void*                     temp_buffer) //28
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
         ROCSPARSE_CHECKARG_ENUM(1, trans_A);
         ROCSPARSE_CHECKARG_ENUM(2, trans_B);
@@ -671,6 +677,8 @@ namespace rocsparse
     template <typename... P>
     static rocsparse_status csrgemm_impl(P&&... p)
     {
+        ROCSPARSE_ROUTINE_TRACE;
+
         rocsparse::log_trace("rocsparse_Xcsrgemm", p...);
         const rocsparse_status status = rocsparse::csrgemm_checkarg(p...);
         if(status != rocsparse_status_continue)
@@ -716,6 +724,7 @@ namespace rocsparse
                                      void*                     temp_buffer)   \
     try                                                                       \
     {                                                                         \
+        ROCSPARSE_ROUTINE_TRACE;                                              \
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_impl(handle,             \
                                                           trans_A,            \
                                                           trans_B,            \

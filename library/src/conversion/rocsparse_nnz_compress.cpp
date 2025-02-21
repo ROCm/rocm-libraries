@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,7 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
                                                   rocsparse_int*            nnz_C, //6
                                                   T                         tol) //7
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Logging
     rocsparse::log_trace(handle,
@@ -409,6 +410,8 @@ extern "C" rocsparse_status rocsparse_snnz_compress(rocsparse_handle          ha
                                                     float                     tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
@@ -428,6 +431,8 @@ extern "C" rocsparse_status rocsparse_dnnz_compress(rocsparse_handle          ha
                                                     double                    tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
@@ -447,6 +452,8 @@ extern "C" rocsparse_status rocsparse_cnnz_compress(rocsparse_handle            
                                                     rocsparse_float_complex        tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
@@ -466,6 +473,8 @@ extern "C" rocsparse_status rocsparse_znnz_compress(rocsparse_handle            
                                                     rocsparse_double_complex        tol)
 try
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;

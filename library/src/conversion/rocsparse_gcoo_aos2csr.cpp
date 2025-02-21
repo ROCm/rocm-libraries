@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,8 @@ rocsparse_status rocsparse::gcoo_aos2csr(rocsparse_handle     handle,
                                          size_t               buffer_size,
                                          void*                buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     //
     // Convert array of column.
     //
@@ -88,6 +90,8 @@ rocsparse_status rocsparse::gcoo_aos2csr_buffer_size(rocsparse_handle     handle
                                                      rocsparse_indextype  target_col_type,
                                                      size_t*              buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     buffer_size_[0]
         = ((rocsparse::indextype_sizeof(target_row_type) * (nnz + 1) - 1) / 256 + 1) * 256;
     return rocsparse_status_success;
@@ -98,6 +102,8 @@ rocsparse_status rocsparse::spmat_coo_aos2csr_buffer_size(rocsparse_handle      
                                                           rocsparse_spmat_descr       target_,
                                                           size_t*                     buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo_aos2csr_buffer_size(handle,
                                                                   source_->rows,
                                                                   source_->nnz,
@@ -117,6 +123,8 @@ rocsparse_status rocsparse::spmat_coo_aos2csr(rocsparse_handle            handle
                                               size_t                      buffer_size_,
                                               void*                       buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcoo_aos2csr(handle,
                                                       source_->rows,
                                                       source_->nnz,

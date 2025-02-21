@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@ rocsparse_status rocsparse::gcsr2csc_buffer_size(rocsparse_handle    handle,
                                                  rocsparse_action    copy_values,
                                                  size_t*             buffer_size)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
 #define CALL_TEMPLATE(PTRTYPE, INDTYPE)                                                          \
     PTRTYPE local_nnz;                                                                           \
@@ -116,6 +117,7 @@ rocsparse_status rocsparse::gcsr2csc(rocsparse_handle     handle,
                                      rocsparse_index_base idx_base,
                                      void*                temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
 #define CALL_TEMPLATE(DATATYPE, PTRTYPE, INDTYPE)                                              \
     PTRTYPE local_nnz;                                                                         \
@@ -232,6 +234,8 @@ rocsparse_status rocsparse::spmat_csr2csc_buffer_size(rocsparse_handle          
                                                       rocsparse_spmat_descr       target_,
                                                       size_t*                     buffer_size_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2csc_buffer_size(
         handle,
         source_->rows,
@@ -257,6 +261,8 @@ rocsparse_status rocsparse::spmat_csr2csc(rocsparse_handle            handle,
                                           size_t                      buffer_size_,
                                           void*                       buffer_)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
                               source_->row_type != target_->col_type);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,

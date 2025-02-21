@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1017,6 +1017,7 @@ namespace rocsparse
                                                             bool                 mul,
                                                             bool                 add)
     {
+        ROCSPARSE_ROUTINE_TRACE;
         return rocsparse_status_internal_error;
     }
 
@@ -1059,6 +1060,7 @@ namespace rocsparse
                                                             bool                 mul,
                                                             bool                 add)
     {
+        ROCSPARSE_ROUTINE_TRACE;
 
 #define CSRGEMM_DIM 1024
 #define CSRGEMM_SUB 64
@@ -1136,6 +1138,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
                                                           const rocsparse_mat_info  info_C,
                                                           const void*               temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     const J*    d_group_offset = (J*)temp_buffer;
     const J*    d_perm         = nullptr;

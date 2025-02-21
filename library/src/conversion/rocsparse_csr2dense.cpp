@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -70,6 +70,7 @@ extern "C" {
     {                                                                                        \
         try                                                                                  \
         {                                                                                    \
+            ROCSPARSE_ROUTINE_TRACE;                                                         \
             RETURN_IF_ROCSPARSE_ERROR(                                                       \
                 rocsparse::csx2dense_impl<rocsparse_direction_row>(handle,                   \
                                                                    m,                        \

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +25,13 @@
 #include "rocsparse_extract_alg_default.hpp"
 #include "utility.h"
 
-//
-//
-//
 extern "C" rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    descr,
                                                            rocsparse_const_spmat_descr source,
                                                            rocsparse_spmat_descr       target,
                                                            rocsparse_extract_alg       alg)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     ROCSPARSE_CHECKARG_POINTER(1, source);
     ROCSPARSE_CHECKARG_POINTER(2, target);

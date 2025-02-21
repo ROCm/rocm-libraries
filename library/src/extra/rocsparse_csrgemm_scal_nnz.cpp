@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -43,6 +43,7 @@ rocsparse_status rocsparse::csrgemm_scal_nnz_quickreturn(rocsparse_handle       
                                                          const rocsparse_mat_info  info_C,
                                                          void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
 
     // Quick return if possible
     if(m == 0 || n == 0)
@@ -100,6 +101,8 @@ rocsparse_status rocsparse::csrgemm_scal_nnz_core(rocsparse_handle          hand
                                                   const rocsparse_mat_info  info_C,
                                                   void*                     temp_buffer)
 {
+    ROCSPARSE_ROUTINE_TRACE;
+
     const bool mul = info_C->csrgemm_info->mul;
     const bool add = info_C->csrgemm_info->add;
     if(mul == false && add == true)
