@@ -454,10 +454,10 @@ rocblas_status rocsolver_stedcj_template(rocblas_handle handle,
                                 eps, ssfmin, ssfmax);
 
         // c. find merged eigen vectors
-        ROCSOLVER_LAUNCH_KERNEL((stedc_mergeVectors_kernel<rocsolver_stedc_mode_jacobi, STEDCJ_EXTERNAL_GEMM, S>),
-                                dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count), dim3(STEDC_BDIM),
-                                lmemsize3, stream, k, n, D, strideD, E, strideE, tempvect, 0, ldt,
-                                strideT, tmpz, tempgemm, splits_map);
+        ROCSOLVER_LAUNCH_KERNEL(
+            (stedc_mergeVectors_kernel<rocsolver_stedc_mode_jacobi, STEDCJ_EXTERNAL_GEMM, S>),
+            dim3(numgrps3, STEDC_NUM_SPLIT_BLKS, batch_count), dim3(STEDC_BDIM), lmemsize3, stream,
+            k, n, D, strideD, E, strideE, tempvect, 0, ldt, strideT, tmpz, tempgemm, splits_map);
 
         // c. update level
         ROCSOLVER_LAUNCH_KERNEL((stedc_mergeUpdate_kernel<rocsolver_stedc_mode_jacobi, S>),
