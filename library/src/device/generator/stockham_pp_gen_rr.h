@@ -41,7 +41,6 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
     Variable     stride_lds_pp{"stride_lds_pp", "size_t"};
     Variable     offset_lds_pp{"offset_lds_pp", "size_t"};
 
-    // TODO: this should be __restrict__
     Variable twiddles_pp{"twiddles_pp", "const scalar_type", true, true};
 
     StatementList calculate_offsets() override

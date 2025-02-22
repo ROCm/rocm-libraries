@@ -109,7 +109,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
     if(scheme == CS_KERNEL_2D_SINGLE)
         kernel_name += "x" + std::to_string(specs2d.threads_per_transform);
 
-    if(specs.half_lds)
+    if(specs.half_lds && ppType == PPT_NONE)
         kernel_name += "_halfLds";
 
     if(specs.static_dim)
