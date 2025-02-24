@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,14 +41,6 @@ namespace rocsparse
         {
             return static_cast<T>(0);
         }
-        __forceinline__ __device__ T get(bool fetch_value) const
-        {
-            return (fetch_value) ? value : *pointer;
-        }
-        __forceinline__ __device__ T get_if(bool fetch_value, bool condition) const
-        {
-            return (condition) ? this->get(fetch_value) : zero();
-        }
     };
 
     template <typename T>
@@ -79,7 +71,9 @@ namespace rocsparse
 #define ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(TYPE_, NAME_) \
     rocsparse::const_host_device_scalar<TYPE_> NAME_##_union
 
-#define ROCSPARSE_DEVICE_HOST_SCALAR_GET(NAME_) const auto NAME_ = NAME_##_union.get(is_host_mode)
+#define ROCSPARSE_DEVICE_HOST_SCALAR_GET(NAME_) \
+    const auto NAME_ = (is_host_mode) ? NAME_##_union.value : *NAME_##_union.pointer
 
-#define ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(COND_, NAME_) \
-    const auto NAME_ = NAME_##_union.get_if(is_host_mode, (COND_))
+#define ROCSPARSE_DEVICE_HOST_SCALAR_GET_IF(COND_, NAME_)                                        \
+    const auto NAME_ = (COND_) ? ((is_host_mode) ? NAME_##_union.value : *NAME_##_union.pointer) \
+                               : NAME_##_union.zero()
