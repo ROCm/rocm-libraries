@@ -405,8 +405,11 @@ rocsparse_status rocsparse::csr2csc_buffer_size_core(rocsparse_handle handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    uint32_t startbit = 0;
+    uint32_t endbit   = rocsparse::clz(n);
+
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, J>(
-        handle, nnz, 0, 32, buffer_size)));
+        handle, nnz, startbit, endbit, buffer_size)));
 
     *buffer_size = ((*buffer_size - 1) / 256 + 1) * 256;
 

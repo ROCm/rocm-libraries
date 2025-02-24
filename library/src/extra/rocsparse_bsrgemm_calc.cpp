@@ -105,6 +105,12 @@ namespace rocsparse
             add);
     }
 
+    template <typename J, typename T, uint32_t HASHSIZE>
+    constexpr uint32_t bsrgemm_fill_block_per_row_2x2_shared_memory_size()
+    {
+        return ((sizeof(J) + sizeof(T) * 4) * HASHSIZE);
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
@@ -516,6 +522,17 @@ namespace rocsparse
 
 #define BSRGEMM_BLOCKSIZE 256
 #define BSRGEMM_HASHSIZE 512
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
+                                                                   16,
+                                                                   BSRGEMM_HASHSIZE,
+                                                                   BSRGEMM_FLL_HASH,
+                                                                   I,
+                                                                   J,
+                                                                   T>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()));
+
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::bsrgemm_fill_block_per_row_2x2<BSRGEMM_BLOCKSIZE,
                                                        16,
@@ -523,7 +540,7 @@ namespace rocsparse
                                                        BSRGEMM_FLL_HASH>),
             dim3(group_size),
             dim3(BSRGEMM_BLOCKSIZE),
-            0,
+            (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
             handle->stream,
             dir,
             group_size,
@@ -757,7 +774,7 @@ namespace rocsparse
                                                            BSRGEMM_FLL_HASH>),
                 dim3(group_size[3]),
                 dim3(BSRGEMM_BLOCKSIZE),
-                0,
+                (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                 stream,
                 dir,
                 group_size[3],
@@ -801,7 +818,7 @@ namespace rocsparse
                                                            BSRGEMM_FLL_HASH>),
                 dim3(group_size[4]),
                 dim3(BSRGEMM_BLOCKSIZE),
-                0,
+                (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                 stream,
                 dir,
                 group_size[4],
@@ -845,7 +862,7 @@ namespace rocsparse
                                                            BSRGEMM_FLL_HASH>),
                 dim3(group_size[5]),
                 dim3(BSRGEMM_BLOCKSIZE),
-                0,
+                (bsrgemm_fill_block_per_row_2x2_shared_memory_size<J, T, BSRGEMM_HASHSIZE>()),
                 stream,
                 dir,
                 group_size[5],
@@ -2133,12 +2150,15 @@ rocsparse_status rocsparse::bsrgemm_calc_template_dispatch(rocsparse_handle    h
         rocsparse::primitives::double_buffer<int> d_keys(tmp_groups, tmp_keys);
         rocsparse::primitives::double_buffer<J>   d_vals(tmp_perm, tmp_vals);
 
+        uint32_t startbit = 0;
+        uint32_t endbit   = rocsparse::clz(BSRGEMM_MAXGROUPS);
+
         // Sort pairs (by groups)
         rocprim_buffer = reinterpret_cast<void*>(buffer);
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int, J>(
-            handle, mb, 0, 3, &rocprim_size)));
+            handle, mb, startbit, endbit, &rocprim_size)));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
-            handle, d_keys, d_vals, mb, 0, 3, rocprim_size, rocprim_buffer));
+            handle, d_keys, d_vals, mb, startbit, endbit, rocprim_size, rocprim_buffer));
 
         d_perm = d_vals.current();
 

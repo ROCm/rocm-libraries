@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -517,8 +517,9 @@ namespace rocsparse
         int wid = hipThreadIdx_x / WFSIZE;
 
         // Hash table in shared memory
-        __shared__ J table[HASHSIZE];
-        __shared__ T data[4 * HASHSIZE];
+        extern __shared__ char shared_memory[];
+        J*                     table = (J*)shared_memory;
+        T*                     data  = (T*)(shared_memory + sizeof(J) * HASHSIZE);
 
         // Initialize hash table
         for(uint32_t i = hipThreadIdx_x; i < HASHSIZE; i += BLOCKSIZE)

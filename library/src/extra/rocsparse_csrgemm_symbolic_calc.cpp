@@ -24,271 +24,18 @@
 
 #include "rocsparse_csrgemm_symbolic_calc.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "control.h"
+
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
+
+#include "control.h"
 #include "utility.h"
 
-#include "common.h"
+#include "csrgemm_symbolic_device.h"
 #include "rocsparse_primitives.h"
 
 namespace rocsparse
 {
-    // Compute column entries and accumulate values, where each row is processed by a single
-    // block. Splitting row into several chunks such that we can use shared memory to store
-    // whether a column index is populated or not. Each row has at least 4097 non-zero
-    // entries to compute.
-    template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t CHUNKSIZE, typename I, typename J>
-    ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_block_per_row_multipass_device(J n,
-                                                             const J* __restrict__ offset_,
-                                                             const J* __restrict__ perm,
-                                                             const I* __restrict__ csr_row_ptr_A,
-                                                             const J* __restrict__ csr_col_ind_A,
-                                                             const I* __restrict__ csr_row_ptr_B,
-                                                             const J* __restrict__ csr_col_ind_B,
-                                                             const I* __restrict__ csr_row_ptr_D,
-                                                             const J* __restrict__ csr_col_ind_D,
-                                                             const I* __restrict__ csr_row_ptr_C,
-                                                             J* __restrict__ csr_col_ind_C,
-                                                             I* __restrict__ workspace_B,
-                                                             rocsparse_index_base idx_base_A,
-                                                             rocsparse_index_base idx_base_B,
-                                                             rocsparse_index_base idx_base_C,
-                                                             rocsparse_index_base idx_base_D,
-                                                             bool                 mul,
-                                                             bool                 add)
-    {
-        // Lane id
-        int lid = hipThreadIdx_x & (WFSIZE - 1);
-        // Wavefront id
-        int wid = hipThreadIdx_x / WFSIZE;
-
-        // Each block processes a row (apply permutation)
-        J row = perm[hipBlockIdx_x + *offset_];
-
-        // Row entry marker and value accumulator
-        __shared__ bool table[CHUNKSIZE];
-        __shared__ int  data[CHUNKSIZE];
-
-        // Shared memory to determine the minimum of all column indices of B that exceed the
-        // current chunk
-        __shared__ J next_chunk;
-
-        // Begin of the current row chunk (this is the column index of the current row)
-        J chunk_begin = 0;
-        J chunk_end   = CHUNKSIZE;
-
-        // Get row boundaries of the current row in A
-        I row_begin_A = (mul == true) ? csr_row_ptr_A[row] - idx_base_A : 0;
-        I row_end_A   = (mul == true) ? csr_row_ptr_A[row + 1] - idx_base_A : 0;
-
-        // Entry point into columns of C
-        I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
-
-        // Loop over the row chunks until the end of the row has been reached (which is
-        // the number of total columns)
-        while(chunk_begin < n)
-        {
-            // Initialize row nnz table and accumulator
-            for(uint32_t i = hipThreadIdx_x; i < CHUNKSIZE; i += BLOCKSIZE)
-            {
-                table[i] = 0;
-            }
-
-            // Initialize next chunk column index
-            if(hipThreadIdx_x == 0)
-            {
-                next_chunk = n;
-            }
-
-            // Wait for all threads to finish initialization
-            __syncthreads();
-
-            // Initialize the beginning of the next chunk
-            J min_col = n;
-
-            // alpha * A * B part
-            if(mul == true)
-            {
-                // Loop over columns of A in current row
-                for(I j = row_begin_A + wid; j < row_end_A; j += BLOCKSIZE / WFSIZE)
-                {
-                    // Column of A in current row
-                    J col_A = csr_col_ind_A[j] - idx_base_A;
-
-                    // Loop over columns of B in row col_A
-                    I row_begin_B
-                        = (chunk_begin == 0) ? csr_row_ptr_B[col_A] - idx_base_B : workspace_B[j];
-                    I row_end_B = csr_row_ptr_B[col_A + 1] - idx_base_B;
-
-                    // Keep track of the first k where the column index of B is exceeding
-                    // the current chunks end point
-                    I next_k = row_begin_B + lid;
-
-                    // Loop over columns of B in row col_A
-                    for(I k = next_k; k < row_end_B; k += WFSIZE)
-                    {
-                        // Column of B in row col_A
-                        J col_B = csr_col_ind_B[k] - idx_base_B;
-
-                        if(col_B >= chunk_begin && col_B < chunk_end)
-                        {
-                            // Mark nnz table if entry at col_B
-                            table[col_B - chunk_begin] = 1;
-                        }
-                        else if(col_B >= chunk_end)
-                        {
-                            // If column index exceeds chunks end point, store k as starting
-                            // point of the columns of B for the next pass
-                            next_k = k;
-
-                            // Store the first column index of B that exceeds the current chunk
-                            min_col = rocsparse::min(min_col, col_B);
-                            break;
-                        }
-                    }
-
-                    // Obtain the minimum of all k that exceed the current chunks end point
-                    rocsparse::wfreduce_min<WFSIZE>(&next_k);
-
-                    // Store the minimum globally for the next chunk
-                    if(lid == WFSIZE - 1)
-                    {
-                        workspace_B[j] = next_k;
-                    }
-                }
-            }
-
-            // beta * D part
-            if(add == true)
-            {
-                // Get row boundaries of the current row in D
-                I row_begin_D = csr_row_ptr_D[row] - idx_base_D;
-                I row_end_D   = csr_row_ptr_D[row + 1] - idx_base_D;
-
-                // Loop over columns of D in current row
-                for(I j = row_begin_D + hipThreadIdx_x; j < row_end_D; j += BLOCKSIZE)
-                {
-                    // Column of D in row col_A
-                    J col_D = csr_col_ind_D[j] - idx_base_D;
-
-                    if(col_D >= chunk_begin && col_D < chunk_end)
-                    {
-                        // Mark nnz table if entry at col_D
-                        table[col_D - chunk_begin] = 1;
-
-                        // Atomically accumulate the entry of D
-                        // rocsparse::atomic_add(&data[col_D - chunk_begin], beta * csr_val_D[j]);
-                    }
-                    else if(col_D >= chunk_end)
-                    {
-                        // Store the first column index of D that exceeds the current chunk
-                        min_col = rocsparse::min(min_col, col_D);
-                        break;
-                    }
-
-                    // Performance can potentially improved by adding another temporary
-                    // workspace of dimension sizeof(J) * nnz, which is significant!
-                }
-            }
-
-            // Gather wavefront-wide minimum for the next chunks starting column index
-            rocsparse::wfreduce_min<WFSIZE>(&min_col);
-
-            // Last thread in each wavefront finds block-wide minimum atomically
-            if(lid == WFSIZE - 1)
-            {
-                // Atomically determine the new chunks beginning (minimum column index of B
-                // that is larger than the current chunks end point)
-                rocsparse::atomic_min(&next_chunk, min_col);
-            }
-
-            // Wait for all threads to finish
-            __syncthreads();
-
-            // We can re-use the shared memory to communicate the scan offsets of each
-            // wavefront
-            int* scan_offsets = reinterpret_cast<int*>(data);
-
-            // "Pseudo compress" the table array such that we can copy the values over into C
-            // In fact, we do an exclusive scan to obtain the index where each non-zero has
-            // to be copied to
-            for(uint32_t i = hipThreadIdx_x; i < CHUNKSIZE; i += BLOCKSIZE)
-            {
-                // Each thread loads its marker and value to know whether it has to process a
-                // non-zero entry or not
-                bool has_nnz = table[i];
-
-                // Each thread obtains a bit mask of all wavefront-wide non-zero entries
-                // to compute its wavefront-wide non-zero offset in C
-                uint64_t mask = __ballot(has_nnz == true);
-
-                // The number of bits set to 1 is the amount of wavefront-wide non-zeros
-                int nnz = __popcll(mask);
-
-                // Obtain the lane mask, where all bits lesser equal the lane id are set to 1
-                // e.g. for lane id 7, lanemask_le = 0b11111111
-                // HIP implements only __lanemask_lt() unfortunately ...
-                uint64_t lanemask_le
-                    = UINT64_MAX >> (sizeof(uint64_t) * CHAR_BIT - (__lane_id() + 1));
-
-                // Compute the intra wavefront offset of the lane id by bitwise AND with the lane mask
-                int offset = __popcll(lanemask_le & mask);
-
-                // Need to sync here to make sure reading from data array has finished
-                __syncthreads();
-
-                // Each wavefront writes its offset / nnz into shared memory so we can compute the
-                // scan offset
-                scan_offsets[hipThreadIdx_x / warpSize] = nnz;
-
-                // Wait for all wavefronts to finish writing
-                __syncthreads();
-
-                // Each thread accumulates the offset of all previous wavefronts to obtain its
-                // offset into C
-                for(uint32_t j = 1; j < BLOCKSIZE / warpSize; ++j)
-                {
-                    if(hipThreadIdx_x >= j * warpSize)
-                    {
-                        offset += scan_offsets[j - 1];
-                    }
-                }
-
-                // Offset into C depends on all previously added non-zeros and need to be shifted by
-                // 1 (zero-based indexing)
-                I idx = row_begin_C + offset - 1;
-
-                // Only threads with a non-zero value write to C
-                if(has_nnz)
-                {
-                    csr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
-                }
-
-                // Last thread in block writes the block-wide offset into C such that all subsequent
-                // entries are shifted by this offset
-                if(hipThreadIdx_x == BLOCKSIZE - 1)
-                {
-                    scan_offsets[BLOCKSIZE / warpSize - 1] = offset;
-                }
-
-                // Wait for last thread in block to finish writing
-                __syncthreads();
-
-                // Each thread reads the block-wide offset and adds it to its local offset into C
-                row_begin_C += scan_offsets[BLOCKSIZE / warpSize - 1];
-            }
-
-            // Each thread loads the new chunk beginning and end point
-            chunk_begin = next_chunk;
-            chunk_end   = chunk_begin + CHUNKSIZE;
-
-            // Wait for all threads to finish load from shared memory
-            __syncthreads();
-        }
-    }
-
     template <uint32_t BLOCKSIZE, uint32_t WFSIZE, uint32_t CHUNKSIZE, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void csrgemm_symbolic_fill_block_per_row_multipass(J n,
@@ -330,397 +77,6 @@ namespace rocsparse
                                                                                    idx_base_D,
                                                                                    mul,
                                                                                    add);
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_DEVICE_ILF void csrgemm_symbolic_group_reduce(int tid, I* __restrict__ data)
-    {
-        // clang-format off
-    if(BLOCKSIZE > 512 && tid < 512) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 512) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE > 256 && tid < 256) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 256) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE > 128 && tid < 128) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid + 128) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >  64 && tid <  64) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +  64) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >  32 && tid <  32) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +  32) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >  16 && tid <  16) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +  16) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >   8 && tid <   8) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +   8) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >   4 && tid <   4) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +   4) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >   2 && tid <   2) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +   2) * GROUPS + i]; __syncthreads();
-    if(BLOCKSIZE >   1 && tid <   1) for(uint32_t i = 0; i < GROUPS; ++i) data[tid * GROUPS + i] += data[(tid +   1) * GROUPS + i]; __syncthreads();
-        // clang-format on
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_group_reduce_part1(J m,
-                                             I* __restrict__ int_prod,
-                                             J* __restrict__ group_size)
-    {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        // Shared memory for block reduction
-        __shared__ J sdata[BLOCKSIZE * GROUPS];
-
-        // Initialize shared memory
-        for(uint32_t i = 0; i < GROUPS; ++i)
-        {
-            sdata[hipThreadIdx_x * GROUPS + i] = 0;
-        }
-
-        __threadfence_block();
-
-        // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
-        {
-            I nprod = int_prod[row];
-
-            // clang-format off
-             if(nprod <=    32) { ++sdata[hipThreadIdx_x * GROUPS + 0]; int_prod[row] = 0; }
-        else if(nprod <=    64) { ++sdata[hipThreadIdx_x * GROUPS + 1]; int_prod[row] = 1; }
-        else if(nprod <=   512) { ++sdata[hipThreadIdx_x * GROUPS + 2]; int_prod[row] = 2; }
-        else if(nprod <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 3]; int_prod[row] = 3; }
-        else if(nprod <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 4]; int_prod[row] = 4; }
-        else if(nprod <=  4096) { ++sdata[hipThreadIdx_x * GROUPS + 5]; int_prod[row] = 5; }
-        else if(nprod <=  8192) { ++sdata[hipThreadIdx_x * GROUPS + 6]; int_prod[row] = 6; }
-        else                    { ++sdata[hipThreadIdx_x * GROUPS + 7]; int_prod[row] = 7; }
-            // clang-format on
-        }
-
-        // Wait for all threads to finish
-        __syncthreads();
-
-        // Reduce block
-        csrgemm_symbolic_group_reduce<BLOCKSIZE, GROUPS>(hipThreadIdx_x, sdata);
-
-        // Write result
-        if(hipThreadIdx_x < GROUPS)
-        {
-            group_size[hipBlockIdx_x * GROUPS + hipThreadIdx_x] = sdata[hipThreadIdx_x];
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, bool EXCEEDS_SMEM, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_group_reduce_part2(J m,
-                                             const I* __restrict__ csr_row_ptr,
-                                             J* __restrict__ group_size,
-                                             int* __restrict__ workspace)
-    {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        // Shared memory for block reduction
-        __shared__ J sdata[BLOCKSIZE * GROUPS];
-
-        // Initialize shared memory
-        for(uint32_t i = 0; i < GROUPS; ++i)
-        {
-            sdata[hipThreadIdx_x * GROUPS + i] = 0;
-        }
-
-        __threadfence_block();
-
-        // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
-        {
-            I nnz = csr_row_ptr[row + 1] - csr_row_ptr[row];
-
-            // clang-format off
-             if(nnz <=    16) { ++sdata[hipThreadIdx_x * GROUPS + 0]; workspace[row] = 0; }
-        else if(nnz <=    32) { ++sdata[hipThreadIdx_x * GROUPS + 1]; workspace[row] = 1; }
-        else if(nnz <=   256) { ++sdata[hipThreadIdx_x * GROUPS + 2]; workspace[row] = 2; }
-        else if(nnz <=   512) { ++sdata[hipThreadIdx_x * GROUPS + 3]; workspace[row] = 3; }
-        else if(nnz <=  1024) { ++sdata[hipThreadIdx_x * GROUPS + 4]; workspace[row] = 4; }
-        else if(nnz <=  2048) { ++sdata[hipThreadIdx_x * GROUPS + 5]; workspace[row] = 5; }
-        else if(nnz <=  4096 && !EXCEEDS_SMEM) { ++sdata[hipThreadIdx_x * GROUPS + 6]; workspace[row] = 6; }
-        else                  { ++sdata[hipThreadIdx_x * GROUPS + 7]; workspace[row] = 7; }
-            // clang-format on
-        }
-
-        // Wait for all threads to finish
-        __syncthreads();
-
-        // Reduce block
-        csrgemm_symbolic_group_reduce<BLOCKSIZE, GROUPS>(hipThreadIdx_x, sdata);
-
-        // Write result
-        if(hipThreadIdx_x < GROUPS)
-        {
-            group_size[hipBlockIdx_x * GROUPS + hipThreadIdx_x] = sdata[hipThreadIdx_x];
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, uint32_t GROUPS, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_group_reduce_part3(I* __restrict__ group_size)
-    {
-        // Shared memory for block reduction
-        __shared__ I sdata[BLOCKSIZE * GROUPS];
-
-        // Copy global data to shared memory
-        for(uint32_t i = hipThreadIdx_x; i < BLOCKSIZE * GROUPS; i += BLOCKSIZE)
-        {
-            sdata[i] = group_size[i];
-        }
-
-        // Wait for all threads to finish
-        __syncthreads();
-
-        // Reduce block
-        csrgemm_symbolic_group_reduce<BLOCKSIZE, GROUPS>(hipThreadIdx_x, sdata);
-
-        // Write result back to global memory
-        if(hipThreadIdx_x < GROUPS)
-        {
-            group_size[hipThreadIdx_x] = sdata[hipThreadIdx_x];
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, typename I, typename J>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_max_row_nnz_part1(J m,
-                                            const I* __restrict__ csr_row_ptr,
-                                            J* __restrict__ workspace)
-    {
-        J row = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
-
-        // Initialize local maximum
-        J local_max = 0;
-
-        // Loop over rows
-        for(; row < m; row += hipGridDim_x * BLOCKSIZE)
-        {
-            // Determine local maximum
-            local_max = rocsparse::max(local_max, J(csr_row_ptr[row + 1] - csr_row_ptr[row]));
-        }
-
-        // Shared memory for block reduction
-        __shared__ J sdata[BLOCKSIZE];
-
-        // Write local maximum into shared memory
-        sdata[hipThreadIdx_x] = local_max;
-
-        // Wait for all threads to finish
-        __syncthreads();
-
-        // Reduce block
-        rocsparse::blockreduce_max<BLOCKSIZE>(hipThreadIdx_x, sdata);
-
-        // Write result
-        if(hipThreadIdx_x == 0)
-        {
-            workspace[hipBlockIdx_x] = sdata[0];
-        }
-    }
-
-    template <uint32_t BLOCKSIZE, typename I>
-    ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrgemm_symbolic_max_row_nnz_part2(I* __restrict__ workspace)
-    {
-        // Shared memory for block reduction
-        __shared__ I sdata[BLOCKSIZE];
-
-        // Initialize shared memory with workspace entry
-        sdata[hipThreadIdx_x] = workspace[hipThreadIdx_x];
-
-        // Wait for all threads to finish
-        __syncthreads();
-
-        // Reduce block
-        rocsparse::blockreduce_max<BLOCKSIZE>(hipThreadIdx_x, sdata);
-
-        // Write result
-        if(hipThreadIdx_x == 0)
-        {
-            workspace[0] = sdata[0];
-        }
-    }
-
-    // Hash operation to insert key into hash table
-    // Returns true if key has been added
-    template <uint32_t HASHVAL, uint32_t HASHSIZE, typename I>
-    ROCSPARSE_DEVICE_ILF bool insert_key(I key, I* __restrict__ table, I empty)
-    {
-        // Compute hash
-        I hash = (key * HASHVAL) & (HASHSIZE - 1);
-
-        // Loop until key has been inserted
-        while(true)
-        {
-            // Load table[hash] exactly once in case it gets set by another thread
-            const I temp = table[hash];
-
-            if(temp == key)
-            {
-                // Element already present
-                return false;
-            }
-            else if(temp == empty)
-            {
-                // If empty, add element with atomic
-                if(rocsparse::atomic_cas(&table[hash], empty, key) == empty)
-                {
-                    // Increment number of insertions
-                    return true;
-                }
-            }
-            else
-            {
-                // Linear probing, when hash is collided, try next entry
-                hash = (hash + 1) & (HASHSIZE - 1);
-            }
-        }
-
-        return false;
-    }
-
-    // Compute column entries and accumulate values, where each row is processed by a single wavefront
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t HASHSIZE,
-              uint32_t HASHVAL,
-              typename I,
-              typename J>
-    ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_wf_per_row_device(J m,
-                                                J nk,
-                                                const J* __restrict__ offset,
-                                                const J* __restrict__ perm,
-                                                const I* __restrict__ csr_row_ptr_A,
-                                                const J* __restrict__ csr_col_ind_A,
-                                                const I* __restrict__ csr_row_ptr_B,
-                                                const J* __restrict__ csr_col_ind_B,
-                                                const I* __restrict__ csr_row_ptr_D,
-                                                const J* __restrict__ csr_col_ind_D,
-                                                const I* __restrict__ csr_row_ptr_C,
-                                                J* __restrict__ csr_col_ind_C,
-                                                rocsparse_index_base idx_base_A,
-                                                rocsparse_index_base idx_base_B,
-                                                rocsparse_index_base idx_base_C,
-                                                rocsparse_index_base idx_base_D,
-                                                bool                 mul,
-                                                bool                 add)
-    {
-        // Lane id
-        int lid = hipThreadIdx_x & (WFSIZE - 1);
-        // Wavefront id
-        int wid = hipThreadIdx_x / WFSIZE;
-
-        // Each (sub)wavefront processes a row
-        J row = hipBlockIdx_x * BLOCKSIZE / WFSIZE + wid;
-
-        // Hash table in shared memory
-        __shared__ J stable[BLOCKSIZE / WFSIZE * HASHSIZE];
-
-        // Local hash table
-        J* table = &stable[wid * HASHSIZE];
-
-        // Initialize hash table
-        for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
-        {
-            table[i] = nk;
-        }
-
-        __threadfence_block();
-
-        // Bounds check
-        if(row >= m)
-        {
-            return;
-        }
-
-        //
-        // Apply permutation, if available
-        //
-        row = perm ? perm[row + *offset] : row;
-
-        //
-        // Build hash tables.
-        //
-
-        //
-        // alpha * A * B part
-        //
-        if(mul == true)
-        {
-            // Get row boundaries of the current row in A
-            const I row_begin_A = csr_row_ptr_A[row] - idx_base_A;
-            const I row_end_A   = csr_row_ptr_A[row + 1] - idx_base_A;
-
-            // Loop over columns of A in current row
-            for(I j = row_begin_A + lid; j < row_end_A; j += WFSIZE)
-            {
-                // Column of A in current row
-                const J col_A = csr_col_ind_A[j] - idx_base_A;
-
-                // Loop over columns of B in row col_A
-                const I row_begin_B = csr_row_ptr_B[col_A] - idx_base_B;
-                const I row_end_B   = csr_row_ptr_B[col_A + 1] - idx_base_B;
-
-                // Insert all columns of B into hash table
-                for(I k = row_begin_B; k < row_end_B; ++k)
-                {
-                    // Insert key into hash table
-                    insert_key<HASHVAL, HASHSIZE>(csr_col_ind_B[k] - idx_base_B, table, nk);
-                }
-            }
-        }
-
-        // beta * D part
-        if(add == true)
-        {
-            // Get row boundaries of the current row in D
-            I row_begin_D = csr_row_ptr_D[row] - idx_base_D;
-            I row_end_D   = csr_row_ptr_D[row + 1] - idx_base_D;
-
-            // Loop over columns of D in current row and insert all columns of D into hash table
-            for(I j = row_begin_D + lid; j < row_end_D; j += WFSIZE)
-            {
-                // Insert key pair into hash table
-                insert_key<HASHVAL, HASHSIZE>(csr_col_ind_D[j] - idx_base_D, table, nk);
-            }
-        }
-
-        __threadfence_block();
-
-        // Entry point of current row into C
-        I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
-
-        // Loop over hash table
-        for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
-        {
-            // Get column from hash table to fill it into C
-            J col_C = table[i];
-
-            // Skip hash table entry if not present
-            if(col_C >= nk)
-            {
-                continue;
-            }
-
-            // Initialize index into C
-            I idx_C = row_begin_C;
-
-            // Initialize index into hash table
-            uint32_t hash_idx = 0;
-
-            // Loop through hash table to find the (sorted) index into C for the
-            // current column index
-            // Checking the whole hash table is actually faster for these hash
-            // table sizes, compared to hash table compression
-            while(hash_idx < HASHSIZE)
-            {
-                // Increment index into C if column entry is greater than table entry
-                if(col_C > table[hash_idx])
-                {
-                    ++idx_C;
-                }
-
-                // Goto next hash table index
-                ++hash_idx;
-            }
-
-            // Write column and accumulated value to the obtained position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-        }
     }
 
     template <uint32_t BLOCKSIZE,
@@ -775,195 +131,10 @@ namespace rocsparse
             add);
     }
 
-    // Compute column entries and accumulate values, where each row is processed by a single block
-    template <uint32_t BLOCKSIZE,
-              uint32_t WFSIZE,
-              uint32_t HASHSIZE,
-              uint32_t HASHVAL,
-              typename I,
-              typename J>
-    ROCSPARSE_DEVICE_ILF void
-        csrgemm_symbolic_fill_block_per_row_device(J nk,
-                                                   const J* __restrict__ offset_,
-                                                   const J* __restrict__ perm,
-                                                   const I* __restrict__ csr_row_ptr_A,
-                                                   const J* __restrict__ csr_col_ind_A,
-                                                   const I* __restrict__ csr_row_ptr_B,
-                                                   const J* __restrict__ csr_col_ind_B,
-                                                   const I* __restrict__ csr_row_ptr_D,
-                                                   const J* __restrict__ csr_col_ind_D,
-                                                   const I* __restrict__ csr_row_ptr_C,
-                                                   J* __restrict__ csr_col_ind_C,
-                                                   rocsparse_index_base idx_base_A,
-                                                   rocsparse_index_base idx_base_B,
-                                                   rocsparse_index_base idx_base_C,
-                                                   rocsparse_index_base idx_base_D,
-                                                   bool                 mul,
-                                                   bool                 add)
+    template <uint32_t HASHSIZE, typename J>
+    constexpr uint32_t csrgemm_symbolic_fill_block_per_row_shared_memory_size()
     {
-        // Lane id
-        int lid = hipThreadIdx_x & (WFSIZE - 1);
-        // Wavefront id
-        int wid = hipThreadIdx_x / WFSIZE;
-
-        // Hash table in shared memory
-        __shared__ J table[HASHSIZE];
-
-        // Initialize hash table
-        for(uint32_t i = hipThreadIdx_x; i < HASHSIZE; i += BLOCKSIZE)
-        {
-            table[i] = nk;
-        }
-
-        // Wait for all threads to finish initialization
-        __syncthreads();
-
-        // Each block processes a row (apply permutation)
-        J row = perm[hipBlockIdx_x + *offset_];
-
-        // alpha * A * B part
-        if(mul == true)
-        {
-            // Get row boundaries of the current row in A
-            I row_begin_A = csr_row_ptr_A[row] - idx_base_A;
-            I row_end_A   = csr_row_ptr_A[row + 1] - idx_base_A;
-
-            // Loop over columns of A in current row
-            for(I j = row_begin_A + wid; j < row_end_A; j += BLOCKSIZE / WFSIZE)
-            {
-                // Column of A in current row
-                J col_A = csr_col_ind_A[j] - idx_base_A;
-
-                // Loop over columns of B in row col_A
-                I row_begin_B = csr_row_ptr_B[col_A] - idx_base_B;
-                I row_end_B   = csr_row_ptr_B[col_A + 1] - idx_base_B;
-
-                for(I k = row_begin_B + lid; k < row_end_B; k += WFSIZE)
-                {
-                    // Insert key value pair into hash table
-                    insert_key<HASHVAL, HASHSIZE>(csr_col_ind_B[k] - idx_base_B, table, nk);
-                }
-            }
-        }
-
-        // beta * D part
-        if(add == true)
-        {
-            // Get row boundaries of the current row in D
-            I row_begin_D = csr_row_ptr_D[row] - idx_base_D;
-            I row_end_D   = csr_row_ptr_D[row + 1] - idx_base_D;
-
-            // Loop over columns of D in current row and insert all columns of D into hash table
-            for(I j = row_begin_D + hipThreadIdx_x; j < row_end_D; j += BLOCKSIZE)
-            {
-                // Insert key value pair into hash table
-                insert_key<HASHVAL, HASHSIZE>(csr_col_ind_D[j] - idx_base_D, table, nk);
-            }
-        }
-
-        // Wait for hash operations to finish
-        __syncthreads();
-
-        // Compress hash table, such that valid entries come first
-        __shared__ J scan_offsets[BLOCKSIZE / warpSize + 1];
-
-        // Offset into hash table
-        J hash_offset = 0;
-
-        // Loop over the hash table and do the compression
-        for(uint32_t i = hipThreadIdx_x; i < HASHSIZE; i += BLOCKSIZE)
-        {
-            // Get column and value from hash table
-            J col_C = table[i];
-
-            // Boolean to store if thread owns a non-zero element
-            bool has_nnz = col_C < nk;
-
-            // Each thread obtains a bit mask of all wavefront-wide non-zero entries
-            // to compute its wavefront-wide non-zero offset
-            uint64_t mask = __ballot(has_nnz);
-
-            // The number of bits set to 1 is the amount of wavefront-wide non-zeros
-            int nnz = __popcll(mask);
-
-            // Obtain the lane mask, where all bits lesser equal the lane id are set to 1
-            // e.g. for lane id 7, lanemask_le = 0b11111111
-            // HIP implements only __lanemask_lt() unfortunately ...
-            uint64_t lanemask_le = UINT64_MAX >> (sizeof(uint64_t) * CHAR_BIT - (__lane_id() + 1));
-
-            // Compute the intra wavefront offset of the lane id by bitwise AND with the lane mask
-            int offset = __popcll(lanemask_le & mask);
-
-            // Need to sync here to make sure reading from data array has finished
-            __syncthreads();
-
-            // Each wavefront writes its offset / nnz into shared memory so we can compute the
-            // scan offset
-            scan_offsets[hipThreadIdx_x / warpSize] = nnz;
-
-            // Wait for all wavefronts to finish writing
-            __syncthreads();
-
-            // Each thread accumulates the offset of all previous wavefronts to obtain its offset
-            for(uint32_t j = 1; j < BLOCKSIZE / warpSize; ++j)
-            {
-                if(hipThreadIdx_x >= j * warpSize)
-                {
-                    offset += scan_offsets[j - 1];
-                }
-            }
-
-            // Offset depends on all previously added non-zeros and need to be shifted by
-            // 1 (zero-based indexing)
-            J idx = hash_offset + offset - 1;
-
-            // Only threads with a non-zero value write their values
-            if(has_nnz)
-            {
-                table[idx] = col_C;
-            }
-
-            // Last thread in block writes the block-wide offset such that all subsequent
-            // entries are shifted by this offset
-            if(hipThreadIdx_x == BLOCKSIZE - 1)
-            {
-                scan_offsets[BLOCKSIZE / warpSize - 1] = offset;
-            }
-
-            // Wait for last thread in block to finish writing
-            __syncthreads();
-
-            // Each thread reads the block-wide offset and adds it to its local offset
-            hash_offset += scan_offsets[BLOCKSIZE / warpSize - 1];
-        }
-
-        // Entry point into row of C
-        I row_begin_C = csr_row_ptr_C[row] - idx_base_C;
-        I row_end_C   = csr_row_ptr_C[row + 1] - idx_base_C;
-        J row_nnz     = row_end_C - row_begin_C;
-
-        // Loop over all valid entries in hash table
-        for(J i = hipThreadIdx_x; i < row_nnz; i += BLOCKSIZE)
-        {
-            J col_C = table[i];
-
-            // Index into C
-            I idx_C = row_begin_C;
-
-            // Loop through hash table to find the (sorted) index into C for the
-            // current column index
-            for(J j = 0; j < row_nnz; ++j)
-            {
-                // Increment index into C if column entry is greater than table entry
-                if(col_C > table[j])
-                {
-                    ++idx_C;
-                }
-            }
-
-            // Write column and accumulated value to the obtain position in C
-            csr_col_ind_C[idx_C] = col_C + idx_base_C;
-        }
+        return (sizeof(J) * HASHSIZE + sizeof(J) * (1024 / 32 + 1));
     }
 
     template <uint32_t BLOCKSIZE,
@@ -1010,67 +181,6 @@ namespace rocsparse
             mul,
             add);
     }
-
-    template <typename I, typename J>
-    static inline rocsparse_status csrgemm_launcher(rocsparse_handle     handle,
-                                                    J                    group_size,
-                                                    const J*             group_offset,
-                                                    const J*             perm,
-                                                    J                    m,
-                                                    J                    n,
-                                                    J                    k,
-                                                    const I*             csr_row_ptr_A,
-                                                    const J*             csr_col_ind_A,
-                                                    const I*             csr_row_ptr_B,
-                                                    const J*             csr_col_ind_B,
-                                                    const I*             csr_row_ptr_D,
-                                                    const J*             csr_col_ind_D,
-                                                    const I*             csr_row_ptr_C,
-                                                    J*                   csr_col_ind_C,
-                                                    rocsparse_index_base base_A,
-                                                    rocsparse_index_base base_B,
-                                                    rocsparse_index_base base_C,
-                                                    rocsparse_index_base base_D,
-                                                    bool                 mul,
-                                                    bool                 add)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-#define CSRGEMM_DIM 1024
-#define CSRGEMM_SUB 64
-#define CSRGEMM_HASHSIZE 4096
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
-                                                            CSRGEMM_SUB,
-                                                            CSRGEMM_HASHSIZE,
-                                                            CSRGEMM_FLL_HASH>),
-            dim3(group_size),
-            dim3(CSRGEMM_DIM),
-            0,
-            handle->stream,
-            rocsparse::max(k, n),
-            group_offset,
-            perm,
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            base_A,
-            base_B,
-            base_C,
-            base_D,
-            mul,
-            add);
-#undef CSRGEMM_HASHSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
-
-        ROCSPARSE_RETURN_STATUS(success);
-    }
 }
 
 template <typename I, typename J>
@@ -1083,10 +193,6 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
 
     // Stream
     hipStream_t stream = handle->stream;
-
-    // Flag for exceeding shared memory
-    constexpr bool exceeding_smem
-        = (std::is_same<I, int64_t>::value && std::is_same<J, int64_t>::value);
 
     // Temporary buffer
     char* buffer = reinterpret_cast<char*>(temp_buffer);
@@ -1150,9 +256,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
         // Determine number of rows per group
 #define CSRGEMM_DIM 256
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_symbolic_group_reduce_part2<CSRGEMM_DIM,
-                                                            CSRGEMM_MAXGROUPS,
-                                                            exceeding_smem>),
+            (rocsparse::csrgemm_symbolic_group_reduce_part2<CSRGEMM_DIM, CSRGEMM_MAXGROUPS>),
             dim3(CSRGEMM_DIM),
             dim3(CSRGEMM_DIM),
             0,
@@ -1160,7 +264,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
             m,
             csr_row_ptr_C,
             d_group_size,
-            tmp_groups);
+            tmp_groups,
+            handle->shared_mem_per_block_optin);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrgemm_symbolic_group_reduce_part3<CSRGEMM_DIM, CSRGEMM_MAXGROUPS>),
@@ -1170,6 +275,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
             stream,
             d_group_size);
 #undef CSRGEMM_DIM
+
         size_t rocprim_size;
         // Exclusive sum to obtain group offsets
         void* rocprim_buffer = reinterpret_cast<void*>(buffer);
@@ -1190,12 +296,15 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
         rocsparse::primitives::double_buffer<int> d_keys(tmp_groups, tmp_keys);
         rocsparse::primitives::double_buffer<J>   d_vals(tmp_perm, tmp_vals);
 
+        uint32_t startbit = 0;
+        uint32_t endbit   = rocsparse::clz(CSRGEMM_MAXGROUPS);
+
         // Sort pairs (by groups)
         rocprim_buffer = reinterpret_cast<void*>(buffer);
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int, J>(
-            handle, m, 0, 3, &rocprim_size)));
+            handle, m, startbit, endbit, &rocprim_size)));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
-            handle, d_keys, d_vals, m, 0, 3, rocprim_size, rocprim_buffer));
+            handle, d_keys, d_vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
 
         // Release tmp_groups buffer
         // buffer -= ((sizeof(int) * m - 1) / 256 + 1) * 256;
@@ -1285,14 +394,9 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     rocsparse_index_base base_D
         = info_C->csrgemm_info->add ? descr_D->base : rocsparse_index_base_zero;
 
-    // Flag for exceeding shared memory
-    constexpr bool exceeding_smem
-        = (std::is_same<I, int64_t>::value && std::is_same<J, int64_t>::value);
-
     // Group 0: 0 - 16 non-zeros per row
     if(h_group_size[0] > 0)
     {
-
 #define CSRGEMM_DIM 256
 #define CSRGEMM_SUB 8
 #define CSRGEMM_HASHSIZE 16
@@ -1380,7 +484,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                             CSRGEMM_FLL_HASH>),
             dim3(h_group_size[2]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[2],
@@ -1417,7 +521,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                             CSRGEMM_FLL_HASH>),
             dim3(h_group_size[3]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[3],
@@ -1454,7 +558,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                             CSRGEMM_FLL_HASH>),
             dim3(h_group_size[4]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[4],
@@ -1491,7 +595,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
                                                             CSRGEMM_FLL_HASH>),
             dim3(h_group_size[5]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[5],
@@ -1516,33 +620,185 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     }
 
     // Group 6: 2049 - 4096 non-zeros per row
-    if(h_group_size[6] > 0 && !exceeding_smem)
+    if(h_group_size[6] > 0)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_launcher(handle,
-                                                              h_group_size[6],
-                                                              &d_group_offset[6],
-                                                              d_perm,
-                                                              m,
-                                                              n,
-                                                              k,
-                                                              csr_row_ptr_A,
-                                                              csr_col_ind_A,
-                                                              csr_row_ptr_B,
-                                                              csr_col_ind_B,
-                                                              csr_row_ptr_D,
-                                                              csr_col_ind_D,
-                                                              csr_row_ptr_C,
-                                                              csr_col_ind_C,
-                                                              base_A,
-                                                              base_B,
-                                                              descr_C->base,
-                                                              base_D,
-                                                              info_C->csrgemm_info->mul,
-                                                              info_C->csrgemm_info->add));
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 4096
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                            CSRGEMM_SUB,
+                                                            CSRGEMM_HASHSIZE,
+                                                            CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[6]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[6],
+            d_perm,
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
     }
 
-    // Group 7: more than 4096 non-zeros per row
+    // Group 7: 4097 - 8192 non-zeros per row
     if(h_group_size[7] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 8192
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                                        CSRGEMM_SUB,
+                                                                        CSRGEMM_HASHSIZE,
+                                                                        CSRGEMM_FLL_HASH,
+                                                                        I,
+                                                                        J>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                            CSRGEMM_SUB,
+                                                            CSRGEMM_HASHSIZE,
+                                                            CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[7]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[7],
+            d_perm,
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 8: 8193 - 16384 non-zeros per row
+    if(h_group_size[8] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 16384
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                                        CSRGEMM_SUB,
+                                                                        CSRGEMM_HASHSIZE,
+                                                                        CSRGEMM_FLL_HASH,
+                                                                        I,
+                                                                        J>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                            CSRGEMM_SUB,
+                                                            CSRGEMM_HASHSIZE,
+                                                            CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[8]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[8],
+            d_perm,
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 9: 16385 - 32768 non-zeros per row
+    if(h_group_size[9] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 32768
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                                        CSRGEMM_SUB,
+                                                                        CSRGEMM_HASHSIZE,
+                                                                        CSRGEMM_FLL_HASH,
+                                                                        I,
+                                                                        J>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_symbolic_fill_block_per_row<CSRGEMM_DIM,
+                                                            CSRGEMM_SUB,
+                                                            CSRGEMM_HASHSIZE,
+                                                            CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[8]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_symbolic_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[8],
+            d_perm,
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 10: more than 65536 non-zeros per row or exceeding shared memory
+    if(h_group_size[10] > 0)
     {
         // Matrices B and D must be sorted in order to run this path
         if(descr_B->storage_mode == rocsparse_storage_mode_unsorted
@@ -1568,12 +824,12 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
             (rocsparse::csrgemm_symbolic_fill_block_per_row_multipass<CSRGEMM_DIM,
                                                                       CSRGEMM_SUB,
                                                                       CSRGEMM_CHUNKSIZE>),
-            dim3(h_group_size[7]),
+            dim3(h_group_size[10]),
             dim3(CSRGEMM_DIM),
             0,
             stream,
             n,
-            &d_group_offset[7],
+            &d_group_offset[10],
             d_perm,
             csr_row_ptr_A,
             csr_col_ind_A,

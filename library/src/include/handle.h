@@ -66,6 +66,8 @@ struct _rocsparse_handle
     hipDeviceProp_t properties;
     // device wavefront size
     int wavefront_size;
+    // shared memory per block opt-in
+    int shared_mem_per_block_optin;
     // asic revision
     int asic_rev;
     // stream ; default stream is system stream NULL

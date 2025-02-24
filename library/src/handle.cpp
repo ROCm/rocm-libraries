@@ -44,6 +44,9 @@ _rocsparse_handle::_rocsparse_handle()
     // Device wavefront size
     wavefront_size = properties.warpSize;
 
+    // Shared memory per block opt-in
+    shared_mem_per_block_optin = properties.sharedMemPerBlockOptin;
+
 #if HIP_VERSION >= 307
     // ASIC revision
     asic_rev = properties.asicRevision;

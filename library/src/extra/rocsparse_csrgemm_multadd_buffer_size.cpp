@@ -70,8 +70,11 @@ rocsparse_status rocsparse::csrgemm_multadd_buffer_size_core(rocsparse_handle   
         handle, static_cast<I>(0), m + 1, &rocprim_size)));
     rocprim_max = rocsparse::max(rocprim_max, rocprim_size);
 
-    RETURN_IF_ROCSPARSE_ERROR((
-        rocsparse::primitives::radix_sort_pairs_buffer_size<I, J>(handle, m, 0, 3, &rocprim_size)));
+    uint32_t startbit = 0;
+    uint32_t endbit   = rocsparse::clz(CSRGEMM_MAXGROUPS);
+
+    RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<I, J>(
+        handle, m, startbit, endbit, &rocprim_size)));
     rocprim_max = rocsparse::max(rocprim_max, rocprim_size);
 
     *buffer_size = ((rocprim_max - 1) / 256 + 1) * 256;

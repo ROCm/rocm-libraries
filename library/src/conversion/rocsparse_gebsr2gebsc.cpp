@@ -354,9 +354,12 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ARRAY(5, mb, bsr_row_ptr);
         ROCSPARSE_CHECKARG_ARRAY(6, nnzb, bsr_col_ind);
 
+        uint32_t startbit = 0;
+        uint32_t endbit   = rocsparse::clz(nb);
+
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::primitives::radix_sort_pairs_buffer_size<rocsparse_int, rocsparse_int>(
-                handle, nnzb, 0, 32, p_buffer_size)));
+                handle, nnzb, startbit, endbit, p_buffer_size)));
 
         *p_buffer_size = ((*p_buffer_size - 1) / 256 + 1) * 256;
 

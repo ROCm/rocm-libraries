@@ -26,7 +26,7 @@
 
 #include "handle.h"
 
-#define CSRGEMM_MAXGROUPS 8
+#define CSRGEMM_MAXGROUPS 11
 #define CSRGEMM_NNZ_HASH 79
 #define CSRGEMM_FLL_HASH 137
 

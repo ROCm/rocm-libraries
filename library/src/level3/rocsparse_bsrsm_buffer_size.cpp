@@ -158,10 +158,13 @@ rocsparse_status rocsparse::bsrsm_buffer_size_core(rocsparse_handle          han
     // int workspace2
     *buffer_size += ((sizeof(int) * mb - 1) / 256 + 1) * 256;
 
+    uint32_t startbit = 0;
+    uint32_t endbit   = rocsparse::clz(mb);
+
     size_t rocprim_size;
     RETURN_IF_ROCSPARSE_ERROR(
         (rocsparse::primitives::radix_sort_pairs_buffer_size<int, rocsparse_int>(
-            handle, mb, 0, 32, &rocprim_size)));
+            handle, mb, startbit, endbit, &rocprim_size)));
 
     // rocprim buffer
     *buffer_size += rocprim_size;
@@ -180,7 +183,7 @@ rocsparse_status rocsparse::bsrsm_buffer_size_core(rocsparse_handle          han
         // Determine rocprim buffer size
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::primitives::radix_sort_pairs_buffer_size<rocsparse_int, rocsparse_int>(
-                handle, nnzb, 0, 32, &transpose_size)));
+                handle, nnzb, startbit, endbit, &transpose_size)));
 
         // rocPRIM does not support in-place sorting, so we need an additional buffer
         transpose_size += ((sizeof(rocsparse_int) * nnzb - 1) / 256 + 1) * 256;

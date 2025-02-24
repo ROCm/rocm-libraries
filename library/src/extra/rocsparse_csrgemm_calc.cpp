@@ -98,6 +98,12 @@ namespace rocsparse
             add);
     }
 
+    template <uint32_t HASHSIZE, typename J, typename T>
+    constexpr uint32_t csrgemm_fill_block_per_row_shared_memory_size()
+    {
+        return ((sizeof(J) + sizeof(T)) * HASHSIZE + sizeof(J) * (1024 / 32 + 1));
+    }
+
     template <uint32_t BLOCKSIZE,
               uint32_t WFSIZE,
               uint32_t HASHSIZE,
@@ -221,135 +227,6 @@ namespace rocsparse
             mul,
             add);
     }
-
-    // Disable for rocsparse_double_complex, as well as double and rocsparse_float_complex
-    // if I == J == int64_t, as required size would exceed available memory
-    template <typename I,
-              typename J,
-              typename T,
-              typename std::enable_if<
-                  std::is_same<T, rocsparse_double_complex>::value
-                      || (std::is_same<T, double>::value && std::is_same<I, int64_t>::value
-                          && std::is_same<J, int64_t>::value)
-                      || (std::is_same<T, rocsparse_float_complex>::value
-                          && std::is_same<I, int64_t>::value && std::is_same<J, int64_t>::value),
-                  int>::type
-              = 0>
-    static inline rocsparse_status csrgemm_launcher(rocsparse_handle     handle,
-                                                    J                    group_size,
-                                                    const J*             group_offset,
-                                                    const J*             perm,
-                                                    J                    m,
-                                                    J                    n,
-                                                    J                    k,
-                                                    const T*             alpha_device_host,
-                                                    const I*             csr_row_ptr_A,
-                                                    const J*             csr_col_ind_A,
-                                                    const T*             csr_val_A,
-                                                    const I*             csr_row_ptr_B,
-                                                    const J*             csr_col_ind_B,
-                                                    const T*             csr_val_B,
-                                                    const T*             beta_device_host,
-                                                    const I*             csr_row_ptr_D,
-                                                    const J*             csr_col_ind_D,
-                                                    const T*             csr_val_D,
-                                                    const I*             csr_row_ptr_C,
-                                                    J*                   csr_col_ind_C,
-                                                    T*                   csr_val_C,
-                                                    rocsparse_index_base base_A,
-                                                    rocsparse_index_base base_B,
-                                                    rocsparse_index_base base_C,
-                                                    rocsparse_index_base base_D,
-                                                    bool                 mul,
-                                                    bool                 add)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-        return rocsparse_status_internal_error;
-    }
-
-    template <typename I,
-              typename J,
-              typename T,
-              typename std::enable_if<
-                  std::is_same<T, float>::value
-                      || (std::is_same<T, double>::value
-                          && (std::is_same<I, int32_t>::value || std::is_same<J, int32_t>::value))
-                      || (std::is_same<T, rocsparse_float_complex>::value
-                          && (std::is_same<I, int32_t>::value || std::is_same<J, int32_t>::value)),
-                  int>::type
-              = 0>
-    static inline rocsparse_status csrgemm_launcher(rocsparse_handle     handle,
-                                                    J                    group_size,
-                                                    const J*             group_offset,
-                                                    const J*             perm,
-                                                    J                    m,
-                                                    J                    n,
-                                                    J                    k,
-                                                    const T*             alpha_device_host,
-                                                    const I*             csr_row_ptr_A,
-                                                    const J*             csr_col_ind_A,
-                                                    const T*             csr_val_A,
-                                                    const I*             csr_row_ptr_B,
-                                                    const J*             csr_col_ind_B,
-                                                    const T*             csr_val_B,
-                                                    const T*             beta_device_host,
-                                                    const I*             csr_row_ptr_D,
-                                                    const J*             csr_col_ind_D,
-                                                    const T*             csr_val_D,
-                                                    const I*             csr_row_ptr_C,
-                                                    J*                   csr_col_ind_C,
-                                                    T*                   csr_val_C,
-                                                    rocsparse_index_base base_A,
-                                                    rocsparse_index_base base_B,
-                                                    rocsparse_index_base base_C,
-                                                    rocsparse_index_base base_D,
-                                                    bool                 mul,
-                                                    bool                 add)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-#define CSRGEMM_DIM 1024
-#define CSRGEMM_SUB 64
-#define CSRGEMM_HASHSIZE 4096
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
-                                                   CSRGEMM_SUB,
-                                                   CSRGEMM_HASHSIZE,
-                                                   CSRGEMM_FLL_HASH>),
-            dim3(group_size),
-            dim3(CSRGEMM_DIM),
-            0,
-            handle->stream,
-            rocsparse::max(k, n),
-            group_offset,
-            perm,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
-            csr_row_ptr_A,
-            csr_col_ind_A,
-            csr_val_A,
-            csr_row_ptr_B,
-            csr_col_ind_B,
-            csr_val_B,
-            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
-            csr_row_ptr_D,
-            csr_col_ind_D,
-            csr_val_D,
-            csr_row_ptr_C,
-            csr_col_ind_C,
-            csr_val_C,
-            base_A,
-            base_B,
-            base_C,
-            base_D,
-            mul,
-            add,
-            handle->pointer_mode == rocsparse_pointer_mode_host);
-#undef CSRGEMM_HASHSIZE
-#undef CSRGEMM_SUB
-#undef CSRGEMM_DIM
-
-        return rocsparse_status_success;
-    }
 }
 
 template <typename I, typename J, typename T>
@@ -395,14 +272,6 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         = info_C->csrgemm_info->mul ? descr_B->base : rocsparse_index_base_zero;
     rocsparse_index_base base_D
         = info_C->csrgemm_info->add ? descr_D->base : rocsparse_index_base_zero;
-
-    // Flag for exceeding shared memory
-    constexpr bool exceeding_smem
-        = std::is_same<T, rocsparse_double_complex>::value
-          || (std::is_same<T, double>::value && std::is_same<I, int64_t>::value
-              && std::is_same<J, int64_t>::value)
-          || (std::is_same<T, rocsparse_float_complex>::value && std::is_same<I, int64_t>::value
-              && std::is_same<J, int64_t>::value);
 
     // Temporary buffer
     char* buffer = reinterpret_cast<char*>(temp_buffer);
@@ -476,7 +345,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         // Determine number of rows per group
 #define CSRGEMM_DIM 256
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-            (rocsparse::csrgemm_group_reduce_part2<CSRGEMM_DIM, CSRGEMM_MAXGROUPS, exceeding_smem>),
+            (rocsparse::csrgemm_group_reduce_part2<CSRGEMM_DIM, CSRGEMM_MAXGROUPS, T>),
             dim3(CSRGEMM_DIM),
             dim3(CSRGEMM_DIM),
             0,
@@ -484,7 +353,8 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
             m,
             csr_row_ptr_C,
             d_group_size,
-            tmp_groups);
+            tmp_groups,
+            handle->shared_mem_per_block_optin);
 
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::csrgemm_group_reduce_part3<CSRGEMM_DIM, CSRGEMM_MAXGROUPS>),
@@ -524,12 +394,15 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         rocsparse::primitives::double_buffer<int> d_keys(tmp_groups, tmp_keys);
         rocsparse::primitives::double_buffer<J>   d_vals(tmp_perm, tmp_vals);
 
+        uint32_t startbit = 0;
+        uint32_t endbit   = rocsparse::clz(CSRGEMM_MAXGROUPS);
+
         // Sort pairs (by groups)
         rocprim_buffer = reinterpret_cast<void*>(buffer);
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int, J>(
-            handle, m, 0, 3, &rocprim_size)));
+            handle, m, startbit, endbit, &rocprim_size)));
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::primitives::radix_sort_pairs(
-            handle, d_keys, d_vals, m, 0, 3, rocprim_size, rocprim_buffer));
+            handle, d_keys, d_vals, m, startbit, endbit, rocprim_size, rocprim_buffer));
 
         d_perm = d_vals.current();
 
@@ -650,7 +523,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                    CSRGEMM_FLL_HASH>),
             dim3(h_group_size[2]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[2],
@@ -694,7 +567,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                    CSRGEMM_FLL_HASH>),
             dim3(h_group_size[3]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[3],
@@ -738,7 +611,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                    CSRGEMM_FLL_HASH>),
             dim3(h_group_size[4]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[4],
@@ -782,7 +655,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                    CSRGEMM_FLL_HASH>),
             dim3(h_group_size[5]),
             dim3(CSRGEMM_DIM),
-            0,
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
             stream,
             rocsparse::max(k, n),
             &d_group_offset[5],
@@ -814,39 +687,227 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     }
 
     // Group 6: 2049 - 4096 non-zeros per row
-    if(h_group_size[6] > 0 && !exceeding_smem)
+    if(h_group_size[6] > 0)
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_launcher(handle,
-                                                              h_group_size[6],
-                                                              &d_group_offset[6],
-                                                              d_perm,
-                                                              m,
-                                                              n,
-                                                              k,
-                                                              alpha_device_host,
-                                                              csr_row_ptr_A,
-                                                              csr_col_ind_A,
-                                                              csr_val_A,
-                                                              csr_row_ptr_B,
-                                                              csr_col_ind_B,
-                                                              csr_val_B,
-                                                              beta_device_host,
-                                                              csr_row_ptr_D,
-                                                              csr_col_ind_D,
-                                                              csr_val_D,
-                                                              csr_row_ptr_C,
-                                                              csr_col_ind_C,
-                                                              csr_val_C,
-                                                              base_A,
-                                                              base_B,
-                                                              descr_C->base,
-                                                              base_D,
-                                                              info_C->csrgemm_info->mul,
-                                                              info_C->csrgemm_info->add));
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 4096
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                               CSRGEMM_SUB,
+                                                               CSRGEMM_HASHSIZE,
+                                                               CSRGEMM_FLL_HASH,
+                                                               I,
+                                                               J,
+                                                               T>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                   CSRGEMM_SUB,
+                                                   CSRGEMM_HASHSIZE,
+                                                   CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[6]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[6],
+            d_perm,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_val_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_val_B,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_val_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            csr_val_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
     }
 
-    // Group 7: more than 4096 non-zeros per row
+    // Group 7: 4096 - 8192 non-zeros per row
     if(h_group_size[7] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 8192
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                               CSRGEMM_SUB,
+                                                               CSRGEMM_HASHSIZE,
+                                                               CSRGEMM_FLL_HASH,
+                                                               I,
+                                                               J,
+                                                               T>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                   CSRGEMM_SUB,
+                                                   CSRGEMM_HASHSIZE,
+                                                   CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[7]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[7],
+            d_perm,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_val_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_val_B,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_val_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            csr_val_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 8: 8192 - 16384 non-zeros per row
+    if(h_group_size[8] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 16384
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                               CSRGEMM_SUB,
+                                                               CSRGEMM_HASHSIZE,
+                                                               CSRGEMM_FLL_HASH,
+                                                               I,
+                                                               J,
+                                                               T>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                   CSRGEMM_SUB,
+                                                   CSRGEMM_HASHSIZE,
+                                                   CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[8]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[8],
+            d_perm,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_val_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_val_B,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_val_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            csr_val_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 9: 16384 - 32768 non-zeros per row
+    if(h_group_size[9] > 0)
+    {
+#define CSRGEMM_DIM 1024
+#define CSRGEMM_SUB 64
+#define CSRGEMM_HASHSIZE 32768
+        RETURN_IF_HIP_ERROR(hipFuncSetAttribute(
+            (const void*)rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                               CSRGEMM_SUB,
+                                                               CSRGEMM_HASHSIZE,
+                                                               CSRGEMM_FLL_HASH,
+                                                               I,
+                                                               J,
+                                                               T>,
+            hipFuncAttributeMaxDynamicSharedMemorySize,
+            csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()));
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::csrgemm_fill_block_per_row<CSRGEMM_DIM,
+                                                   CSRGEMM_SUB,
+                                                   CSRGEMM_HASHSIZE,
+                                                   CSRGEMM_FLL_HASH>),
+            dim3(h_group_size[9]),
+            dim3(CSRGEMM_DIM),
+            (csrgemm_fill_block_per_row_shared_memory_size<CSRGEMM_HASHSIZE, J, T>()),
+            handle->stream,
+            rocsparse::max(k, n),
+            &d_group_offset[9],
+            d_perm,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
+            csr_row_ptr_A,
+            csr_col_ind_A,
+            csr_val_A,
+            csr_row_ptr_B,
+            csr_col_ind_B,
+            csr_val_B,
+            ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, beta_device_host),
+            csr_row_ptr_D,
+            csr_col_ind_D,
+            csr_val_D,
+            csr_row_ptr_C,
+            csr_col_ind_C,
+            csr_val_C,
+            base_A,
+            base_B,
+            descr_C->base,
+            base_D,
+            info_C->csrgemm_info->mul,
+            info_C->csrgemm_info->add,
+            handle->pointer_mode == rocsparse_pointer_mode_host);
+#undef CSRGEMM_HASHSIZE
+#undef CSRGEMM_SUB
+#undef CSRGEMM_DIM
+    }
+
+    // Group 10: more than 32768 non-zeros per row or shared memory was exceeded
+    if(h_group_size[10] > 0)
     {
         // Matrices B and D must be sorted in order to run this path
         if(descr_B->storage_mode == rocsparse_storage_mode_unsorted
@@ -871,12 +932,12 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
             (rocsparse::
                  csrgemm_fill_block_per_row_multipass<CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_CHUNKSIZE>),
-            dim3(h_group_size[7]),
+            dim3(h_group_size[10]),
             dim3(CSRGEMM_DIM),
             0,
             stream,
             n,
-            &d_group_offset[7],
+            &d_group_offset[10],
             d_perm,
             ROCSPARSE_DEVICE_HOST_SCALAR_PERMISSIVE_ARGS(handle, alpha_device_host),
             csr_row_ptr_A,
