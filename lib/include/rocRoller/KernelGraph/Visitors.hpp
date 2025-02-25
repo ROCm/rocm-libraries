@@ -6,14 +6,14 @@
 #include <set>
 #include <variant>
 
-#include "ControlGraph/ControlGraph.hpp"
-#include "CoordinateGraph/CoordinateEdge_fwd.hpp"
-#include "CoordinateGraph/CoordinateGraph.hpp"
-#include "Graph/Hypergraph.hpp"
-#include "KernelGraph.hpp"
-#include "Reindexer.hpp"
+#include <rocRoller/Graph/Hypergraph.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Reindexer.hpp>
 
-#include "Expression_fwd.hpp"
+#include <rocRoller/Expression_fwd.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 

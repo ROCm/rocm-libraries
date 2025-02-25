@@ -1,6 +1,6 @@
-#include "GPUArchitecture/GPUArchitecture.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 
-#include "InstructionValues/Register.hpp"
+#include <rocRoller/InstructionValues/Register.hpp>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>

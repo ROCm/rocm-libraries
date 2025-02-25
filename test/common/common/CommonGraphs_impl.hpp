@@ -2,7 +2,7 @@
 #pragma once
 
 #include "CommonGraphs.hpp"
-#include "DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>

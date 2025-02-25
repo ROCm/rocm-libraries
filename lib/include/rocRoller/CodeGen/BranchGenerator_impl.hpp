@@ -8,11 +8,11 @@
 #include "BranchGenerator.hpp"
 #include "CopyGenerator.hpp"
 
-#include "../AssemblyKernel.hpp"
-#include "../Context.hpp"
-#include "../ExpressionTransformations.hpp"
-#include "../InstructionValues/Register.hpp"
-#include "../Utilities/Error.hpp"
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
 {

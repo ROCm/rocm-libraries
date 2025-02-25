@@ -74,7 +74,6 @@ target_link_libraries(
 target_include_directories(GPUArchitectureGenerator PUBLIC
                            ${CMAKE_SOURCE_DIR}/lib/include
                            include
-                           ${CMAKE_SOURCE_DIR}/lib/include/rocRoller
                            )
 
 target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC

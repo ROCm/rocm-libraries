@@ -6,12 +6,12 @@
 #include <string>
 #include <unordered_map>
 
-#include "Instruction.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
 
-#include "../AssemblyKernelArgument.hpp"
-#include "../AssemblyKernel_fwd.hpp"
-#include "../InstructionValues/Register_fwd.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/AssemblyKernel_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRollerTest
 {

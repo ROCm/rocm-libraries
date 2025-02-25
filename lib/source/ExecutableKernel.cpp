@@ -7,9 +7,9 @@
 
 #include <rocRoller/Utilities/Error.hpp>
 
-#include "Assemblers/Assembler.hpp"
-#include "ExecutableKernel.hpp"
-#include "Utilities/HipUtils.hpp"
+#include <rocRoller/Assemblers/Assembler.hpp>
+#include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/Utilities/HipUtils.hpp>
 
 namespace rocRoller
 {

@@ -5,7 +5,7 @@
 
 #include <string>
 
-#include "Expression.hpp"
+#include <rocRoller/Expression.hpp>
 
 namespace rocRoller
 {

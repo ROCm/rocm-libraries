@@ -1,9 +1,9 @@
 
 #pragma once
 
-#include "CodeGen/Instruction.hpp"
-#include "Utilities/Error.hpp"
-#include "Utilities/Generator.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {

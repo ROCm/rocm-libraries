@@ -9,31 +9,31 @@
 #include <unordered_map>
 #include <vector>
 
-#include "Context_fwd.hpp"
+#include <rocRoller/Context_fwd.hpp>
 
-#include "AssemblyKernel_fwd.hpp"
-#include "CodeGen/ArgumentLoader_fwd.hpp"
-#include "CodeGen/BranchGenerator_fwd.hpp"
-#include "CodeGen/CopyGenerator_fwd.hpp"
-#include "CodeGen/CrashKernelGenerator_fwd.hpp"
-#include "CodeGen/Instruction_fwd.hpp"
-#include "CodeGen/MemoryInstructions_fwd.hpp"
-#include "Expression_fwd.hpp"
-#include "GPUArchitecture/GPUArchitectureTarget_fwd.hpp"
-#include "InstructionValues/LDSAllocator_fwd.hpp"
-#include "InstructionValues/LabelAllocator_fwd.hpp"
-#include "InstructionValues/RegisterAllocator_fwd.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "KernelGraph/RegisterTagManager_fwd.hpp"
-#include "KernelGraph/ScopeManager_fwd.hpp"
-#include "ScheduledInstructions_fwd.hpp"
-#include "Scheduling/Scheduling_fwd.hpp"
-#include "Utilities/Random_fwd.hpp"
+#include <rocRoller/AssemblyKernel_fwd.hpp>
+#include <rocRoller/CodeGen/ArgumentLoader_fwd.hpp>
+#include <rocRoller/CodeGen/BranchGenerator_fwd.hpp>
+#include <rocRoller/CodeGen/CopyGenerator_fwd.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator_fwd.hpp>
+#include <rocRoller/CodeGen/Instruction_fwd.hpp>
+#include <rocRoller/CodeGen/MemoryInstructions_fwd.hpp>
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget_fwd.hpp>
+#include <rocRoller/InstructionValues/LDSAllocator_fwd.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator_fwd.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
+#include <rocRoller/KernelGraph/ScopeManager_fwd.hpp>
+#include <rocRoller/ScheduledInstructions_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduling_fwd.hpp>
+#include <rocRoller/Utilities/Random_fwd.hpp>
 
-#include "DataTypes/DataTypes.hpp"
-#include "KernelOptions.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/KernelOptions.hpp>
 
-#include "GPUArchitecture/GPUArchitecture.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 
 class ContextFixture;
 

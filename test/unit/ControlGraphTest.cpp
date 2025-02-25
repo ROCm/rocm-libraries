@@ -8,9 +8,9 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
-#include "DataTypes/DataTypes.hpp"
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 using namespace rocRoller;
 using namespace KernelGraph::ControlGraph;

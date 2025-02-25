@@ -3,7 +3,7 @@
 #include <vector>
 
 #include "CoordinateGraph.hpp"
-#include "Graph/Hypergraph.hpp"
+#include <rocRoller/Graph/Hypergraph.hpp>
 
 namespace rocRoller
 {

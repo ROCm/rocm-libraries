@@ -6,7 +6,7 @@
 
 #include "Assembler_fwd.hpp"
 
-#include "../GPUArchitecture/GPUArchitectureTarget.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 
 namespace rocRoller
 {

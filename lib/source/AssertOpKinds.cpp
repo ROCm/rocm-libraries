@@ -1,4 +1,4 @@
-#include <AssertOpKinds.hpp>
+#include <rocRoller/AssertOpKinds.hpp>
 
 namespace rocRoller
 {

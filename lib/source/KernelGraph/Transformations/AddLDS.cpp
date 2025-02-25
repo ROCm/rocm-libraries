@@ -183,13 +183,13 @@ the scheduling of operations in unrolled segment $u$ are:
  *
  */
 
-#include "KernelGraph/ControlGraph/ControlGraph.hpp"
-#include "KernelGraph/ControlGraph/Operation.hpp"
-#include "KernelGraph/ControlToCoordinateMapper.hpp"
-#include "KernelGraph/CoordinateGraph/Dimension.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>

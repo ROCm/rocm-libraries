@@ -3,9 +3,9 @@
 #include <sstream>
 #include <vector>
 
-#include "CodeGen/Instruction_fwd.hpp"
-#include "Context_fwd.hpp"
-#include "ExecutableKernel.hpp"
+#include <rocRoller/CodeGen/Instruction_fwd.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/ExecutableKernel.hpp>
 
 namespace rocRoller
 {
