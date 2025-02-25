@@ -30,6 +30,8 @@ namespace rocRoller
         template <typename T>
         struct SimplifyByConstant
         {
+            VariableType resultVarType;
+
             ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 return nullptr;
@@ -39,6 +41,8 @@ namespace rocRoller
         template <typename T>
         struct SimplifyByConstantLHS
         {
+            VariableType resultVarType;
+
             ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
             {
                 return nullptr;
@@ -48,11 +52,14 @@ namespace rocRoller
         template <>
         struct SimplifyByConstant<Add>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 0)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -62,33 +69,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
-            }
-
-        private:
-            ExpressionPtr m_lhs;
-        };
-
-        template <>
-        struct SimplifyByConstantLHS<Add>
-        {
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
             }
         };
 
         template <CShift ShiftType>
         struct SimplifyByConstant<ShiftType>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 0)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -98,33 +96,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
-            }
-
-        private:
-            ExpressionPtr m_lhs;
-        };
-
-        template <CShift ShiftType>
-        struct SimplifyByConstantLHS<ShiftType>
-        {
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
             }
         };
 
         template <>
         struct SimplifyByConstant<BitwiseAnd>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 0)
-                    return literal(0);
+                    return literal(0, resultVarType);
                 return nullptr;
             }
 
@@ -134,35 +123,26 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
-            }
-
-        private:
-            ExpressionPtr m_lhs;
-        };
-
-        template <>
-        struct SimplifyByConstantLHS<BitwiseAnd>
-        {
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
             }
         };
 
         template <>
         struct SimplifyByConstant<LogicalAnd>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
             template <typename RHS>
             requires(CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == false)
                     return literal(false);
                 if(rhs == true)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -172,26 +152,26 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
             }
-
-        private:
-            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstant<LogicalOr>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs = nullptr;
+
             template <typename RHS>
             requires(CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == true)
                     return literal(true);
                 if(rhs == false)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -201,35 +181,26 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
-            }
-
-        private:
-            ExpressionPtr m_lhs;
-        };
-
-        template <>
-        struct SimplifyByConstantLHS<LogicalAnd>
-        {
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
             }
         };
 
         template <>
         struct SimplifyByConstant<Multiply>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 0)
-                    return literal(0);
+                    return literal(0, resultVarType);
                 if(rhs == 1)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -239,34 +210,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
-            }
-
-        private:
-            ExpressionPtr m_lhs;
-        };
-
-        template <>
-        struct SimplifyByConstantLHS<Multiply>
-        {
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
             }
         };
 
         template <>
         struct SimplifyByConstant<Divide>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
 
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 1)
-                    return m_lhs;
+                    return lhs;
                 return nullptr;
             }
 
@@ -276,25 +237,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
             }
-
-        private:
-            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstantLHS<Divide>
         {
+            VariableType  resultVarType;
+            ExpressionPtr rhs;
 
             template <typename LHS>
             requires(CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
             {
                 if(lhs == 0)
-                    return literal(0);
+                    return literal(0, resultVarType);
                 return nullptr;
             }
 
@@ -304,25 +264,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs_)
             {
-                m_rhs = rhs;
+                rhs = rhs_;
                 return visit(*this, lhs);
             }
-
-        private:
-            ExpressionPtr m_rhs;
         };
 
         template <>
         struct SimplifyByConstant<Modulo>
         {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
 
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 if(rhs == 1)
-                    return literal(0);
+                    return literal(0, resultVarType);
                 return nullptr;
             }
 
@@ -332,25 +291,24 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
             {
-                m_lhs = lhs;
+                lhs = lhs_;
                 return visit(*this, rhs);
             }
-
-        private:
-            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstantLHS<Modulo>
         {
+            VariableType  resultVarType;
+            ExpressionPtr rhs;
 
             template <typename LHS>
             requires(CIntegral<LHS>) ExpressionPtr operator()(LHS lhs)
             {
                 if(lhs == 0)
-                    return literal(0);
+                    return literal(0, resultVarType);
                 return nullptr;
             }
 
@@ -360,14 +318,11 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs)
+            ExpressionPtr call(CommandArgumentValue lhs, ExpressionPtr rhs_)
             {
-                m_rhs = rhs;
+                rhs = rhs_;
                 return visit(*this, lhs);
             }
-
-        private:
-            ExpressionPtr m_rhs;
         };
 
         struct SimplifyExpressionVisitor
@@ -379,8 +334,8 @@ namespace rocRoller
                 {
                     if(expr.arg)
                     {
-                        auto resultType = resultVariableType(expr.arg);
-                        if(Expr::DestinationType == resultType)
+                        auto resultVarType = resultVariableType(expr.arg);
+                        if(Expr::DestinationType == resultVarType)
                         {
                             return call(expr.arg);
                         }
@@ -398,13 +353,15 @@ namespace rocRoller
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
+                auto resultVarType = resultVariableType(expr);
+
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
 
-                auto simplifier = SimplifyByConstant<Expr>();
+                auto simplifier = SimplifyByConstant<Expr>{resultVarType};
 
                 ExpressionPtr rv = nullptr;
 
@@ -422,13 +379,22 @@ namespace rocRoller
                 }
                 else if(!CCommutativeBinary<Expr> && eval_lhs)
                 {
-                    auto simplifierLHS = SimplifyByConstantLHS<Expr>();
+                    auto simplifierLHS = SimplifyByConstantLHS<Expr>{resultVarType};
 
                     rv = simplifierLHS.call(evaluate(lhs), rhs);
                 }
 
                 if(rv != nullptr)
                 {
+                    if(resultVariableType(rv) != resultVarType)
+                    {
+                        AssertFatal(!resultVarType.isPointer(),
+                                    ShowValue(expr),
+                                    ShowValue(rv),
+                                    ShowValue(resultVarType));
+                        rv = convert(resultVarType.dataType, rv);
+                    }
+
                     copyComment(rv, expr);
                     return rv;
                 }

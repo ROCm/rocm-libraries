@@ -83,40 +83,40 @@ namespace ScopeTest
             // generate()
             // end: generate()
             // generate(4)
-            // Assign VGPR 11j(4) BEGIN
-            // Assign dim(1) = 11j
-            // Generate 11j into v**UNALLOCATED**
+            // Assign VGPR 11:U32(4) BEGIN
+            // Assign dim(1) = 11:U32
+            // Generate 11:U32 into v**UNALLOCATED**
             // Allocated DataFlowTag1: 1 VGPR (Value: UInt32): v0
-            v_mov_b32 v0, 11
-            // Assign VGPR 11j(4) END
+            v_mov_b32 v0, 11 // call()
+            // Assign VGPR 11:U32(4) END
             // Scope(2) BEGIN
             // Lock Scope 2
             // generate(3)
             // Scope(3) BEGIN
             // Lock Scope 3
             // generate(6)
-            // Assign VGPR 33j(6) BEGIN
-            // Assign dim(3) = 33j
-            // Generate 33j into v**UNALLOCATED**
+            // Assign VGPR 33:U32(6) BEGIN
+            // Assign dim(3) = 33:U32
+            // Generate 33:U32 into v**UNALLOCATED**
             // Allocated DataFlowTag3: 1 VGPR (Value: UInt32): v1
-            v_mov_b32 v1, 33
-            // Assign VGPR 33j(6) END
-            // Assign VGPR 44j(7) BEGIN
-            // Assign dim(1) = 44j
-            // Generate 44j into v0
-            v_mov_b32 v0, 44
-            // Assign VGPR 44j(7) END
+            v_mov_b32 v1, 33 // call()
+            // Assign VGPR 33:U32(6) END
+            // Assign VGPR 44:U32(7) BEGIN
+            // Assign dim(1) = 44:U32
+            // Generate 44:U32 into v0
+            v_mov_b32 v0, 44 // call()
+            // Assign VGPR 44:U32(7) END
             // end: generate(6)
             // Deleting tag 3
             // Freeing DataFlowTag3: 1 VGPR (Value: UInt32): v1
             // Unlock Scope 3
             // Scope(3) END
-            // Assign VGPR 22j(5) BEGIN
-            // Assign dim(2) = 22j
-            // Generate 22j into v**UNALLOCATED**
+            // Assign VGPR 22:U32(5) BEGIN
+            // Assign dim(2) = 22:U32
+            // Generate 22:U32 into v**UNALLOCATED**
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32): v1
-            v_mov_b32 v1, 22
-            // Assign VGPR 22j(5) END
+            v_mov_b32 v1, 22 // call()
+            // Assign VGPR 22:U32(5) END
             // end: generate(3)
             // Deleting tag 2
             // Freeing DataFlowTag2: 1 VGPR (Value: UInt32): v1
@@ -131,7 +131,7 @@ namespace ScopeTest
         )";
 
         if(sched == Scheduling::SchedulerProcedure::Sequential)
-            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(kexpected, true));
+            EXPECT_EQ(NormalizedSource(kexpected, true), NormalizedSource(output(), true));
     }
 
     /**

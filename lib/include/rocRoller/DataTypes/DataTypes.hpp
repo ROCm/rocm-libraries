@@ -253,6 +253,11 @@ namespace rocRoller
             , pointerType(p)
         {
         }
+        explicit constexpr VariableType(PointerType p)
+            : dataType()
+            , pointerType(p)
+        {
+        }
 
         DataType    dataType;
         PointerType pointerType = PointerType::Value;
@@ -295,6 +300,7 @@ namespace rocRoller
         */
         int registerAlignment(Register::Type regType, int count, GPUArchitecture const& gpuArch);
 
+        auto                  operator<=>(VariableType const&) const = default;
         inline constexpr bool operator==(const VariableType& rhs) const
         {
             return (dataType == rhs.dataType) && (pointerType == rhs.pointerType);
@@ -322,7 +328,6 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, PointerType const& p);
 
     std::string   toString(VariableType const& v);
-    std::string   ValueString(VariableType const& v);
     std::string   TypeAbbrev(VariableType const& v);
     std::ostream& operator<<(std::ostream& stream, VariableType const& v);
 

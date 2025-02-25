@@ -97,7 +97,7 @@ namespace rocRoller
         {
             int index = m_nextIndex++;
             AssertFatal(m_elements.find(index) == m_elements.end());
-            m_elements[index] = std::forward<T>(element);
+            m_elements.emplace(index, std::forward<T>(element));
             clearCache();
             return index;
         }
@@ -158,7 +158,7 @@ namespace rocRoller
 
             clearCache();
 
-            m_elements[index] = std::forward<T>(element);
+            m_elements.emplace(index, std::forward<T>(element));
 
             if(elementType == ElementType::Edge)
             {

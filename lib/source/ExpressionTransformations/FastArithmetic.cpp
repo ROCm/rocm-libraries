@@ -24,6 +24,7 @@ namespace rocRoller
             x = lowerExponential(x);
             x = fastMultiplication(x);
             x = fuseAssociative(x);
+            x = combineShifts(x);
             x = fuseTernary(x);
             x = launchTimeSubExpressions(x, m_context);
 
@@ -32,6 +33,13 @@ namespace rocRoller
                 auto comment = Instruction::Comment(
                     concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
                 m_context->schedule(comment);
+
+                auto origResultType = resultType(orig);
+                AssertFatal(origResultType.varType == resultType(x).varType,
+                            ShowValue(origResultType),
+                            ShowValue(resultType(x)),
+                            ShowValue(orig),
+                            ShowValue(x));
             }
 
             return x;

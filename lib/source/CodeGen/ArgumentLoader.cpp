@@ -186,7 +186,7 @@ namespace rocRoller
         }
         else
         {
-            co_yield m_context.lock()->copier()->copy(value, iter->second);
+            co_yield m_context.lock()->copier()->copy(value, iter->second, "ArgLoader");
         }
     }
 }

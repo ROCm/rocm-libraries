@@ -273,7 +273,11 @@ namespace rocRoller
 
     inline std::string toString(CommandArgumentValue const& val)
     {
-        return std::visit([](auto const& value) { return concatenate(value); }, val);
+        return std::visit(
+            rocRoller::overloaded{
+                [](CPointer auto const& value) { return concatenate(static_cast<void*>(value)); },
+                [](auto const& value) { return concatenate(value); }},
+            val);
     }
 
     inline std::ostream& operator<<(std::ostream& stream, CommandArgumentValue const& val)

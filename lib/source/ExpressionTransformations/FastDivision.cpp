@@ -343,7 +343,7 @@ namespace rocRoller
                 }
                 else if(rhs == -1)
                 {
-                    return std::make_shared<Expression>(Multiply({m_lhs, literal(-1)}));
+                    return std::make_shared<Expression>(Multiply({m_lhs, literal(rhs)}));
                 }
                 // Power of 2 Division
                 else if(std::has_single_bit(cast_to_unsigned(rhs)))
@@ -387,7 +387,7 @@ namespace rocRoller
                 }
                 else if(rhs == 1 || rhs == -1)
                 {
-                    return literal(0);
+                    return literal<T>(0);
                 }
                 // Power of 2 Modulo
                 else if(std::has_single_bit(cast_to_unsigned(rhs)))
@@ -512,7 +512,9 @@ namespace rocRoller
                 {
                     auto rhsVal     = evaluate(rhs);
                     auto divByConst = DivisionByConstant();
-                    return divByConst.call(lhs, rhsVal);
+                    auto rv         = divByConst.call(lhs, rhsVal);
+                    copyComment(rv, expr);
+                    return rv;
                 }
 
                 auto rhsType = resultVariableType(rhs);
@@ -520,7 +522,10 @@ namespace rocRoller
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)
+                    {
+                        copyComment(div, expr);
                         return div;
+                    }
 
                     extraComment = " (magicNumberDivision returned nullptr)";
                 }
@@ -541,7 +546,9 @@ namespace rocRoller
                 {
                     auto rhsVal     = evaluate(rhs);
                     auto modByConst = ModuloByConstant();
-                    return modByConst.call(lhs, rhsVal);
+                    auto rv         = modByConst.call(lhs, rhsVal);
+                    copyComment(rv, expr);
+                    return rv;
                 }
 
                 auto rhsType = resultVariableType(rhs);
@@ -550,7 +557,11 @@ namespace rocRoller
                 {
                     auto div = magicNumberDivision(lhs, rhs, m_context);
                     if(div)
-                        return lhs - (div * rhs);
+                    {
+                        auto rv = lhs - (div * rhs);
+                        copyComment(rv, expr);
+                        return rv;
+                    }
 
                     extraComment = " (modulo: magicNumberDivision returned nullptr)";
                 }
@@ -569,7 +580,10 @@ namespace rocRoller
                 if(!expr)
                     return expr;
 
-                return std::visit(*this, *expr);
+                auto rv = std::visit(*this, *expr);
+
+                Log::debug("visitor:\n    {}\n    {}", toString(expr), toString(rv));
+                return rv;
             }
 
         private:
@@ -582,7 +596,11 @@ namespace rocRoller
         ExpressionPtr fastDivision(ExpressionPtr expr, ContextPtr cxt)
         {
             auto visitor = FastDivisionExpressionVisitor(cxt);
-            return visitor.call(expr);
+            auto rv      = visitor.call(expr);
+
+            Log::debug("fastDivision:\n    {}\n    {}", toString(expr), toString(rv));
+
+            return rv;
         }
 
     }

@@ -2165,11 +2165,18 @@ namespace GEMMDriverTest
         EXPECT_LT(countSubstring(output_literalStrides, "Tensor_4_stride_0"),
                   countSubstring(output_noLiteralStrides, "Tensor_4_stride_0"));
 
-        //Since we're not setting the second dimension to a literal, there will be the same occurrences of Load_Tiled_X_stride_1.
+        // Since we're not setting the second dimension to a literal, there
+        // will be the same occurrences of Load_Tiled_X_stride_1.
+
+        // Currently due to some expressions having different signedness
+        // between literal and non-literal, there are some extra convert
+        // expressions in the literal version and so this is mentioned more
+        // times in comments.
         EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_0_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_1"));
+                  countSubstring(output_noLiteralStrides, "Tensor_0_stride_1") + 2);
         EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_2_stride_1"),
-                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_1"));
+                  countSubstring(output_noLiteralStrides, "Tensor_2_stride_1") + 2);
+
         EXPECT_EQ(countSubstring(output_literalStrides, "Tensor_4_stride_1"),
                   countSubstring(output_noLiteralStrides, "Tensor_4_stride_1"));
     }

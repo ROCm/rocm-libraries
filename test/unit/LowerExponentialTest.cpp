@@ -36,8 +36,8 @@ namespace LowerExponentialTest
         auto a       = std::make_shared<Expression::Expression>(command->allocateArgument(
             {DataType::Float, PointerType::Value}, aTag, ArgumentType::Value));
 
-        ExpectCommutative(a,
-                          "Exponential2(Multiply(1.44270f, CommandArgument(user_Float_Value_0)))");
+        ExpectCommutative(
+            a, "Exponential2(Multiply(1.44270:S, CommandArgument(user_Float_Value_0)S)S)S");
     }
 
     class ExecuteLowerExponentialCurrentGPU : public CurrentGPUContextFixture

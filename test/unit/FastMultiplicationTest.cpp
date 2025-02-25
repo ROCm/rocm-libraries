@@ -24,12 +24,9 @@ namespace FastMultiplicationTest
 
     TEST_F(FastMultiplicationTest, MultiplicationByConstantExpressions)
     {
-        auto ExpectCommutative = [&](std::shared_ptr<Expression::Expression> lhs,
-                                     std::shared_ptr<Expression::Expression> rhs,
-                                     std::string                             result) {
-            EXPECT_EQ(Expression::toString(fastMultiplication(lhs * rhs)), result);
-            EXPECT_EQ(Expression::toString(fastMultiplication(rhs * lhs)), result);
-        };
+#define ExpectCommutative(lhs, rhs, result)                                \
+    EXPECT_EQ(Expression::toString(fastMultiplication(lhs* rhs)), result); \
+    EXPECT_EQ(Expression::toString(fastMultiplication(rhs* lhs)), result)
 
         auto command = std::make_shared<Command>();
 
@@ -37,72 +34,81 @@ namespace FastMultiplicationTest
         auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
             {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
 
-        ExpectCommutative(a, std::make_shared<Expression::Expression>(0), "0i");
+        auto bTag = command->allocateTag();
+        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
+            {DataType::Float, PointerType::Value}, bTag, ArgumentType::Value));
+
+        ExpectCommutative(a, std::make_shared<Expression::Expression>(0), "0:I");
 
         ExpectCommutative(
-            a, std::make_shared<Expression::Expression>(1), "CommandArgument(user_Int32_Value_0)");
+            a, std::make_shared<Expression::Expression>(1), "CommandArgument(user_Int32_Value_0)I");
 
-        ExpectCommutative(a, std::make_shared<Expression::Expression>(0u), "0i");
+        ExpectCommutative(a, std::make_shared<Expression::Expression>(0u), "0:I");
 
-        ExpectCommutative(a, Expression::literal(0u), "0i");
-
-        ExpectCommutative(
-            a, std::make_shared<Expression::Expression>(1u), "CommandArgument(user_Int32_Value_0)");
+        ExpectCommutative(a, Expression::literal(0u), "0:I");
 
         ExpectCommutative(a,
-                          std::make_shared<Expression::Expression>(8u),
-                          "ShiftL(CommandArgument(user_Int32_Value_0), 3j)");
+                          std::make_shared<Expression::Expression>(1u),
+                          "Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32");
+
+        ExpectCommutative(
+            a,
+            std::make_shared<Expression::Expression>(8u),
+            "ShiftL(Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32, 3:U32)U32");
 
         ExpectCommutative(a,
                           std::make_shared<Expression::Expression>(16),
-                          "ShiftL(CommandArgument(user_Int32_Value_0), 4j)");
+                          "ShiftL(CommandArgument(user_Int32_Value_0)I, 4:U32)I");
 
         ExpectCommutative(
-            a, Expression::literal(64u), "ShiftL(CommandArgument(user_Int32_Value_0), 6j)");
+            a,
+            Expression::literal(64u),
+            "ShiftL(Convert<DataType::UInt32>(CommandArgument(user_Int32_Value_0)I)U32, 6:U32)U32");
 
         ExpectCommutative(a,
-                          std::make_shared<Expression::Expression>(256u),
-                          "ShiftL(CommandArgument(user_Int32_Value_0), 8j)");
+                          std::make_shared<Expression::Expression>(256),
+                          "ShiftL(CommandArgument(user_Int32_Value_0)I, 8:U32)I");
+#undef ExpectCommutative
 
         auto expr      = a * std::make_shared<Expression::Expression>(-5);
         auto expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(CommandArgument(user_Int32_Value_0), -5i)");
+                  "Multiply(CommandArgument(user_Int32_Value_0)I, -5:I)I");
 
         expr      = std::make_shared<Expression::Expression>(-5) * a;
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(-5i, CommandArgument(user_Int32_Value_0))");
+                  "Multiply(-5:I, CommandArgument(user_Int32_Value_0)I)I");
 
         expr      = a * std::make_shared<Expression::Expression>(-4);
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(CommandArgument(user_Int32_Value_0), -4i)");
+                  "Multiply(CommandArgument(user_Int32_Value_0)I, -4:I)I");
 
         expr      = std::make_shared<Expression::Expression>(-4) * a;
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(-4i, CommandArgument(user_Int32_Value_0))");
+                  "Multiply(-4:I, CommandArgument(user_Int32_Value_0)I)I");
 
         expr      = a * std::make_shared<Expression::Expression>(11u);
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(CommandArgument(user_Int32_Value_0), 11j)");
+                  "Multiply(CommandArgument(user_Int32_Value_0)I, 11:U32)U32");
 
         expr      = std::make_shared<Expression::Expression>(11u) * a;
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(11j, CommandArgument(user_Int32_Value_0))");
+                  "Multiply(11:U32, CommandArgument(user_Int32_Value_0)I)U32");
 
-        expr      = a * std::make_shared<Expression::Expression>(3.14);
+        expr      = b * std::make_shared<Expression::Expression>(3.14);
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(CommandArgument(user_Int32_Value_0), 3.14000d)");
+                  "Multiply(CommandArgument(user_Float_Value_1)S, 3.14000:D)D");
 
-        expr      = a * Expression::literal(3.14);
+        expr      = b * Expression::literal(3.14);
         expr_fast = rocRoller::Expression::fastMultiplication(expr);
         EXPECT_EQ(Expression::toString(expr_fast),
-                  "Multiply(CommandArgument(user_Int32_Value_0), 3.14000d)");
+                  "Multiply(CommandArgument(user_Float_Value_1)S, 3.14000:D)D");
     }
 
     TEST_F(FastMultiplicationTest, MultiplicationByArgumentExpressions)
@@ -119,9 +125,9 @@ namespace FastMultiplicationTest
 
         auto expr      = a * b_unsigned;
         auto expr_fast = rocRoller::Expression::fastMultiplication(expr);
-        EXPECT_EQ(
-            Expression::toString(expr_fast),
-            "Multiply(CommandArgument(user_Int32_Value_0), CommandArgument(user_UInt32_Value_1))");
+        EXPECT_EQ(Expression::toString(expr_fast),
+                  "Multiply(CommandArgument(user_Int32_Value_0)I, "
+                  "CommandArgument(user_UInt32_Value_1)U32)U32");
     }
 
     class FastMultiplicationTestByConstantCurrentGPU : public CurrentGPUContextFixture,
