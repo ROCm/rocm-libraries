@@ -12,6 +12,25 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        // Return value of colourByUnrollValue.  A colour-mapping is...
+        struct UnrollColouring
+        {
+            std::map<int, std::map<int, int>>
+                operationColour; //< Mapping: operation tag to colour-mapping.
+            std::map<int, std::map<int, int>>
+                          coordinateColour; //< Mapping: coordinate tag to colour-mapping.
+            std::set<int> separators; //< Separator edges in the control graph
+        };
+
+        std::string toString(UnrollColouring const&);
+
+        /**
+         * @brief
+         */
+        UnrollColouring colourByUnrollValue(KernelGraph const&             kgraph,
+                                            int                            topOp   = -1,
+                                            std::unordered_set<int> const& exclude = {});
+
         /**
         * @brief Return DataFlowTag of LHS of binary expression in Assign node.
         */
@@ -88,6 +107,12 @@ namespace rocRoller
             findStorageNeighbour(int tag, KernelGraph const& kgraph);
 
         /**
+         * @brief Return Unroll coordinate beside (as part of a Split
+         * edge) the ForLoop coordinate.
+         */
+        std::optional<int> findUnrollNeighbour(KernelGraph const& kgraph, int forLoopCoord);
+
+        /**
         * @brief Return DataFlowTag of DEST of Assign node.
         */
         int getDEST(KernelGraph const& kgraph, int assign);
@@ -130,8 +155,8 @@ namespace rocRoller
         std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
-     * @brief Reconnect incoming/outgoing edges from op to newop.
-     */
+         * @brief Reconnect incoming/outgoing edges from op to newop.
+         */
         template <Graph::Direction direction>
         void reconnect(KernelGraph& graph, int newop, int op);
 
@@ -157,7 +182,12 @@ namespace rocRoller
             Expression::ExpressionPtr size, VariableType varType, ContextPtr context);
 
         /**
-         * Replace operation with a new operation.  Does not delete the original operation.
+         * @brief Replace operation with a new operation.
+         *
+         * @param op Operation to replace.
+         * @param newOp Replacement.
+         *
+         * Does not delete the original operation.
          */
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody = true);
 
@@ -167,6 +197,13 @@ namespace rocRoller
          * Bottom is attached to op via a Sequence edge.
          */
         void insertBefore(KernelGraph& graph, int op, int top, int bottom);
+
+        /**
+         * @brief Insert chain (from top to bottom) above operation.
+         *
+         * Top is attached to op via a Sequence edge.
+         */
+        void insertAfter(KernelGraph& graph, int op, int top, int bottom);
 
         /**
          * @brief Replace operation with a new operation.
@@ -255,6 +292,21 @@ namespace rocRoller
         int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load);
 
         /**
+         * @brief Determine whether a matching SetCoordinate object exists upstream
+         * from op for a given coordValue and coordTag.
+         *
+         * @param graph
+         * @param op
+         * @param coordValue
+         * @param coordTag
+         * @return bool
+         */
+        bool hasExistingSetCoordinate(KernelGraph const& graph,
+                                      int                op,
+                                      int                coordValue,
+                                      int                coordTag);
+
+        /**
          * Gets the unroll coordinate value that is set by a SetCoordinate node upstream
          * from the operation op, for the dimension unrollDim.
          */
@@ -296,6 +348,7 @@ namespace rocRoller
                                  int                              macTileTag,
                                  std::vector<int> const&          sdim,
                                  std::vector<unsigned int> const& jammedTiles,
+                                 CommandParametersPtr             params,
                                  ContextPtr                       context);
 
         /**
@@ -308,6 +361,7 @@ namespace rocRoller
                                 int                              macTileTag,
                                 std::vector<int> const&          sdim,
                                 std::vector<unsigned int> const& jammedTiles,
+                                CommandParametersPtr             params,
                                 ContextPtr                       context);
 
         /**
@@ -329,7 +383,8 @@ namespace rocRoller
             addStoreMacroTileCT(KernelGraph&                     graph,
                                 std::vector<DeferredConnection>& connections,
                                 int                              macTileTag,
-                                std::vector<int> const&          sdim);
+                                std::vector<int> const&          sdim,
+                                std::vector<unsigned int> const& jammedTiles = {1, 1});
 
         /**
          * @brief Add coordinate-transforms for tiling two
@@ -404,6 +459,7 @@ namespace rocRoller
                                VariableType                     varType,
                                int                              macTileTag,
                                std::vector<unsigned int> const& numWaveTiles,
+                               bool                             splitStore,
                                CommandParametersPtr             params,
                                ContextPtr                       context);
 

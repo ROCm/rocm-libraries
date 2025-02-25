@@ -8,6 +8,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller
 {
@@ -35,6 +36,13 @@ namespace rocRoller
             RightInBodyOfLeft,
             RightFirst,
             Count
+        };
+
+        enum class CacheStatus
+        {
+            Invalid = 0, //< Cache is empty
+            Partial, //< Cache does not have all the orders between nodes
+            Valid //< Cache has all orders of nodes
         };
 
         /**
@@ -133,7 +141,7 @@ namespace rocRoller
              * Also, if a reference to the returned value is maintained through any changes
              * to the graph, the returned map will be cleared.
              */
-            std::map<std::pair<int, int>, NodeOrdering> const& nodeOrderTable() const;
+            std::unordered_map<std::tuple<int, int>, NodeOrdering> const& nodeOrderTable() const;
 
             template <typename T>
             requires(std::constructible_from<Operation, T>)
@@ -178,7 +186,7 @@ namespace rocRoller
             void chain(int a, int b, Nodes... remaining);
 
         private:
-            virtual void clearCache() override;
+            virtual void clearCache(Graph::GraphModification modification) override;
             void         checkOrderCache() const;
             void         populateOrderCache() const;
 
@@ -205,12 +213,14 @@ namespace rocRoller
                                  BRange const& nodesB,
                                  NodeOrdering  order) const;
 
-            mutable std::map<std::pair<int, int>, NodeOrdering> m_orderCache;
+            mutable std::unordered_map<std::tuple<int, int>, NodeOrdering> m_orderCache;
             /**
              * If an entry is present, the value will be the IDs of every descendent from the key,
              * following every kind of edge.
              */
-            mutable std::map<int, std::set<int>> m_descendentCache;
+            mutable std::unordered_map<int, std::set<int>> m_descendentCache;
+
+            mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
         };
 
         std::string name(ControlGraph::Element const& el);

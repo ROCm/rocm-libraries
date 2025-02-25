@@ -6,7 +6,8 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
-    std::map<std::pair<int, int>, NodeOrdering> const& ControlGraph::nodeOrderTable() const
+    std::unordered_map<std::tuple<int, int>, NodeOrdering> const&
+        ControlGraph::nodeOrderTable() const
     {
         populateOrderCache();
         return m_orderCache;
@@ -26,8 +27,8 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         for(auto const& pair : m_orderCache)
         {
-            nodes.insert(pair.first.first);
-            nodes.insert(pair.first.second);
+            nodes.insert(std::get<0>(pair.first));
+            nodes.insert(std::get<1>(pair.first));
         }
 
         if(nodes.empty())
@@ -73,11 +74,22 @@ namespace rocRoller::KernelGraph::ControlGraph
         return msg.str();
     }
 
-    void ControlGraph::clearCache()
+    void ControlGraph::clearCache(Graph::GraphModification modification)
     {
-        Hypergraph<Operation, ControlEdge, false>::clearCache();
+        Hypergraph<Operation, ControlEdge, false>::clearCache(modification);
 
-        m_orderCache.clear();
+        if(modification == Graph::GraphModification::AddElement
+           && m_cacheStatus != CacheStatus::Invalid)
+        {
+            // If adding a new element and order is non-empty (partial or valid)
+            m_cacheStatus = CacheStatus::Partial;
+        }
+        else
+        {
+            m_orderCache.clear();
+            m_cacheStatus = CacheStatus::Invalid;
+        }
+
         m_descendentCache.clear();
     }
 
@@ -87,6 +99,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto r = roots().to<std::set>();
         populateOrderCache(r);
+        m_cacheStatus = CacheStatus::Valid;
     }
 
     template <CForwardRangeOf<int> Range>

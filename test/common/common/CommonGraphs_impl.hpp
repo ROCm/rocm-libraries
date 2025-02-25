@@ -329,11 +329,11 @@ namespace rocRollerTest::Graphs
         auto macTileA = MacroTile({m_macM, m_macK},
                                   LayoutType::MATRIX_A,
                                   {m_waveM, m_waveN, m_waveK, m_waveB},
-                                  m_useLDSA ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                  m_useLDSA ? MemoryType::LDS : MemoryType::WAVE);
         auto macTileB = MacroTile({m_macK, m_macN},
                                   LayoutType::MATRIX_B,
                                   {m_waveM, m_waveN, m_waveK, m_waveB},
-                                  m_useLDSB ? MemoryType::WAVE_LDS : MemoryType::WAVE);
+                                  m_useLDSB ? MemoryType::LDS : MemoryType::WAVE);
         auto macTileC = MacroTile(
             {m_macM, m_macN}, LayoutType::MATRIX_ACCUMULATOR, {m_waveM, m_waveN, m_waveK, m_waveB});
 
@@ -348,6 +348,9 @@ namespace rocRollerTest::Graphs
 
         uint jammedM = wavefrontSize * m_macM / m_waveM / workgroupSizeX;
         uint jammedN = m_macN / m_waveN / workgroupSizeY;
+
+        Log::debug("GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
+        Log::debug("GEMM jamming {} {}", jammedM, jammedN);
 
         params->setWaveTilesPerWavefront(jammedM, jammedN);
 
@@ -585,6 +588,8 @@ namespace rocRollerTest::Graphs
 
         params->setManualKernelDimension(2);
         params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
+
+        params->transposeMemoryAccess[LayoutType::None] = true;
 
         return params;
     }

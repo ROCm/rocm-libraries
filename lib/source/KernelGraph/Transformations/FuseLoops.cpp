@@ -25,8 +25,8 @@ namespace rocRoller
          */
         namespace FuseLoopsNS
         {
-            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-            using GD     = rocRoller::Graph::Direction;
+            using GD = rocRoller::Graph::Direction;
+
             /**
              * @brief Find a path from a node to a ForLoopOp using only Sequence edges
              *
@@ -71,123 +71,6 @@ namespace rocRoller
                              });
 
                 return pathToLoop;
-            }
-
-            using LoadKey = std::vector<unsigned int>;
-
-            /**
-             * @brief Return information about a load.
-             *
-             * Returns a key that describes the data being loaded by the provided load
-             * instruction. This key includes the User variable plus any information
-             * from SetCoordinate nodes above the load.
-             *
-             * Also returns the node tag of the top SetCoordinate node above the load.
-             * If there is no SetCoordinate node, returns the tag of the load.
-             *
-             * @param graph
-             * @param load
-             * @return std::pair<LoadKey, int>
-             */
-            std::pair<LoadKey, int> getLoadPair(KernelGraph const& graph, int load)
-            {
-                LoadKey key;
-                int     tag = load;
-
-                AssertFatal(graph.control.get<LoadTiled>(load), "Expecting a LoadTiled node");
-                AssertFatal(graph.mapper.get<User>(load), "Load tiled missing User dimension");
-
-                key.push_back(graph.mapper.get<User>(load));
-
-                // Search for nested SetCoordinates
-                while(true)
-                {
-                    auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
-                    if(!parent)
-                        break;
-
-                    if(graph.control.get<SetCoordinate>(*parent))
-                        tag = *parent;
-                    else
-                        break;
-
-                    auto setCoord = graph.control.get<SetCoordinate>(tag);
-                    AssertFatal(graph.mapper.get<Unroll>(tag),
-                                "SetCoordinate needs Unroll dimension");
-
-                    key.push_back(graph.mapper.get<Unroll>(tag));
-                    AssertFatal(
-                        evaluationTimes(setCoord->value)[Expression::EvaluationTime::Translate],
-                        "Unroll value should be a literal");
-                    key.push_back(getUnsignedInt(evaluate(setCoord->value)));
-                }
-
-                return {key, tag};
-            }
-
-            /**
-             * @brief Remove duplicate loads from the graph.
-             *
-             * Check to see if any load within loads has already been seen. If it has, it can be replaced by the
-             * previously seen load.
-             *
-             * @param graph
-             * @param seenLoads Loads that have already been seen
-             * @param loads
-             */
-            void removeDuplicateLoads(KernelGraph&                            graph,
-                                      std::map<LoadKey, std::pair<int, int>>& seenLoads,
-                                      std::vector<int> const&                 loads)
-            {
-                for(auto const& load : loads)
-                {
-                    auto loadKey = getLoadPair(graph, load);
-
-                    if(seenLoads.count(loadKey.first) > 0)
-                    {
-                        auto existingLoad  = seenLoads[loadKey.first];
-                        auto loadMacroTile = graph.mapper.get<MacroTile>(load);
-                        auto existingLoadMacroTile
-                            = graph.mapper.get<MacroTile>(seenLoads[loadKey.first].first);
-
-                        // Check to see if the MacroTile associated with the load is the "Original" MacroTile.
-                        // If it is, it shouldn't be replaced. Instead, replace the already seen load.
-                        auto duplicateStorage = only(graph.coordinates.getOutputNodeIndices(
-                            loadMacroTile, CT::isEdge<Duplicate>));
-                        if(!duplicateStorage)
-                        {
-                            auto tmp                 = loadKey.second;
-                            loadMacroTile            = existingLoadMacroTile;
-                            loadKey.second           = seenLoads[loadKey.first].second;
-                            seenLoads[loadKey.first] = {load, tmp};
-                            existingLoadMacroTile    = graph.mapper.get<MacroTile>(load);
-                        }
-
-                        for(auto const& c : graph.mapper.getCoordinateConnections(loadMacroTile))
-                        {
-                            graph.mapper.disconnect(c.control, c.coordinate, c.connection);
-                            graph.mapper.connect(c.control, existingLoadMacroTile, c.connection);
-                        }
-                        replaceWith(graph, loadKey.second, seenLoads[loadKey.first].second, false);
-                        purgeNodeAndChildren(graph, loadKey.second);
-
-                        // MacroTile should always be a duplicate pointing to an "Original" MacroTile.
-                        // Delete the edges from the MacroTile to the original, then delete the MacroTile.
-                        if(graph.mapper.getCoordinateConnections(loadMacroTile).empty())
-                        {
-                            for(auto const& child :
-                                graph.coordinates.getLocation(loadMacroTile).outgoing)
-                            {
-                                graph.coordinates.deleteElement(child);
-                            }
-                            graph.coordinates.deleteElement(loadMacroTile);
-                        }
-                    }
-                    else
-                    {
-                        seenLoads[loadKey.first] = {load, loadKey.second};
-                    }
-                }
             }
 
             void fuseLoops(KernelGraph& graph, int tag)
@@ -260,23 +143,10 @@ namespace rocRoller
 
                 auto fusedLoopTag = *forLoopsToFuse.begin();
 
-                std::map<LoadKey, std::pair<int, int>> seenLoads;
-
                 for(auto const& forLoopTag : forLoopsToFuse)
                 {
-                    auto loads = filter(graph.control.isElemType<LoadTiled>(),
-                                        graph.control.depthFirstVisit(
-                                            graph.control.getOutputNodeIndices<Body>(forLoopTag)
-                                                .to<std::vector>(),
-                                            dontWalkPastForLoop,
-                                            GD::Downstream))
-                                     .to<std::vector>();
-
                     if(forLoopTag == fusedLoopTag)
-                    {
-                        removeDuplicateLoads(graph, seenLoads, loads);
                         continue;
-                    }
 
                     for(auto const& child :
                         graph.control.getOutputNodeIndices<Sequence>(forLoopTag).to<std::vector>())
@@ -312,8 +182,6 @@ namespace rocRoller
                         graph.control.deleteElement<Body>(std::vector<int>{forLoopTag},
                                                           std::vector<int>{child});
                     }
-
-                    removeDuplicateLoads(graph, seenLoads, loads);
 
                     for(auto const& parent :
                         graph.control.getInputNodeIndices<Sequence>(forLoopTag).to<std::vector>())
@@ -352,13 +220,25 @@ namespace rocRoller
                                         children, dontWalkPastForLoop, GD::Downstream))
                                  .to<std::vector>();
 
+                auto ldsLoads = filter(graph.control.isElemType<LoadLDSTile>(),
+                                       graph.control.depthFirstVisit(
+                                           children, dontWalkPastForLoop, GD::Downstream))
+                                    .to<std::vector>();
+
                 auto stores = filter(graph.control.isElemType<StoreTiled>(),
                                      graph.control.depthFirstVisit(
                                          children, dontWalkPastForLoop, GD::Downstream))
                                   .to<std::vector>();
 
+                auto ldsStores = filter(graph.control.isElemType<StoreLDSTile>(),
+                                        graph.control.depthFirstVisit(
+                                            children, dontWalkPastForLoop, GD::Downstream))
+                                     .to<std::vector>();
+
                 orderMemoryNodes(graph, loads, true);
+                orderMemoryNodes(graph, ldsLoads, true);
                 orderMemoryNodes(graph, stores, true);
+                orderMemoryNodes(graph, ldsStores, true);
             }
         }
 

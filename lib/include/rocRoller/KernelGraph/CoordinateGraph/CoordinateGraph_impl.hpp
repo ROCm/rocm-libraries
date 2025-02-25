@@ -139,7 +139,7 @@ namespace rocRoller
             return true;
         }
 
-        inline EdgeType CoordinateGraph::getEdgeType(int index)
+        inline EdgeType CoordinateGraph::getEdgeType(int index) const
         {
             Element const& elem = getElement(index);
             if(std::holds_alternative<Edge>(elem))

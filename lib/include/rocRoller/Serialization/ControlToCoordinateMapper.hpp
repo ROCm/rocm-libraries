@@ -101,28 +101,6 @@ namespace rocRoller
             }
         };
 
-        template <typename IO, typename Context>
-        struct MappingTraits<KernelGraph::Connections::LDSTypeAndSubDimension, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-
-            static void
-                mapping(IO& io, KernelGraph::Connections::LDSTypeAndSubDimension& x, Context& ctx)
-            {
-                iot::mapRequired(io, "id", x.id);
-                iot::mapRequired(io, "subdimension", x.subdimension);
-                iot::mapRequired(io, "direction", x.direction);
-            }
-
-            static void mapping(IO& io, KernelGraph::Connections::LDSTypeAndSubDimension& x)
-            {
-                AssertFatal((std::same_as<EmptyContext, Context>));
-
-                Context ctx;
-                mapping(io, x, ctx);
-            }
-        };
-
         static_assert(CNamedVariant<KernelGraph::Connections::ConnectionSpec>);
 
         template <typename IO, typename Context>

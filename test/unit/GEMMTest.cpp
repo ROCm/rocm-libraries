@@ -321,7 +321,7 @@ namespace GEMMDriverTest
                           ? cvtOp.addXOp(rocRoller::Operations::E_StochasticRoundingCvt(
                               tagStoreD, tagLoadSeed, dataTypeD))
                           : cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
-                command->addOperation(std::move(cvtOp));
+                tagStoreD = command->addOperation(std::move(cvtOp));
                 command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
             }
 
@@ -434,17 +434,13 @@ namespace GEMMDriverTest
                     {gemm.macM, gemm.macN},
                     LayoutType::MATRIX_ACCUMULATOR,
                     {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
-                    gemm.storeLDSD ? MemoryType::JAMMED_WAVE_LDS : MemoryType::WAVE);
+                    gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
                 params->setDimensionInfo(tagStoreD, macTileD);
             }
 
-            // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
-
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-            rocRoller::Log::getLogger()->debug(
-                "GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
-            rocRoller::Log::getLogger()->debug(
-                "GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
+            Log::debug("GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
+            Log::debug("GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
 
             params->setManualWavefrontCount(
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
@@ -1027,9 +1023,15 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
-        gemm.fuseLoops = false;
-        gemm.unrollK   = 4;
-        gemm.macK      = 8;
+        gemm.fuseLoops = true;
+        gemm.unrollK   = 2;
+
+        gemm.loadLDSA = true;
+        gemm.loadLDSB = true;
+
+        gemm.macM = 128;
+        gemm.macK = 4;
+
         basicGEMM<float>(gemm);
     }
 
@@ -1111,11 +1113,13 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
-        gemm.storeLDSD = false;
+        gemm.storeLDSD = true;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
         gemm.macK      = 4;
         gemm.prefetch  = true;
+        gemm.macM      = gemm.waveM * 4;
+        gemm.macN      = gemm.waveN * 2;
 
         for(auto inflight : {1, 2})
         {
@@ -1138,14 +1142,17 @@ namespace GEMMDriverTest
         gemm.k         = 64 * 16 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
-        gemm.storeLDSD = false;
+        gemm.storeLDSD = true;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
-        gemm.macM      = 64;
-        gemm.macN      = 64;
+        gemm.macM      = 128;
+        gemm.macN      = 128;
         gemm.macK      = 16;
         gemm.prefetch  = true;
         gemm.waveK     = 8;
+
+        gemm.transA = "N";
+        gemm.transB = "N";
 
         for(auto inflight : {1, 2})
         {

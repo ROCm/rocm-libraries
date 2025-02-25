@@ -272,8 +272,8 @@ namespace rocRoller
             std::vector<unsigned int> jammedSizes = {loopInfo.xLoopSize, loopInfo.yLoopSize};
 
             // Store
-            auto jammedStoreScratchTileTag
-                = createInternalTile(graph, varType, macTileTag, jammedSizes, params, context);
+            auto jammedStoreScratchTileTag = createInternalTile(
+                graph, varType, macTileTag, jammedSizes, false, params, context);
             graph.coordinates.addElement(View(), {jammedStoreScratchTileTag}, {macTileTag});
 
             auto jammedStoreScratchTile
@@ -308,8 +308,8 @@ namespace rocRoller
             storeConnections.push_back(DC<User>(globalScratchTag));
 
             // Load
-            auto jammedLoadScratchTileTag
-                = createInternalTile(graph, varType, macTileTag, jammedSizes, params, context);
+            auto jammedLoadScratchTileTag = createInternalTile(
+                graph, varType, macTileTag, jammedSizes, false, params, context);
             auto jammedLoadScratchTile
                 = *graph.coordinates.get<MacroTile>(jammedLoadScratchTileTag);
             jammedLoadScratchTile.layoutType = LayoutType::SCRATCH;
@@ -958,14 +958,18 @@ namespace rocRoller
             int dpTopLoop, dpAccumLoop;
             if(twoTile)
             {
+                // We disable duplication here so that the fix-up pass
+                // uses the correct registers.
                 auto reindexer = std::make_shared<GraphReindexer>();
                 dpTopLoop      = *only(duplicateControlNodes(
                     graph, reindexer, {loopInfo.topLoopOp}, [](int x) { return true; }));
                 dpAccumLoop    = reindexer->control[loopInfo.accumulatorLoopOp];
 
-                // Duplicate the epilogue
+                // Duplicate the epilogue.  We enable duplication here
+                // to help the deallocation pass reduce register
+                // pressure (shortens lifetimes)
                 auto epilogueDuplicates = duplicateControlNodes(
-                    graph, nullptr, epilogueOperations, [](int x) { return true; });
+                    graph, nullptr, epilogueOperations, [](int x) { return false; });
                 for(auto const& epilogueDuplicate : epilogueDuplicates)
                     graph.control.addElement(Sequence(), {dpTopLoop}, {epilogueDuplicate});
             }

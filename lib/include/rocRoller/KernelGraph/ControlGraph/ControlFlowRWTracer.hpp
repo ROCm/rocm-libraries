@@ -58,6 +58,11 @@ namespace rocRoller::KernelGraph
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
 
+        /**
+         * @brief Get map of body-parents.
+         */
+        std::unordered_map<int, int> getBodyParents() const;
+
         void operator()(Assign const& op, int tag);
         void operator()(Barrier const& op, int tag);
         void operator()(ComputeIndex const& op, int tag);

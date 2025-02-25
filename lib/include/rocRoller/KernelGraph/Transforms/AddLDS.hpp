@@ -37,6 +37,35 @@ namespace rocRoller
                 return "AddLDS";
             }
 
+            std::vector<GraphConstraint> postConstraints() const override;
+
+        private:
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
+        };
+
+        /**
+         * @brief Rewrite KernelGraph to add LDS operations for
+         * loading/storing data.
+         *
+         * Modifies the coordinate and control graphs to add LDS
+         * information.
+         */
+        class AddPrefetch : public GraphTransform
+        {
+        public:
+            AddPrefetch(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
+            {
+            }
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "AddPrefetch";
+            }
+
             inline std::vector<GraphConstraint> preConstraints() const override
             {
                 return {&AcceptablePrefetchNodes};

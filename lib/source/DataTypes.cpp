@@ -229,8 +229,8 @@ namespace rocRoller
             return "WAVE";
         case MemoryType::WAVE_LDS:
             return "WAVE_LDS";
-        case MemoryType::JAMMED_WAVE_LDS:
-            return "JAMMED_WAVE_LDS";
+        case MemoryType::WAVE_SPLIT:
+            return "WAVE_SPLIT";
         case MemoryType::WAVE_SWIZZLE:
             return "WAVE_SWIZZLE";
         case MemoryType::Literal:

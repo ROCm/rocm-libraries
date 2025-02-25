@@ -77,6 +77,7 @@ namespace KernelGraphTest
 
         std::vector<GraphTransformPtr> transforms;
         transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, m_context));
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
         transforms.push_back(std::make_shared<ConnectWorkgroups>());
@@ -96,7 +97,6 @@ namespace KernelGraphTest
             auto arguments = command->getArguments();
             for(auto argument : arguments)
             {
-                std::cout << argument->name() << std::endl;
                 if(argument->name() == "Tensor_4_size_0")
                     tensorDsizeX = argument;
             }

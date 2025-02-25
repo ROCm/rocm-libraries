@@ -73,6 +73,7 @@ namespace rocRoller::KernelGraph
                 dest = getDEST(kgraph, tag);
             else if(std::holds_alternative<Multiply>(op))
                 dest = kgraph.mapper.get(tag, NaryArgument::DEST);
+            // ZZZ
             else if(std::holds_alternative<LoadTiled>(op))
                 dest = kgraph.mapper.get<MacroTile>(tag);
             else

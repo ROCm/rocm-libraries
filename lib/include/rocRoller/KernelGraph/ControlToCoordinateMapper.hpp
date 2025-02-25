@@ -90,44 +90,11 @@ namespace rocRoller::KernelGraph
             return a.argument < b.argument;
         }
 
-        enum class LDSLoadStore : int
-        {
-            LOAD_FROM_GLOBAL = 0,
-            STORE_INTO_LDS,
-            LOAD_FROM_LDS,
-            STORE_INTO_GLOBAL,
-
-            Count,
-        };
-
-        std::string toString(LDSLoadStore ld);
-
-        struct LDSTypeAndSubDimension
-        {
-            std::string  id;
-            int          subdimension;
-            LDSLoadStore direction;
-        };
-
-        bool inline operator<(LDSTypeAndSubDimension const& a, LDSTypeAndSubDimension const& b)
-        {
-            if(a.id == b.id)
-            {
-                if(a.subdimension == b.subdimension)
-                {
-                    return a.direction < b.direction;
-                }
-                return a.subdimension < b.subdimension;
-            }
-            return a.id < b.id;
-        }
-
         using ConnectionSpec = std::variant<std::monostate,
                                             JustNaryArgument,
                                             ComputeIndex,
                                             TypeAndSubDimension,
-                                            TypeAndNaryArgument,
-                                            LDSTypeAndSubDimension>;
+                                            TypeAndNaryArgument>;
 
         std::string   name(ConnectionSpec const& cs);
         std::string   toString(ConnectionSpec const& cs);
@@ -146,16 +113,6 @@ namespace rocRoller::KernelGraph
     {
         DeferredConnection rv;
         rv.connectionSpec = Connections::TypeAndSubDimension{name<T>(), sdim};
-        rv.coordinate     = coordinate;
-        return rv;
-    }
-
-    template <typename T>
-    inline DeferredConnection
-        LDSDC(int coordinate, Connections::LDSLoadStore direction, int sdim = 0)
-    {
-        DeferredConnection rv;
-        rv.connectionSpec = Connections::LDSTypeAndSubDimension{name<T>(), sdim, direction};
         rv.coordinate     = coordinate;
         return rv;
     }

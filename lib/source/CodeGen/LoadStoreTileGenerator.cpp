@@ -996,11 +996,11 @@ namespace rocRoller
                 {
                     info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
 
-                    auto viewTileTag = only(
-                        m_graph->coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<View>));
-                    if(viewTileTag)
+                    auto viewTileTags
+                        = m_graph->coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<View>);
+                    for(auto viewTileTag : viewTileTags)
                     {
-                        m_context->registerTagManager()->addRegister(*viewTileTag, info.data);
+                        m_context->registerTagManager()->addRegister(viewTileTag, info.data);
                     }
                 }
 
@@ -1323,6 +1323,7 @@ namespace rocRoller
 
             switch(macTile.memoryType)
             {
+            case MemoryType::WAVE_SPLIT:
             case MemoryType::VGPR:
             case MemoryType::LDS:
                 co_yield loadMacroTileLDS(tag, load, coords);
@@ -1553,6 +1554,7 @@ namespace rocRoller
 
             switch(macTile.memoryType)
             {
+            case MemoryType::WAVE_SPLIT:
             case MemoryType::VGPR:
                 co_yield storeMacroTileVGPR(tag, store, coords);
                 break;

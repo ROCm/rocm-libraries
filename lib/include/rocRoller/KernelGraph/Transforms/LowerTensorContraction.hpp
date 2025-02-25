@@ -28,6 +28,8 @@ namespace rocRoller
                 return "LowerTensorContraction";
             }
 
+            std::vector<GraphConstraint> postConstraints() const override;
+
         private:
             CommandParametersPtr m_params;
             ContextPtr           m_context;

@@ -174,7 +174,7 @@ namespace rocRoller::KernelGraph
     std::vector<int> getCodeGeneratorCoordinates(KernelGraph const& graph, int tag)
     {
         auto [tileTag, tile] = graph.getDimension<MacroTile>(tag);
-        if(tile.memoryType == MemoryType::VGPR)
+        if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::WAVE_SPLIT)
         {
             return {graph.mapper.get<ElementNumber>(tag, 0),
                     graph.mapper.get<ElementNumber>(tag, 1)};
@@ -481,13 +481,15 @@ namespace rocRoller::KernelGraph
         {
             auto log = rocRoller::Log::getLogger();
 
-            log->debug("KernelGraph::addComputeIndex({}): ", candidate);
+            auto node = kgraph.control.getNode<Operation>(candidate);
+            log->debug("KernelGraph::addComputeIndex({}): {}", candidate, toString(node));
 
             auto [target, direction] = getOperationTarget(candidate, kgraph);
             auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, kgraph);
             auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);
 
+            log->debug("  target: {}", target);
             for(auto r : required)
             {
                 auto e = std::get<Dimension>(kgraph.coordinates.getElement(r));

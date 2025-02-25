@@ -393,7 +393,7 @@ namespace rocRoller
             /**
              * Return MacroTileIndex corresponding to sub-dimension `sdim` of this tile.
              */
-            MacroTileIndex tileIndex(int sdim) const;
+            MacroTileIndex tileIndex(int sdim, uint jamming = 1) const;
 
             /**
              * Return total number of elements.
