@@ -2,6 +2,7 @@
 
 #include <any>
 #include <bitset>
+#include <functional>
 #include <limits>
 #include <map>
 #include <shared_mutex>
@@ -48,14 +49,19 @@ namespace rocRoller
      *
      * @tparam T type of underlying option.
      */
-    template <typename T>
+    template <typename T, bool LazyValue = false>
     struct SettingsOption : public SettingsOptionBase
     {
         using Type = T;
-        T   defaultValue;
-        int bit;
+        using DefaultValueType =
+            typename std::conditional<LazyValue, std::function<T(void)>, T>::type;
+        DefaultValueType defaultValue;
+        int              bit;
 
-        SettingsOption(std::string name, std::string description, T defaultValue, int bit);
+        SettingsOption(std::string      name,
+                       std::string      description,
+                       DefaultValueType defaultValue,
+                       int              bit);
 
         std::string             help() const;
         std::optional<std::any> getFromEnv() const;
@@ -167,6 +173,12 @@ namespace rocRoller
             -1};
 
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
+
+        static inline const SettingsOption<F8Mode, /*LazyValue*/ true> F8ModeOption{
+            "ROCROLLER_SET_F8MODE",
+            "F8 mode that can be either NaNoo or OCP",
+            getDefaultF8ModeForCurrentHipDevice,
+            -1};
 
         /**
          * @brief Creates a help dialog for the environment variables with

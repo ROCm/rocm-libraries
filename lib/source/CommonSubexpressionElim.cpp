@@ -39,6 +39,32 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                ScaledMatrixMultiply cpy = expr;
+                if(expr.matA)
+                {
+                    cpy.matA = call(expr.matA);
+                }
+                if(expr.matB)
+                {
+                    cpy.matB = call(expr.matB);
+                }
+                if(expr.matC)
+                {
+                    cpy.matC = call(expr.matC);
+                }
+                if(expr.scaleA)
+                {
+                    cpy.scaleA = call(expr.scaleA);
+                }
+                if(expr.scaleB)
+                {
+                    cpy.scaleB = call(expr.scaleB);
+                }
+                return std::make_shared<Expression>(cpy);
+            }
+
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
@@ -113,6 +139,32 @@ namespace rocRoller
                 if(expr.rhs)
                 {
                     cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                ScaledMatrixMultiply cpy = expr;
+                if(expr.matA)
+                {
+                    cpy.matA = call(expr.matA);
+                }
+                if(expr.matB)
+                {
+                    cpy.matB = call(expr.matB);
+                }
+                if(expr.matC)
+                {
+                    cpy.matC = call(expr.matC);
+                }
+                if(expr.scaleA)
+                {
+                    cpy.scaleA = call(expr.scaleA);
+                }
+                if(expr.scaleB)
+                {
+                    cpy.scaleB = call(expr.scaleB);
                 }
                 return std::make_shared<Expression>(cpy);
             }
@@ -349,6 +401,11 @@ namespace rocRoller
                 setComment(tree.back().expr, getComment(expr));
 
                 return tree;
+            }
+
+            ExpressionTree operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return {};
             }
 
             ExpressionTree operator()(WaveTilePtr const& value) const

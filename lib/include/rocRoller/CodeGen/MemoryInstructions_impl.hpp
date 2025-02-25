@@ -262,6 +262,8 @@ namespace rocRoller
         auto ctx = m_context.lock();
         co_yield addLargerOffset2Addr(offset, addr, "global_load_dword");
 
+        co_yield addLargerOffset2Addr(offset, addr, "flat_load_dword");
+
         if(numBytes < m_wordSize)
         {
             AssertFatal(numBytes < m_wordSize && dest->registerCount() == 1);
@@ -330,6 +332,8 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
         co_yield addLargerOffset2Addr(offset, addr, "global_store_dword");
+
+        co_yield addLargerOffset2Addr(offset, addr, "flat_store_dword");
 
         if(numBytes < m_wordSize)
         {
@@ -479,6 +483,8 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
 
+        co_yield addLargerOffset2Addr(offset, newAddr, "ds_read_b32");
+
         if(numBytes < m_wordSize)
         {
             auto offsetModifier = genOffsetModifier(offset);
@@ -534,6 +540,8 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
+
+        co_yield addLargerOffset2Addr(offset, newAddr, "ds_write_b32");
 
         if(numBytes < m_wordSize)
         {
@@ -702,12 +710,22 @@ namespace rocRoller
         AssertFatal(data != nullptr);
         AssertFatal(buffOpts.lds);
 
-        // TODO : add support for other memory instruction generator where numBytes == 3 || numBytes % m_wordSize != 0
-        AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4,
-                    "Invalid number of bytes",
-                    ShowValue(numBytes));
-
         auto ctx = m_context.lock();
+        AssertFatal(ctx->kernelOptions().alwaysWaitZeroBeforeBarrier);
+
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+        {
+            AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4 || numBytes == 12
+                            || numBytes == 16,
+                        "Invalid number of bytes",
+                        ShowValue(numBytes));
+        }
+        else
+        {
+            AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4,
+                        "Invalid number of bytes",
+                        ShowValue(numBytes));
+        }
 
         std::string offsetModifier = "offset: 0", glc = "", slc = "", lds = "lds";
         if(buffOpts.glc)
@@ -722,20 +740,29 @@ namespace rocRoller
         auto sgprSrd = buffDesc->allRegisters();
 
         std::string opEnd = "";
-        if(numBytes < m_wordSize)
+        if(numBytes == 1)
         {
-            if(numBytes == 1)
-            {
-                opEnd += "ubyte";
-            }
-            else if(numBytes == 2)
-            {
-                opEnd += "ushort";
-            }
+            opEnd += "ubyte";
+        }
+        else if(numBytes == 2)
+        {
+            opEnd += "ushort";
+        }
+        else if(numBytes == 4)
+        {
+            opEnd += "dword";
+        }
+        else if(numBytes == 12)
+        {
+            opEnd += "dwordx3";
+        }
+        else if(numBytes == 16)
+        {
+            opEnd += "dwordx4";
         }
         else
         {
-            opEnd += "dword";
+            Throw<FatalError>("Invalid number of bytes for buffer load direct to LDS.");
         }
 
         co_yield_(Instruction("buffer_load_" + opEnd,

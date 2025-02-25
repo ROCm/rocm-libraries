@@ -76,12 +76,24 @@ namespace rocRoller
             return "ComplexDouble";
         case DataType::FP8:
             return "FP8";
-        case DataType::FP8x4:
-            return "FP8x4";
         case DataType::BF8:
             return "BF8";
+        case DataType::FP6:
+            return "FP6";
+        case DataType::BF6:
+            return "BF6";
+        case DataType::FP4:
+            return "FP4";
+        case DataType::FP8x4:
+            return "FP8x4";
         case DataType::BF8x4:
             return "BF8x4";
+        case DataType::FP4x8:
+            return "FP4x8";
+        case DataType::FP6x16:
+            return "FP6x16";
+        case DataType::BF6x16:
+            return "BF6x16";
         case DataType::Half:
             return "Half";
         case DataType::Halfx2:
@@ -145,6 +157,18 @@ namespace rocRoller
             return "BF8";
         case DataType::BF8x4:
             return "4xBF8";
+        case DataType::FP4x8:
+            return "8xFP4";
+        case DataType::FP6x16:
+            return "16xFP6";
+        case DataType::FP6:
+            return "FP6";
+        case DataType::BF6x16:
+            return "16xBF6";
+        case DataType::BF6:
+            return "BF6";
+        case DataType::FP4:
+            return "FP4";
         case DataType::Half:
             return "H";
         case DataType::Halfx2:
@@ -253,6 +277,10 @@ namespace rocRoller
             return "LHS";
         case NaryArgument::RHS:
             return "RHS";
+        case NaryArgument::LHS_SCALE:
+            return "LHS_SCALE";
+        case NaryArgument::RHS_SCALE:
+            return "RHS_SCALE";
 
         case NaryArgument::Count:;
         }
@@ -457,7 +485,6 @@ namespace rocRoller
         info.packing       = T_Info::Packing;
         info.elementBytes  = T_Info::ElementBytes;
         info.elementBits   = T_Info::ElementBits;
-        info.segmentSize   = T_Info::SegmentSize;
         info.alignment     = T_Info::Alignment;
         info.registerCount = T_Info::RegisterCount;
 
@@ -471,9 +498,16 @@ namespace rocRoller
     void DataTypeInfo::registerAllTypeInfo()
     {
         registerTypeInfo<FP8>();
-        registerTypeInfo<FP8x4>();
         registerTypeInfo<BF8>();
+        registerTypeInfo<FP6>();
+        registerTypeInfo<BF6>();
+        registerTypeInfo<FP4>();
+        registerTypeInfo<FP8x4>();
         registerTypeInfo<BF8x4>();
+        registerTypeInfo<FP4x8>();
+        registerTypeInfo<FP6x16>();
+        registerTypeInfo<BF6x16>();
+        registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();
         registerTypeInfo<Halfx2>();
         registerTypeInfo<BFloat16>();
