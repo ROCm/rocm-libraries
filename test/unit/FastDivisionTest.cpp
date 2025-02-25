@@ -63,8 +63,8 @@ namespace FastDivisionTest
         EXPECT_EQ(
             Expression::toString(expr_fast),
             "Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), -1717986919i), "
-            "1j), LogicalShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), -1717986919i), "
-            "31i))");
+            "1j), LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
+            "-1717986919i), 1j), 31j))");
 
         expr      = a / std::make_shared<Expression::Expression>(8u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);
@@ -156,8 +156,9 @@ namespace FastDivisionTest
             Expression::toString(expr_fast),
             "Subtract(CommandArgument(user_Int32_Value_0), "
             "Multiply(Add(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "-1717986919i), 1j), LogicalShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
-            "-1717986919i), 31i)), -5i))");
+            "-1717986919i), 1j), "
+            "LogicalShiftR(ArithmeticShiftR(MultiplyHigh(CommandArgument(user_Int32_Value_0), "
+            "-1717986919i), 1j), 31j)), -5i))");
 
         expr      = a % std::make_shared<Expression::Expression>(8u);
         expr_fast = rocRoller::Expression::fastDivision(expr, m_context);

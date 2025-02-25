@@ -241,7 +241,7 @@ TEST_F(CommandTest, SetCommandArguments)
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
 }
 
-TEST_F(CommandTest, TensorDescriptor)
+TEST_F(CommandTest, GPU_TensorDescriptor)
 {
     auto command = std::make_shared<rocRoller::Command>();
 

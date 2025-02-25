@@ -12,9 +12,9 @@ namespace rocRollerTest
     class MFMA90aObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
 
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
@@ -28,9 +28,9 @@ namespace rocRollerTest
     class MFMA908ObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx908";
+            return {GPUArchitectureGFX::GFX908};
         }
 
         void peekAndSchedule(Instruction inst, uint expectedNops = 0)
@@ -44,9 +44,9 @@ namespace rocRollerTest
     class MFMA942ObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx942";
+            return {GPUArchitectureGFX::GFX942};
         }
 
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
@@ -60,9 +60,9 @@ namespace rocRollerTest
     class MFMA950ObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture()
         {
-            return "gfx950";
+            return GPUArchitectureTarget{GPUArchitectureGFX::GFX950};
         }
 
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)

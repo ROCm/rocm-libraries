@@ -62,7 +62,7 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CObserver = requires(T a, Instruction inst, ContextPtr const& ctx)
+        concept CObserver = requires(T a, Instruction inst, GPUArchitectureTarget const& target)
         {
             //> Speculatively predict stalls if this instruction were scheduled now.
             {
@@ -77,9 +77,9 @@ namespace rocRoller
             //> This is after all observers have had the opportunity to modify the instruction.
             {a.observe(inst)};
 
-            //> This observer is required in ctx.
+            //> This observer is required in ctx, checking GPUArchitectureTarget if needed.
             {
-                a.required(ctx)
+                a.required(target)
                 } -> std::convertible_to<bool>;
         };
 

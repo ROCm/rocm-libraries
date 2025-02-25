@@ -50,7 +50,7 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+            if(!m_context->targetArchitecture().target().is9XGPU())
             {
                 GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
             }
@@ -420,22 +420,22 @@ namespace ArithmeticTest
         }
     };
 
-    TEST_P(IntegralArithmeticTest, Int32)
+    TEST_P(IntegralArithmeticTest, GPU_Int32)
     {
         testBody<int32_t>();
     }
 
-    TEST_P(IntegralArithmeticTest, UInt32)
+    TEST_P(IntegralArithmeticTest, GPU_UInt32)
     {
         testBody<uint32_t>();
     }
 
-    TEST_P(IntegralArithmeticTest, Int64)
+    TEST_P(IntegralArithmeticTest, GPU_Int64)
     {
         testBody<int64_t>();
     }
 
-    TEST_P(IntegralArithmeticTest, UInt64)
+    TEST_P(IntegralArithmeticTest, GPU_UInt64)
     {
         testBody<uint64_t>();
     }
@@ -452,7 +452,7 @@ namespace ArithmeticTest
         FPArithmeticTest() {}
     };
 
-    TEST_P(FPArithmeticTest, ArithFloat)
+    TEST_P(FPArithmeticTest, GPU_ArithFloat)
     {
         auto k = m_context->kernel();
 
@@ -614,7 +614,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -692,7 +692,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(FPArithmeticTest, ArithUnaryFloat)
+    TEST_P(FPArithmeticTest, GPU_ArithUnaryFloat)
     {
         auto k = m_context->kernel();
 
@@ -759,7 +759,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -801,7 +801,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(FPArithmeticTest, ArithFMAMixed)
+    TEST_P(FPArithmeticTest, GPU_ArithFMAMixed)
     {
         auto k = m_context->kernel();
 
@@ -929,8 +929,8 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -1009,7 +1009,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(FPArithmeticTest, ArithDouble)
+    TEST_P(FPArithmeticTest, GPU_ArithDouble)
     {
         auto k = m_context->kernel();
 
@@ -1175,7 +1175,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -1239,7 +1239,7 @@ namespace ArithmeticTest
         }
     }
 
-    TEST_P(FPArithmeticTest, NullChecks)
+    TEST_P(FPArithmeticTest, GPU_NullChecks)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
 

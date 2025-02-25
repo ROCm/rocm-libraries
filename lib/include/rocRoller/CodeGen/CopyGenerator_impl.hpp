@@ -5,14 +5,14 @@
 
 #pragma once
 
-#include "CopyGenerator.hpp"
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
 
-#include "../AssemblyKernel.hpp"
-#include "../Context.hpp"
-#include "../InstructionValues/Register.hpp"
-#include "../Utilities/Error.hpp"
-#include "Arithmetic/ArithmeticGenerator.hpp"
-#include "Arithmetic/Utility.hpp"
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
 {
@@ -350,11 +350,13 @@ namespace rocRoller
                                                       std::vector<Register::ValuePtr> values,
                                                       std::string                     comment) const
     {
-        if(values.size() == 2 && values[0] && values[1]
-           && values[0]->regType() == Register::Type::Vector
-           && values[1]->regType() == Register::Type::Vector
-           && values[0]->variableType().getElementSize() == 2
-           && values[1]->variableType().getElementSize() == 2
+        if(values.size() == 2
+           && std::all_of(values.begin(),
+                          values.end(),
+                          [&](auto v) {
+                              return v && v->regType() == Register::Type::Vector
+                                     && v->variableType().getElementSize() == 2;
+                          })
            && dest->regType() == Register::Type::Vector
            && dest->variableType().getElementSize() == 4)
         {

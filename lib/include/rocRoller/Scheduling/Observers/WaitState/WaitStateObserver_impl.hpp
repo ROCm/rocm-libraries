@@ -41,10 +41,11 @@ namespace rocRoller
             auto* thisDerived = static_cast<DerivedObserver*>(this);
             if(thisDerived->trigger(inst))
             {
-                for(auto iter = (thisDerived->writeTrigger() ? inst.getDsts().begin()
-                                                             : inst.getSrcs().begin());
+                for(auto iter = (DerivedObserver::writeTrigger() ? inst.getDsts().begin()
+                                                                 : inst.getSrcs().begin());
                     iter
-                    != (thisDerived->writeTrigger() ? inst.getDsts().end() : inst.getSrcs().end());
+                    != (DerivedObserver::writeTrigger() ? inst.getDsts().end()
+                                                        : inst.getSrcs().end());
                     iter++)
                 {
                     auto reg = *iter;
@@ -53,7 +54,7 @@ namespace rocRoller
                         for(auto const& regId : reg->getRegisterIds())
                         {
                             (*m_hazardMap)[regId].push_back(WaitStateHazardCounter(
-                                thisDerived->getMaxNops(inst), thisDerived->writeTrigger()));
+                                thisDerived->getMaxNops(inst), DerivedObserver::writeTrigger()));
                         }
                     }
                 }
@@ -127,8 +128,8 @@ namespace rocRoller
                     for(auto const& hazard : m_hazardMap->at(regId))
                     {
                         bool isHazardous
-                            = (thisDerived->writeTrigger() && hazard.regWasWritten())
-                              || (!thisDerived->writeTrigger() && !hazard.regWasWritten());
+                            = (DerivedObserver::writeTrigger() && hazard.regWasWritten())
+                              || (!DerivedObserver::writeTrigger() && !hazard.regWasWritten());
                         if(isHazardous)
                         {
                             requiredNops = std::max(hazard.getRequiredNops(), requiredNops);

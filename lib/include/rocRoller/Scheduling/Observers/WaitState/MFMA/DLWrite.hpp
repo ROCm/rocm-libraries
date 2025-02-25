@@ -21,9 +21,12 @@ namespace rocRoller
          */
             void observeHazard(Instruction const& inst) override;
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

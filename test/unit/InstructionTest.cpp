@@ -9,7 +9,7 @@ using namespace rocRoller;
 
 class InstructionTest : public GenericContextFixture
 {
-    void SetUp()
+    void SetUp() override
     {
         Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
         GenericContextFixture::SetUp();
@@ -168,13 +168,31 @@ TEST_F(InstructionTest, NopOnRegularInstruction)
 
 TEST_F(InstructionTest, Label)
 {
-    const std::string label2 = "next loop";
-    auto              inst   = Instruction::Label("main_loop");
-    auto              inst2  = Instruction::Label(label2);
-    m_context->schedule(inst);
-    m_context->schedule(inst2);
+    {
+        auto inst = Instruction::Label("main_loop", "Main loop");
+        EXPECT_TRUE(inst.isLabel());
+        EXPECT_EQ(inst.getLabel(), "main_loop");
+    }
 
-    EXPECT_EQ("main_loop:\n\nnext loop:\n\n", output());
+    {
+        auto label = Register::Value::Label("main_loop");
+        auto inst  = Instruction::Label(label, "Main loop");
+        EXPECT_TRUE(inst.isLabel());
+        EXPECT_EQ(inst.getLabel(), "main_loop");
+    }
+
+    {
+        const std::string label2 = "next loop";
+        auto              inst   = Instruction::Label("main_loop");
+        auto              inst2  = Instruction::Label(label2);
+        m_context->schedule(inst);
+        m_context->schedule(inst2);
+
+        EXPECT_TRUE(inst.isLabel());
+        EXPECT_EQ(inst.getLabel(), "main_loop");
+
+        EXPECT_EQ("main_loop:\n\nnext loop:\n\n", output());
+    }
 }
 
 TEST_F(InstructionTest, Wait)

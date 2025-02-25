@@ -63,7 +63,7 @@ namespace rocRoller
              */
             void observe(Instruction const& inst);
 
-            static bool required(ContextPtr);
+            static bool required(GPUArchitectureTarget const& target);
 
         private:
             std::weak_ptr<Context>            m_context;

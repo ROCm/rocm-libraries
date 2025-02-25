@@ -18,6 +18,6 @@ namespace rocRoller
             if(toString(val) == str)
                 return val;
         }
-        Throw<FatalError>("Invalid ", typeid(T).name(), ": ", str);
+        Throw<FatalError>("Invalid fromString", typeid(T).name(), ": ", str);
     }
 }

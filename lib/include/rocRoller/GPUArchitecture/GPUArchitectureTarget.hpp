@@ -17,98 +17,129 @@
 
 namespace rocRoller
 {
-    class GPUArchitectureTarget
+
+    /**
+     * @brief Represents GFX architecture version IDs
+     *
+     * NOTE: When adding new arches, be sure to
+     * - Add the enum
+     * - Update the `toString()` method
+     * - Update relevant filters like `isGFX9X()`
+     * - Double check Observers and other places the filters might be used
+     *
+     */
+    enum class GPUArchitectureGFX : int32_t
+    {
+        UNKNOWN = 0,
+        GFX803,
+        GFX900,
+        GFX906,
+        GFX908,
+        GFX90A,
+        GFX940,
+        GFX941,
+        GFX942,
+        GFX950,
+        GFX1010,
+        GFX1011,
+        GFX1012,
+        GFX1030,
+
+        Count,
+    };
+    std::string toString(GPUArchitectureGFX const& gfx);
+
+    struct GPUArchitectureFeatures
     {
     public:
-        GPUArchitectureTarget() = default;
-        explicit GPUArchitectureTarget(std::string const& input);
-
-        GPUArchitectureTarget& operator=(std::string const& input);
-
-        bool operator==(GPUArchitectureTarget a) const
-        {
-            return m_majorVersion == a.m_majorVersion && m_minorVersion == a.m_minorVersion
-                   && m_pointVersion == a.m_pointVersion && m_sramecc == a.m_sramecc
-                   && m_xnack == a.m_xnack;
-        }
-        bool operator!=(GPUArchitectureTarget a) const
-        {
-            return m_majorVersion != a.m_majorVersion || m_minorVersion != a.m_minorVersion
-                   || m_pointVersion != a.m_pointVersion || m_sramecc != a.m_sramecc
-                   || m_xnack != a.m_xnack;
-        }
-        bool operator<(GPUArchitectureTarget a) const
-        {
-            if(m_majorVersion < a.m_majorVersion)
-            {
-                return true;
-            }
-            else if(m_majorVersion > a.m_majorVersion)
-            {
-                return false;
-            }
-            else if(m_minorVersion < a.m_minorVersion)
-            {
-                return true;
-            }
-            else if(m_minorVersion > a.m_minorVersion)
-            {
-                return false;
-            }
-            else if(m_pointVersion < a.m_pointVersion)
-            {
-                return true;
-            }
-            else if(m_pointVersion > a.m_pointVersion)
-            {
-                return false;
-            }
-            else
-            {
-                return toString() < a.toString();
-            }
-        }
+        bool sramecc = false;
+        bool xnack   = false;
 
         std::string toString() const;
-
-        void parseString(std::string const&);
 
         // Return a string of features that can be provided as input to the LLVM Assembler.
         // These should have the ON/OFF symbol in front of each feature, and be comma
         // delimmited.
-        std::string getLLVMFeatureString() const;
+        std::string toLLVMString() const;
 
-        // Return the target string without the features list.
-        std::string getVersionString() const;
+        auto operator<=>(const GPUArchitectureFeatures&) const = default;
+    };
 
-        int getMajorVersion() const;
+    struct GPUArchitectureTarget
+    {
+    public:
+        GPUArchitectureGFX      gfx      = GPUArchitectureGFX::UNKNOWN;
+        GPUArchitectureFeatures features = {};
 
-        struct Hash
+        static GPUArchitectureTarget fromString(std::string const& archStr);
+        std::string                  toString() const;
+
+        constexpr bool is10XGPU() const
         {
-            std::size_t operator()(const GPUArchitectureTarget& input) const
-            {
-                return std::hash<std::string>()(input.toString());
-            };
-        };
+            return gfx == GPUArchitectureGFX::GFX1010 || gfx == GPUArchitectureGFX::GFX1011
+                   || gfx == GPUArchitectureGFX::GFX1012 || gfx == GPUArchitectureGFX::GFX1030;
+        }
 
-        template <typename T1, typename T2, typename T3>
-        friend struct rocRoller::Serialization::MappingTraits;
+        constexpr bool is9XGPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX900 || gfx == GPUArchitectureGFX::GFX906
+                   || gfx == GPUArchitectureGFX::GFX908 || gfx == GPUArchitectureGFX::GFX90A
+                   || gfx == GPUArchitectureGFX::GFX940 || gfx == GPUArchitectureGFX::GFX941
+                   || gfx == GPUArchitectureGFX::GFX942 || gfx == GPUArchitectureGFX::GFX950;
+        }
+
+        constexpr bool is908GPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX908;
+        }
+
+        constexpr bool is90aGPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX90A;
+        }
+
+        constexpr bool is94XGPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX940 || gfx == GPUArchitectureGFX::GFX941
+                   || gfx == GPUArchitectureGFX::GFX942;
+        }
+
+        constexpr bool is950GPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX950;
+        }
+
+        auto operator<=>(const GPUArchitectureTarget&) const = default;
 
     private:
-        int m_majorVersion = 0;
-        int m_minorVersion = 0;
-        int m_pointVersion = 0;
-
-        bool m_sramecc = false;
-        bool m_xnack   = false;
-
-        std::string m_stringRep;
-        std::string m_versionRep;
-        std::string m_llvmFeaturesRep;
-
-        std::string createString(bool) const;
-        std::string createLLVMFeatureString() const;
+        template <typename T1, typename T2, typename T3>
+        friend struct rocRoller::Serialization::MappingTraits;
     };
+
+    inline std::ostream& operator<<(std::ostream& os, GPUArchitectureTarget const& input)
+    {
+        os << input.toString();
+        return os;
+    }
+
+    inline std::istream& operator>>(std::istream& is, GPUArchitectureTarget& input)
+    {
+        std::string recvd;
+        is >> recvd;
+        input = GPUArchitectureTarget::fromString(recvd);
+        return is;
+    }
+
+    inline std::string toString(GPUArchitectureFeatures const& feat)
+    {
+        return feat.toString();
+    }
+
+    inline std::string toString(GPUArchitectureTarget const& target)
+    {
+        return target.toString();
+    }
+
 }
 
 #include "GPUArchitectureTarget_impl.hpp"

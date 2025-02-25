@@ -117,11 +117,11 @@ namespace rocRoller
          * from row/column coordinates `iWaveX` and `iWaveY` for the
          * v_mfma_*_f8f6f4 instruction.
          *
-	 * The `lane` and `element` parameters are existing
-	 * coordinates corresponding to a Lane coordiante and VGPR
-	 * coordinate (which should be thought of as which
-	 * element/item is being addressed).  Each lane loads 32
-	 * elements.
+     * The `lane` and `element` parameters are existing
+     * coordinates corresponding to a Lane coordiante and VGPR
+     * coordinate (which should be thought of as which
+     * element/item is being addressed).  Each lane loads 32
+     * elements.
          */
         void addLoadWaveTileCTF8F6F4(KernelGraph& graph,
                                      int          iWaveX,
@@ -357,7 +357,7 @@ namespace rocRoller
             break;
 
             default:
-                Throw<FatalError>("Not implemented yet.");
+                Throw<FatalError>("addLoadWaveTileCT waveTile.layout not implemented yet.");
             }
         }
 

@@ -28,7 +28,8 @@ namespace msgpack
                         throw msgpack::type_error();
                     }
                     v = rocRoller::GPUArchitecture(
-                        o.via.array.ptr[0].as<rocRoller::GPUArchitectureTarget>(),
+                        rocRoller::GPUArchitectureTarget::fromString(
+                            o.via.array.ptr[0].as<std::string>()),
                         o.via.array.ptr[1].as<std::map<rocRoller::GPUCapability, int>>(),
                         o.via.array.ptr[2]
                             .as<std::map<std::string, rocRoller::GPUInstructionInfo>>());
@@ -44,7 +45,7 @@ namespace msgpack
                                            rocRoller::GPUArchitecture const& v) const
                 {
                     o.pack_array(3);
-                    o.pack(v.target());
+                    o.pack(v.target().toString());
                     o.pack(v.getAllCapabilities());
                     o.pack(v.getAllIntructionInfo());
                     return o;
@@ -65,7 +66,8 @@ namespace msgpack
                     {
                         throw msgpack::type_error();
                     }
-                    v = rocRoller::GPUArchitectureTarget(o.via.array.ptr[0].as<std::string>());
+                    v = rocRoller::GPUArchitectureTarget::fromString(
+                        o.via.array.ptr[0].as<std::string>());
                     return o;
                 }
             };
@@ -79,6 +81,38 @@ namespace msgpack
                 {
                     o.pack_array(1);
                     o.pack(v.toString());
+                    return o;
+                }
+            };
+
+            template <>
+            struct convert<rocRoller::GPUArchitectureGFX>
+            {
+                msgpack::object const& operator()(msgpack::object const&         o,
+                                                  rocRoller::GPUArchitectureGFX& v) const
+                {
+                    if(o.type != msgpack::type::ARRAY)
+                    {
+                        throw msgpack::type_error();
+                    }
+                    if(o.via.array.size != 1)
+                    {
+                        throw msgpack::type_error();
+                    }
+                    v = rocRoller::GPUArchitectureGFX(o.via.array.ptr[0].as<int32_t>());
+                    return o;
+                }
+            };
+
+            template <>
+            struct pack<rocRoller::GPUArchitectureGFX>
+            {
+                template <typename Stream>
+                packer<Stream>& operator()(msgpack::packer<Stream>&             o,
+                                           rocRoller::GPUArchitectureGFX const& v) const
+                {
+                    o.pack_array(1);
+                    o.pack((int32_t)v);
                     return o;
                 }
             };

@@ -133,6 +133,15 @@ namespace rocRoller
                     if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
                         inputType = "_f8f6f4";
                 }
+
+                if(typeA == DataType::BFloat16x2)
+                {
+                    if(((M == 32) && (N == 32) && (K == 8))
+                       || ((M == 16) && (N == 16) && (K == 16)))
+                    {
+                        inputType = "bf16_1k";
+                    }
+                }
             }
             else
             {

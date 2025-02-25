@@ -6,12 +6,18 @@ import pathlib
 import pytest
 import yaml
 
+import time
+import random
+
 from types import SimpleNamespace as NS
 
 
 @pytest.mark.slow
 def test_run_optimize(tmp_path_factory):
-    output_dir = tmp_path_factory.mktemp("test_optimize_weights")
+    t = int(time.time())
+    print(f"Random seed: {t}")
+    random.seed(t)
+    output_dir = tmp_path_factory.mktemp("test_run_optimize")
     run_1_dir = output_dir / "run_1"
     run_2_dir = output_dir / "run_2"
     args = [
@@ -83,7 +89,7 @@ rnorm:           2.5e-05
 
 def test_mocked_integration(tmp_path_factory, mocker):
     mocker.patch("subprocess.run", new=mocked_run)
-    output_dir = tmp_path_factory.mktemp("test_optimize_weights")
+    output_dir = tmp_path_factory.mktemp("test_mocked_integration")
     run_1_dir = output_dir / "run_1"
     run_2_dir = output_dir / "run_2"
     args = [
@@ -203,7 +209,7 @@ def test_get_args():
 
 
 def test_gen_rw(tmp_path_factory):
-    output_dir = tmp_path_factory.mktemp("test_optimize_weights")
+    output_dir = tmp_path_factory.mktemp("test_gen_rw")
     population = 5
     num_gens = 10
     for gen in range(num_gens):

@@ -17,14 +17,10 @@ option(BUILD_SHARED_LIBS                "Build using shared libraries" ON)
 set(YAML_BACKEND "YAML_CPP" CACHE STRING "YAML backend used for serialization")
 set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  if (YAML_BACKEND STREQUAL "LLVM")
-    message(FATAL_ERROR "LLVM YAML backend not supported with Clang")
-  endif()
-  set(COROUTINES_COMPILE_OPTION -fcoroutines-ts)
-  set(EXTRA_COMPILE_OPTIONS -stdlib=libc++)
-  set(EXTRA_LINK_OPTIONS -lc++ -lm -fuse-ld=lld)
-  set_source_files_properties(lib/source/Assemblers/InProcessAssembler.cpp PROPERTIES COMPILE_FLAGS "-stdlib=libstdc++")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  set(COROUTINES_COMPILE_OPTION )
+  set(EXTRA_COMPILE_OPTIONS )
+  set(EXTRA_LINK_OPTIONS -fuse-ld=lld)
 else()
   set(COROUTINES_COMPILE_OPTION -fcoroutines)
   set(EXTRA_COMPILE_OPTIONS )
@@ -43,6 +39,16 @@ if(CODE_COVERAGE)
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
 
+if(ROCROLLER_USE_HIP)
+  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+  find_package(hip)
+
+  find_package(LLVM REQUIRED HINTS /opt/rocm/llvm/)
+
+  llvm_map_components_to_libnames(llvm_libs all)
+  find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lld/)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
@@ -53,7 +59,7 @@ FetchContent_MakeAvailable(googletest)
 FetchContent_Declare(
   libdivide
   GIT_REPOSITORY https://github.com/ridiculousfish/libdivide.git
-  GIT_TAG 5.0
+  GIT_TAG v5.1
   CONFIGURE_COMMAND ""
   BUILD_COMMAND ""
   INSTALL_COMMAND ""
@@ -147,17 +153,6 @@ endif()
 
 enable_testing()
 include(CTest)
-
-find_package(LLVM 13.0.1 REQUIRED)
-find_package(OpenMP)
-
-llvm_map_components_to_libnames(llvm_libs all)
-find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lib/cmake/lld/)
-
-if(ROCROLLER_USE_HIP)
-  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
-  find_package(hip)
-endif()
 
 if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/spdlog)
   execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} submodule update --init -- extern/spdlog)
@@ -626,10 +621,11 @@ add_executable(
   ${rocRollerTests_SOURCES}
 )
 
+find_package(OpenMP)
 target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_include_directories(rocRollerTests PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}/lib/include
-                           )
+  ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+)
 target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests
@@ -768,16 +764,33 @@ catch_discover_tests(rocRollerTests_catch
     OUTPUT_SUFFIX ".xml"
     DISCOVERY_MODE PRE_TEST
     EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+    TEST_SPEC "[gpu]"
     PROPERTIES
       "LABELS" "CATCH"
-      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped")
+      "LABELS" "GPU"
+      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+)
+
+include(Catch)
+catch_discover_tests(rocRollerTests_catch
+    REPORTER JUnit
+    OUTPUT_DIR ${TEST_REPORT_DIR}
+    OUTPUT_SUFFIX ".xml"
+    DISCOVERY_MODE PRE_TEST
+    EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+    TEST_SPEC "~[gpu]"
+    PROPERTIES
+      "LABELS" "CATCH"
+      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+)
 
   # Add script linting
   add_test(NAME PythonLint
            COMMAND flake8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonLint
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
+  )
 
   if (ROCROLLER_TESTS_SKIP_SLOW)
     set(PYTHON_TEST_SKIP "-m not slow")
@@ -785,10 +798,11 @@ catch_discover_tests(rocRollerTests_catch
 
   # Add rrperf unit tests
   add_test(NAME PythonTest
-           COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
+           COMMAND pytest -s --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonTest
-                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib"
+  )
 
 
   add_test(NAME GraupelInstall

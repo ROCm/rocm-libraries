@@ -23,7 +23,7 @@ namespace rocRollerTest
         rocRoller::Operations::OperationTag resultTag, aTag;
     };
 
-    class F8Test : public GPUContextFixtureParam<rocRoller::DataType>
+    class F8TestGPU : public GPUContextFixtureParam<rocRoller::DataType>
     {
     };
 
@@ -196,7 +196,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(F8Test, F8x4LoadToFloatStore)
+    TEST_P(F8TestGPU, GPU_F8x4LoadToFloatStore)
     {
         auto F8Type = std::get<rocRoller::DataType>(GetParam());
         if(isLocalDevice())
@@ -352,7 +352,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(F8Test, F8LoadGather)
+    TEST_P(F8TestGPU, GPU_F8LoadGather)
     {
         constexpr int N = 4;
         if(isLocalDevice())
@@ -368,10 +368,13 @@ namespace rocRollerTest
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        F8Test,
-        F8Test,
-        ::testing::Combine(::testing::Values("gfx942:sramecc+", "gfx950:sramecc+", "gfx950:xnack+"),
-                           ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8)));
+        F8TestGPU,
+        F8TestGPU,
+        ::testing::Combine(
+            ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}}),
+            ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8)));
 
     class CPUF8Test : public GenericContextFixture
     {

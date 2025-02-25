@@ -286,7 +286,7 @@ namespace rocRoller
         return m_label;
     }
 
-    inline int Instruction::nopCount() const
+    constexpr inline int Instruction::nopCount() const
     {
         return m_nopCount;
     }

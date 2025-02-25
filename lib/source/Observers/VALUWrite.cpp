@@ -17,11 +17,6 @@ namespace rocRoller
                    && !GPUInstructionInfo::isDLOP(inst.getOpCode());
         };
 
-        bool VALUWrite::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUWrite::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode())

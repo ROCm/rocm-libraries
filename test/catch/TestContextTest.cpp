@@ -31,7 +31,8 @@ TEST_CASE("TestContext::EscapeKernelName escapes bad characters", "[meta-test][i
 
 TEST_CASE("TestContext::KernelName includes test name", "[meta-test][infrastructure]")
 {
-    rocRoller::GPUArchitectureTarget target("gfx90a:xnack+");
+    rocRoller::GPUArchitectureTarget target
+        = {rocRoller::GPUArchitectureGFX::GFX90A, {.xnack = true}};
     CHECK(TestContext::KernelName("my kernel", 5, target)
           == "TestContext_KernelName_includes_test_name_my_kernel_5_gfx90a_xnackp");
 }
@@ -52,7 +53,7 @@ TEST_CASE("TestContext::ForTestDevice gives a usable GPU.", "[meta-test][infrast
 TEST_CASE("TestContext::ForTarget does not give a usable GPU.", "[meta-test][infrastructure]")
 {
     using namespace Catch::Matchers;
-    auto context = TestContext::ForTarget("gfx942");
+    auto context = TestContext::ForTarget({rocRoller::GPUArchitectureGFX::GFX942});
 
     REQUIRE(context.get() != nullptr);
     auto kernelName = context->kernel()->kernelName();

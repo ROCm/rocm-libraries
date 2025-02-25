@@ -1,5 +1,8 @@
+
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -40,7 +43,7 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::SaveAssembly, true);
             CurrentGPUContextFixture::SetUp();
@@ -56,7 +59,7 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             GenericContextFixture::SetUp();
             fastArith = Expression::FastArithmetic(m_context);
@@ -2436,13 +2439,13 @@ namespace KernelGraphTest
                   "node 0 maps to coordinate node 0, which doesn't exist.");
     }
 
-    TEST_F(KernelGraphTestGPU, Conditional)
+    TEST_F(KernelGraphTestGPU, GPU_Conditional)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         rocRoller::KernelGraph::KernelGraph kgraph;
@@ -2479,13 +2482,13 @@ namespace KernelGraphTest
         EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0")); //False Body
     }
 
-    TEST_F(KernelGraphTestGPU, ConditionalExecute)
+    TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         rocRoller::KernelGraph::KernelGraph kgraph;
@@ -2583,7 +2586,7 @@ namespace KernelGraphTest
         }
     }
 
-    TEST_F(KernelGraphTestGPU, DoWhileExecute)
+    TEST_F(KernelGraphTestGPU, GPU_DoWhileExecute)
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 

@@ -1902,13 +1902,15 @@ namespace ExpressionTest
     {
         using namespace Expression;
 
-        float  a = 1.25f;
-        Half   b = 1.1111;
-        double c = 5.2619;
+        float    a = 1.25f;
+        Half     b = 1.1111;
+        double   c = 5.2619;
+        BFloat16 d(1.0f);
 
         auto a_exp = literal(a);
         auto b_exp = literal(b);
         auto c_exp = literal(c);
+        auto d_exp = literal(d);
 
         auto exp1 = convert<DataType::Half>(a_exp);
         auto exp2 = convert<DataType::Half>(b_exp);
@@ -1925,14 +1927,17 @@ namespace ExpressionTest
         auto exp4 = convert<DataType::Float>(a_exp);
         auto exp5 = convert<DataType::Float>(b_exp);
         auto exp6 = convert<DataType::Float>(c_exp);
+        auto exp7 = convert<DataType::Float>(d_exp);
 
         CHECK(resultVariableType(exp4).dataType == DataType::Float);
         CHECK(resultVariableType(exp5).dataType == DataType::Float);
         CHECK(resultVariableType(exp6).dataType == DataType::Float);
+        CHECK(resultVariableType(exp7).dataType == DataType::Float);
 
         CHECK(std::get<float>(evaluate(exp4)) == a);
         CHECK(std::get<float>(evaluate(exp5)) == static_cast<float>(b));
         CHECK(std::get<float>(evaluate(exp6)) == static_cast<float>(c));
+        CHECK(std::get<float>(evaluate(exp7)) == static_cast<float>(d));
     }
 
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")

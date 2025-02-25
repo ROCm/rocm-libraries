@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isACCVGPRWrite(inst.getOpCode());
         }
 
-        bool ACCVGPRWriteWrite::writeTrigger() const
-        {
-            return true;
-        }
-
         int ACCVGPRWriteWrite::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode()))

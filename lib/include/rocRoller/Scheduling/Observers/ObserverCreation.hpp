@@ -52,7 +52,7 @@ namespace rocRoller
                                        const Done&... observers)
         {
             PotentialObservers<TypesRemaining...> remaining;
-            if(Current::required(ctx))
+            if(Current::required(ctx->targetArchitecture().target()))
             {
                 Current obs(ctx);
                 return createObserver_Conditional(ctx, remaining, observers..., obs);

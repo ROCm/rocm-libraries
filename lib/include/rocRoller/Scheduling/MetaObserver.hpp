@@ -44,7 +44,7 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             virtual void observe(Instruction const& inst) override;
 
-            static bool required(ContextPtr ctx);
+            constexpr static bool required(GPUArchitectureTarget const& target);
 
         private:
             Tup m_tuple;

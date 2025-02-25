@@ -191,7 +191,7 @@ namespace rocRoller::KernelGraph
             return {graph.mapper.get<VGPRBlockNumber>(tag), graph.mapper.get<VGPRBlockIndex>(tag)};
         }
 
-        Throw<FatalError>("Not implemented yet.");
+        Throw<FatalError>("getCodeGeneratorCoordinates tile type not implemented yet.");
     }
 
     /**

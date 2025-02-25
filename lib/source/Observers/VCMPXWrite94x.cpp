@@ -27,11 +27,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVCMPX(inst.getOpCode());
         };
 
-        bool VCMPXWrite94x::writeTrigger() const
-        {
-            return true;
-        }
-
         int VCMPXWrite94x::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVReadlane(inst.getOpCode())

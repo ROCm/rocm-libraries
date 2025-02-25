@@ -13,109 +13,107 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/Utilities/Utils.hpp>
+
 namespace rocRoller
 {
-    inline std::string GPUArchitectureTarget::createString(bool withFeatures) const
+    inline std::string toString(GPUArchitectureGFX const& gfx)
     {
-        std::stringstream ss;
-        ss << "gfx" << m_majorVersion << m_minorVersion << std::hex << m_pointVersion;
-        if(withFeatures)
+        switch(gfx)
         {
-            if(m_xnack)
-            {
-                ss << ":xnack+";
-            }
-            if(m_sramecc)
-            {
-                ss << ":sramecc+";
-            }
+        case GPUArchitectureGFX::GFX803:
+            return "gfx803";
+        case GPUArchitectureGFX::GFX900:
+            return "gfx900";
+        case GPUArchitectureGFX::GFX906:
+            return "gfx906";
+        case GPUArchitectureGFX::GFX908:
+            return "gfx908";
+        case GPUArchitectureGFX::GFX90A:
+            return "gfx90a";
+        case GPUArchitectureGFX::GFX940:
+            return "gfx940";
+        case GPUArchitectureGFX::GFX941:
+            return "gfx941";
+        case GPUArchitectureGFX::GFX942:
+            return "gfx942";
+        case GPUArchitectureGFX::GFX950:
+            return "gfx950";
+        case GPUArchitectureGFX::GFX1010:
+            return "gfx1010";
+        case GPUArchitectureGFX::GFX1011:
+            return "gfx1011";
+        case GPUArchitectureGFX::GFX1012:
+            return "gfx1012";
+        case GPUArchitectureGFX::GFX1030:
+            return "gfx1030";
+        default:
+            return "gfxunknown";
         }
-        return ss.str();
     }
 
-    inline std::string GPUArchitectureTarget::createLLVMFeatureString() const
+    inline std::string GPUArchitectureFeatures::toString() const
     {
-        std::stringstream ss;
-        if(m_xnack)
+        std::string rv = "";
+        if(sramecc)
         {
-            ss << "+xnack";
+            rv = concatenate(rv, "sramecc+");
         }
-        if(m_sramecc)
+        if(xnack)
         {
-            if(m_xnack)
-                ss << ",";
-            ss << "+sramecc";
+            rv = concatenate(rv, "xnack+");
         }
+        return rv;
+    }
 
-        return ss.str();
+    inline std::string GPUArchitectureFeatures::toLLVMString() const
+    {
+        std::string rv = "";
+        if(xnack)
+        {
+            rv = concatenate(rv, "+xnack");
+        }
+        if(sramecc)
+        {
+            if(xnack)
+                rv = concatenate(rv, ",");
+            rv = concatenate(rv, "+sramecc");
+        }
+        return rv;
     }
 
     inline std::string GPUArchitectureTarget::toString() const
     {
-        return m_stringRep;
+        if(features.sramecc || features.xnack)
+            return concatenate(gfx, ":", features.toString());
+        else
+            return rocRoller::toString(gfx);
     }
 
-    inline void GPUArchitectureTarget::parseString(std::string const& input)
+    inline GPUArchitectureTarget GPUArchitectureTarget::fromString(std::string const& archStr)
     {
-        int         start = 3; //Skip gfx
-        size_t      end   = input.find(":");
-        std::string arch  = input.substr(start, end - start);
+        GPUArchitectureTarget rv;
 
-        if(arch.length() == 4)
-        {
-            m_majorVersion = std::stoi(arch.substr(0, 2));
-        }
-        else
-        {
-            m_majorVersion = std::stoi(arch.substr(0, 1));
-        }
+        int         start = 0;
+        size_t      end   = archStr.find(":");
+        std::string arch  = archStr.substr(start, end - start);
 
-        m_minorVersion = std::stoi(arch.substr(arch.length() - 2, 1));
-        m_pointVersion = std::stoi(arch.substr(arch.length() - 1, 1), nullptr, 16);
+        rv.gfx = rocRoller::fromString<GPUArchitectureGFX>(arch);
 
         while(end != std::string::npos)
         {
             start               = end + 1;
-            end                 = input.find(":", start);
-            std::string feature = input.substr(start, end - start);
+            end                 = archStr.find(":", start);
+            std::string feature = archStr.substr(start, end - start);
             if(feature == "xnack+")
             {
-                m_xnack = true;
+                rv.features.xnack = true;
             }
             else if(feature == "sramecc+")
             {
-                m_sramecc = true;
+                rv.features.sramecc = true;
             }
         }
-
-        m_stringRep       = createString(true);
-        m_versionRep      = createString(false);
-        m_llvmFeaturesRep = createLLVMFeatureString();
-    }
-
-    inline std::string GPUArchitectureTarget::getLLVMFeatureString() const
-    {
-        return m_llvmFeaturesRep;
-    }
-
-    inline std::string GPUArchitectureTarget::getVersionString() const
-    {
-        return m_versionRep;
-    }
-
-    inline GPUArchitectureTarget::GPUArchitectureTarget(std::string const& input)
-    {
-        parseString(input);
-    }
-
-    inline GPUArchitectureTarget& GPUArchitectureTarget::operator=(std::string const& input)
-    {
-        parseString(input);
-        return *this;
-    }
-
-    inline int GPUArchitectureTarget::getMajorVersion() const
-    {
-        return m_majorVersion;
+        return rv;
     }
 }

@@ -37,11 +37,6 @@ namespace rocRoller
             return GPUInstructionInfo::isDLOP(inst.getOpCode());
         };
 
-        bool DLWrite::writeTrigger() const
-        {
-            return true;
-        }
-
         int DLWrite::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isDLOP(inst.getOpCode()))

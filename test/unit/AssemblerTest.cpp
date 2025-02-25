@@ -89,7 +89,7 @@ auto assemble()
     auto myAssembler = rocRoller::Assembler::Get();
 
     std::vector<char> kernelObject = myAssembler->assembleMachineCode(
-        simple_assembly, rocRoller::GPUArchitectureTarget("gfx90a:xnack+"));
+        simple_assembly, {GPUArchitectureGFX::GFX90A, {.xnack = true}});
 
     return kernelObject;
 }
@@ -104,8 +104,8 @@ TEST_F(AssemblerTest, BadTarget)
 {
     auto myAssembler = rocRoller::Assembler::Get();
 
-    EXPECT_THROW(myAssembler->assembleMachineCode(
-                     simple_assembly, rocRoller::GPUArchitectureTarget("gfx91a:xnack+")),
+    EXPECT_THROW(myAssembler->assembleMachineCode(simple_assembly,
+                                                  {GPUArchitectureGFX::UNKNOWN, {.xnack = true}}),
                  std::runtime_error);
 }
 

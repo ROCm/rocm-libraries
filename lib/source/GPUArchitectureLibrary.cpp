@@ -28,7 +28,8 @@ namespace rocRoller
 
             HIP_CHECK(hipGetDeviceProperties(&deviceProps, i));
 
-            retval.push_back(m_gpuArchitectures.at(GPUArchitectureTarget(deviceProps.gcnArchName)));
+            retval.push_back(
+                m_gpuArchitectures.at(GPUArchitectureTarget::fromString(deviceProps.gcnArchName)));
         }
 
         if(count > 0)
@@ -51,20 +52,13 @@ namespace rocRoller
         return iter->second;
     }
 
-    GPUArchitecture GPUArchitectureLibrary::GetArch(std::string const& archName)
-    {
-        GPUArchitectureTarget target(archName);
-
-        return GetArch(target);
-    }
-
     GPUArchitecture GPUArchitectureLibrary::GetHipDeviceArch(int deviceIdx)
     {
         hipDeviceProp_t deviceProps;
 
         HIP_CHECK(hipGetDeviceProperties(&deviceProps, deviceIdx));
 
-        return GetArch(deviceProps.gcnArchName);
+        return GetArch(GPUArchitectureTarget::fromString(deviceProps.gcnArchName));
     }
 
     GPUArchitecture GPUArchitectureLibrary::GetDefaultHipDeviceArch(int& deviceIdx)
@@ -77,5 +71,11 @@ namespace rocRoller
     {
         int idx;
         return GetDefaultHipDeviceArch(idx);
+    }
+
+    bool GPUArchitectureLibrary::HasHipDevice()
+    {
+        int idx;
+        return hipGetDevice(&idx) == hipSuccess;
     }
 }

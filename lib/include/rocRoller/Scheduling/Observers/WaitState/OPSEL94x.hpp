@@ -22,15 +22,17 @@ namespace rocRoller
             OPSEL94x(ContextPtr context)
                 : WaitStateObserver<OPSEL94x>(context){};
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                auto arch = context->targetArchitecture().target().getVersionString();
-                return arch == "gfx940" || arch == "gfx941" || arch == "gfx942" || arch == "gfx950";
+                return target.is94XGPU() || target.is950GPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

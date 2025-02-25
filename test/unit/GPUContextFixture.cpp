@@ -35,15 +35,14 @@ void BaseGPUContextFixture::SetUp()
     }
 }
 
-rocRoller::ContextPtr BaseGPUContextFixture::createContextForArch(std::string const& device)
+rocRoller::ContextPtr
+    BaseGPUContextFixture::createContextForArch(rocRoller::GPUArchitectureTarget const& device)
 {
     using namespace rocRoller;
 
-    auto target = GPUArchitectureTarget(device);
-
     auto currentDevice = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
 
-    bool localDevice = currentDevice.target() == target;
+    bool localDevice = currentDevice.target() == device;
 
     if(localDevice)
     {
@@ -51,7 +50,7 @@ rocRoller::ContextPtr BaseGPUContextFixture::createContextForArch(std::string co
     }
     else
     {
-        return Context::ForTarget(target, testKernelName(), m_kernelOptions);
+        return Context::ForTarget(device, testKernelName(), m_kernelOptions);
     }
 }
 

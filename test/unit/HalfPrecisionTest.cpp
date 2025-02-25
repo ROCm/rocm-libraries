@@ -605,7 +605,7 @@ namespace rocRollerTest
         AddTiles(256, 512, 16, 8, 4, 4);
     }
 
-    TEST_F(HalfPrecisionTest, HalfPrecisionAsserts)
+    TEST_F(HalfPrecisionTest, GPU_HalfPrecisionAsserts)
     {
 
         auto vf32

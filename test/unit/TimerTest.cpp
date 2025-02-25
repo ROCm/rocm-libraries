@@ -15,7 +15,7 @@ class TimerTest : public GenericContextFixture
 
 class TimerTestGPU : public CurrentGPUContextFixture
 {
-    void SetUp()
+    void SetUp() override
     {
         CurrentGPUContextFixture::SetUp();
     }
@@ -70,7 +70,7 @@ TEST_F(TimerTest, Destructor)
     EXPECT_EQ(t1, TimerPool::milliseconds("rocRoller::TimerTest.Destructor"));
 }
 
-TEST_F(TimerTestGPU, Destructor)
+TEST_F(TimerTestGPU, GPU_Destructor)
 {
     TimerPool::clear();
 

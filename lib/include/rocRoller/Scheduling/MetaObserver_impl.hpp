@@ -122,29 +122,30 @@ namespace rocRoller
         namespace Detail
         {
             template <CObserver T, CObserver... Rest>
-            bool Required(ContextPtr ctx, T const& obs, Rest const&... rest)
+            constexpr bool
+                Required(GPUArchitectureTarget const& target, T const& obs, Rest const&... rest)
             {
-                auto rv = obs.required(ctx);
+                auto rv = obs.required(target);
                 if constexpr(sizeof...(rest) > 0)
                 {
-                    rv &= Required(ctx, rest...);
+                    rv &= Required(target, rest...);
                 }
                 return rv;
             }
         }
 
         template <>
-        inline bool MetaObserver<>::required(ContextPtr)
+        constexpr inline bool MetaObserver<>::required(GPUArchitectureTarget const& target)
         {
             return true;
         }
 
         template <CObserver... Types>
-        inline bool MetaObserver<Types...>::required(ContextPtr ctx)
+        constexpr inline bool MetaObserver<Types...>::required(GPUArchitectureTarget const& target)
         {
             auto tup = Tup();
-            return std::apply([&ctx](auto&&... args) { return Detail::Required(ctx, args...); },
-                              tup);
+            return std::apply(
+                [&target](auto&&... args) { return Detail::Required(target, args...); }, tup);
         }
     }
 }

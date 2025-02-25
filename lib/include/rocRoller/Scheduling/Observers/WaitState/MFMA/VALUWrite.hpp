@@ -24,20 +24,20 @@ namespace rocRoller
             VALUWrite(ContextPtr context)
                 : WaitStateObserver<VALUWrite>(context)
             {
-                m_checkACCVGPR
-                    = context->targetArchitecture().target().getVersionString() == "gfx908";
+                m_checkACCVGPR = context->targetArchitecture().target().is908GPU();
             };
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                auto arch = context->targetArchitecture().target().getVersionString();
-                return arch == "gfx90a" || arch == "gfx908" || arch == "gfx940" || arch == "gfx941"
-                       || arch == "gfx942" || arch == "gfx950";
+                return target.is9XGPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

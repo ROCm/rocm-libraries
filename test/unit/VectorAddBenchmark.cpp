@@ -1,5 +1,8 @@
+
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
@@ -16,13 +19,13 @@ namespace VectorAddBenchmark
     class VectorAddBenchmarkGPU : public CurrentGPUContextFixture,
                                   public ::testing::WithParamInterface<int>
     {
-        void SetUp()
+        void SetUp() override
         {
             CurrentGPUContextFixture::SetUp();
         }
     };
 
-    TEST_P(VectorAddBenchmarkGPU, VectorAddBenchmark_GPU_Graph)
+    TEST_P(VectorAddBenchmarkGPU, GPU_VectorAddBenchmark_Graph)
     {
         auto nx = GetParam();
 

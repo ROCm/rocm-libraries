@@ -13,9 +13,9 @@ namespace rocRollerTest
     class SupportedInstructionObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
     };
 
@@ -40,12 +40,12 @@ namespace rocRollerTest
     class SupportedInstructionObserverOffTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
 
-        void SetUp()
+        void SetUp() override
         {
             Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             GenericContextFixture::SetUp();

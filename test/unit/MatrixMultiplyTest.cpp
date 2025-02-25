@@ -1,7 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include <random>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -19,7 +19,6 @@
 
 #include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
@@ -69,12 +68,12 @@ namespace MatrixMultiplyTest
     template <typename... Ts>
     class BaseMatrixMultiplyContextFixture
         : public BaseGPUContextFixture,
-          public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+          public ::testing::WithParamInterface<std::tuple<rocRoller::GPUArchitectureTarget, Ts...>>
     {
     protected:
         virtual rocRoller::ContextPtr createContext() override
         {
-            std::string device = std::get<0>(this->GetParam());
+            GPUArchitectureTarget device = std::get<0>(this->GetParam());
 
             return this->createContextForArch(device);
         }
@@ -107,7 +106,7 @@ namespace MatrixMultiplyTest
             }
             if constexpr(std::is_same_v<TA, BFloat16>)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16);
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
 
                 // TODO Remove this when we can generate BF16 kernels on archs that don't support BF16
                 if(!isLocalDevice())
@@ -667,15 +666,27 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numLocalRead, 16);
     }
 
-    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_FP32)
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_FP32_BF16)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+
         auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+
         matrixMultiplyMacroTile<BFloat16, BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
     }
 
     TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_BF16)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+
         auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+
         matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16>(
             mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
     }
@@ -1378,7 +1389,8 @@ namespace MatrixMultiplyTest
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyTestGPUMixed,
-        ::testing::Combine(::testing::Values("gfx950"), //mfmaSupportedISAValues(),
+        ::testing::Combine(::testing::Values(GPUArchitectureTarget{
+                               GPUArchitectureGFX::GFX950}), //mfmaSupportedISAValues(),
                            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
                                                                 rocRoller::DataType::BF8,
                                                                 rocRoller::DataType::FP6,
@@ -1419,7 +1431,8 @@ namespace MatrixMultiplyTest
         MatrixMultiplyTest,
         ScaledMatrixMultiplyTestGPUMixed,
         ::testing::Combine(
-            ::testing::Values("gfx950"), //mfmaSupportedISAValues(),
+            ::testing::Values(GPUArchitectureTarget{
+                GPUArchitectureGFX::GFX950}), //mfmaSupportedISAValues(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
                                                  rocRoller::DataType::BF8,
                                                  rocRoller::DataType::FP6,
@@ -1531,8 +1544,10 @@ namespace MatrixMultiplyTest
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest,
                              ScaledMatrixMultiplyTestGPU,
-                             ::testing::Combine(::testing::Values("gfx950"),
+                             ::testing::Combine(::testing::Values(GPUArchitectureTarget{
+                                                    GPUArchitectureGFX::GFX950}),
                                                 ::testing::Values(16, 32)));
+
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTestGPUBFloat16,
         MatrixMultiplyTestGPUBFloat16,

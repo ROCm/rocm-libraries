@@ -1,7 +1,9 @@
 #include "gtest/gtest.h"
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -19,7 +21,7 @@ using ::testing::HasSubstr;
 
 namespace AssertTest
 {
-    class AssertTestGPU
+    class GPU_AssertTest
         : public CurrentGPUContextFixture,
           public ::testing::WithParamInterface<std::tuple<AssertOpKind, std::string>>
     {
@@ -27,7 +29,7 @@ namespace AssertTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        void SetUp()
+        void SetUp() override
         {
             CurrentGPUContextFixture::SetUp();
             Settings::getInstance()->set(Settings::SaveAssembly, true);
@@ -36,20 +38,20 @@ namespace AssertTest
         }
 
         static std::string
-            getTestSuffix(const testing::TestParamInfo<AssertTestGPU::ParamType>& info)
+            getTestSuffix(const testing::TestParamInfo<GPU_AssertTest::ParamType>& info)
         {
             const auto [assertOpKind, _] = info.param;
             return toString(assertOpKind);
         }
     };
 
-    TEST_P(AssertTestGPU, Assert)
+    TEST_P(GPU_AssertTest, GPU_Assert)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         AssertOpKind assertOpKind;
@@ -171,13 +173,13 @@ namespace AssertTest
         }
     }
 
-    TEST_P(AssertTestGPU, UnconditionalAssert)
+    TEST_P(GPU_AssertTest, GPU_UnconditionalAssert)
     {
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9
-           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        if(!m_context->targetArchitecture().target().is9XGPU()
+           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
         {
             GTEST_SKIP() << "Skipping GPU assert tests for "
-                         << m_context->targetArchitecture().target().getVersionString();
+                         << m_context->targetArchitecture().target().toString();
         }
 
         AssertOpKind assertOpKind;
@@ -281,10 +283,10 @@ namespace AssertTest
 
     INSTANTIATE_TEST_SUITE_P(
         AssertTest,
-        AssertTestGPU,
+        GPU_AssertTest,
         ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "Memory access fault"),
                           std::tuple(AssertOpKind::STrap, "HSA_STATUS_ERROR_EXCEPTION"),
                           std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
                           std::tuple(AssertOpKind::Count, "Invalid AssertOpKind")),
-        AssertTestGPU::getTestSuffix);
+        GPU_AssertTest::getTestSuffix);
 }

@@ -9,7 +9,7 @@ namespace rocRoller
         {
             auto const& architecture = m_context.lock()->targetArchitecture();
             int         passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
-            bool        is950  = (architecture.target().getVersionString() == "gfx950");
+            bool        is950  = architecture.target().is950GPU();
 
             AssertFatal(m_latencyAndNops.contains(passes),
                         "Unexpected number of passes",
@@ -29,11 +29,6 @@ namespace rocRoller
                   != m_excludedOpCodes.end();
             return GPUInstructionInfo::isMFMA(inst.getOpCode()) && !excluded;
         };
-
-        bool XDLWrite94x::writeTrigger() const
-        {
-            return true;
-        }
 
         int XDLWrite94x::getNops(Instruction const& inst) const
         {
@@ -88,7 +83,7 @@ namespace rocRoller
                     {
                         auto const& architecture = m_context.lock()->targetArchitecture();
                         int passes = architecture.GetInstructionInfo(inst.getOpCode()).getLatency();
-                        bool is950 = (architecture.target().getVersionString() == "gfx950");
+                        bool is950 = architecture.target().is950GPU();
 
                         if(mismatched)
                         {

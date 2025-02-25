@@ -27,11 +27,6 @@ namespace rocRoller
             return false;
         };
 
-        bool OPSEL94x::writeTrigger() const
-        {
-            return true;
-        }
-
         int OPSEL94x::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVALU(inst.getOpCode()))

@@ -186,12 +186,14 @@ namespace ConvertInstructionsTest
             convertFromF32<Half>();
     }
 
-    INSTANTIATE_TEST_SUITE_P(ConvertInstructionsTests,
-                             ConvertInstructionsTest,
-                             ::testing::Combine(::testing::Values("gfx90a",
-                                                                  "gfx90a:sramecc+",
-                                                                  "gfx950",
-                                                                  "gfx950:sramecc+",
-                                                                  "gfx950:xnack+"),
-                                                ::testing::Values(rocRoller::DataType::Half)));
+    INSTANTIATE_TEST_SUITE_P(
+        ConvertInstructionsTests,
+        ConvertInstructionsTest,
+        ::testing::Combine(
+            ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX90A, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}}),
+            ::testing::Values(rocRoller::DataType::Half)));
 }

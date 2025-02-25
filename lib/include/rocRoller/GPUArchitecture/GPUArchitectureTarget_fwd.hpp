@@ -3,5 +3,5 @@
 
 namespace rocRoller
 {
-    class GPUArchitectureTarget;
+    struct GPUArchitectureTarget;
 }

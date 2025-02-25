@@ -1,8 +1,8 @@
-#include <cstdio>
-#include <iterator>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -103,9 +103,9 @@ namespace rocRollerTest
     class MaxRegisterKernelTest : public KernelTest
     {
     protected:
-        std::string targetArchitecture() override
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
 
         void SetUp() override
@@ -214,7 +214,7 @@ amdhsa.kernels:
 #endif
     }
 
-    TEST_P(ARCH_KernelTest, WholeKernel)
+    TEST_P(ARCH_KernelTest, GPU_WholeKernel)
     {
         auto k = m_context->kernel();
 
@@ -309,7 +309,7 @@ amdhsa.kernels:
     {
     };
 
-    TEST_P(GPU_KernelTest, WholeKernel)
+    TEST_P(GPU_KernelTest, GPU_WholeKernel)
     {
         //FIXME fix the arch check with InProcess assembler for gfx94X and gfx95X
         if(GetParam() == AssemblerType::InProcess

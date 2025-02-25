@@ -398,7 +398,7 @@ class ARCH_RegisterTest : public GPUContextFixture
 {
 };
 
-TEST_P(ARCH_RegisterTest, RegisterIDSpecial)
+TEST_P(ARCH_RegisterTest, GPU_RegisterIDSpecial)
 {
     std::vector<std::shared_ptr<rocRoller::Register::Value>> specialRegisters(
         {m_context->getVCC_LO(),

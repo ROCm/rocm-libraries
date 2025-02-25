@@ -1,5 +1,8 @@
+
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -45,7 +48,7 @@ namespace rocRollerTest
         EXPECT_THROW(m_context->schedule(brancher.branchConditional(s0, s0, true)), FatalError);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, Basic)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_Basic)
     {
         auto k = m_context->kernel();
 
@@ -90,7 +93,7 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping BranchGenerator tests for " << GetParam();
         }
@@ -99,7 +102,7 @@ namespace rocRollerTest
         EXPECT_GT(assembledKernel.size(), 0);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, Wait)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_Wait)
     {
         auto k = m_context->kernel();
 
@@ -123,7 +126,7 @@ namespace rocRollerTest
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
         }
@@ -131,7 +134,7 @@ namespace rocRollerTest
         EXPECT_EQ(found, true);
     }
 
-    TEST_P(ARCH_BranchGeneratorTest, NoWait)
+    TEST_P(ARCH_BranchGeneratorTest, GPU_NoWait)
     {
         auto k = m_context->kernel();
 
@@ -154,7 +157,7 @@ namespace rocRollerTest
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
         {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
         }

@@ -124,7 +124,7 @@ namespace MemoryInstructionsTest
         }
     };
 
-    TEST_P(ScalarMemoryInstructionsTest, Basic)
+    TEST_P(ScalarMemoryInstructionsTest, GPU_Basic)
     {
         if(!contains({4, 8, 16, 32, 64}, numBytesParam()))
         {
@@ -140,14 +140,15 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(ScalarMemoryInstructionsTest,
-                             ScalarMemoryInstructionsTest,
-                             ::testing::Combine(::testing::Values("gfx90a",
-                                                                  "gfx908",
-                                                                  "gfx940",
-                                                                  "gfx941"
-                                                                  "gfx942"),
-                                                ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+    INSTANTIATE_TEST_SUITE_P(
+        ScalarMemoryInstructionsTest,
+        ScalarMemoryInstructionsTest,
+        ::testing::Combine(::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX940},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX941},
+                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX942}),
+                           ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
 
     struct FlatMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
@@ -264,7 +265,7 @@ namespace MemoryInstructionsTest
         }
     };
 
-    TEST_P(FlatMemoryInstructionsTest, Basic)
+    TEST_P(FlatMemoryInstructionsTest, GPU_Basic)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasFlatOffset);
 
@@ -370,7 +371,7 @@ namespace MemoryInstructionsTest
         }
     }
 
-    TEST_P(MemoryInstructionsTest, BufferDescriptor)
+    TEST_P(MemoryInstructionsTest, GPU_BufferDescriptor)
     {
         auto generate = [&]() {
             auto k = m_context->kernel();
@@ -549,7 +550,7 @@ namespace MemoryInstructionsTest
         }
     };
 
-    TEST_P(BufferMemoryInstructionsTest, Basic)
+    TEST_P(BufferMemoryInstructionsTest, GPU_Basic)
     {
         int N = numBytesParam();
 
@@ -605,7 +606,7 @@ namespace MemoryInstructionsTest
                              ::testing::Combine(mfmaSupportedISAValues(),
                                                 ::testing::Values(1, 2, 3, 4, 8, 16, 20, 44, 47)));
 
-    TEST_P(MemoryInstructionsTest, ExecuteBufDescriptor)
+    TEST_P(MemoryInstructionsTest, GPU_ExecuteBufDescriptor)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasFlatOffset);
 
@@ -901,7 +902,7 @@ namespace MemoryInstructionsTest
             EXPECT_EQ(result[i], a[i]);
     }
 
-    struct MemoryInstructionsLDSBarrierTest : public GPUContextFixtureParam<unsigned int>
+    struct GPU_MemoryInstructionsLDSBarrierTest : public GPUContextFixtureParam<unsigned int>
     {
 
         unsigned int getWorkItemCountParam()
@@ -1006,7 +1007,7 @@ namespace MemoryInstructionsTest
         }
     };
 
-    TEST_P(MemoryInstructionsLDSBarrierTest, GPU_LDSBarrierTest)
+    TEST_P(GPU_MemoryInstructionsLDSBarrierTest, GPU_LDSBarrierTest)
     {
         const unsigned int N = getWorkItemCountParam();
 
@@ -1041,12 +1042,12 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsLDSBarrierTest,
-                             MemoryInstructionsLDSBarrierTest,
+    INSTANTIATE_TEST_SUITE_P(GPU_MemoryInstructionsLDSBarrierTest,
+                             GPU_MemoryInstructionsLDSBarrierTest,
                              ::testing::Combine(currentGPUISA(),
                                                 ::testing::Values(64, 128, 256, 512, 1024)));
 
-    TEST_P(MemoryInstructionsTest, MemoryKernelOptions)
+    TEST_P(MemoryInstructionsTest, GPU_MemoryKernelOptions)
     {
         auto v_addr_64bit
             = Register::Value::Placeholder(m_context,
@@ -1386,7 +1387,7 @@ namespace MemoryInstructionsTest
         }
     };
 
-    TEST_P(MemoryInstructions942Test, ByteLoadStore)
+    TEST_P(MemoryInstructions942Test, GPU_ByteLoadStore)
     {
         genByteLoadStore(std::get<rocRoller::DataType>(GetParam()));
 
@@ -1396,7 +1397,8 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(MemoryInstructions942Test,
                              MemoryInstructions942Test,
-                             ::testing::Combine(::testing::Values("gfx942:sramecc+"),
+                             ::testing::Combine(::testing::Values(GPUArchitectureTarget{
+                                                    GPUArchitectureGFX::GFX942, {.sramecc = true}}),
                                                 ::testing::Values(rocRoller::DataType::FP8x4,
                                                                   rocRoller::DataType::BF8x4)));
 }

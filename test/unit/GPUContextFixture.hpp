@@ -1,12 +1,13 @@
 #pragma once
 
 #include "ContextFixture.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include "Utilities.hpp"
+#endif /* ROCROLLER_USE_HIP */
 
 /**
  * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller.
@@ -52,9 +53,18 @@ inline auto mfmaSupportedISAValues()
  */
 inline auto currentGPUISA()
 {
-    auto currentDevice
-        = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
-    return ::testing::Values(currentDevice.target().toString());
+    if(rocRoller::GPUArchitectureLibrary::getInstance()->HasHipDevice())
+    {
+        auto currentDevice
+            = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
+        return ::testing::Values(currentDevice.target());
+    }
+    else
+    {
+        // Give a dummy device
+        return ::testing::Values(
+            rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A});
+    }
 }
 
 /**
@@ -89,7 +99,7 @@ protected:
     void SetUp() override;
 
     rocRoller::ContextPtr createContextLocalDevice();
-    rocRoller::ContextPtr createContextForArch(std::string const& device);
+    rocRoller::ContextPtr createContextForArch(rocRoller::GPUArchitectureTarget const& device);
 };
 
 class CurrentGPUContextFixture : public BaseGPUContextFixture
@@ -99,36 +109,36 @@ protected:
 };
 
 template <typename... Ts>
-class GPUContextFixtureParam : public BaseGPUContextFixture,
-                               public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+class GPUContextFixtureParam
+    : public BaseGPUContextFixture,
+      public ::testing::WithParamInterface<std::tuple<rocRoller::GPUArchitectureTarget, Ts...>>
 {
 protected:
     virtual rocRoller::ContextPtr createContext() override
     {
-        std::string device = std::get<0>(this->GetParam());
-
+        rocRoller::GPUArchitectureTarget device = std::get<0>(this->GetParam());
         return this->createContextForArch(device);
     }
 };
 
 using GPUContextFixture = GPUContextFixtureParam<>;
 
-#define REQUIRE_ARCH_CAP(cap)                                                                 \
-    do                                                                                        \
-    {                                                                                         \
-        if(!m_context->targetArchitecture().HasCapability(cap))                               \
-        {                                                                                     \
-            GTEST_SKIP() << m_context->targetArchitecture().target() << " has no capability " \
-                         << cap << std::endl;                                                 \
-        }                                                                                     \
+#define REQUIRE_ARCH_CAP(cap)                                                   \
+    do                                                                          \
+    {                                                                           \
+        if(!m_context->targetArchitecture().HasCapability(cap))                 \
+        {                                                                       \
+            GTEST_SKIP() << m_context->targetArchitecture().target().toString() \
+                         << " has no capability " << cap << std::endl;          \
+        }                                                                       \
     } while(0)
 
-#define REQUIRE_NOT_ARCH_CAP(cap)                                                                 \
-    do                                                                                            \
-    {                                                                                             \
-        if(m_context->targetArchitecture().HasCapability(cap))                                    \
-        {                                                                                         \
-            GTEST_SKIP() << m_context->targetArchitecture().target() << " has capability " << cap \
-                         << std::endl;                                                            \
-        }                                                                                         \
+#define REQUIRE_NOT_ARCH_CAP(cap)                                               \
+    do                                                                          \
+    {                                                                           \
+        if(m_context->targetArchitecture().HasCapability(cap))                  \
+        {                                                                       \
+            GTEST_SKIP() << m_context->targetArchitecture().target().toString() \
+                         << " has capability " << cap << std::endl;             \
+        }                                                                       \
     } while(0)

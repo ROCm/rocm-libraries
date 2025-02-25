@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isMFMA(inst.getOpCode());
         };
 
-        bool XDLWrite908::writeTrigger() const
-        {
-            return true;
-        }
-
         int XDLWrite908::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isMFMA(inst.getOpCode()))

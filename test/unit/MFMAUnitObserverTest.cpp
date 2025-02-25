@@ -22,7 +22,7 @@ public:
     }
 };
 
-TEST_P(MFMAUnitObserverTest, Direct)
+TEST_P(MFMAUnitObserverTest, GPU_Direct)
 {
     Scheduling::MFMAObserver observer(m_context);
 
@@ -61,7 +61,7 @@ TEST_P(MFMAUnitObserverTest, Direct)
     EXPECT_EQ(0, observer.peek(valuInst).stallCycles);
 }
 
-TEST_P(MFMAUnitObserverTest, InContext)
+TEST_P(MFMAUnitObserverTest, GPU_InContext)
 {
     auto agpr
         = Register::Value::Placeholder(m_context, Register::Type::Accumulator, DataType::Float, 16);

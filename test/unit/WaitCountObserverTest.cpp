@@ -19,9 +19,9 @@ namespace rocRollerTest
             GenericContextFixture::SetUp();
         }
 
-        std::string targetArchitecture() override
+        GPUArchitectureTarget targetArchitecture() override
         {
-            return "gfx90a";
+            return {GPUArchitectureGFX::GFX90A};
         }
     };
 

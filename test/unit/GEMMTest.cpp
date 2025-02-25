@@ -1,5 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <regex>
 
@@ -35,18 +37,18 @@ namespace GEMMDriverTest
     template <typename... Ts>
     class BaseGEMMContextFixture
         : public BaseGPUContextFixture,
-          public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+          public ::testing::WithParamInterface<std::tuple<GPUArchitectureTarget, Ts...>>
     {
     protected:
         virtual rocRoller::ContextPtr createContext() override
         {
-            std::string device = std::get<0>(this->GetParam());
+            auto device = std::get<0>(this->GetParam());
 
             return this->createContextForArch(device);
         }
 
     public:
-        template <typename TA, typename TB = TA, typename TD = TA>
+        template <typename TA, typename TB = TA, typename TC = TA, typename TD = TA>
         void basicGEMM(const GEMMProblem& gemm,
                        bool               debuggable  = false,
                        bool               setIdentity = false,
@@ -71,6 +73,7 @@ namespace GEMMDriverTest
 
             auto dataTypeA = TypeInfo<TA>::Var.dataType;
             auto dataTypeB = TypeInfo<TB>::Var.dataType;
+            auto dataTypeC = TypeInfo<TC>::Var.dataType;
             auto dataTypeD = TypeInfo<TD>::Var.dataType;
 
             // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
@@ -146,7 +149,7 @@ namespace GEMMDriverTest
             using UnsegmentedTypeB = typename UnsegmentedTypeOf<TB>::type;
             std::vector<UnsegmentedTypeA> hostA;
             std::vector<UnsegmentedTypeB> hostB;
-            std::vector<TD>               hostC;
+            std::vector<TC>               hostC;
 
             GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
 
@@ -160,7 +163,7 @@ namespace GEMMDriverTest
 
             auto                deviceA = make_shared_device(hostA);
             auto                deviceB = make_shared_device(hostB);
-            std::shared_ptr<TD> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
+            std::shared_ptr<TC> deviceC = (notSetC) ? nullptr : make_shared_device(hostC);
             std::shared_ptr<TD> deviceD = make_shared_device<TD>(M * N, TD{});
 
             auto command = std::make_shared<Command>();
@@ -181,7 +184,7 @@ namespace GEMMDriverTest
             auto tagLoadB = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
 
             auto tagTensorC = command->addOperation(
-                rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // C
+                rocRoller::Operations::Tensor(2, dataTypeC, oneStridesN)); // C
             auto tagLoadC = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorC));
 
             auto tagScalarAlpha
@@ -220,7 +223,18 @@ namespace GEMMDriverTest
 
             auto tagTensorD = command->addOperation(
                 rocRoller::Operations::Tensor(2, dataTypeD, oneStridesN)); // D
-            command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
+            }
+            else
+            {
+                // If Matrix C and D are of different types, an explicit type conversion is required
+                auto cvtOp  = rocRoller::Operations::T_Execute(command->getNextTag());
+                auto tagCvt = cvtOp.addXOp(rocRoller::Operations::E_Cvt(tagStoreD, dataTypeD));
+                command->addOperation(std::move(cvtOp)); // Convert( alpha * (A * B) + beta * C )
+                command->addOperation(rocRoller::Operations::T_Store_Tiled(tagCvt, tagTensorD));
+            }
 
             auto tagScratch = command->allocateTag();
             command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
@@ -352,17 +366,37 @@ namespace GEMMDriverTest
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
-            rocRoller::CPUMM(h_result,
-                             hostC,
-                             hostA,
-                             hostB,
-                             M,
-                             N,
-                             K,
-                             alpha,
-                             beta,
-                             gemm.transA == "T",
-                             gemm.transB == "T");
+            if constexpr(std::is_same_v<TC, TD>)
+            {
+                rocRoller::CPUMM(h_result,
+                                 hostC,
+                                 hostA,
+                                 hostB,
+                                 M,
+                                 N,
+                                 K,
+                                 alpha,
+                                 beta,
+                                 gemm.transA == "T",
+                                 gemm.transB == "T");
+            }
+            else
+            {
+                std::vector<TC> h_C(M * N, TC{});
+                rocRoller::CPUMM(h_C,
+                                 hostC,
+                                 hostA,
+                                 hostB,
+                                 M,
+                                 N,
+                                 K,
+                                 alpha,
+                                 beta,
+                                 gemm.transA == "T",
+                                 gemm.transB == "T");
+                for(size_t i = 0; i < h_C.size(); i++)
+                    h_result[i] = TD(h_C[i]);
+            }
 
             // Device result
             std::vector<TD> d_result(M * N);
@@ -571,7 +605,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
+        if(m_context->targetArchitecture().target().is908GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
         }
@@ -610,7 +644,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() == "gfx908")
+        if(m_context->targetArchitecture().target().is908GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -647,7 +681,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        if(!m_context->targetArchitecture().target().is90aGPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -700,7 +734,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(m_context->targetArchitecture().target().getVersionString() != "gfx90a")
+        if(!m_context->targetArchitecture().target().is90aGPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -958,6 +992,18 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_32x32x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 8;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
@@ -968,6 +1014,18 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
@@ -978,6 +1036,18 @@ namespace GEMMDriverTest
         gemm.waveN = 32;
         gemm.waveK = 4;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x4);
+        basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_32x32x8)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 32;
+        gemm.waveN = 32;
+        gemm.waveK = 8;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_32x32x8_1k);
         basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
     }
 
@@ -988,10 +1058,57 @@ namespace GEMMDriverTest
         gemm.waveN = 16;
         gemm.waveK = 8;
 
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x8);
         basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
     }
 
-    TEST_P(GEMMF8TestGPU, GPU_BasicGEMMFP8_16x16x32_NT)
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_16x16x16)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 16;
+
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16_16x16x16_1k);
+        basicGEMM<BFloat16, BFloat16, float>(gemm);
+    }
+
+    GEMMProblem setup_GEMMF8_NT()
+    {
+        GEMMProblem gemm;
+
+        // 4x2 jamming
+        uint wavesPerWGX = 16;
+        uint wavesPerWGY = 2;
+
+        gemm.waveM = 16;
+        gemm.waveN = 16;
+        gemm.waveK = 32;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA = true;
+        gemm.loadLDSB = true;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 33 * gemm.macM;
+        gemm.n = 17 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
+
+        gemm.transA = "N";
+        gemm.transB = "T";
+
+        return gemm;
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
     {
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, FP8, float>(gemm);
@@ -1001,6 +1118,20 @@ namespace GEMMDriverTest
     {
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, BF8, float>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (FP8) = Convert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
+        basicGEMM<FP8, FP8, float, FP8>(gemm);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
+    {
+        auto gemm = setup_GEMMF8_NT();
+        // D (BF8) = Convert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
+        basicGEMM<BF8, BF8, float, BF8>(gemm);
     }
 
     TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicGEMMFP8_16x16x128_NT)

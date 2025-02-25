@@ -1,7 +1,7 @@
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
-
-#include <random>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -13,9 +13,6 @@
 
 #include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
-#include "Scheduling/Observers/FileWritingObserver.hpp"
-#include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 
@@ -30,7 +27,7 @@ namespace TileTransposeAddTest
         bool c;
     };
 
-    class TileTransposeAddTestGPU
+    class GPU_TileTransposeAddTest
         : public CurrentGPUContextFixture,
           public ::testing::WithParamInterface<
               std::tuple<bool, bool, bool, size_t, size_t, int, int, int, int>>
@@ -155,7 +152,7 @@ namespace TileTransposeAddTest
         ASSERT_TRUE(res.ok) << res.message();
     }
 
-    TEST_P(TileTransposeAddTestGPU, TileTransposeAddTest_GPU)
+    TEST_P(GPU_TileTransposeAddTest, GPU_TileTransposeAddTest)
     {
         Transpose transpose
             = {std::get<0>(GetParam()), std::get<1>(GetParam()), std::get<2>(GetParam())};
@@ -170,10 +167,11 @@ namespace TileTransposeAddTest
         TileTransposeAdd(transpose, nx, ny, m, n, t_m, t_n);
     }
 
-    std::vector<TileTransposeAddTestGPU::ParamType> testableParams(
-        ::testing::internal::ParamGenerator<TileTransposeAddTestGPU::ParamType> inputParamGenerator)
+    std::vector<GPU_TileTransposeAddTest::ParamType>
+        testableParams(::testing::internal::ParamGenerator<GPU_TileTransposeAddTest::ParamType>
+                           inputParamGenerator)
     {
-        std::vector<TileTransposeAddTestGPU::ParamType> retval;
+        std::vector<GPU_TileTransposeAddTest::ParamType> retval;
         for(auto const& param : inputParamGenerator)
         {
             Transpose transpose = {std::get<0>(param), std::get<1>(param), std::get<2>(param)};
@@ -188,8 +186,8 @@ namespace TileTransposeAddTest
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        TileTransposeAddTestGPU,
-        TileTransposeAddTestGPU,
+        GPU_TileTransposeAddTest,
+        GPU_TileTransposeAddTest,
         testing::ValuesIn(testableParams(testing::Combine(testing::Bool(),
                                                           testing::Bool(),
                                                           testing::Bool(),

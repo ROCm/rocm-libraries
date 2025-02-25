@@ -6,7 +6,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_templated.hpp>
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/Utilities/Utils.hpp>
 

@@ -15,11 +15,6 @@ namespace rocRoller
             return GPUInstructionInfo::isVALUTrans(inst.getOpCode());
         };
 
-        bool VALUTransWrite94x::writeTrigger() const
-        {
-            return true;
-        }
-
         int VALUTransWrite94x::getNops(Instruction const& inst) const
         {
             if(GPUInstructionInfo::isVALU(inst.getOpCode())

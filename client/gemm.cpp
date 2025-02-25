@@ -1,6 +1,8 @@
 
+#ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
+#endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
@@ -116,18 +118,15 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
     if(solutionParams.scheduler == "TENSILE_ASM")
     {
         Client::GEMMClient::Result result;
-        auto                       versionString = GPUArchitectureLibrary::getInstance()
-                                 ->GetDefaultHipDeviceArch()
-                                 .target()
-                                 .getVersionString();
-        if(versionString == "gfx90a")
+        auto arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch().target();
+        if(arch.is90aGPU())
         {
             Client::GEMMClient::TensileGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
             result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
         }
         else
         {
-            std::cout << "Not running TENSILE_ASM for " << versionString << std::endl;
+            std::cout << "Not running TENSILE_ASM for " << arch.toString() << std::endl;
             result.solutionParams             = solutionParams;
             result.benchmarkResults.runParams = runParams;
         }
@@ -146,7 +145,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         }
         else
         {
-            std::cout << "Not running StreamK for " << defaultDevice.target().getVersionString()
+            std::cout << "Not running StreamK for " << defaultDevice.target().toString()
                       << std::endl;
             result.solutionParams             = solutionParams;
             result.benchmarkResults.runParams = runParams;

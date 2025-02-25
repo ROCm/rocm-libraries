@@ -10,15 +10,15 @@
 #include "llvm/MC/MCParser/MCTargetAsmParser.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Option/Option.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 
 #include <cstdio>
@@ -27,6 +27,11 @@
 #include <vector>
 
 #include <rocRoller/Assemblers/InProcessAssembler.hpp>
+
+#include "llvm/Config/llvm-config.h"
+#if LLVM_VERSION_MAJOR >= 18
+LLD_HAS_DRIVER(elf)
+#endif
 
 namespace rocRoller
 {
@@ -78,8 +83,8 @@ namespace rocRoller
         std::unique_ptr<llvm::MCObjectFileInfo> MOFI(new llvm::MCObjectFileInfo());
 
         // Create a Machine Code Target Info instance
-        std::unique_ptr<llvm::MCSubtargetInfo> STI(
-            TheTarget->createMCSubtargetInfo(triple, target, featureString));
+        std::unique_ptr<llvm::MCSubtargetInfo> STI(TheTarget->createMCSubtargetInfo(
+            triple, std::string(target), std::string(featureString)));
 
         // Create a Context
         llvm::MCContext Ctx(llvm::Triple(triple), MAI.get(), MRI.get(), STI.get(), &SrcMgr);
@@ -93,7 +98,7 @@ namespace rocRoller
         auto                     BOS = std::make_unique<llvm::buffer_ostream>(*FDOS);
         llvm::raw_pwrite_stream* Out = BOS.get();
 
-        llvm::MCCodeEmitter*  CE = TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx);
+        llvm::MCCodeEmitter*  CE = TheTarget->createMCCodeEmitter(*MCII, Ctx);
         llvm::MCTargetOptions Backend_Options;
         llvm::MCAsmBackend*   MAB = TheTarget->createMCAsmBackend(*STI, *MRI, Backend_Options);
         Str.reset(TheTarget->createMCObjectStreamer(llvm::Triple(triple),
@@ -129,9 +134,8 @@ namespace rocRoller
         LLDArgs.push_back("-shared");
         LLDArgs.push_back("-o");
         LLDArgs.push_back(output);
-        llvm::ArrayRef<const char*> LLDArgRefs = llvm::makeArrayRef(LLDArgs);
 
-        bool linkResult = lld::elf::link(LLDArgRefs, false, llvm::outs(), llvm::outs());
+        bool linkResult = lld::elf::link(LLDArgs, llvm::outs(), llvm::outs(), false, false);
         if(!linkResult)
             throw std::runtime_error("Error linking");
     }

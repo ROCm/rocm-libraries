@@ -344,6 +344,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(Convert<DataType::Half>);
         EXPRESSION_INFO(Convert<DataType::Halfx2>);
+        EXPRESSION_INFO(Convert<DataType::FP8>);
+        EXPRESSION_INFO(Convert<DataType::BF8>);
         EXPRESSION_INFO(Convert<DataType::FP8x4>);
         EXPRESSION_INFO(Convert<DataType::BF8x4>);
         EXPRESSION_INFO(Convert<DataType::FP6x16>);

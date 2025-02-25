@@ -12,9 +12,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-        namespace CF = rocRoller::KernelGraph::ControlGraph;
-
         /**
         * @brief Return DataFlowTag of LHS of binary expression in Assign node.
         */
@@ -152,11 +149,10 @@ namespace rocRoller
          * @param size
          * @param varType
          * @param context
-         * @return CT::User
+         * @return User
          */
-        CT::User newScratchCoordinate(Expression::ExpressionPtr size,
-                                      VariableType              varType,
-                                      ContextPtr                context);
+        rocRoller::KernelGraph::CoordinateGraph::User newScratchCoordinate(
+            Expression::ExpressionPtr size, VariableType varType, ContextPtr context);
 
         /**
          * Replace operation with a new operation.  Does not delete the original operation.

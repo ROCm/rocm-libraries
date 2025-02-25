@@ -459,7 +459,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, UnrollOp const& unroll, Transformer coords)
             {
-                Throw<FatalError>("Not implemented yet.");
+                Throw<FatalError>("CodeGeneratorVisitor UnrollOp not implemented yet.");
             }
 
             struct ExpressionHasNoneDTVisitor

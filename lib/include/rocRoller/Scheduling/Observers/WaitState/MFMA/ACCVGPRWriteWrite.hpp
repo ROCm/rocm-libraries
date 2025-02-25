@@ -23,14 +23,17 @@ namespace rocRoller
             ACCVGPRWriteWrite(ContextPtr context)
                 : WaitStateObserver<ACCVGPRWriteWrite>(context){};
 
-            static bool required(ContextPtr context)
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                return context->targetArchitecture().target().getVersionString() == "gfx908";
+                return target.is908GPU();
             }
 
-            int         getMaxNops(Instruction const& inst) const;
-            bool        trigger(Instruction const& inst) const;
-            bool        writeTrigger() const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
+            static constexpr bool writeTrigger()
+            {
+                return true;
+            }
             int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {

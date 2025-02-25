@@ -15,3 +15,5 @@ cql/checks
 
 junit.xml
 .cache
+
+.venv

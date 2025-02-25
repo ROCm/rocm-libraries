@@ -14,8 +14,8 @@
  * Declares a `GPUArchitectureTarget` variable in the current scope named `varname`.
  */
 #define SUPPORTED_ARCH_SECTION(varname)                                                       \
-    std::string varname_ = GENERATE(                                                          \
+    GPUArchitectureTarget varname_ = GENERATE(                                                \
         from_range(rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs())); \
     GPUArchitectureTarget varname;                                                            \
     varname = varname_;                                                                       \
-    SECTION(varname_)
+    SECTION(varname_.toString())

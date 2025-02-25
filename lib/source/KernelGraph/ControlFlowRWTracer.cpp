@@ -486,7 +486,7 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(UnrollOp const& op, int tag)
     {
-        Throw<FatalError>("Not implemented yet.");
+        Throw<FatalError>("ControlFlowRWTracer UnrollOp not implemented yet.");
     }
 
     void ControlFlowRWTracer::operator()(WaitZero const& op, int tag) {}

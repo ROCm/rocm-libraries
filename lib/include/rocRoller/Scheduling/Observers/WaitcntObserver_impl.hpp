@@ -13,7 +13,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        constexpr inline bool WaitcntObserver::required(ContextPtr const& ctx)
+        constexpr inline bool WaitcntObserver::required(GPUArchitectureTarget const& target)
         {
             return true;
         }

@@ -551,7 +551,7 @@ namespace RegisterAllocatorTest
     {
     };
 
-    TEST_P(ARCH_RegisterAllocatorTest, AlignedSGPR)
+    TEST_P(ARCH_RegisterAllocatorTest, GPU_AlignedSGPR)
     {
         auto k = m_context->kernel();
 
@@ -596,7 +596,7 @@ namespace RegisterAllocatorTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        if(!m_context->targetArchitecture().target().is9XGPU())
             GTEST_SKIP() << "Skipping SGPR alignment tests for " << GetParam();
 
         std::vector<char> assembledKernel = m_context->instructions()->assemble();

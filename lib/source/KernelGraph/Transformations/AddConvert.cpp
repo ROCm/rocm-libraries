@@ -162,6 +162,8 @@ namespace rocRoller
 
         void AddConvertOperations::commit(KernelGraph& graph)
         {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
             std::map<int, int> newStorageDuplicate;
 
             for(auto& location : m_locations)
