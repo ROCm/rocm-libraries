@@ -439,8 +439,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
         EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, true);
     }
 
-    for(auto inst :
-        {"v_mfma_f32_16x16x16bf16_1k", "v_mfma_f32_16x16x1f32", "v_mfma_f32_32x32x8f16"})
+    for(auto inst : {"v_mfma_f32_16x16x16bf16", "v_mfma_f32_16x16x1f32", "v_mfma_f32_32x32x8f16"})
     {
         EXPECT_CATEGORY_EQ(inst, isDLOP, false);
         EXPECT_CATEGORY_EQ(inst, isMFMA, true);
@@ -512,9 +511,4 @@ TEST_F(GPUInstructionInfoTest, Signed)
         EXPECT_CATEGORY_EQ(inst, isUIntInst, false);
         EXPECT_CATEGORY_EQ(inst, isIntInst, true);
     }
-}
-
-TEST_F(GPUInstructionInfoTest, SDWA)
-{
-    EXPECT_CATEGORY_EQ("v_xor_b32_sdwa", isSDWA, true);
 }

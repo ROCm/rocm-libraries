@@ -93,7 +93,7 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping BranchGenerator tests for " << GetParam();
         }
@@ -126,7 +126,7 @@ namespace rocRollerTest
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
         }
@@ -157,7 +157,7 @@ namespace rocRollerTest
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
         }

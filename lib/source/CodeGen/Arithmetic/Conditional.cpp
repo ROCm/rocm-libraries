@@ -78,12 +78,12 @@ namespace rocRoller
             auto const elementSize = dest->variableType().getElementSize();
             if(elementSize == 8)
             {
-                co_yield_(Instruction("v_cndmask_b32_e64",
+                co_yield_(Instruction("v_cndmask_b32",
                                       {dest->subset({0})},
                                       {r2hs->subset({0}), r1hs->subset({0}), cond},
                                       {},
                                       ""));
-                co_yield_(Instruction("v_cndmask_b32_e64",
+                co_yield_(Instruction("v_cndmask_b32",
                                       {dest->subset({1})},
                                       {r2hs->subset({1}), r1hs->subset({1}), cond},
                                       {},
@@ -91,7 +91,7 @@ namespace rocRoller
             }
             else if(elementSize == 4)
             {
-                co_yield_(Instruction("v_cndmask_b32_e64", {dest}, {r2hs, r1hs, cond}, {}, ""));
+                co_yield_(Instruction("v_cndmask_b32", {dest}, {r2hs, r1hs, cond}, {}, ""));
             }
             else
             {

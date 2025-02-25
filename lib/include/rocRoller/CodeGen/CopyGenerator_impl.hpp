@@ -397,6 +397,6 @@ namespace rocRoller
                                                           Register::ValuePtr hiVal,
                                                           std::string        comment) const
     {
-        co_yield_(Instruction("v_pack_B32_F16", {dest}, {loVal, hiVal}, {}, ""));
+        co_yield_(Instruction("v_pack_b32_f16", {dest}, {loVal, hiVal}, {}, ""));
     }
 }

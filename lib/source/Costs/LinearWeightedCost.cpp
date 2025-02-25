@@ -169,11 +169,11 @@ namespace rocRoller
             {
                 const auto arch = ctx->targetArchitecture().target();
 
-                if(arch.is908GPU())
+                if(arch.isCDNA1GPU())
                     m_weights = GFX908_WEIGHTS;
-                else if(arch.is90aGPU())
+                else if(arch.isCDNA2GPU())
                     m_weights = GFX90A_WEIGHTS;
-                else if(arch.is94XGPU())
+                else if(arch.isCDNA3GPU())
                     m_weights = GFX942_WEIGHTS;
                 else
                 {

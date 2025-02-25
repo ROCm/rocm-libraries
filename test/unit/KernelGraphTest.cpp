@@ -2441,8 +2441,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_Conditional)
     {
-        if(!m_context->targetArchitecture().target().is9XGPU()
-           || m_context->targetArchitecture().target().gfx != GPUArchitectureGFX::GFX900)
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
                          << m_context->targetArchitecture().target().toString();
@@ -2484,8 +2483,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
     {
-        if(!m_context->targetArchitecture().target().is9XGPU()
-           || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for "
                          << m_context->targetArchitecture().target().toString();
