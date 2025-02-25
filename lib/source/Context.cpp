@@ -138,12 +138,21 @@ namespace rocRoller
 
     Register::ValuePtr Context::getVCC()
     {
-        if(kernel()->wavefront_size() == 32)
+        auto wavefrontSize = kernel()->wavefront_size();
+        if(wavefrontSize == 32)
+        {
             return std::make_shared<Register::Value>(
                 shared_from_this(), Register::Type::VCC_LO, DataType::Bool32, 1);
-        else
+        }
+        else if(wavefrontSize == 64)
+        {
             return std::make_shared<Register::Value>(
                 shared_from_this(), Register::Type::VCC, DataType::Bool64, 1);
+        }
+        else
+        {
+            Throw<FatalError>("getVCC() is only implemented for wave32 or wave64");
+        }
     }
 
     Register::ValuePtr Context::getVCC_LO()
@@ -166,8 +175,21 @@ namespace rocRoller
 
     Register::ValuePtr Context::getExec()
     {
-        return std::make_shared<Register::Value>(
-            shared_from_this(), Register::Type::EXEC, DataType::Bool32, 1);
+        auto wavefrontSize = kernel()->wavefront_size();
+        if(wavefrontSize == 32)
+        {
+            return std::make_shared<Register::Value>(
+                shared_from_this(), Register::Type::EXEC_LO, DataType::Bool32, 1);
+        }
+        else if(wavefrontSize == 64)
+        {
+            return std::make_shared<Register::Value>(
+                shared_from_this(), Register::Type::EXEC, DataType::Bool64, 1);
+        }
+        else
+        {
+            Throw<FatalError>("getExec() is only implemented for wave32 or wave64");
+        }
     }
 
     std::ostream& operator<<(std::ostream& stream, ContextPtr const& ctx)

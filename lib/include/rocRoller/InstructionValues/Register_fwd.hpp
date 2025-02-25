@@ -23,6 +23,8 @@ namespace rocRoller
             VCC_LO,
             VCC_HI,
             EXEC,
+            EXEC_LO,
+            EXEC_HI,
             Count // Always last enum entry
         };
 

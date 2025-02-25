@@ -89,46 +89,21 @@ namespace rocRoller
             co_return;
         }
 
-        int beginOffset = std::numeric_limits<int>::max();
-        int endOffset   = 0;
-
+        auto argPtr = argumentPointer();
+        // TODO: coalesce loads when possible
         for(auto const& arg : args)
         {
-            beginOffset = std::min<int>(beginOffset, arg.offset);
-            endOffset   = std::max<int>(endOffset, arg.offset + arg.size);
-        }
-
-        Register::ValuePtr allArgs;
-
-        co_yield loadRange(beginOffset, endOffset, allArgs);
-
-        std::vector<std::vector<int>> indices;
-        indices.reserve(args.size());
-
-        for(auto const& arg : args)
-        {
-            // TODO Fix argument alignment
-            // Note use of element size instead of arg size.
-            // Previously the argument size may have been aligned,
-            // which may have resulted in arg.size > getElementSize.
-            auto beginReg = arg.offset / 4;
-            auto endReg   = (arg.offset + static_cast<int>(arg.variableType.getElementSize())) / 4;
-
-            auto range = iota(beginReg, endReg);
-            indices.emplace_back(range.begin(), range.end());
-        }
-
-        auto valueRegs = allArgs->split(indices);
-
-        int idx = 0;
-        for(auto const& arg : args)
-        {
-            auto subReg = valueRegs[idx];
-            subReg->setName(arg.name);
-            subReg->setVariableType(arg.variableType);
-            m_loadedValues[arg.name] = subReg;
-
-            idx++;
+            auto numRegisters = arg.size / (Register::bitsPerRegister / 8);
+            auto r            = Register::Value::Placeholder(m_context.lock(),
+                                                  Register::Type::Scalar,
+                                                  DataType::Raw32,
+                                                  numRegisters,
+                                                  Register::AllocationOptions::FullyContiguous());
+            r->allocateNow();
+            r->setName(arg.name);
+            r->setVariableType(arg.variableType);
+            m_loadedValues[arg.name] = r;
+            co_yield m_context.lock()->mem()->loadScalar(r, argPtr, arg.offset, arg.size);
         }
     }
 

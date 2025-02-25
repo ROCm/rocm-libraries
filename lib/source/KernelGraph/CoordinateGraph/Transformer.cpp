@@ -77,7 +77,7 @@ namespace rocRoller
 
         void Transformer::setCoordinate(int tag, ExpressionPtr index)
         {
-            if(Log::getLogger()->should_log(spdlog::level::debug))
+            if(Log::getLogger()->should_log(LogLevel::Debug))
             {
                 auto elemName = std::visit([](auto const& el) { return toString(el); },
                                            m_graph->getElement(tag));

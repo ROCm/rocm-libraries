@@ -1,4 +1,5 @@
 #include <rocRoller/CodeGen/Arithmetic/Subtract.hpp>
+#include <rocRoller/CodeGen/SubInstruction.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -39,7 +40,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield_(Instruction("s_sub_i32", {dest}, {lhs, rhs}, {}, ""));
+        co_yield ScalarSubInt32(m_context, dest, lhs, rhs);
     }
 
     template <>
@@ -52,7 +53,22 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield_(Instruction("v_sub_i32", {dest}, {lhs, rhs}, {}, ""));
+        auto gpu = m_context->targetArchitecture().target();
+        if(gpu.isCDNAGPU())
+        {
+            co_yield_(Instruction("v_sub_i32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        else if(gpu.isRDNAGPU())
+        {
+            co_yield_(Instruction("v_sub_nc_i32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        else
+        {
+            Throw<FatalError>(std::format("SubtractGenerator<{}, {}> not implemented for {}\n",
+                                          toString(Register::Type::Vector),
+                                          toString(DataType::Int32),
+                                          gpu.toString()));
+        }
     }
 
     template <>
@@ -65,7 +81,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield_(Instruction("s_sub_u32", {dest}, {lhs, rhs}, {}, ""));
+        co_yield ScalarSubUInt32(m_context, dest, lhs, rhs);
     }
 
     template <>
@@ -78,7 +94,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield_(Instruction("v_sub_u32", {dest}, {lhs, rhs}, {}, ""));
+        co_yield VectorSubUInt32(m_context, dest, lhs, rhs);
     }
 
     template <>
@@ -93,15 +109,14 @@ namespace rocRoller
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
-        co_yield_(
-            Instruction(
-                "s_sub_u32", {dest->subset({0})}, {l0, r0}, {}, "least significant half; sets scc")
-                .lock(Scheduling::Dependency::SCC));
+        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Int64 sub, locking SCC"));
 
-        co_yield_(
-            Instruction(
-                "s_subb_u32", {dest->subset({1})}, {l1, r1}, {}, "most significant half; uses scc")
-                .unlock());
+        co_yield ScalarSubUInt32(
+            m_context, dest->subset({0}), l0, r0, "least significant half; sets scc");
+        co_yield ScalarSubUInt32CarryInOut(
+            m_context, dest->subset({1}), l1, r1, "most significant half; uses scc");
+
+        co_yield(Instruction::Unlock("End of Int64 sub, unlocking SCC"));
     }
 
     template <>
@@ -119,17 +134,14 @@ namespace rocRoller
 
         auto borrow = m_context->getVCC();
 
-        co_yield_(
-            Instruction(
-                "v_sub_co_u32", {dest->subset({0}), borrow}, {l0, r0}, {}, "least significant half")
-                .lock(Scheduling::Dependency::VCC));
+        co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Int64 sub, locking VCC"));
 
-        co_yield_(Instruction("v_subb_co_u32",
-                              {dest->subset({1}), borrow},
-                              {l1, r1, borrow},
-                              {},
-                              "most significant half")
-                      .unlock());
+        co_yield VectorSubUInt32CarryOut(
+            m_context, dest->subset({0}), l0, r0, "least significant half");
+        co_yield VectorSubUInt32CarryInOut(
+            m_context, dest->subset({1}), l1, r1, "most significant half");
+
+        co_yield(Instruction::Unlock("End of Int64 sub, unlocking VCC"));
     }
 
     template <>

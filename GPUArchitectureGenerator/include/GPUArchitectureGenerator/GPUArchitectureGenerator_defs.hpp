@@ -119,6 +119,7 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::HasPermLanes16, {"v_permlane16_swap_b32 v4, v5", ""}},
             {rocRoller::GPUCapability::HasPermLanes32, {"v_permlane32_swap_b32 v4, v5", ""}},
+            {rocRoller::GPUCapability::UnalignedSGPRs, {"s_cmp_eq_u64 s[0:1], s[0:1], s[3:4]", ""}},
     };
 
     // GPUCapability -> <Vector of ISAs That Support It>
@@ -285,9 +286,6 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::CMPXWritesSGPR,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return !x.isRDNAGPU(); }},
-
-            {rocRoller::GPUCapability::UnalignedSGPRs,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isRDNAGPU(); }},
 
             {rocRoller::GPUCapability::HasWave32,
              [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isRDNAGPU(); }},

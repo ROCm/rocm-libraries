@@ -639,15 +639,15 @@ namespace ExpressionTest
             // X is v[36:37]:2xH and Y is v[38:41]:H (and Z is same as Y)
             // Then Y <- X + Y will be: Add(v[36:37]:2xH, v[38:41]:H)
             v_mov_b32 v42, 65535
-            v_and_b32 v43, v42, v36
-            v_lshrrev_b32 v44, 16, v36
-            v_add_f16 v38, v43, v38
-            v_add_f16 v39, v44, v39
-            v_mov_b32 v42, 65535
-            v_and_b32 v43, v42, v37
-            v_lshrrev_b32 v44, 16, v37
-            v_add_f16 v40, v43, v40
-            v_add_f16 v41, v44, v41
+            v_and_b32 v44, v42, v36
+            v_lshrrev_b32 v45, 16, v36
+            v_add_f16 v38, v44, v38
+            v_add_f16 v39, v45, v39
+            v_mov_b32 v43, 65535
+            v_and_b32 v44, v43, v37
+            v_lshrrev_b32 v45, 16, v37
+            v_add_f16 v40, v44, v40
+            v_add_f16 v41, v45, v41
         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(result));

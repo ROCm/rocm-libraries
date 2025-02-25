@@ -119,7 +119,8 @@ namespace rocRoller
             auto        context      = m_context.lock();
             const auto& architecture = context->targetArchitecture();
 
-            if(inst.getOpCode() == "s_barrier")
+            const auto& gpu = architecture.target();
+            if(inst.getOpCode() == (gpu.isRDNA4GPU() ? "s_barrier_signal" : "s_barrier"))
             {
                 if(context->kernelOptions().alwaysWaitZeroBeforeBarrier)
                 {

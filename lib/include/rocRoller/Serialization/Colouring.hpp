@@ -15,7 +15,7 @@ namespace rocRoller
         {
         };
 
-	template <typename IO>
+        template <typename IO>
         struct MappingTraits<KernelGraph::UnrollColouring, IO, EmptyContext>
         {
             static const bool flow = false;

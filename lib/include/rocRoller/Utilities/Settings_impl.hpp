@@ -100,17 +100,22 @@ namespace rocRoller
         {
         case LogLevel::None:
             return "None";
+        case LogLevel::Critical:
+            return "Critical";
         case LogLevel::Error:
             return "Error";
         case LogLevel::Warning:
             return "Warning";
         case LogLevel::Terse:
             return "Terse";
+        case LogLevel::Info:
+            return "Info";
         case LogLevel::Verbose:
             return "Verbose";
         case LogLevel::Debug:
             return "Debug";
-            break;
+        case LogLevel::Trace:
+            return "Trace";
         case LogLevel::Count:
             return "Count";
         }
