@@ -1,6 +1,6 @@
-#include "DataTypes/DataTypes.hpp"
 #include "GenericContextFixture.hpp"
-#include "InstructionValues/Register.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
 
 using namespace rocRoller;
 

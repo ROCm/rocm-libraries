@@ -11,10 +11,10 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 using namespace rocRoller;
 

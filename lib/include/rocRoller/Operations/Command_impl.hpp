@@ -5,7 +5,7 @@
 
 #include "Command.hpp"
 #include "Operations.hpp"
-#include "Utilities/Utils.hpp"
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

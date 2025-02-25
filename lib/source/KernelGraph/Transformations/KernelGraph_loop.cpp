@@ -1,4 +1,4 @@
-#include "DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>

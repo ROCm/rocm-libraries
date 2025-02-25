@@ -30,10 +30,10 @@
 #include <stack>
 #include <variant>
 
-#include "CodeGen/Instruction.hpp"
-#include "InstructionValues/Register.hpp"
-#include "Operations/CommandArgument.hpp"
-#include "Utilities/Component.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {

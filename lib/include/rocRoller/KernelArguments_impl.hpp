@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "KernelArguments.hpp"
+#include <rocRoller/KernelArguments.hpp>
 
-#include "Operations/CommandArgument_fwd.hpp"
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
 #include <concepts>
 #include <cstring>

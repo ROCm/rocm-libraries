@@ -12,9 +12,9 @@
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 
-#include "Expression_fwd.hpp"
-#include "InstructionValues/Register_fwd.hpp"
-#include "Utilities/Utils.hpp"
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

@@ -3,7 +3,8 @@
 
 #include <map>
 
-#include "Expression_fwd.hpp"
+#include <rocRoller/Expression_fwd.hpp>
+
 #include "KernelGraph.hpp"
 
 namespace rocRoller

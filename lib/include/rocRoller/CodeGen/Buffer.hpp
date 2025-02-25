@@ -7,12 +7,12 @@
 #include <functional>
 #include <memory>
 
-#include "Instruction.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
 
-#include "../Context.hpp"
-#include "../Utilities/Comparison.hpp"
-#include "../Utilities/Component.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {

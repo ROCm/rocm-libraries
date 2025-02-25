@@ -1,13 +1,13 @@
 
 #pragma once
 
-#include "Context.hpp"
+#include <rocRoller/Context.hpp>
 
-#include "CodeGen/Instruction.hpp"
-#include "GPUArchitecture/GPUArchitecture.hpp"
-#include "GPUArchitecture/GPUArchitectureLibrary.hpp"
-#include "ScheduledInstructions.hpp"
-#include "Scheduling/Scheduling.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+#include <rocRoller/ScheduledInstructions.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {

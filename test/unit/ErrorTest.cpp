@@ -33,6 +33,20 @@ namespace rocRollerTest
         EXPECT_THROW({ throw RecoverableError("Recoverable rocRoller Error"); }, RecoverableError);
     }
 
+    TEST_F(ErrorTest, BaseFileNameTest)
+    {
+        EXPECT_STREQ("/absolute/path/to/file.txt", GetBaseFileName("/absolute/path/to/file.txt"));
+        EXPECT_STREQ("relative/local/path/to/file.txt",
+                     GetBaseFileName("./relative/local/path/to/file.txt"));
+        EXPECT_STREQ("relative/path/to/file.txt", GetBaseFileName("../relative/path/to/file.txt"));
+        EXPECT_STREQ("long/relative/path/to/file.txt",
+                     GetBaseFileName("../../../long/relative/path/to/file.txt"));
+        EXPECT_STREQ("long/local/relative/path/to/file.txt",
+                     GetBaseFileName("./../../../long/local/relative/path/to/file.txt"));
+        EXPECT_STREQ("", GetBaseFileName("./"));
+        EXPECT_STREQ("", GetBaseFileName("../"));
+    }
+
     TEST_F(ErrorTest, FatalErrorTest)
     {
         int         IntA    = 5;
@@ -43,7 +57,7 @@ namespace rocRollerTest
         EXPECT_THROW({ AssertFatal(IntA < IntB, ShowValue(IntB), message); }, FatalError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:52: FatalError(IntA < IntB)
+            test/unit/ErrorTest.cpp:66: FatalError(IntA < IntB)
                 IntA = 5
             FatalError Test)";
 
@@ -55,7 +69,8 @@ namespace rocRollerTest
         catch(FatalError& e)
         {
             std::string output = e.what();
-            EXPECT_EQ(NormalizedSource(output), NormalizedSource(expected));
+            EXPECT_EQ(NormalizedSource(output), NormalizedSource(expected))
+                << std::source_location::current().file_name();
         }
         catch(...)
         {
@@ -74,7 +89,7 @@ namespace rocRollerTest
                      RecoverableError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:84: RecoverableError(StrA == StrB)
+            test/unit/ErrorTest.cpp:99: RecoverableError(StrA == StrB)
                 StrA = StrA
                 StrB = StrB
             RecoverableError Test)";
@@ -87,7 +102,8 @@ namespace rocRollerTest
         catch(RecoverableError& e)
         {
             std::string output = e.what();
-            EXPECT_EQ(NormalizedSource(output), NormalizedSource(expected));
+            EXPECT_EQ(NormalizedSource(output), NormalizedSource(expected))
+                << std::source_location::current().file_name();
         }
         catch(...)
         {

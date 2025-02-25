@@ -2,7 +2,7 @@
 
 #include "Assembler.hpp"
 
-#include "GPUArchitecture/GPUArchitectureTarget.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <vector>
 
 namespace rocRoller

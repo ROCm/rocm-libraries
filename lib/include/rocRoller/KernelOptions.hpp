@@ -5,9 +5,9 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
-#include "AssertOpKinds_fwd.hpp"
-#include "Utilities/EnumBitset.hpp"
-#include "Utilities/Settings_fwd.hpp"
+#include <rocRoller/AssertOpKinds_fwd.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
 {

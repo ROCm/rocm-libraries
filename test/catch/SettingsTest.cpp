@@ -4,8 +4,8 @@
 #include <omp.h>
 
 #include "SimpleTest.hpp"
-#include "Utilities/Settings_fwd.hpp"
 #include "common/SourceMatcher.hpp"
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 using namespace rocRoller;
 using namespace Catch::Matchers;

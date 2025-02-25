@@ -30,14 +30,14 @@
 #include <memory>
 #include <stack>
 
-#include "Expression_fwd.hpp"
+#include <rocRoller/Expression_fwd.hpp>
 
-#include "InstructionValues/Register_fwd.hpp"
-#include "Operations/CommandArgument_fwd.hpp"
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
-#include "CodeGen/Instruction.hpp"
-#include "Utilities/Component.hpp"
-#include "Utilities/EnumBitset.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
 {
@@ -765,6 +765,7 @@ namespace rocRoller
          * NOTE: Never considers commutativity or associativity.
          */
         bool identical(ExpressionPtr const&, ExpressionPtr const&);
+        bool identical(Expression const&, Expression const&);
 
         /**
          * True when two expressions are equivalent.
@@ -861,6 +862,12 @@ namespace rocRoller
          */
         template <CExpression T>
         bool contains(Expression const& expr);
+
+        /**
+         * Returns true if expr contains a sub-expression
+         */
+        bool containsSubExpression(ExpressionPtr const& expr, ExpressionPtr const& subExpr);
+        bool containsSubExpression(Expression const& expr, Expression const& subExpr);
 
     } // namespace Expression
 } // namespace rocRoller

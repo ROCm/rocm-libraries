@@ -2,7 +2,9 @@
 #pragma once
 
 #include <concepts>
+#include <source_location>
 #include <stdexcept>
+#include <string.h>
 #include <string>
 
 #include <cassert>
@@ -41,31 +43,40 @@ namespace rocRoller
 
     int* GetNullPointer();
 
+    // Get path
+    // Strips all "../" and "./"
     constexpr const char* GetBaseFileName(const char* file)
     {
-        if(file[0] == '.' && file[1] == '.' && file[2] == '/')
-            return file + 3;
-        for(int i = 0; i < ROCROLLER_PATH_PREFIX_LENGTH + 1; ++i)
-            assert(file[i] != '\0');
-        return file + ROCROLLER_PATH_PREFIX_LENGTH + 1;
+        if(strnlen(file, 3) >= 3 && file[0] == '.' && file[1] == '.' && file[2] == '/')
+        {
+            return GetBaseFileName(file + 3);
+        }
+        else if(strnlen(file, 3) >= 2 && file[0] == '.' && file[1] == '/')
+        {
+            return GetBaseFileName(file + 2);
+        }
+        return file;
     }
 
 #define ShowValue(var) concatenate("\t", #var, " = ", var, "\n")
 
-#define AssertError(T_Exception, condition, message...)    \
-    do                                                     \
-    {                                                      \
-        bool condition_val = static_cast<bool>(condition); \
-        if(!(condition_val))                               \
-            Throw<T_Exception>(GetBaseFileName(__FILE__),  \
-                               ":",                        \
-                               __LINE__,                   \
-                               ": ",                       \
-                               #T_Exception,               \
-                               "(",                        \
-                               #condition,                 \
-                               ")\n",                      \
-                               ##message);                 \
+#define AssertError(T_Exception, condition, message...)                       \
+    do                                                                        \
+    {                                                                         \
+        std::source_location location      = std::source_location::current(); \
+        bool                 condition_val = static_cast<bool>(condition);    \
+        if(!(condition_val))                                                  \
+        {                                                                     \
+            Throw<T_Exception>(GetBaseFileName(location.file_name()),         \
+                               ":",                                           \
+                               location.line(),                               \
+                               ": ",                                          \
+                               #T_Exception,                                  \
+                               "(",                                           \
+                               #condition,                                    \
+                               ")\n",                                         \
+                               ##message);                                    \
+        }                                                                     \
     } while(0)
 
 #define AssertFatal(...) AssertError(FatalError, __VA_ARGS__)

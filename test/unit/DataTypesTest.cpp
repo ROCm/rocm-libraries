@@ -47,6 +47,8 @@ using InputTypes = ::testing::Types<std::tuple<float>,
                                     std::tuple<std::complex<double>>,
                                     std::tuple<int8_t>,
                                     std::tuple<rocRoller::Int8x4>,
+                                    std::tuple<uint8_t>,
+                                    std::tuple<rocRoller::UInt8x4>,
                                     std::tuple<int32_t>,
                                     std::tuple<int64_t>,
                                     std::tuple<rocRoller::Raw32>,
@@ -100,6 +102,9 @@ static_assert(rocRoller::TypeInfo<std::complex<double>>::Var == rocRoller::DataT
 static_assert(rocRoller::TypeInfo<rocRoller::Half>::Var == rocRoller::DataType::Half, "Half");
 static_assert(rocRoller::TypeInfo<int8_t>::Var == rocRoller::DataType::Int8, "Int8");
 static_assert(rocRoller::TypeInfo<rocRoller::Int8x4>::Var == rocRoller::DataType::Int8x4, "Int8x4");
+static_assert(rocRoller::TypeInfo<uint8_t>::Var == rocRoller::DataType::UInt8, "UInt8");
+static_assert(rocRoller::TypeInfo<rocRoller::UInt8x4>::Var == rocRoller::DataType::UInt8x4,
+              "UInt8x4");
 static_assert(rocRoller::TypeInfo<int32_t>::Var == rocRoller::DataType::Int32, "Int32");
 static_assert(rocRoller::TypeInfo<int64_t>::Var == rocRoller::DataType::Int64, "Int64");
 static_assert(rocRoller::TypeInfo<rocRoller::Raw32>::Var == rocRoller::DataType::Raw32, "Raw32");
@@ -137,6 +142,8 @@ static_assert(rocRoller::TypeInfo<std::complex<double>>::Packing == 1, "ComplexD
 static_assert(rocRoller::TypeInfo<rocRoller::Half>::Packing == 1, "Half");
 static_assert(rocRoller::TypeInfo<int8_t>::Packing == 1, "Int8");
 static_assert(rocRoller::TypeInfo<rocRoller::Int8x4>::Packing == 4, "Int8x4");
+static_assert(rocRoller::TypeInfo<uint8_t>::Packing == 1, "UInt8");
+static_assert(rocRoller::TypeInfo<rocRoller::UInt8x4>::Packing == 4, "UInt8x4");
 static_assert(rocRoller::TypeInfo<int32_t>::Packing == 1, "Int32");
 static_assert(rocRoller::TypeInfo<int64_t>::Packing == 1, "Int64");
 static_assert(rocRoller::TypeInfo<rocRoller::Raw32>::Packing == 1, "Raw32");
@@ -164,6 +171,8 @@ static_assert(rocRoller::TypeInfo<std::complex<double>>::RegisterCount == 4, "Co
 static_assert(rocRoller::TypeInfo<rocRoller::Half>::RegisterCount == 1, "Half");
 static_assert(rocRoller::TypeInfo<int8_t>::RegisterCount == 1, "Int8");
 static_assert(rocRoller::TypeInfo<rocRoller::Int8x4>::RegisterCount == 1, "Int8x4");
+static_assert(rocRoller::TypeInfo<uint8_t>::RegisterCount == 1, "UInt8");
+static_assert(rocRoller::TypeInfo<rocRoller::UInt8x4>::RegisterCount == 1, "UInt8x4");
 static_assert(rocRoller::TypeInfo<int32_t>::RegisterCount == 1, "Int32");
 static_assert(rocRoller::TypeInfo<int64_t>::RegisterCount == 2, "Int64");
 static_assert(rocRoller::TypeInfo<rocRoller::Raw32>::RegisterCount == 1, "Raw32");
@@ -221,6 +230,8 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocRoller::DataType::Half,
                                            rocRoller::DataType::Int8,
                                            rocRoller::DataType::Int8x4,
+                                           rocRoller::DataType::UInt8,
+                                           rocRoller::DataType::UInt8x4,
                                            rocRoller::DataType::Int32,
                                            rocRoller::DataType::Int64,
                                            rocRoller::DataType::Raw32,
