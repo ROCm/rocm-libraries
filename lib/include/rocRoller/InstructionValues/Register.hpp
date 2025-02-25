@@ -308,6 +308,49 @@ namespace rocRoller
              */
             bool sameAs(ValuePtr) const;
 
+            /**
+             * Return the bitfield located at bitOffset with bitWidth bits
+             * of the 32-bit register represented by this value.
+             *
+             * For example, a register that contains 0xDEADBEAF is represented by value r then
+             * r.bitfield(8, 8) is a ValuePtr that refers to the bitfield with value 0xBE.
+             *
+             * Throws FatalError if:
+             *  - this value is not backed by a register;
+             *  - bitOffset is out-of-range of bits in this value;
+             *  - bitWidth is zero or greater than number of bits in a register; and/or
+             *  - the bitfield would cross register boundaries.
+             */
+            ValuePtr bitfield(uint8_t bitOffset, uint8_t bitWidth) const;
+
+            /**
+             * Return contiguous segments of a packed datatype denotated by indices.
+             * Throws FatalError if this value data type is not packed.
+             */
+            template <std::ranges::forward_range T>
+            ValuePtr segment(T const& indices) const;
+            template <typename T>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, ValuePtr>
+                segment(std::initializer_list<T> indices) const;
+
+            /**
+             * Returns true if Value is a bitfield, i.e. has bitOffset &
+             * bitWitdh, and false otherwise.
+             */
+            bool isBitfield() const;
+
+            /**
+             * Returns the bit offset of this bitfield Value.
+             * Throws FatalError if this is not a bitfield Value.
+             */
+            uint8_t getBitOffset() const;
+
+            /**
+             * Returns the bit width (length in bits) of this bitfield.
+             * Throws FatalError if this is not a bitfield Value.
+             */
+            uint8_t getBitWidth() const;
+
         private:
             /**
              * Implementation of toString() for general-purpose registers.
@@ -342,6 +385,13 @@ namespace rocRoller
             Type         m_regType = Type::Count;
             VariableType m_varType;
             bool         m_negate = false;
+
+            /**
+             * Offset and bit-width of the bitfielf in the 32-bit register represented by this value.
+             * Multi-register values must have empty bitOffset & bitWidth, otherwise they are invalid.
+             */
+            std::optional<uint8_t> m_bitOffset;
+            std::optional<uint8_t> m_bitWidth;
 
             /**
              * Pulls values from the allocation

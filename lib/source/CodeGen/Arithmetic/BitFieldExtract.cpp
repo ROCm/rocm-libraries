@@ -9,6 +9,9 @@ namespace rocRoller
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::BFloat16);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::FP8);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::BF8);
+    RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::FP6);
+    RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::BF6);
+    RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::FP4);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::Int8);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::Int16);
     RegisterComponentTemplateSpec(BitFieldExtractGenerator, DataType::Int32);

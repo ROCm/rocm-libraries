@@ -122,9 +122,18 @@ namespace rocRoller
          *        implement the PRNG algorithm when PRNG instruction is unavailable.
          *
          * @param expr Input expression
-     * @param context
+         * @param context
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr lowerPRNG(ExpressionPtr exp, ContextPtr context);
+
+        /**
+         * @brief Resolve all ValuePtr expressions that are bitfields into
+         * BitFieldExtract expressions.
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr lowerBitfieldValues(ExpressionPtr expr);
     }
 }

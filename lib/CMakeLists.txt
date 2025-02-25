@@ -51,6 +51,7 @@ set(rocroller_src
  source/ExpressionTransformations/FuseTernary.cpp
  source/ExpressionTransformations/Identity.cpp
  source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
+ source/ExpressionTransformations/LowerBitfieldValues.cpp
  source/ExpressionTransformations/LowerExponential.cpp
  source/ExpressionTransformations/LowerPRNG.cpp
  source/ExpressionTransformations/RestoreCommandArguments.cpp
