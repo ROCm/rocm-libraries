@@ -1,13 +1,16 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 
+#include "SimpleFixture.hpp"
+
 using namespace rocRoller;
 
-TEST(GPUInstructionInfoTest, BasicTest)
+class GPUInstructionInfoTest : public SimpleFixture
+{
+};
+
+TEST_F(GPUInstructionInfoTest, BasicTest)
 {
     GPUInstructionInfo Test("test",
                             0,
@@ -25,7 +28,7 @@ TEST(GPUInstructionInfoTest, BasicTest)
     EXPECT_EQ(Test.maxLiteralValue(), 8192);
 }
 
-TEST(GPUInstructionInfoTest, BasicTestLatency)
+TEST_F(GPUInstructionInfoTest, BasicTestLatency)
 {
     GPUInstructionInfo Test(
         "test", 0, {GPUWaitQueueType::LGKMDSQueue, GPUWaitQueueType::VMQueue}, 8);
@@ -50,7 +53,7 @@ TEST(GPUInstructionInfoTest, BasicTestLatency)
             << ShowValue(fromString_) << ShowValue(fromInstruction_) << ShowValue(val); \
     }
 
-TEST(GPUInstructionInfoTest, LDS)
+TEST_F(GPUInstructionInfoTest, LDS)
 {
 
     for(auto inst : {"ds_write_b128", "ds_write2_b64", "ds_write_b8"})
@@ -112,7 +115,7 @@ TEST(GPUInstructionInfoTest, LDS)
     }
 }
 
-TEST(GPUInstructionInfoTest, Scalar)
+TEST_F(GPUInstructionInfoTest, Scalar)
 {
     for(auto inst : {"s_load_dword", "s_load_dwordx2", "s_load_dwordx16"})
     {
@@ -199,7 +202,7 @@ TEST(GPUInstructionInfoTest, Scalar)
     }
 }
 
-TEST(GPUInstructionInfoTest, Vector)
+TEST_F(GPUInstructionInfoTest, Vector)
 {
 
     for(auto inst : {"v_mov_b32", "v_add_u32", "v_addc_co_u32", "v_or_b32"})
@@ -376,7 +379,7 @@ TEST(GPUInstructionInfoTest, Vector)
     }
 }
 
-TEST(GPUInstructionInfoTest, AccMFMA)
+TEST_F(GPUInstructionInfoTest, AccMFMA)
 {
     for(auto inst : {"v_accvgpr_read_b32"})
     {
@@ -496,7 +499,7 @@ TEST(GPUInstructionInfoTest, AccMFMA)
     }
 }
 
-TEST(GPUInstructionInfoTest, Signed)
+TEST_F(GPUInstructionInfoTest, Signed)
 {
     for(auto inst : {"v_add_u32", "v_add_u32_e32", "v_add_u32\n"})
     {
@@ -511,7 +514,7 @@ TEST(GPUInstructionInfoTest, Signed)
     }
 }
 
-TEST(GPUInstructionInfoTest, SDWA)
+TEST_F(GPUInstructionInfoTest, SDWA)
 {
     EXPECT_CATEGORY_EQ("v_xor_b32_sdwa", isSDWA, true);
 }

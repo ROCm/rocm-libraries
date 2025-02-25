@@ -1,15 +1,19 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
-TEST(UtilsTest, StreamTuple)
+class UtilsTest : public SimpleFixture
+{
+};
+
+class EnumBitsetTest : public SimpleFixture
+{
+};
+
+TEST_F(UtilsTest, StreamTuple)
 {
     std::string        str  = "foo";
     auto               test = std::make_tuple(4, 5.6, str);
@@ -19,7 +23,7 @@ TEST(UtilsTest, StreamTuple)
     EXPECT_EQ("[4, 5.6, foo]", msg.str());
 }
 
-TEST(UtilsTest, StreamTuple2)
+TEST_F(UtilsTest, StreamTuple2)
 {
     std::string        str  = "foo";
     auto               test = std::make_tuple(str);
@@ -75,7 +79,7 @@ std::string toString(TestEnum e)
     return concatenate("A", idx);
 }
 
-TEST(EnumBitsetTest, LargeEnum)
+TEST_F(EnumBitsetTest, LargeEnum)
 {
 
     using LargeBitset = rocRoller::EnumBitset<TestEnum>;
@@ -136,7 +140,7 @@ TEST(EnumBitsetTest, LargeEnum)
     EXPECT_EQ(NormalizedSource(expected), NormalizedSource(rocRoller::concatenate(a1)));
 }
 
-TEST(UtilsTest, SetIdentityMatrix)
+TEST_F(UtilsTest, SetIdentityMatrix)
 {
     using namespace rocRoller;
 
@@ -164,7 +168,7 @@ TEST(UtilsTest, SetIdentityMatrix)
     EXPECT_EQ(mat, expected);
 }
 
-TEST(UtilsTest, SetIdentityMatrixFP4)
+TEST_F(UtilsTest, SetIdentityMatrixFP4)
 {
     using namespace rocRoller;
 
@@ -231,7 +235,7 @@ std::string createF6IdentityMatrix(float min, float max)
     return bits;
 }
 
-TEST(UtilsTest, SetIdentityMatrixF6)
+TEST_F(UtilsTest, SetIdentityMatrixF6)
 {
     auto fp6_bits = createF6IdentityMatrix<rocRoller::FP6>(-7.5f, 7.5f);
 
@@ -288,7 +292,7 @@ TEST(UtilsTest, SetIdentityMatrixF6)
     EXPECT_EQ(bf6_bits, expected_bf6_bits);
 }
 
-TEST(UtilsTest, SingleVariant)
+TEST_F(UtilsTest, SingleVariant)
 {
     using namespace rocRoller;
 

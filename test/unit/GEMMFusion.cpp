@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
@@ -32,7 +29,6 @@ namespace GEMMDriverTest
         template <typename T>
         void basicGEMMRelu(ContextPtr&        m_context,
                            const GEMMProblem& gemm,
-                           double             acceptableError,
                            bool               debuggable  = false,
                            bool               setIdentity = false,
                            int                numIters    = 1)
@@ -384,8 +380,12 @@ namespace GEMMDriverTest
                         d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
                     HasHipSuccess(0));
 
-                double rnorm = relativeNorm(d_result, h_result);
-                if(debuggable && rnorm > acceptableError)
+                auto tol = gemmAcceptableError<T, T, T>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(d_result, h_result, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                if(debuggable && !res.ok)
                 {
                     for(size_t i = 0; i < M; i++)
                     {
@@ -393,7 +393,7 @@ namespace GEMMDriverTest
                         {
                             auto const a = d_result[i * N + j];
                             auto       b = h_result[i * N + j];
-                            if((a - b) * (a - b) / (b * b) > 100.0 * acceptableError)
+                            if((a - b) * (a - b) / (b * b) > 100.0 * tol.relativeL2Tolerance)
                             {
                                 std::cout << std::setw(8) << i << std::setw(8) << j << std::setw(16)
                                           << std::scientific << a << std::setw(16)
@@ -403,7 +403,7 @@ namespace GEMMDriverTest
                         }
                     }
                 }
-                ASSERT_LT(rnorm, acceptableError) << "Iteration: " << iteration;
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
     };
@@ -411,7 +411,7 @@ namespace GEMMDriverTest
     TEST_F(GEMMFusionGPU, GPU_GEMMRelu)
     {
         GEMMProblem gemm;
-        basicGEMMRelu<float>(m_context, gemm, 1.e-6);
+        basicGEMMRelu<float>(m_context, gemm);
     }
 
 }

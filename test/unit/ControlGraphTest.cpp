@@ -1,6 +1,4 @@
-#include <gmock/gmock.h>
 #include <gtest/gtest-spi.h>
-#include <gtest/gtest.h>
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
@@ -11,6 +9,7 @@
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 #include "DataTypes/DataTypes.hpp"
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
@@ -18,7 +17,11 @@ using namespace KernelGraph::ControlGraph;
 
 namespace rocRollerTest
 {
-    TEST(ControlGraphTest, Basic)
+    class ControlGraphTest : public SimpleFixture
+    {
+    };
+
+    TEST_F(ControlGraphTest, Basic)
     {
         ControlGraph control = ControlGraph();
 
@@ -175,7 +178,7 @@ namespace rocRollerTest
         EXPECT_EQ(NodeOrdering::RightInBodyOfLeft, control.compareNodes(kernel_index, loadB_index));
     }
 
-    TEST(ControlGraphTest, BeforeAfter)
+    TEST_F(ControlGraphTest, BeforeAfter)
     {
         ControlGraph control = ControlGraph();
 
@@ -373,7 +376,7 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
     }
 
-    TEST(ControlGraphTest, Conditional)
+    TEST_F(ControlGraphTest, Conditional)
     {
         ControlGraph control = ControlGraph();
 
@@ -431,7 +434,7 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
     }
 
-    TEST(ControlGraphTest, AssertOp)
+    TEST_F(ControlGraphTest, AssertOp)
     {
         using GD             = rocRoller::Graph::Direction;
         ControlGraph control = ControlGraph();
@@ -454,7 +457,7 @@ namespace rocRollerTest
         EXPECT_EQ(assertOps.size(), 1);
     }
 
-    TEST(ControlGraphTest, getSetCoordinates)
+    TEST_F(ControlGraphTest, getSetCoordinates)
     {
         KernelGraph::KernelGraph kg;
         using namespace KernelGraph;

@@ -1,12 +1,11 @@
-
 #pragma once
-
-#include <gtest/gtest.h>
 
 #include <sstream>
 
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+
+#include "Utilities.hpp"
 
 class ContextFixture : public ::testing::Test
 {

@@ -26,12 +26,12 @@
 
 #include <tuple>
 
-#include <gtest/gtest.h>
+#include "SimpleFixture.hpp"
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
 template <typename Tuple>
-struct TypedDataTypesTest : public ::testing::Test
+struct TypedDataTypesTest : public SimpleFixture
 {
     using DataType = typename std::tuple_element<0, Tuple>::type;
 };
@@ -237,7 +237,11 @@ INSTANTIATE_TEST_SUITE_P(DataTypesTest,
                                            rocRoller::DataType::FP6x16,
                                            rocRoller::DataType::FP4));
 
-TEST(DataTypesTest, Promotions)
+class DataTypesTest : public SimpleFixture
+{
+};
+
+TEST_F(DataTypesTest, Promotions)
 {
     using namespace rocRoller;
 
@@ -261,7 +265,7 @@ TEST(DataTypesTest, Promotions)
     ExpectEqual(DataType::Int32, DataType::Raw32, DataType::Int32);
 }
 
-TEST(DataTypesTest, GetIntegerType)
+TEST_F(DataTypesTest, GetIntegerType)
 {
     using namespace rocRoller;
 

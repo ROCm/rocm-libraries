@@ -1,10 +1,7 @@
-
 #include <compare>
 #include <fstream>
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 #include <rocRoller/Graph/Hypergraph.hpp>
@@ -116,7 +113,11 @@ namespace rocRollerTest
 
     using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
 
-    TEST(HypergraphTest, Basic)
+    class HypergraphTest : public SimpleFixture
+    {
+    };
+
+    TEST_F(HypergraphTest, Basic)
     {
 
         myHypergraph g;
@@ -365,7 +366,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(HypergraphTest, Path)
+    TEST_F(HypergraphTest, Path)
     {
 
         myHypergraph g;
@@ -411,7 +412,7 @@ namespace rocRollerTest
                       .to<std::vector>());
     }
 
-    TEST(HypergraphTest, BadGraph)
+    TEST_F(HypergraphTest, BadGraph)
     {
         myHypergraph g;
 
@@ -437,7 +438,7 @@ namespace rocRollerTest
         EXPECT_THROW({ auto sd2 = g.addElement(TestSubDimension{}, {u0}, {}); }, FatalError);
     }
 
-    TEST(HypergraphTest, TopoSort)
+    TEST_F(HypergraphTest, TopoSort)
     {
         myHypergraph g;
 
@@ -462,7 +463,7 @@ namespace rocRollerTest
         EXPECT_EQ(bfs, std::vector<int>({1, 3, 5, 2, 4, 9, 7, 8, 6}));
     }
 
-    TEST(HypergraphTest, DeleteElement)
+    TEST_F(HypergraphTest, DeleteElement)
     {
         myHypergraph g;
 
@@ -485,7 +486,7 @@ namespace rocRollerTest
         g.deleteElement<TestForget>(std::vector<int>{sd0, sd1}, std::vector<int>{TestVGPR0});
     }
 
-    TEST(HypergraphTest, ParallelEdges)
+    TEST_F(HypergraphTest, ParallelEdges)
     {
         myHypergraph g;
 
@@ -503,7 +504,7 @@ namespace rocRollerTest
         EXPECT_EQ(parentVec, std::vector<int>({1}));
     }
 
-    TEST(HypergraphTest, FollowEdges)
+    TEST_F(HypergraphTest, FollowEdges)
     {
         myHypergraph g;
 

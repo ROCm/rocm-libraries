@@ -1,15 +1,15 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 #include <rocRoller/Operations/Command.hpp>
 
 using namespace rocRoller;
 
-TEST(CommandTest, Basic)
+class CommandTest : public SimpleFixture
+{
+};
+
+TEST_F(CommandTest, Basic)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -36,7 +36,7 @@ TEST(CommandTest, Basic)
     EXPECT_EQ(4, command->operations().size());
 }
 
-TEST(CommandTest, ToString)
+TEST_F(CommandTest, ToString)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -58,7 +58,7 @@ TEST(CommandTest, ToString)
     EXPECT_EQ(msg.str(), command->toString());
 }
 
-TEST(CommandTest, VectorAdd)
+TEST_F(CommandTest, VectorAdd)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -108,7 +108,7 @@ TEST(CommandTest, VectorAdd)
     }
 }
 
-TEST(CommandTest, DuplicateOp)
+TEST_F(CommandTest, DuplicateOp)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -123,7 +123,7 @@ TEST(CommandTest, DuplicateOp)
     EXPECT_THROW({ command->addOperation(execute); }, FatalError);
 }
 
-TEST(CommandTest, XopInputOutputs)
+TEST_F(CommandTest, XopInputOutputs)
 {
     auto command = std::make_shared<rocRoller::Command>();
     command->allocateTag();
@@ -150,7 +150,7 @@ TEST(CommandTest, XopInputOutputs)
               std::unordered_set<Operations::OperationTag>({tagC, tagD, tagE, tagF}));
 }
 
-TEST(CommandTest, BlockScaleInline)
+TEST_F(CommandTest, BlockScaleInline)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -166,7 +166,7 @@ TEST(CommandTest, BlockScaleInline)
               std::unordered_set<Operations::OperationTag>({dataTensor}));
 }
 
-TEST(CommandTest, BlockScaleSeparate)
+TEST_F(CommandTest, BlockScaleSeparate)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -183,7 +183,7 @@ TEST(CommandTest, BlockScaleSeparate)
               std::unordered_set<Operations::OperationTag>({dataTensor, scaleTensor}));
 }
 
-TEST(CommandTest, SetCommandArguments)
+TEST_F(CommandTest, SetCommandArguments)
 {
     auto command = std::make_shared<rocRoller::Command>();
 
@@ -212,7 +212,7 @@ TEST(CommandTest, SetCommandArguments)
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
 }
 
-TEST(CommandTest, GetRuntimeArguments)
+TEST_F(CommandTest, GetRuntimeArguments)
 {
     std::unordered_map<DataType, size_t> typeSizes
         = {{DataType::Float, 4},        {DataType::Double, 8},

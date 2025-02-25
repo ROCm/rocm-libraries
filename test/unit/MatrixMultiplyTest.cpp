@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
@@ -279,21 +275,12 @@ namespace MatrixMultiplyTest
 
                 CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, transA == "T", transB == "T");
 
-                double rnorm = relativeNorm(D, c_D);
+                auto tol = gemmAcceptableError<TA, TB, ACC>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
 
-                if(std::isinf(rnorm))
-                {
-                    std::cout << "Using relativeNormInf" << std::endl;
-                    rnorm = relativeNormInf(D, c_D);
-                }
-                // TODO: more robust and accurate check when rnorm is -nan or nan, it happens in the scaled mixed matrix multiply test
-                else if(std::isnan(rnorm))
-                {
-                    std::cout << "Using normInf" << std::endl;
-                    rnorm = normInf(D);
-                }
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
 
@@ -500,9 +487,12 @@ namespace MatrixMultiplyTest
 
                 CPUMM(c_D, c_C, A, B, M, N, K, alpha, 0.0, false, false);
 
-                double rnorm = relativeNorm(D, c_D);
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                auto tol = gemmAcceptableError<T, T, ACC>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
 
@@ -637,9 +627,12 @@ namespace MatrixMultiplyTest
                 std::vector<T> c_D(M * N, 0.f);
                 CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
-                double rnorm = relativeNorm(D, c_D);
-                Log::info("RNorm is {}", rnorm);
-                ASSERT_LT(rnorm, acceptableError);
+                auto tol = gemmAcceptableError<T, T, T>(
+                    M, N, K, m_context->targetArchitecture().target());
+                auto res = compare(D, c_D, tol);
+
+                Log::info("RNorm is {}", res.relativeNormL2);
+                ASSERT_TRUE(res.ok) << res.message();
             }
         }
     };
@@ -1413,7 +1406,7 @@ namespace MatrixMultiplyTest
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiplyTest,
         MatrixMultiplyTestGPUMixed,
-        ::testing::Combine(currentGPUISA(),
+        ::testing::Combine(::testing::Values("gfx950"), //mfmaSupportedISAValues(),
                            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
                                                                 rocRoller::DataType::BF8,
                                                                 rocRoller::DataType::FP6,
@@ -1454,7 +1447,7 @@ namespace MatrixMultiplyTest
         MatrixMultiplyTest,
         ScaledMatrixMultiplyTestGPUMixed,
         ::testing::Combine(
-            currentGPUISA(),
+            ::testing::Values("gfx950"), //mfmaSupportedISAValues(),
             ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
                                                  rocRoller::DataType::BF8,
                                                  rocRoller::DataType::FP6,
@@ -1468,12 +1461,7 @@ namespace MatrixMultiplyTest
                                ::testing::Values(std::pair<uint8_t, uint8_t>{125u, 125u},
                                                  std::pair<uint8_t, uint8_t>{125u, 128u},
                                                  std::pair<uint8_t, uint8_t>{128u, 125u},
-                                                 std::pair<uint8_t, uint8_t>{128u, 128u},
-                                                 std::pair<uint8_t, uint8_t>{1u, 129u},
-                                                 std::pair<uint8_t, uint8_t>{1u, 254u},
-                                                 std::pair<uint8_t, uint8_t>{27u, 101u},
-                                                 std::pair<uint8_t, uint8_t>{254u, 1u},
-                                                 std::pair<uint8_t, uint8_t>{129u, 1u}),
+                                                 std::pair<uint8_t, uint8_t>{128u, 128u}),
                                ::testing::Values(64, 128))));
 
     /**

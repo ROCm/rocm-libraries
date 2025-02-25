@@ -1,15 +1,17 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <sstream>
 #include <variant>
 
 #include <rocRoller/Utilities/Generator.hpp>
 
+#include "SimpleFixture.hpp"
+
 using namespace rocRoller;
 
 using Foo = std::variant<int, float, std::string>;
+
+class VariantTest : public SimpleFixture
+{
+};
 
 struct ConvertToString
 {
@@ -53,7 +55,7 @@ struct PrintIt
     }
 };
 
-TEST(VariantTest, Basic)
+TEST_F(VariantTest, Basic)
 {
     Foo f("four");
 
@@ -100,7 +102,7 @@ struct AddIt
     }
 };
 
-TEST(VariantTest, Reference)
+TEST_F(VariantTest, Reference)
 {
     AddIt adder;
 

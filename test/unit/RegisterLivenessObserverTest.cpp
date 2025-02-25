@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>

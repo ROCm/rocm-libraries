@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <sstream>
+
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller

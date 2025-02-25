@@ -1,11 +1,10 @@
-
-#include <gtest/gtest.h>
-
 #include <iterator>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+
+#include "SimpleFixture.hpp"
 
 namespace rocRollerTest
 {
@@ -13,6 +12,10 @@ namespace rocRollerTest
     static_assert(std::input_iterator<typename Generator<int>::iterator>);
     static_assert(std::ranges::input_range<Generator<int>>);
     static_assert(CInputRangeOf<Generator<int>, int>);
+
+    class GeneratorTest : public SimpleFixture
+    {
+    };
 
     template <typename T>
     rocRoller::Generator<T> Take(size_t n, Generator<T> gen)
@@ -70,7 +73,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, Fibonacci)
+    TEST_F(GeneratorTest, Fibonacci)
     {
         auto fibs = fibonacci<int>();
         auto iter = fibs.begin();
@@ -101,7 +104,7 @@ namespace rocRollerTest
         co_yield std::move(seq);
     }
 
-    TEST(GeneratorTest, YieldFromGenerator)
+    TEST_F(GeneratorTest, YieldFromGenerator)
     {
         auto fib1 = fibonacci<int>();
         auto fib2 = identity(fibonacci<int>());
@@ -113,7 +116,7 @@ namespace rocRollerTest
             EXPECT_EQ(*iter1, *iter2) << i;
     }
 
-    TEST(GeneratorTest, YieldFromContainer)
+    TEST_F(GeneratorTest, YieldFromContainer)
     {
         auto foo = []() -> Generator<int> {
             std::vector<int> x;
@@ -163,7 +166,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, YieldFromSkippingDereference)
+    TEST_F(GeneratorTest, YieldFromSkippingDereference)
     {
         auto bar = []() -> Generator<int> {
             co_yield range<int>(5);
@@ -214,7 +217,7 @@ namespace rocRollerTest
         EXPECT_TRUE(iter == gen.end());
     }
 
-    TEST(GeneratorTest, StateEnum)
+    TEST_F(GeneratorTest, StateEnum)
     {
         for(int i = 0; i < static_cast<int>(GeneratorState::Count); i++)
         {
@@ -223,7 +226,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, Assignment)
+    TEST_F(GeneratorTest, Assignment)
     {
         auto fib = fibonacci<int>();
 
@@ -270,7 +273,7 @@ namespace rocRollerTest
         EXPECT_THROW(std::ignore = *iter, std::runtime_error);
     }
 
-    TEST(GeneratorTest, Ranges)
+    TEST_F(GeneratorTest, Ranges)
     {
         auto             r = range(0, 5, 1);
         std::vector<int> v(r.begin(), r.end());
@@ -288,7 +291,7 @@ namespace rocRollerTest
         EXPECT_EQ(v2, v);
     }
 
-    TEST(GeneratorTest, IteratorSemantics)
+    TEST_F(GeneratorTest, IteratorSemantics)
     {
         auto fibs = fibonacci<int>();
 
@@ -374,7 +377,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, MergeLess)
+    TEST_F(GeneratorTest, MergeLess)
     {
         std::vector<Generator<int>> gens;
         gens.push_back(std::move(range(5)));
@@ -387,7 +390,7 @@ namespace rocRollerTest
         EXPECT_EQ(ref, v);
     }
 
-    TEST(GeneratorTest, ToContainer)
+    TEST_F(GeneratorTest, ToContainer)
     {
         auto g = range(0, 5, 1);
 
@@ -424,7 +427,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, TestVectorParams)
+    TEST_F(GeneratorTest, TestVectorParams)
     {
         std::vector<int> a = {0, 1, 2};
         // Vectors as separate values
@@ -469,7 +472,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(GeneratorTest, GeneratorFilter)
+    TEST_F(GeneratorTest, GeneratorFilter)
     {
         auto func = []() -> Generator<int> {
             co_yield 3;
@@ -498,7 +501,7 @@ namespace rocRollerTest
             filter([](int x) { return x % 2 != 0; }, Take(20, fibonacci<int>())).to<std::vector>());
     }
 
-    TEST(GeneratorTest, ConvenienceFunctions)
+    TEST_F(GeneratorTest, ConvenienceFunctions)
     {
         auto isEven     = [](auto x) { return x % 2 == 0; };
         auto isOdd      = [](auto x) { return x % 2 != 0; };

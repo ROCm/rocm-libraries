@@ -1,14 +1,16 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
 
-TEST(WaitCountTest, Basic)
+class WaitCountTest : public SimpleFixture
+{
+};
+
+TEST_F(WaitCountTest, Basic)
 {
     auto wc = WaitCount::LGKMCnt(2);
 
@@ -20,7 +22,7 @@ TEST(WaitCountTest, Basic)
     EXPECT_EQ("s_waitcnt lgkmcnt(2)\n", wc.toString(LogLevel::Terse));
 }
 
-TEST(WaitCountTest, Combine)
+TEST_F(WaitCountTest, Combine)
 {
     auto wc = WaitCount::LGKMCnt(2);
 
@@ -98,7 +100,7 @@ TEST(WaitCountTest, Combine)
  * This test checks that if an architecture has the SeparateVscnt capability, then a waitcnt zero will
  * produce a wait zero for vscnt, and if it doesn't have that capability, then no vscnt wait is produced.
  **/
-TEST(WaitCountTest, VSCnt)
+TEST_F(WaitCountTest, VSCnt)
 {
     GPUArchitecture TestWithVSCnt;
     TestWithVSCnt.AddCapability(GPUCapability::SupportedISA, 0);
@@ -141,7 +143,7 @@ TEST(WaitCountTest, VSCnt)
               NormalizedSource(expectedNoVSCnt));
 }
 
-TEST(WaitCountTest, SaturatedValues)
+TEST_F(WaitCountTest, SaturatedValues)
 {
     GPUArchitecture testArch;
     testArch.AddCapability(GPUCapability::MaxExpcnt, 7);

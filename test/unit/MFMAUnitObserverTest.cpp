@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <memory>
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>

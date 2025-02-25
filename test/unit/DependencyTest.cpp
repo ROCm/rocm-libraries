@@ -1,6 +1,3 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 

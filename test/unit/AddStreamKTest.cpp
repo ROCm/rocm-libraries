@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
@@ -489,8 +485,9 @@ namespace AddStreamKTest
                 }
             }
 
-            double rnorm = relativeNorm(hostA, referenceA);
-            ASSERT_LT(rnorm, 1.e-12);
+            auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
+            auto res = compare(hostA, referenceA, tol);
+            EXPECT_TRUE(res.ok) << res.message();
         }
         else
         {

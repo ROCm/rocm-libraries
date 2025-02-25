@@ -24,15 +24,19 @@
  *
  *******************************************************************************/
 
-#include <gtest/gtest.h>
-
 #include <rocRoller/KernelArguments.hpp>
 
 #include <cstddef>
 
+#include "SimpleFixture.hpp"
+
 using namespace rocRoller;
 
-TEST(KernelArguments, Simple)
+class KernelArgumentsTest : public SimpleFixture
+{
+};
+
+TEST_F(KernelArgumentsTest, Simple)
 {
     KernelArguments args(true);
 
@@ -99,7 +103,7 @@ TEST(KernelArguments, Simple)
     // std::cout << args << std::endl;
 }
 
-TEST(KernelArguments, Binding)
+TEST_F(KernelArgumentsTest, Binding)
 {
     KernelArguments args(true);
 
@@ -172,7 +176,7 @@ TEST(KernelArguments, Binding)
     // std::cout << args << std::endl;
 }
 
-TEST(KernelArguments, Iterator)
+TEST_F(KernelArgumentsTest, Iterator)
 {
     // Quick test for required m_log
     {

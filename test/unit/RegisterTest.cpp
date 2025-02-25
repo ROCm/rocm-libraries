@@ -1,7 +1,3 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>

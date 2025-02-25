@@ -1,15 +1,15 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/CodeGen/Buffer.hpp>
 
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
 
-TEST(BufferDescriptorTest, Default)
+class BufferDescriptorTest : public SimpleFixture
+{
+};
+
+TEST_F(BufferDescriptorTest, Default)
 {
     GFX9BufferDescriptorOptions options;
 
@@ -47,7 +47,7 @@ TEST(BufferDescriptorTest, Default)
     EXPECT_EQ(CommandArgumentValue(0x00020000u), literal->getLiteralValue());
 }
 
-TEST(BufferDescriptorTest, Values)
+TEST_F(BufferDescriptorTest, Values)
 {
     GFX9BufferDescriptorOptions options;
     options.dst_sel_x = 1;

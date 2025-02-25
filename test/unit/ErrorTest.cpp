@@ -1,38 +1,39 @@
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
+#include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    class ErrorTest : public SimpleFixture
+    {
+    };
+
     class ErrorFixtureTest : public GenericContextFixture
     {
     };
 
-    TEST(ErrorTest, BaseErrorTest)
+    TEST_F(ErrorTest, BaseErrorTest)
     {
         EXPECT_THROW({ throw Error("Base rocRoller Error"); }, Error);
     }
 
-    TEST(ErrorTest, BaseFatalErrorTest)
+    TEST_F(ErrorTest, BaseFatalErrorTest)
     {
         EXPECT_THROW({ throw FatalError("Fatal rocRoller Error"); }, FatalError);
     }
 
-    TEST(ErrorTest, BaseRecoverableErrorTest)
+    TEST_F(ErrorTest, BaseRecoverableErrorTest)
     {
         EXPECT_THROW({ throw RecoverableError("Recoverable rocRoller Error"); }, RecoverableError);
     }
 
-    TEST(ErrorTest, FatalErrorTest)
+    TEST_F(ErrorTest, FatalErrorTest)
     {
         int         IntA    = 5;
         int         IntB    = 3;
@@ -42,7 +43,7 @@ namespace rocRollerTest
         EXPECT_THROW({ AssertFatal(IntA < IntB, ShowValue(IntB), message); }, FatalError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:51: FatalError(IntA < IntB)
+            test/unit/ErrorTest.cpp:52: FatalError(IntA < IntB)
                 IntA = 5
             FatalError Test)";
 
@@ -62,7 +63,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST(ErrorTest, RecoverableErrorTest)
+    TEST_F(ErrorTest, RecoverableErrorTest)
     {
         std::string StrA    = "StrA";
         std::string StrB    = "StrB";
@@ -73,7 +74,7 @@ namespace rocRollerTest
                      RecoverableError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:83: RecoverableError(StrA == StrB)
+            test/unit/ErrorTest.cpp:84: RecoverableError(StrA == StrB)
                 StrA = StrA
                 StrB = StrB
             RecoverableError Test)";

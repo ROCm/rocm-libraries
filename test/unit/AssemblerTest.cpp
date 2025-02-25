@@ -1,14 +1,14 @@
-
-
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
+#include "SimpleFixture.hpp"
 
 using namespace rocRoller;
+
+class AssemblerTest : public SimpleFixture
+{
+};
 
 static constexpr auto simple_assembly{
     R"(
@@ -94,13 +94,13 @@ auto assemble()
     return kernelObject;
 }
 
-TEST(AssemblerTest, Basic)
+TEST_F(AssemblerTest, Basic)
 {
     auto kernelObject = assemble();
     EXPECT_NE(kernelObject.size(), 0);
 }
 
-TEST(AssemblerTest, BadTarget)
+TEST_F(AssemblerTest, BadTarget)
 {
     auto myAssembler = rocRoller::Assembler::Get();
 
