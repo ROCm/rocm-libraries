@@ -114,6 +114,8 @@ namespace rocRoller
         {
             std::string argumentName;
 
+            bool needsPadding = false;
+
             using BaseDimension::BaseDimension;
 
             User(std::string const& name);
@@ -238,6 +240,10 @@ namespace rocRoller
         {
             static constexpr bool HasValue = false;
 
+            bool holdsTransposedTile;
+
+            LDS(bool holdsTransposedTile = false);
+
             using BaseDimension::BaseDimension;
 
             std::string name() const override;
@@ -323,6 +329,14 @@ namespace rocRoller
             std::vector<int> subTileSizes;
 
             /**
+             * Number of bytes padding each dimension.
+             *
+             * For example, a MxN Macrotile padded with [[x y]] requires
+             * M * N * elementBytes + N * x + M * y bytes of storage.
+             */
+            std::vector<uint> padBytesOfDim;
+
+            /**
              * Construct MacroTile dimension with deferred rank etc.
              */
             MacroTile();
@@ -354,6 +368,13 @@ namespace rocRoller
                       std::vector<int> const& subTileSizes = {},
                       MemoryType const        memoryType   = MemoryType::WAVE);
 
+            /**
+             * Construct MacroTile dimension that is padded.
+             *
+             * Layout type must be either MATRIX_A or MATRIX_B.
+             */
+            MacroTile(MacroTile& macTile, std::vector<uint> const& padBytesOfDim);
+
             std::string toString() const override;
 
             std::string name() const override;
@@ -372,6 +393,11 @@ namespace rocRoller
              * Return total number of elements.
              */
             int elements() const;
+
+            /**
+             * Return total number of padding bytes.
+             */
+            uint paddingBytes() const;
         };
 
         /**
@@ -458,6 +484,14 @@ namespace rocRoller
             LayoutType         layout = LayoutType::None;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?
 
+            /**
+             * Number of bytes padding each dimension.
+             *
+             * For example, a MxN Macrotile padded with [[x y]] requires
+             * M * N * elementBytes + N * x + M * y bytes of storage.
+             */
+            std::vector<uint> padBytesOfDim;
+
             WaveTile() = default;
 
             /**
@@ -481,6 +515,11 @@ namespace rocRoller
              * Return total number of elements.
              */
             int elements() const;
+
+            /**
+             * Return total number of padding bytes.
+             */
+            uint paddingBytes() const;
         };
 
         /**

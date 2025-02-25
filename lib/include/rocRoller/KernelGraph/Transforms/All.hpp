@@ -4,6 +4,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddF6LDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPRNG.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>

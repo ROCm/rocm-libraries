@@ -40,6 +40,27 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::LDS, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::LDS& lds, Context& ctx)
+            {
+                iot::mapRequired(io, "size", lds.size);
+                iot::mapRequired(io, "stride", lds.stride);
+                iot::mapRequired(io, "holdsTransposedTile", lds.holdsTransposedTile);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::LDS& lds)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, lds, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::CoordinateGraph::Adhoc, IO, Context>
         {
             using iot = IOTraits<IO>;
@@ -103,6 +124,7 @@ namespace rocRoller
                     io, dim, ctx);
 
                 iot::mapRequired(io, "argumentName", dim.argumentName);
+                iot::mapRequired(io, "needsPadding", dim.needsPadding);
             }
 
             static void mapping(IO& io, KernelGraph::CoordinateGraph::User& dim)

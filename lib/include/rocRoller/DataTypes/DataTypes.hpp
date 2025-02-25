@@ -34,8 +34,11 @@
 #include <stdexcept>
 #include <string>
 
+#include "DataTypes_BF6.hpp"
 #include "DataTypes_BF8.hpp"
 #include "DataTypes_BFloat16.hpp"
+#include "DataTypes_FP4.hpp"
+#include "DataTypes_FP6.hpp"
 #include "DataTypes_FP8.hpp"
 #include "DataTypes_Half.hpp"
 #include "DataTypes_Int8.hpp"
@@ -91,6 +94,12 @@ namespace rocRoller
         FP8x4, //< Four 8bit floating point (E4M3); packed into 32bits
         BF8, //< 8bit floating point (E5M2)
         BF8x4, //< Four 8bit floating point (E5M2); packed into 32bits
+        FP4, //< 4bit floating point (E2M1)
+        FP4x8, //< Eight 4bit floating point (E2M1); packed into 32bits
+        FP6, //< 6bit floating point in E2M3 format
+        FP6x16, //< 16 6bit floating point in FP6 format; packed into 96bits
+        BF6, //< 6bit floating point in E3M2 format
+        BF6x16, //< 16 6bit floating point in BF6 format; packed into 96bits
         Int8x4, //< Four 8bit signed integers; packed into 32bits
         Int8, //< 8bit signed integer
         Int16, //< 16bit signed integer
@@ -168,6 +177,8 @@ namespace rocRoller
         DEST = 0,
         LHS,
         RHS,
+        LHS_SCALE,
+        RHS_SCALE,
 
         Count,
         None = Count
@@ -349,7 +360,6 @@ namespace rocRoller
         unsigned int elementBits;
         unsigned int registerCount;
         size_t       packing;
-        size_t       segmentSize;
         size_t       alignment;
 
         bool isComplex;
@@ -400,8 +410,7 @@ namespace rocRoller
         constexpr static size_t ElementBits  = T_Bits;
         /// Segments per element.
         constexpr static size_t Packing = T_Packing;
-        /// Bytes per segment.
-        constexpr static size_t SegmentSize   = ElementBytes / Packing;
+
         constexpr static size_t Alignment     = alignof(T);
         constexpr static size_t RegisterCount = T_RegCount;
 
@@ -547,27 +556,6 @@ namespace rocRoller
                                   T_IsComplex,
                                   T_IsIntegral,
                                   T_IsSigned>::RegisterCount;
-
-    template <typename T,
-              DataType    T_DEnum,
-              DataType    T_SegmentType,
-              PointerType T_PEnum,
-              int         T_Packing,
-              int         T_RegCount,
-              int         T_Bits,
-              bool        T_IsComplex,
-              bool        T_IsIntegral,
-              bool        T_IsSigned>
-    constexpr size_t BaseTypeInfo<T,
-                                  T_DEnum,
-                                  T_SegmentType,
-                                  T_PEnum,
-                                  T_Packing,
-                                  T_RegCount,
-                                  T_Bits,
-                                  T_IsComplex,
-                                  T_IsIntegral,
-                                  T_IsSigned>::SegmentSize;
 
     template <typename T,
               DataType    T_DEnum,
@@ -833,6 +821,108 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<FP6> : public BaseTypeInfo<FP6,
+                                               DataType::FP6,
+                                               DataType::FP6,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               6,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
+    struct FP6x16
+    {
+        uint32_t a;
+        uint32_t b;
+        uint32_t c;
+    };
+
+    template <>
+    struct TypeInfo<FP6x16> : public BaseTypeInfo<FP6x16,
+                                                  DataType::FP6x16,
+                                                  DataType::FP6,
+                                                  PointerType::Value,
+                                                  16,
+                                                  3,
+                                                  96,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<BF6> : public BaseTypeInfo<BF6,
+                                               DataType::BF6,
+                                               DataType::BF6,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               6,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
+    struct BF6x16
+    {
+        uint32_t a;
+        uint32_t b;
+        uint32_t c;
+    };
+
+    template <>
+    struct TypeInfo<BF6x16> : public BaseTypeInfo<BF6x16,
+                                                  DataType::BF6x16,
+                                                  DataType::BF6,
+                                                  PointerType::Value,
+                                                  16,
+                                                  3,
+                                                  96,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<FP4> : public BaseTypeInfo<FP4,
+                                               DataType::FP4,
+                                               DataType::FP4,
+                                               PointerType::Value,
+                                               1,
+                                               1,
+                                               4,
+                                               false,
+                                               false,
+                                               true>
+    {
+    };
+
+    struct FP4x8 : public DistinctType<uint32_t, FP4x8>
+    {
+    };
+
+    template <>
+    struct TypeInfo<FP4x8> : public BaseTypeInfo<FP4x8,
+                                                 DataType::FP4x8,
+                                                 DataType::FP4,
+                                                 PointerType::Value,
+                                                 8,
+                                                 1,
+                                                 32,
+                                                 false,
+                                                 false,
+                                                 false>
+    {
+    };
+
+    template <>
     struct TypeInfo<BFloat16> : public BaseTypeInfo<BFloat16,
                                                     DataType::BFloat16,
                                                     DataType::BFloat16,
@@ -1011,6 +1101,12 @@ namespace rocRoller
     DeclareEnumTypeInfo(FP8x4, FP8x4);
     DeclareEnumTypeInfo(BF8, BF8);
     DeclareEnumTypeInfo(BF8x4, BF8x4);
+    DeclareEnumTypeInfo(FP6, FP6);
+    DeclareEnumTypeInfo(FP6x16, FP6x16);
+    DeclareEnumTypeInfo(BF6, BF6);
+    DeclareEnumTypeInfo(BF6x16, BF6x16);
+    DeclareEnumTypeInfo(FP4, FP4);
+    DeclareEnumTypeInfo(FP4x8, FP4x8);
     DeclareEnumTypeInfo(Int8x4, Int8x4);
     DeclareEnumTypeInfo(Int8, int8_t);
     DeclareEnumTypeInfo(Int16, int16_t);

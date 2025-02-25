@@ -25,19 +25,40 @@ namespace rocRoller
 
         std::unordered_set<OperationTag> BlockScale::getInputs() const
         {
-            if(pointerMode() == PointerMode::Inline)
+            if(scaleMode() == ScaleMode::Inline)
                 return {m_data};
             return {m_data, m_scale.value()};
         }
 
-        std::string BlockScale::toString() const
+        OperationTag BlockScale::data() const
         {
-            return "BlockScale";
+            return m_data;
         }
 
-        BlockScale::PointerMode BlockScale::pointerMode() const
+        std::optional<OperationTag> BlockScale::scale() const
         {
-            return m_scale.has_value() ? PointerMode::Separate : PointerMode::Inline;
+            return m_scale;
+        }
+
+        std::string BlockScale::toString() const
+        {
+            std::ostringstream rv;
+
+            rv << "BlockScale(" << scaleMode() << ", {";
+            streamJoin(rv, m_strides, ", ");
+            rv << "}): Data: " << m_data;
+
+            if(m_scale)
+            {
+                rv << ", Scale: " << *m_scale;
+            }
+
+            return rv.str();
+        }
+
+        ScaleMode BlockScale::scaleMode() const
+        {
+            return m_scale.has_value() ? ScaleMode::Separate : ScaleMode::Inline;
         }
 
         const std::vector<size_t>& BlockScale::strides() const
@@ -49,6 +70,29 @@ namespace rocRoller
         {
             return m_tag == rhs.m_tag && m_data == rhs.m_data && m_scale == rhs.m_scale
                    && m_strides == rhs.m_strides;
+        }
+
+        std::string toString(ScaleMode const& mode)
+        {
+            switch(mode)
+            {
+            case ScaleMode::None:
+                return "None";
+            case ScaleMode::SingleScale:
+                return "SingleScale";
+            case ScaleMode::Separate:
+                return "Separate";
+            case ScaleMode::Inline:
+                return "Inline";
+            case ScaleMode::Count:;
+            }
+
+            return "Invalid";
+        }
+
+        std::ostream& operator<<(std::ostream& stream, ScaleMode const& mode)
+        {
+            return stream << toString(mode);
         }
     }
 }

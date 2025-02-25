@@ -16,6 +16,9 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP8x4);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF8x4);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP4x8);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::FP6x16);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::BF6x16);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int64);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::UInt32);
@@ -43,6 +46,9 @@ namespace rocRoller
     DefineSpecializedGetGeneratorConvert(BF8);
     DefineSpecializedGetGeneratorConvert(FP8x4);
     DefineSpecializedGetGeneratorConvert(BF8x4);
+    DefineSpecializedGetGeneratorConvert(FP4x8);
+    DefineSpecializedGetGeneratorConvert(FP6x16);
+    DefineSpecializedGetGeneratorConvert(BF6x16);
     DefineSpecializedGetGeneratorConvert(Int32);
     DefineSpecializedGetGeneratorConvert(Int64);
     DefineSpecializedGetGeneratorConvert(UInt32);
@@ -288,6 +294,28 @@ namespace rocRoller
     }
 
     template <>
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP6x16>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::FP6x16> const&)
+    {
+        AssertFatal(arg != nullptr);
+        auto dataType = getArithDataType(arg);
+        Throw<FatalError>("Unsupported datatype for convert to FP6x16 ", ShowValue(dataType));
+    }
+
+    template <>
+    Generator<Instruction>
+        ConvertGenerator<DataType::BF6x16>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::BF6x16> const&)
+    {
+        AssertFatal(arg != nullptr);
+        auto dataType = getArithDataType(arg);
+        Throw<FatalError>("Unsupported datatype for convert to BF6x16 ", ShowValue(dataType));
+    }
+
+    template <>
     Generator<Instruction> ConvertGenerator<DataType::FP8>::generate(
         Register::ValuePtr dest, Register::ValuePtr arg, Expression::Convert<DataType::FP8> const&)
     {
@@ -349,6 +377,17 @@ namespace rocRoller
         default:
             Throw<FatalError>("Unsupported datatype for convert to bf8: ", ShowValue(dataType));
         }
+    }
+
+    template <>
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP4x8>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::FP4x8> const&)
+    {
+        AssertFatal(arg != nullptr);
+        auto dataType = getArithDataType(arg);
+        Throw<FatalError>("Unsupported datatype for convert to FP4x8 ", ShowValue(dataType));
     }
 
     template <>

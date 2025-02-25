@@ -488,7 +488,7 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, supportedISATuples());
+    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, CDNAISATuples());
 
     struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
@@ -1403,13 +1403,14 @@ namespace MemoryInstructionsTest
                                                 ::testing::Values(rocRoller::DataType::FP8x4,
                                                                   rocRoller::DataType::BF8x4)));
 
-    struct BufferLoad2LDSTest : public GPUContextFixtureParam<int>
+    class BufferLoad2LDSTest : public GPUContextFixtureParam<int>
     {
         int numBytesParam()
         {
             return std::get<1>(GetParam());
         }
 
+    public:
         void genbufferLoad2LDSTest()
         {
             int N = numBytesParam();
@@ -1494,31 +1495,57 @@ namespace MemoryInstructionsTest
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
         }
-    };
 
-    TEST_P(BufferLoad2LDSTest, Basic)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
-        int N = numBytesParam();
-
-        if(N % 4 == 3)
+        void chechkDwordWidth()
         {
-            EXPECT_THROW(genbufferLoad2LDSTest(), FatalError);
-            GTEST_SKIP();
+            int numBytes = numBytesParam();
+
+            std::string generatedCode = m_context->instructions()->toString();
+
+            if(numBytes == 1)
+            {
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte"), 1);
+            }
+            else if(numBytes == 2)
+            {
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ushort"), 1);
+            }
+            else
+            {
+                const int wordSize = 4;
+                AssertFatal(numBytes % wordSize == 0);
+                auto numWords = numBytes / wordSize;
+
+                auto numx1 = numWords;
+                int  numx3 = 0, numx4 = 0;
+                if(m_context->targetArchitecture().HasCapability(
+                       GPUCapability::HasWiderDirectToLds))
+                {
+                    const int maxWidth = 4;
+                    numx4              = numWords / maxWidth;
+                    if(numWords % maxWidth == 3)
+                    {
+                        numx3 = 1;
+                        numx1 = 0;
+                    }
+                    else
+                    {
+                        numx1 = numWords % maxWidth;
+                    }
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx3 "), numx3);
+                    EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numx4);
+                }
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), numx1);
+            }
         }
-        else
+
+        void exeBufferLoad2LDS()
         {
+            int N = numBytesParam();
+
             genbufferLoad2LDSTest();
-        }
+            chechkDwordWidth();
 
-        if(!isLocalDevice())
-        {
-
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-        else
-        {
             std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
                 = m_context->instructions()->getExecutableKernel();
 
@@ -1547,10 +1574,28 @@ namespace MemoryInstructionsTest
                 EXPECT_EQ(result[i], a[i]);
             }
         }
+    };
+
+    TEST_P(BufferLoad2LDSTest, CodeGen)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
+        genbufferLoad2LDSTest();
+        std::vector<char> assembledKernel = m_context->instructions()->assemble();
+        EXPECT_GT(assembledKernel.size(), 0);
+        chechkDwordWidth();
+    }
+
+    TEST_P(BufferLoad2LDSTest, Execute)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
+        exeBufferLoad2LDS();
     }
 
     INSTANTIATE_TEST_SUITE_P(
         BufferLoad2LDSTest,
         BufferLoad2LDSTest,
-        ::testing::Combine(currentGPUISA(), ::testing::Values(1, 2, 4, 8, 12, 16, 32, 64, 128)));
+        ::testing::Combine(CDNAISAValues(),
+                           ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44, 32, 64, 128)));
 }

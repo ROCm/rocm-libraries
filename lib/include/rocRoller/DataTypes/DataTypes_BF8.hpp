@@ -56,13 +56,17 @@ namespace rocRoller
 
         BF8(BF8 const& other) = default;
 
-        template <typename T,
-                  typename
-                  = typename std::enable_if<(!std::is_same<T, BF8>::value)
-                                            && std::is_convertible<T, double>::value>::type>
-        explicit BF8(T const& value)
+        template <typename T>
+        requires(!std::is_same_v<T, BF8> && std::is_convertible_v<T, float>) explicit BF8(
+            T const& value)
             : data(float_to_bf8(static_cast<double>(value)).data)
         {
+        }
+
+        template <typename T>
+        requires(std::is_convertible_v<T, float>) void operator=(T const& value)
+        {
+            data = float_to_bf8(static_cast<float>(value)).data;
         }
 
         explicit operator float() const
@@ -134,14 +138,14 @@ namespace rocRoller
         return !static_cast<float>(a);
     }
 
-    template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
-    inline auto operator<=>(BF8 const& a, T const& b)
+    template <typename T>
+    requires(std::is_convertible_v<T, float>) inline auto operator<=>(BF8 const& a, T const& b)
     {
         return static_cast<float>(a) <=> static_cast<float>(b);
     }
 
-    template <typename T, typename = typename std::enable_if_t<std::is_convertible_v<T, float>>>
-    inline bool operator==(BF8 const& a, T const& b)
+    template <typename T>
+    requires(std::is_convertible_v<T, float>) inline bool operator==(BF8 const& a, T const& b)
     {
         return static_cast<float>(a) == static_cast<float>(b);
     }

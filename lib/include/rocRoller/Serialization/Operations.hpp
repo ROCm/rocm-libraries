@@ -234,7 +234,7 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "tag", op.m_tag);
                 iot::mapRequired(io, "srcTag", op.m_srcTag);
-                iot::mapRequired(io, "tensorTag", op.m_tensorTag);
+                iot::mapRequired(io, "dstTag", op.m_dstTag);
             }
 
             static void mapping(IO& io, TOp& val)
@@ -255,7 +255,7 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "tag", op.m_tag);
                 iot::mapRequired(io, "srcTag", op.m_srcTag);
-                iot::mapRequired(io, "tensorTag", op.m_tensorTag);
+                iot::mapRequired(io, "dstTag", op.m_dstTag);
             }
 
             static void mapping(IO& io, TOp& val)
