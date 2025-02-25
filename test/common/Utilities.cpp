@@ -79,11 +79,15 @@ namespace rocRoller
                      bool                        transA,
                      bool                        transB)
     {
-        AssertFatal(floatA.size() % AX.size() == 0 && floatA.size() / AX.size() == 32,
+        constexpr int elementsPerMXBlock = 32;
+
+        AssertFatal(floatA.size() % AX.size() == 0
+                        && floatA.size() / AX.size() == elementsPerMXBlock,
                     "Matrix A size must be 32 times of the scale vector size.",
                     ShowValue(floatA.size()),
                     ShowValue(AX.size()));
-        AssertFatal(floatB.size() % BX.size() == 0 && floatB.size() / BX.size() == 32,
+        AssertFatal(floatB.size() % BX.size() == 0
+                        && floatB.size() / BX.size() == elementsPerMXBlock,
                     "Matrix B size must be 32 times of the scale vector size.",
                     ShowValue(floatB.size()),
                     ShowValue(BX.size()));
@@ -98,7 +102,7 @@ namespace rocRoller
             {
                 auto  m      = mk / K;
                 auto  k      = mk % K;
-                auto  idx    = m * (K / 32) + (k / 32);
+                auto  idx    = m * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
                 float aScale = scaleToFloat(AX[idx]);
                 scaledA[mk] *= aScale;
             }
@@ -110,7 +114,7 @@ namespace rocRoller
             {
                 auto  m      = mk % M;
                 auto  k      = mk / M;
-                auto  idx    = (k / 32) * M + m;
+                auto  idx    = (k / elementsPerMXBlock) * M + m;
                 float aScale = scaleToFloat(AX[idx]);
                 scaledA[mk] *= aScale;
             }
@@ -123,7 +127,7 @@ namespace rocRoller
             {
                 auto  k      = kn / N;
                 auto  n      = kn % N;
-                auto  idx    = (k / 32) * N + n;
+                auto  idx    = (k / elementsPerMXBlock) * N + n;
                 float bScale = scaleToFloat(BX[idx]);
                 scaledB[kn] *= bScale;
             }
@@ -135,7 +139,7 @@ namespace rocRoller
             {
                 auto  k      = kn % K;
                 auto  n      = kn / K;
-                auto  idx    = n * (K / 32) + (k / 32);
+                auto  idx    = n * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
                 float bScale = scaleToFloat(BX[idx]);
                 scaledB[kn] *= bScale;
             }

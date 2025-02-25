@@ -74,7 +74,6 @@ namespace rocRoller
                                 ShowValue(solutionParams.scaleA),
                                 ShowValue(solutionParams.scaleB));
                     AssertFatal(solutionParams.scaleA == Operations::ScaleMode::None
-                                    || solutionParams.scaleA == Operations::ScaleMode::SingleScale
                                     || solutionParams.scaleA == Operations::ScaleMode::Separate,
                                 "Scale mode not supported!",
                                 ShowValue(solutionParams.scaleA));
@@ -313,8 +312,6 @@ namespace rocRoller
                         {
                             params->prefetchMixMemOps = true;
                         }
-
-                        params->prefetchMixMemOps = false;
                     }
                     else
                     {
