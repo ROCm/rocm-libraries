@@ -52,6 +52,32 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                ScaledMatrixMultiply cpy = expr;
+                if(expr.matA)
+                {
+                    cpy.matA = call(expr.matA);
+                }
+                if(expr.matB)
+                {
+                    cpy.matB = call(expr.matB);
+                }
+                if(expr.matC)
+                {
+                    cpy.matC = call(expr.matC);
+                }
+                if(expr.scaleA)
+                {
+                    cpy.scaleA = call(expr.scaleA);
+                }
+                if(expr.scaleB)
+                {
+                    cpy.scaleB = call(expr.scaleB);
+                }
+                return std::make_shared<Expression>(cpy);
+            }
+
             ExpressionPtr operator()(RandomNumber const& expr) const
             {
                 auto arg = call(expr.arg);
@@ -96,8 +122,11 @@ namespace rocRoller
         /**
          *  Replace RandomNumber expression with equivalent expressions
          */
-        ExpressionPtr lowerPRNG(ExpressionPtr expr)
+        ExpressionPtr lowerPRNG(ExpressionPtr expr, ContextPtr cxt)
         {
+            if(cxt->targetArchitecture().HasCapability(GPUCapability::HasPRNG))
+                return expr;
+
             auto visitor = LowerPRNGExpressionVisitor();
             return visitor.call(expr);
         }

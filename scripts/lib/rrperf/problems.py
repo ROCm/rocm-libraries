@@ -105,6 +105,12 @@ class GEMMSolution:
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
 
+    scale_A: str = "None"
+    scale_B: str = "None"
+
+    loadLDSScale_A: bool = False
+    loadLDSScale_B: bool = False
+
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False

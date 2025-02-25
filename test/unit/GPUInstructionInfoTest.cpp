@@ -512,3 +512,33 @@ TEST_F(GPUInstructionInfoTest, Signed)
         EXPECT_CATEGORY_EQ(inst, isIntInst, true);
     }
 }
+
+TEST_F(GPUInstructionInfoTest, LaneInstructions)
+{
+    for(auto inst : {"v_readlane_b32"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isVector, true);
+        EXPECT_CATEGORY_EQ(inst, isVALU, true);
+        EXPECT_CATEGORY_EQ(inst, isVReadlane, true);
+        EXPECT_CATEGORY_EQ(inst, isVWritelane, false);
+        EXPECT_CATEGORY_EQ(inst, isVPermlane, false);
+    }
+
+    for(auto inst : {"v_writelane_b32"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isVector, true);
+        EXPECT_CATEGORY_EQ(inst, isVALU, true);
+        EXPECT_CATEGORY_EQ(inst, isVReadlane, false);
+        EXPECT_CATEGORY_EQ(inst, isVWritelane, true);
+        EXPECT_CATEGORY_EQ(inst, isVPermlane, false);
+    }
+
+    for(auto const& inst : {"v_permlane16_swap_b32", "v_permlane32_swap_b32"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isVector, true);
+        EXPECT_CATEGORY_EQ(inst, isVALU, true);
+        EXPECT_CATEGORY_EQ(inst, isVReadlane, false);
+        EXPECT_CATEGORY_EQ(inst, isVWritelane, false);
+        EXPECT_CATEGORY_EQ(inst, isVPermlane, true);
+    }
+}

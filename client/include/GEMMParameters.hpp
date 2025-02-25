@@ -14,6 +14,8 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
+            constexpr int elementsPerMXBlock = 32;
+
             /**
              * @brief Indicates whether a matrix is supplied in transposed form or not
              */
@@ -44,7 +46,6 @@ namespace rocRoller
                 float alpha;
                 float beta;
 
-                // Datatype of inputs and outputs
                 std::string typeA;
                 std::string typeB;
                 std::string typeC;
@@ -53,6 +54,9 @@ namespace rocRoller
 
                 TransposeType transA;
                 TransposeType transB;
+
+                Operations::ScaleMode scaleA;
+                Operations::ScaleMode scaleB;
             };
 
             /**
@@ -86,6 +90,12 @@ namespace rocRoller
 
                 TransposeType transA;
                 TransposeType transB;
+
+                Operations::ScaleMode scaleA;
+                Operations::ScaleMode scaleB;
+
+                bool loadLDSScaleA = false;
+                bool loadLDSScaleB = false;
 
                 // Other options
                 bool loadLDSA  = true;

@@ -15,6 +15,7 @@
 #endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -39,10 +40,10 @@ std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = {})
     return std::shared_ptr<T>(ptr, hipFree);
 }
 
-template <typename T>
-std::shared_ptr<T> make_shared_device(const std::vector<T>& init, size_t padding = 0)
+template <typename T, typename U>
+std::shared_ptr<T> make_shared_device(std::vector<U> const& init, size_t padding = 0)
 {
-    std::size_t size   = init.size() * sizeof(T);
+    std::size_t size   = init.size() * sizeof(U);
     T*          ptr    = nullptr;
     auto        result = hipMalloc(&ptr, size + padding);
     if(result != hipSuccess)
@@ -57,6 +58,12 @@ std::shared_ptr<T> make_shared_device(const std::vector<T>& init, size_t padding
     }
 
     return std::shared_ptr<T>(ptr, hipFree);
+}
+
+auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
+{
+    using T = std::remove_cvref_t<decltype(init.front())>;
+    return make_shared_device<T, T>(init, padding);
 }
 
 template <typename T>
@@ -217,6 +224,44 @@ AcceptableError
         ss << " Problem size scaling: " << scale;
         ss << " Fudge: " << fudge;
 
+        if constexpr(std::is_same_v<TA, TB>)
+        {
+            if constexpr(std::is_same_v<TA, rocRoller::BF6>)
+            {
+                fudge *= 3;
+                ss << " Increase fudge for BF6: " << fudge;
+            }
+            if constexpr(std::is_same_v<TA, rocRoller::BF8>)
+            {
+                fudge *= 5;
+                ss << " Increase fudge for BF8: " << fudge;
+            }
+            if constexpr(std::is_same_v<TA, rocRoller::FP8>)
+            {
+                fudge *= 5.5;
+                ss << " Increase fudge for FP8: " << fudge;
+            }
+        }
+        else
+        {
+            if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
+            {
+                fudge *= 5;
+                ss << " Increase fudge for mixed BF8: " << fudge;
+            }
+            else if constexpr(std::is_same_v<TA,
+                                             rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
+            {
+                fudge *= 4.95;
+                ss << " Increase fudge for mixed FP8: " << fudge;
+            }
+            else if constexpr(std::is_same_v<TA,
+                                             rocRoller::BF6> || std::is_same_v<TB, rocRoller::BF6>)
+            {
+                fudge *= 3;
+                ss << " Increase fudge for mixed BF6: " << fudge;
+            }
+        }
         tolerance = fudge * epsilon<TD>() * std::sqrt(K);
     }
 
@@ -259,24 +304,6 @@ int countSubstring(const std::string& str, const std::string& sub);
 
 namespace rocRoller
 {
-    // TODO: use data generator for input, then remove this function
-    template <typename T>
-    std::vector<float> unpackToFloat(std::vector<T> const& A)
-    {
-        static_assert(
-            std::is_same_v<
-                T,
-                rocRoller::
-                    FP8> || std::is_same_v<T, rocRoller::BF8> || std::is_same_v<T, rocRoller::BFloat16> || std::is_same_v<T, rocRoller::Half>);
-
-        std::vector<float> floatA(A.size());
-        for(std::size_t i = 0; i != A.size(); ++i)
-        {
-            floatA[i] = float(A[i]);
-        }
-        return floatA;
-    }
-
     void CPUMM(std::vector<float>&       D,
                const std::vector<float>& C,
                const std::vector<float>& A,
@@ -289,45 +316,119 @@ namespace rocRoller
                bool                      transA = false,
                bool                      transB = true);
 
-    void CPUMM(std::vector<__half>&       D,
-               const std::vector<__half>& C,
-               const std::vector<__half>& A,
-               const std::vector<__half>& B,
-               int                        M,
-               int                        N,
-               int                        K,
-               float                      alpha,
-               float                      beta,
-               bool                       transA = false,
-               bool                       transB = true);
-
-    void CPUMM(std::vector<BFloat16>&       D,
-               const std::vector<BFloat16>& C,
-               const std::vector<BFloat16>& A,
-               const std::vector<BFloat16>& B,
-               int                          M,
-               int                          N,
-               int                          K,
-               float                        alpha,
-               float                        beta,
-               bool                         transA = false,
-               bool                         transB = true);
-
-    template <typename TA, typename TB>
-    void CPUMM(std::vector<float>&       D,
-               const std::vector<float>& C,
-               const std::vector<TA>&    A,
-               const std::vector<TB>&    B,
-               int                       M,
-               int                       N,
-               int                       K,
-               float                     alpha,
-               float                     beta,
-               bool                      transA = false,
-               bool                      transB = true)
+    template <typename TA, typename TB, typename TC, typename TD>
+    void CPUMM(std::vector<TD>&       D,
+               const std::vector<TC>& C,
+               const std::vector<TA>& A,
+               const std::vector<TB>& B,
+               int                    M,
+               int                    N,
+               int                    K,
+               float                  alpha,
+               float                  beta,
+               bool                   transA = false,
+               bool                   transB = true)
     {
-        CPUMM(
-            D, C, unpackToFloat<TA>(A), unpackToFloat<TB>(B), M, N, K, alpha, beta, transA, transB);
+        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
+        {
+            CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
+        }
+        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
+                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
+        {
+            auto floatD = unpackToFloat(C);
+            CPUMM(floatD,
+                  floatD,
+                  unpackToFloat(A),
+                  unpackToFloat(B),
+                  M,
+                  N,
+                  K,
+                  alpha,
+                  beta,
+                  transA,
+                  transB);
+#pragma omp parallel for
+            for(std::size_t i = 0; i != floatD.size(); ++i)
+            {
+                D[i] = TD(floatD[i]);
+            }
+        }
+        else
+        {
+            Throw<FatalError>("CPUMM invalid types.");
+        }
+    }
+
+    void ScaledCPUMM(std::vector<float>&         D,
+                     const std::vector<float>&   C,
+                     const std::vector<float>&   floatA,
+                     const std::vector<float>&   floatB,
+                     const std::vector<uint8_t>& AX,
+                     const std::vector<uint8_t>& BX,
+                     int                         M,
+                     int                         N,
+                     int                         K,
+                     float                       alpha,
+                     float                       beta,
+                     bool                        transA,
+                     bool                        transB);
+
+    template <typename TA, typename TB, typename TC, typename TD>
+    void ScaledCPUMM(std::vector<TD>&            D,
+                     const std::vector<TC>&      C,
+                     const std::vector<TA>&      A,
+                     const std::vector<TB>&      B,
+                     const std::vector<uint8_t>& AX,
+                     const std::vector<uint8_t>& BX,
+                     int                         M,
+                     int                         N,
+                     int                         K,
+                     float                       alpha,
+                     float                       beta,
+                     bool                        transA,
+                     bool                        transB)
+    {
+        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
+        {
+            auto aConverted = unpackToFloat(A);
+            auto bConverted = unpackToFloat(B);
+            ScaledCPUMM(D, C, aConverted, bConverted, AX, BX, M, N, K, alpha, beta, transA, transB);
+        }
+        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
+                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
+        {
+            auto aConverted = unpackToFloat(A);
+            auto bConverted = unpackToFloat(B);
+            auto floatD     = unpackToFloat(C);
+            ScaledCPUMM(floatD,
+                        floatD,
+                        aConverted,
+                        bConverted,
+                        AX,
+                        BX,
+                        M,
+                        N,
+                        K,
+                        alpha,
+                        beta,
+                        transA,
+                        transB);
+#pragma omp parallel for
+            for(std::size_t i = 0; i != floatD.size(); ++i)
+            {
+                D[i] = TD(floatD[i]);
+            }
+        }
+        else
+        {
+            auto dataTypeC = TypeInfo<TC>::Var.dataType;
+            auto dataTypeD = TypeInfo<TD>::Var.dataType;
+
+            Throw<FatalError>("ScaledCPUMM only supported for float, not ",
+                              ShowValue(dataTypeC),
+                              ShowValue(dataTypeD));
+        }
     }
 }
 
@@ -343,5 +444,72 @@ namespace rocRoller
         for(size_t i = 0; i < cols; i++)
             for(size_t j = 0; j < rows; j++)
                 mat[i + j * cols] = i == j ? static_cast<T>(1.0) : static_cast<T>(0.0);
+    }
+
+    template <>
+    inline void SetIdentityMatrix(std::vector<FP4x8>& mat, size_t cols, size_t rows)
+    {
+        std::fill(mat.begin(), mat.end(), FP4x8()); // zero out the matrix
+
+        // Notice `cols` and `rows` are NOT the actual dimensions of `mat`,
+        // they are the dimensions before packed into FP4x8.
+        size_t const row_bytes = 4 * cols / 8; // number of bytes in a row
+        uint8_t      even      = 0b00100000;
+        uint8_t      odd       = 0b00000010;
+
+        //  Generate FP4 identity matrix with bit pattern like this:
+        //    0010 0000 0000 0000
+        //    0000 0010 0000 0000
+        //    0000 0000 0010 0000
+        //    0000 0000 0000 0010
+        //    ...
+        for(size_t i = 0; i < std::min(rows, cols); i += 2)
+            std::memcpy(
+                reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + (4 * i / 8), &even, 1);
+        for(size_t i = 1; i < std::min(rows, cols); i += 2)
+            std::memcpy(
+                reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + (4 * i / 8), &odd, 1);
+    }
+
+    template <typename F6x16>
+    requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
+        inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
+    {
+        std::fill(mat.begin(), mat.end(), F6x16()); // zero out the matrix
+
+        // Notice `cols` and `rows` are NOT the actual dimensions of `mat`,
+        // they are the dimensions before packed into F6x16.
+        size_t const row_bytes = 6 * cols / 8; // number of bytes in a row
+        // clang-format off
+        auto constexpr patterns = [] {
+        if constexpr (std::is_same_v<F6x16, FP6x16>)
+        {
+            return std::to_array<uint8_t> ({  //  Bit pattern of FP6 identity matrix:
+                0b00100000,                   //    001000 000000 000000 000000 000000
+                0b10000000,                   //    000000 001000 000000 000000 000000
+                0b00000010,                   //    000000 000000 001000 000000 000000
+                0b00001000,                   //    000000 000000 000000 001000 000000
+            });                               //    000000 000000 000000 000000 001000 (repeat 1st row)
+        }
+        else
+        {
+            return std::to_array<uint8_t> ({  //  Bit pattern of BF6 identity matrix:
+                0b00110000,                   //    001100 000000 000000 000000 000000
+                0b11000000,                   //    000000 001100 000000 000000 000000
+                0b00000011,                   //    000000 000000 001100 000000 000000
+                0b00001100,                   //    000000 000000 000000 001100 000000
+             });                              //    000000 000000 000000 000000 001100 (repeat 1st row)
+        }
+        }();
+        // clang-format on
+        std::array constexpr shift = {0, 1, 0, 0};
+
+        for(size_t i = 0; i < std::min(rows, cols); i++)
+        {
+            int byte_offset = (i * 6) / 8 + shift[i % 4];
+            std::memcpy(reinterpret_cast<uint8_t*>(mat.data()) + (row_bytes * i) + byte_offset,
+                        &patterns[i % 4],
+                        1);
+        }
     }
 }

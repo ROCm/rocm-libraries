@@ -1,4 +1,5 @@
 #pragma once
+
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
@@ -19,16 +20,24 @@ namespace rocRoller
                 Operations::OperationTag m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagScalarAlpha,
                     m_tagScalarBeta, m_tagTensorD;
 
+                std::optional<Operations::OperationTag> m_tagTensorScaleA, m_tagLoadScaleA,
+                    m_tagBlockScaleA, m_tagTensorScaleB, m_tagLoadScaleB, m_tagBlockScaleB;
+
             public:
                 using GEMMSolution::GEMMSolution;
 
-                virtual ABCDTags getABCDTags() const override
+                ABCDTags getABCDTags() const override
                 {
                     return {m_tagTensorA, m_tagTensorB, m_tagTensorC, m_tagTensorD};
                 }
 
+                ABScaleTags getABScaleTags() const override
+                {
+                    return {*m_tagTensorScaleA, *m_tagTensorScaleB};
+                }
+
             protected:
-                virtual CommandPtr makeCommand(SolutionParameters const& solutionParams) override
+                CommandPtr makeCommand(SolutionParameters const& solutionParams) override
                 {
                     auto command = std::make_shared<Command>();
 
@@ -37,40 +46,62 @@ namespace rocRoller
                     auto typeC = getDataTypeFromString(solutionParams.typeC);
                     auto typeD = getDataTypeFromString(solutionParams.typeD);
 
-                    //TODO: Handle transposed matrices more elegantly
-                    switch(solutionParams.transA)
-                    {
-                    case TransposeType::T:
-                        m_tagTensorA = command->addOperation(
-                            Operations::Tensor(2, typeA, {(size_t)0, (size_t)1})); // AT
-                        break;
-                    case TransposeType::N:
-                        m_tagTensorA = command->addOperation(
-                            Operations::Tensor(2, typeA, {(size_t)1})); // AN
-                        break;
-                    default:
-                        Throw<FatalError>("Bad transpose option");
-                    }
+                    auto unitStrides = [](TransposeType t) -> std::vector<size_t> {
+                        switch(t)
+                        {
+                        case TransposeType::T:
+                            return {(size_t)0, (size_t)1};
+                        case TransposeType::N:
+                            return {(size_t)1};
+                        default:
+                            Throw<FatalError>("Bad transpose option");
+                        }
+                    };
+
+                    m_tagTensorA = command->addOperation(
+                        Operations::Tensor(2, typeA, unitStrides(solutionParams.transA)));
                     m_tagA = command->addOperation(Operations::T_Load_Tiled(m_tagTensorA));
 
-                    //TODO: Handle transposed matrices more elegantly
-                    switch(solutionParams.transB)
-                    {
-                    case TransposeType::T:
-                        m_tagTensorB = command->addOperation(
-                            Operations::Tensor(2, typeB, {(size_t)0, (size_t)1})); // BT
-                        break;
-                    case TransposeType::N:
-                        m_tagTensorB = command->addOperation(Operations::Tensor(2,
-                                                                                typeB,
-                                                                                {
-                                                                                    (size_t)1,
-                                                                                })); // BN
-                        break;
-                    default:
-                        Throw<FatalError>("Bad transpose option");
-                    }
+                    m_tagTensorB = command->addOperation(
+                        Operations::Tensor(2, typeB, unitStrides(solutionParams.transB)));
                     m_tagB = command->addOperation(Operations::T_Load_Tiled(m_tagTensorB));
+
+                    auto mulInputA = m_tagA;
+                    auto mulInputB = m_tagB;
+
+                    AssertFatal(solutionParams.scaleA == solutionParams.scaleB,
+                                "Scale modes must match",
+                                ShowValue(solutionParams.scaleA),
+                                ShowValue(solutionParams.scaleB));
+                    AssertFatal(solutionParams.scaleA == Operations::ScaleMode::None
+                                    || solutionParams.scaleA == Operations::ScaleMode::SingleScale
+                                    || solutionParams.scaleA == Operations::ScaleMode::Separate,
+                                "Scale mode not supported!",
+                                ShowValue(solutionParams.scaleA));
+
+                    if(solutionParams.scaleA == Operations::ScaleMode::Separate)
+                    {
+                        m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                            2, DataType::UInt8, unitStrides(solutionParams.transA)));
+                        m_tagLoadScaleA   = command->addOperation(
+                            rocRoller::Operations::T_Load_Tiled(*m_tagTensorScaleA));
+
+                        m_tagBlockScaleA = mulInputA
+                            = command->addOperation(rocRoller::Operations::BlockScale(
+                                m_tagA, 2, m_tagLoadScaleA, {1, elementsPerMXBlock}));
+                    }
+
+                    if(solutionParams.scaleB == Operations::ScaleMode::Separate)
+                    {
+                        m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                            2, DataType::UInt8, unitStrides(solutionParams.transB)));
+                        m_tagLoadScaleB   = command->addOperation(
+                            rocRoller::Operations::T_Load_Tiled(*m_tagTensorScaleB));
+
+                        m_tagBlockScaleB = mulInputB
+                            = command->addOperation(rocRoller::Operations::BlockScale(
+                                m_tagB, 2, m_tagLoadScaleB, {elementsPerMXBlock, 1}));
+                    }
 
                     m_tagTensorC
                         = command->addOperation(Operations::Tensor(2, typeC, {(size_t)1})); // C
@@ -86,7 +117,8 @@ namespace rocRoller
                     auto tagLoadBeta
                         = command->addOperation(Operations::T_Load_Scalar(m_tagScalarBeta));
 
-                    auto tagAB = command->addOperation(Operations::T_Mul(m_tagA, m_tagB)); // A * B
+                    auto tagAB
+                        = command->addOperation(Operations::T_Mul(mulInputA, mulInputB)); // A * B
 
                     Operations::T_Execute execute(command->getNextTag());
                     auto                  tagBetaC
@@ -125,6 +157,12 @@ namespace rocRoller
                     auto typeC = getDataTypeFromString(solutionParams.typeC);
                     auto typeD = getDataTypeFromString(solutionParams.typeD);
 
+                    auto isF8F6F4 = [](auto dtype) {
+                        return (dtype == DataType::FP8 || dtype == DataType::BF8
+                                || dtype == DataType::FP6 || dtype == DataType::BF6
+                                || dtype == DataType::FP4);
+                    };
+
                     if(typeA == DataType::Float && typeB == DataType::Float)
                     {
                         wave_m = 32;
@@ -146,6 +184,22 @@ namespace rocRoller
                         wave_m = 16;
                         wave_n = 16;
                         wave_k = 32;
+                        wave_b = 1;
+                    }
+                    else if((typeA == DataType::FP4 && typeB == DataType::FP4)
+                            || (typeA == DataType::FP6 && typeB == DataType::FP6)
+                            || (typeA == DataType::BF6 && typeB == DataType::BF6))
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
+                        wave_b = 1;
+                    }
+                    else if(typeA != typeB && isF8F6F4(typeA) && isF8F6F4(typeB))
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
                         wave_b = 1;
                     }
                     else
@@ -220,6 +274,31 @@ namespace rocRoller
                     // TODO Fix MemoryType promotion (JAMMED_WAVE_LDS)
                     params->setDimensionInfo(m_tagD, macTileD);
 
+                    if(solutionParams.scaleA == Operations::ScaleMode::Separate)
+                    {
+                        auto macTileAScale = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macM, solutionParams.macK / elementsPerMXBlock},
+                            LayoutType::MATRIX_A,
+                            {solutionParams.waveM,
+                             solutionParams.waveN,
+                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveB},
+                            solutionParams.loadLDSScaleA ? MemoryType::LDS : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagLoadScaleA, macTileAScale);
+                    }
+                    if(solutionParams.scaleB == Operations::ScaleMode::Separate)
+                    {
+                        auto macTileBScale = KernelGraph::CoordinateGraph::MacroTile(
+                            {solutionParams.macK / elementsPerMXBlock, solutionParams.macN},
+                            LayoutType::MATRIX_B,
+                            {solutionParams.waveM,
+                             solutionParams.waveN,
+                             solutionParams.waveK / elementsPerMXBlock,
+                             solutionParams.waveB},
+                            solutionParams.loadLDSScaleB ? MemoryType::LDS : MemoryType::WAVE);
+                        params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
+                    }
+
                     params->unrollX = solutionParams.unrollX;
                     params->unrollY = solutionParams.unrollY;
 
@@ -234,6 +313,8 @@ namespace rocRoller
                         {
                             params->prefetchMixMemOps = true;
                         }
+
+                        params->prefetchMixMemOps = false;
                     }
                     else
                     {

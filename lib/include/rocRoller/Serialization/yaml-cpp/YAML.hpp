@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright 2019-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -168,6 +168,30 @@ namespace rocRoller
 
         template <>
         inline void EmitterOutput::output(BF8& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(FP6& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(BF6& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(FP4& obj)
         {
             std::stringstream ss;
             ss << obj;
@@ -412,6 +436,28 @@ namespace rocRoller
 namespace YAML
 {
     template <>
+    struct convert<rocRoller::BFloat16>
+    {
+        static Node encode(const rocRoller::BFloat16& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::BFloat16& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
     struct convert<rocRoller::FP8>
     {
         static Node encode(const rocRoller::FP8& rhs)
@@ -456,16 +502,60 @@ namespace YAML
     };
 
     template <>
-    struct convert<rocRoller::BFloat16>
+    struct convert<rocRoller::FP6>
     {
-        static Node encode(const rocRoller::BFloat16& rhs)
+        static Node encode(const rocRoller::FP6& rhs)
         {
             Node node;
             node.push_back(rhs.data);
             return node;
         }
 
-        static bool decode(const Node& node, rocRoller::BFloat16& rhs)
+        static bool decode(const Node& node, rocRoller::FP6& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::BF6>
+    {
+        static Node encode(const rocRoller::BF6& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::BF6& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.data = node[0].as<decltype(rhs.data)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::FP4>
+    {
+        static Node encode(const rocRoller::FP4& rhs)
+        {
+            Node node;
+            node.push_back(rhs.data);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::FP4& rhs)
         {
             if(!node.IsSequence() || node.size() != 1)
             {

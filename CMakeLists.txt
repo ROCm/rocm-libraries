@@ -72,7 +72,7 @@ endif()
 
 include(cmake/Dependencies.cmake)
 # both show up in headers, system package required
-rocroller_add_dependency(spdlog VERSION 1.9.2)
+rocroller_add_dependency(spdlog VERSION 1.14.1)
 rocroller_add_dependency(msgpack VERSION 3.3.0)
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
