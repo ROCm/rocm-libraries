@@ -243,6 +243,17 @@ namespace rocRoller
             Throw<FatalError>("Conversions to ", DATATYPE, " not yet supported.");
         }
 
+        inline ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width)
+        {
+            return std::make_shared<Expression>(
+                BitFieldExtract{{.arg{a}}, DataType::None, offset, width});
+        }
+
+        inline ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width)
+        {
+            return std::make_shared<Expression>(BitFieldExtract{{.arg{a}}, dt, offset, width});
+        }
+
         template <CCommandArgumentValue T>
         inline ExpressionPtr literal(T value)
         {
@@ -344,6 +355,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(RandomNumber);
 
+        EXPRESSION_INFO(BitFieldExtract);
+
         EXPRESSION_INFO(Convert<DataType::Half>);
         EXPRESSION_INFO(Convert<DataType::Halfx2>);
         EXPRESSION_INFO(Convert<DataType::FP8>);
@@ -361,6 +374,9 @@ namespace rocRoller
         EXPRESSION_INFO(Convert<DataType::Int64>);
         EXPRESSION_INFO(Convert<DataType::UInt32>);
         EXPRESSION_INFO(Convert<DataType::UInt64>);
+
+        EXPRESSION_INFO(SRConvert<DataType::FP8>);
+        EXPRESSION_INFO(SRConvert<DataType::BF8>);
 
         EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "Register Value");
         EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "Command Argument");

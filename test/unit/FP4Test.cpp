@@ -317,6 +317,12 @@ namespace rocRollerTest
 
     TEST_P(FP4MemoryInstructionTest, GPU_FP4x8BufferLoadAndStore)
     {
+        auto arch = m_context->targetArchitecture().target();
+        if(!arch.isCDNAGPU())
+        {
+            GTEST_SKIP() << "Test not yet supported on "
+                         << m_context->targetArchitecture().target().toString() << std::endl;
+        }
         int num_fp4 = 8;
         genFP4x8BufferLoadAndStore(num_fp4);
         std::vector<char> assembledKernel = m_context->instructions()->assemble();

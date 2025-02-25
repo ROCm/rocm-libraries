@@ -31,6 +31,11 @@ namespace rocRoller
                 virtual CommandArguments commandArguments(ProblemParameters const& problemParams,
                                                           RunParameters const& runParams) const = 0;
 
+                virtual void setPredicates(CommandKernelPtr          commandKernel,
+                                           SolutionParameters const& solutionParams)
+                {
+                }
+
                 virtual Operations::OperationTag getScratchTag() const
                 {
                     return {};
@@ -44,6 +49,7 @@ namespace rocRoller
                     this->m_commandKernel->setContext(m_context);
                     this->m_commandKernel->setCommandParameters(
                         this->makeCommandParameters(solutionParams));
+                    this->setPredicates(this->m_commandKernel, solutionParams);
                     this->m_commandKernel->generateKernel();
                 }
 
@@ -52,6 +58,9 @@ namespace rocRoller
                                                    RunParameters const&      runParams,
                                                    CommandKernelPtr          commandKernel)
                 {
+                    auto args = this->commandArguments(problemParams, runParams).runtimeArguments();
+                    AssertFatal(this->m_commandKernel->matchesPredicates(args, spdlog::level::err),
+                                "Invalid run parameters: all predicates must match.");
                 }
 
                 using ABCDTags                       = std::tuple<Operations::OperationTag,

@@ -11,7 +11,8 @@ namespace rocRoller
         GetGenerator<Expression::AddShiftL>(Register::ValuePtr dst,
                                             Register::ValuePtr lhs,
                                             Register::ValuePtr rhs,
-                                            Register::ValuePtr shiftAmount);
+                                            Register::ValuePtr shiftAmount,
+                                            Expression::AddShiftL const&);
 
     // Generator for all register types and datatypes.
     class AddShiftLGenerator : public TernaryArithmeticGenerator<Expression::AddShiftL>
@@ -48,7 +49,8 @@ namespace rocRoller
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr lhs,
                                         Register::ValuePtr rhs,
-                                        Register::ValuePtr shiftAmount);
+                                        Register::ValuePtr shiftAmount,
+                                        Expression::AddShiftL const&);
 
         static const std::string Name;
     };

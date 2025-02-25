@@ -81,6 +81,13 @@ namespace rocRoller
         {
             ExpressionPtr lhs, rhs;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Binary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         template <typename T>
@@ -260,10 +267,31 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
+        /*
+         * SRConversion performs a stochastic rounding conversion.
+         * The lhs is the value to be converted, the rhs is the seed
+         * for stochastic rounding.
+         */
+        template <DataType DATATYPE>
+        struct SRConvert : Binary
+        {
+            constexpr static inline auto DestinationType = DATATYPE;
+            constexpr static inline auto Type            = Category::Conversion;
+            constexpr static inline auto EvalTimes       = EvaluationTimes::All();
+            constexpr static inline int  Complexity      = 2;
+        };
+
         struct Ternary
         {
             ExpressionPtr lhs, r1hs, r2hs;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Ternary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         struct TernaryMixed : Ternary
@@ -388,6 +416,13 @@ namespace rocRoller
         {
             ExpressionPtr arg;
             std::string   comment = "";
+
+            template <typename T>
+            requires std::derived_from<T, Unary>
+            inline T& copyParams(const T& other)
+            {
+                return static_cast<T&>(*this);
+            }
         };
 
         template <typename T>
@@ -472,6 +507,26 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
+        struct BitFieldExtract : Unary
+        {
+            inline BitFieldExtract& copyParams(const BitFieldExtract& other)
+            {
+                outputDataType = other.outputDataType;
+                offset         = other.offset;
+                width          = other.offset;
+
+                return *this;
+            }
+
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate};
+            constexpr static inline int             Complexity = 1;
+
+            DataType outputDataType = DataType::None;
+            int      offset         = 0;
+            int      width          = 0;
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *
@@ -526,6 +581,9 @@ namespace rocRoller
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
 
+        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
+        ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
+
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
 
@@ -574,6 +632,12 @@ namespace rocRoller
         concept CLogical = requires
         {
             requires static_cast<Category>(T::Type) == Category::Logical;
+        };
+
+        template <typename T>
+        concept CConversion = requires
+        {
+            requires static_cast<Category>(T::Type) == Category::Conversion;
         };
 
         template <typename T>

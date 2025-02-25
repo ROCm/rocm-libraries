@@ -179,8 +179,21 @@ namespace rocRoller
          */
         void loadKernel();
 
+        /**
+         * @brief Add an expression predicate to be evaluated using the runtime arguments.
+         *
+         * @param expression The expression predicate to add.
+         */
         void addPredicate(Expression::ExpressionPtr expression);
-        bool matchesPredicates(/* args */) const;
+
+        /**
+         * @brief Evaluate all added predicates, return AND of all results.
+         *
+         * @param args The runtime arguments which will be passed to the kernel.
+         * @param level The log level to log any predicate mismatch messages to (defaults to debug)
+         */
+        bool matchesPredicates(RuntimeArguments const&   args,
+                               spdlog::level::level_enum level = spdlog::level::debug) const;
 
         /**
          * @brief Set (manual) launch parameters.

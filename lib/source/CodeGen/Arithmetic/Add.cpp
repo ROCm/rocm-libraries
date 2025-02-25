@@ -16,8 +16,11 @@ namespace rocRoller
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Double);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::Add>> GetGenerator<Expression::Add>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::Add>>
+        GetGenerator<Expression::Add>(Register::ValuePtr dst,
+                                      Register::ValuePtr lhs,
+                                      Register::ValuePtr rhs,
+                                      Expression::Add const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -28,8 +31,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Scalar, DataType::Int32>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr rhs,
+                                                                        Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -38,8 +44,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Int32>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr rhs,
+                                                                        Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -50,8 +59,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Scalar, DataType::UInt32>::generate(Register::ValuePtr dest,
+                                                                         Register::ValuePtr lhs,
+                                                                         Register::ValuePtr rhs,
+                                                                         Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -60,8 +72,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::UInt32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::UInt32>::generate(Register::ValuePtr dest,
+                                                                         Register::ValuePtr lhs,
+                                                                         Register::ValuePtr rhs,
+                                                                         Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -72,8 +87,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Scalar, DataType::Int64>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr rhs,
+                                                                        Expression::Add const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
@@ -93,8 +111,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Int64>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr rhs,
+                                                                        Expression::Add const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
@@ -141,8 +162,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Halfx2>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Halfx2>::generate(Register::ValuePtr dest,
+                                                                         Register::ValuePtr lhs,
+                                                                         Register::ValuePtr rhs,
+                                                                         Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -151,8 +175,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Half>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Half>::generate(Register::ValuePtr dest,
+                                                                       Register::ValuePtr lhs,
+                                                                       Register::ValuePtr rhs,
+                                                                       Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -161,8 +188,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Float>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr rhs,
+                                                                        Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -173,8 +203,11 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction>
+        AddGenerator<Register::Type::Vector, DataType::Double>::generate(Register::ValuePtr dest,
+                                                                         Register::ValuePtr lhs,
+                                                                         Register::ValuePtr rhs,
+                                                                         Expression::Add const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

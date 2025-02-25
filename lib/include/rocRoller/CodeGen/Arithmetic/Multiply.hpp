@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Multiply>>
         GetGenerator<Expression::Multiply>(Register::ValuePtr dst,
                                            Register::ValuePtr lhs,
-                                           Register::ValuePtr rhs);
+                                           Register::ValuePtr rhs,
+                                           Expression::Multiply const&);
 
     // Templated Generator class based on the register type and datatype.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
@@ -54,8 +55,10 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction>
-            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs,
+                                        Expression::Multiply const&);
 
         inline static const std::string Name;
     };
@@ -63,23 +66,44 @@ namespace rocRoller
     // Specializations for supported Register Type / DataType combinations
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Halfx2>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
     template <>
     Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Multiply const&);
 }

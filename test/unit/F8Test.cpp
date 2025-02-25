@@ -71,6 +71,8 @@ namespace rocRollerTest
             co_yield context->argLoader()->getValue("result", s_result);
             co_yield context->argLoader()->getValue("a", s_a);
 
+            const auto packedDType = static_cast<DataType>(static_cast<int>(F8Type) + 1);
+
             auto result_ptr
                 = Register::Value::Placeholder(context,
                                                Register::Type::Vector,
@@ -78,14 +80,20 @@ namespace rocRollerTest
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
 
+            DataType packedDataType;
+            if(F8Type == DataType::BF8)
+                packedDataType = DataType::BF8x4;
+            else // F8Type == DataType::FP8
+                packedDataType = DataType::FP8x4;
+
             auto a_ptr
                 = Register::Value::Placeholder(context,
                                                Register::Type::Vector,
-                                               {DataType::UInt32, PointerType::PointerGlobal},
+                                               {packedDataType, PointerType::PointerGlobal},
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
-            auto v_a = Register::Value::Placeholder(
-                context, Register::Type::Vector, DataType::UInt32, 1);
+            auto v_a
+                = Register::Value::Placeholder(context, Register::Type::Vector, packedDataType, 1);
 
             auto v_temp = Register::Value::Placeholder(context, Register::Type::Vector, F8Type, 1);
 
@@ -108,11 +116,9 @@ namespace rocRollerTest
                 // Bitmask each F8 of F8x4, convert to float, then store
                 for(int f8_idx = 0; f8_idx < numF8PerElement; f8_idx++)
                 {
-                    co_yield context->copier()->copy(v_temp, v_a, "Move to temp");
-
-                    co_yield_(Instruction::Comment("Mask for lower 8 bits"));
-                    co_yield generateOp<Expression::BitwiseAnd>(
-                        v_temp, v_temp, Register::Value::Literal(0xFF));
+                    co_yield_(Instruction::Comment("Extract f8 from packed F8"));
+                    co_yield generateOp<Expression::BitFieldExtract>(
+                        v_temp, v_a, Expression::BitFieldExtract{{}, F8Type, f8_idx * 8, 8});
 
                     co_yield_(Instruction::Comment("Convert to float"));
                     co_yield generateOp<Expression::Convert<DataType::Float>>(v_temp, v_temp);
@@ -122,11 +128,6 @@ namespace rocRollerTest
                                                        (i * numF8PerElement + f8_idx) * bpo,
                                                        bpo,
                                                        "Store to result");
-
-                    co_yield_(Instruction::Comment(
-                        "Shift right so lower 8 bits is the f8 to manipulate"));
-                    co_yield generateOp<Expression::LogicalShiftR>(
-                        v_a, v_a, Register::Value::Literal(8));
                 }
             }
         };

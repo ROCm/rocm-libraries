@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::BitwiseAnd>>
         GetGenerator<Expression::BitwiseAnd>(Register::ValuePtr dst,
                                              Register::ValuePtr lhs,
-                                             Register::ValuePtr rhs)
+                                             Register::ValuePtr rhs,
+                                             Expression::BitwiseAnd const&)
     {
         return Component::Get<BinaryArithmeticGenerator<Expression::BitwiseAnd>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
@@ -18,7 +19,8 @@ namespace rocRoller
 
     Generator<Instruction> BitwiseAndGenerator::generate(Register::ValuePtr dest,
                                                          Register::ValuePtr lhs,
-                                                         Register::ValuePtr rhs)
+                                                         Register::ValuePtr rhs,
+                                                         Expression::BitwiseAnd const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

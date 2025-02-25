@@ -12,7 +12,9 @@ namespace rocRoller
 
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::LogicalNot>>
-        GetGenerator<Expression::LogicalNot>(Register::ValuePtr dst, Register::ValuePtr arg)
+        GetGenerator<Expression::LogicalNot>(Register::ValuePtr dst,
+                                             Register::ValuePtr arg,
+                                             Expression::LogicalNot const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -22,7 +24,7 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> LogicalNotGenerator<Register::Type::Scalar, DataType::Bool>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg)
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dst->registerCount() == 1, "Only single-register dst currently supported");
@@ -32,7 +34,7 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> LogicalNotGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg)
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dst->registerCount() == 1, "Only single-register dst currently supported");
@@ -42,7 +44,7 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> LogicalNotGenerator<Register::Type::Scalar, DataType::Bool64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg)
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&)
     {
         AssertFatal(arg != nullptr);
 

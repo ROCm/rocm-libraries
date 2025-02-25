@@ -47,7 +47,11 @@ if(ROCROLLER_USE_HIP)
 
   find_package(LLVM REQUIRED HINTS /opt/rocm/llvm/)
 
-  llvm_map_components_to_libnames(llvm_libs all)
+  if(YAML_BACKEND STREQUAL "LLVM")
+    set(LLVM_YAML_COMPONENT "objectyaml")
+  endif()
+
+  llvm_map_components_to_libnames(llvm_libs mc support ${LLVM_YAML_COMPONENT})
   find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lld/)
 endif()
 
@@ -348,6 +352,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/AddShiftL.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticShiftR.cpp
+ lib/source/CodeGen/Arithmetic/BitFieldExtract.cpp
  lib/source/CodeGen/Arithmetic/BitwiseNegate.cpp
  lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp

@@ -7,15 +7,16 @@ namespace rocRoller
     RegisterComponent(NegateGenerator);
 
     template <>
-    std::shared_ptr<UnaryArithmeticGenerator<Expression::Negate>>
-        GetGenerator<Expression::Negate>(Register::ValuePtr dst, Register::ValuePtr arg)
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::Negate>> GetGenerator<Expression::Negate>(
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::Negate const&)
     {
         return Component::Get<UnaryArithmeticGenerator<Expression::Negate>>(
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
     }
 
     Generator<Instruction> NegateGenerator::generate(Register::ValuePtr dest,
-                                                     Register::ValuePtr arg)
+                                                     Register::ValuePtr arg,
+                                                     Expression::Negate const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);

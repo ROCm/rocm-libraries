@@ -10,7 +10,8 @@ namespace rocRoller
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,
                                               Register::ValuePtr lhs,
                                               Register::ValuePtr r1hs,
-                                              Register::ValuePtr r2hs)
+                                              Register::ValuePtr r2hs,
+                                              Expression::Conditional const&)
     {
         return Component::Get<TernaryArithmeticGenerator<Expression::Conditional>>(
             getContextFromValues(dst, lhs, r1hs, r2hs),
@@ -21,7 +22,8 @@ namespace rocRoller
     Generator<Instruction> ConditionalGenerator::generate(Register::ValuePtr dest,
                                                           Register::ValuePtr cond,
                                                           Register::ValuePtr r1hs,
-                                                          Register::ValuePtr r2hs)
+                                                          Register::ValuePtr r2hs,
+                                                          Expression::Conditional const&)
     {
         AssertFatal(cond != nullptr);
         AssertFatal(r1hs != nullptr);

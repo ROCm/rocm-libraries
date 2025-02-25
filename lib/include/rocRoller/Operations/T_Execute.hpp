@@ -115,6 +115,29 @@ namespace rocRoller
         }                                                     \
     };
 
+        struct E_StochasticRoundingCvt : public E_Binary
+        {
+            E_StochasticRoundingCvt(OperationTag        data,
+                                    OperationTag        seed,
+                                    rocRoller::DataType destType)
+                : E_Binary(data, seed)
+                , destType(destType)
+            {
+            }
+            E_StochasticRoundingCvt(const std::initializer_list<OperationTag>& args,
+                                    rocRoller::DataType                        destType)
+                : E_Binary(args)
+                , destType(destType)
+            {
+            }
+            std::string name() const
+            {
+                return "E_StochasticRoundingCvt";
+            }
+
+            rocRoller::DataType destType;
+        };
+
         MAKE_BINARY_XOP(E_Add)
         MAKE_BINARY_XOP(E_Sub)
         MAKE_BINARY_XOP(E_Mul)

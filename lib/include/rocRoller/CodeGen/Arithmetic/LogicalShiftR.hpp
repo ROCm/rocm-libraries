@@ -10,7 +10,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalShiftR>>
         GetGenerator<Expression::LogicalShiftR>(Register::ValuePtr dst,
                                                 Register::ValuePtr lhs,
-                                                Register::ValuePtr rhs);
+                                                Register::ValuePtr rhs,
+                                                Expression::LogicalShiftR const&);
 
     // Generator for all register types and datatypes.
     class LogicalShiftRGenerator : public BinaryArithmeticGenerator<Expression::LogicalShiftR>
@@ -46,7 +47,8 @@ namespace rocRoller
         // Method to generate instructions
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr value,
-                                        Register::ValuePtr shiftAmount);
+                                        Register::ValuePtr shiftAmount,
+                                        Expression::LogicalShiftR const&);
 
         static const std::string Name;
     };

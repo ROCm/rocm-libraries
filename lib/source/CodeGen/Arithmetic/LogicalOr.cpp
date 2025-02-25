@@ -13,7 +13,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalOr>>
         GetGenerator<Expression::LogicalOr>(Register::ValuePtr dst,
                                             Register::ValuePtr lhs,
-                                            Register::ValuePtr rhs)
+                                            Register::ValuePtr rhs,
+                                            Expression::LogicalOr const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -25,7 +26,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> LogicalOrGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::LogicalOr const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -51,7 +55,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> LogicalOrGenerator<Register::Type::Scalar, DataType::Bool64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::LogicalOr const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

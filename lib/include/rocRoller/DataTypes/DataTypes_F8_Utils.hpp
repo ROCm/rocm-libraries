@@ -219,7 +219,12 @@ namespace rocRoller
   */
 
             if(exponent_diff > 0)
-                mantissa >>= exponent_diff;
+            {
+                if(exponent_diff >= 32)
+                    mantissa = 0u;
+                else
+                    mantissa >>= exponent_diff;
+            }
             else if(exponent_diff == -1)
                 mantissa <<= -exponent_diff;
             bool implicit_one = mantissa & (1 << mfmt);
@@ -233,8 +238,21 @@ namespace rocRoller
             bool odd
                 = mantissa
                   & (1 << (mfmt - wm)); // if the least significant bit that is not truncated is 1
-            mantissa += (stoch ? rng : (midpoint ? (odd ? mantissa : mantissa - 1) : mantissa))
-                        & drop_mask;
+
+            if(stoch)
+            {
+                AssertFatal(is_float && (!is_half),
+                            "Stochastic rounding currently only supports float");
+                // For stochastic rounding, E4M3 right shifts rng by 12 and E5M2 right shifts rng by 11
+                if((wm == 3 && we == 4) || (wm == 2 && we == 5))
+                    mantissa += (rng >> (32 - (mfmt - wm)));
+                else
+                    AssertFatal(false, "Not FP8 nor BF8");
+            }
+            else
+            {
+                mantissa += ((midpoint ? (odd ? mantissa : mantissa - 1) : mantissa)) & drop_mask;
+            }
 
             //Now we deal with overflow
             if(f8_exponent == 0)

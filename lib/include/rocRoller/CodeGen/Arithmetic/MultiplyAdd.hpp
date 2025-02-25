@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright 2022-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,8 @@ namespace rocRoller
         GetGenerator<Expression::MultiplyAdd>(Register::ValuePtr dst,
                                               Register::ValuePtr a,
                                               Register::ValuePtr x,
-                                              Register::ValuePtr y);
+                                              Register::ValuePtr y,
+                                              Expression::MultiplyAdd const&);
 
     struct MultiplyAddGenerator : public TernaryArithmeticGenerator<Expression::MultiplyAdd>
     {
@@ -64,7 +65,8 @@ namespace rocRoller
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr a,
                                         Register::ValuePtr x,
-                                        Register::ValuePtr y);
+                                        Register::ValuePtr y,
+                                        Expression::MultiplyAdd const&);
 
         static const std::string Name;
     };

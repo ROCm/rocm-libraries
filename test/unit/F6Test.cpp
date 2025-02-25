@@ -78,6 +78,13 @@ namespace rocRollerTest
          */
         void genF6x16BufferLoadAndStore(int num_f6, DataType F6x16Type)
         {
+            auto arch = m_context->targetArchitecture().target();
+            if(!arch.isCDNAGPU())
+            {
+                GTEST_SKIP() << "Test not yet supported on "
+                             << m_context->targetArchitecture().target().toString() << std::endl;
+            }
+
             int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
 
             auto k = m_context->kernel();

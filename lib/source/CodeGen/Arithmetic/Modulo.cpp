@@ -13,8 +13,11 @@ namespace rocRoller
     RegisterComponentTemplateSpec(ModuloGenerator, Register::Type::Vector, DataType::Int64);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::Modulo>> GetGenerator<Expression::Modulo>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::Modulo>>
+        GetGenerator<Expression::Modulo>(Register::ValuePtr dst,
+                                         Register::ValuePtr lhs,
+                                         Register::ValuePtr rhs,
+                                         Expression::Modulo const&)
     {
         // Choose the proper generator, based on the context, register type
         // and datatype.
@@ -26,7 +29,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Modulo const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -94,7 +100,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Modulo const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -163,7 +172,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Modulo const&)
     {
         auto const& architecture = m_context->targetArchitecture();
 
@@ -535,7 +547,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> ModuloGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Modulo const&)
     {
         auto const& architecture = m_context->targetArchitecture();
 

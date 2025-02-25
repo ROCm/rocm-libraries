@@ -7,7 +7,9 @@ namespace rocRoller
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::LogicalNot>>
-        GetGenerator<Expression::LogicalNot>(Register::ValuePtr dst, Register::ValuePtr arg);
+        GetGenerator<Expression::LogicalNot>(Register::ValuePtr dst,
+                                             Register::ValuePtr arg,
+                                             Expression::LogicalNot const&);
 
     // Templated Generator class based on the register type and datatype.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
@@ -51,7 +53,8 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
+        Generator<Instruction>
+            generate(Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&);
 
         static const std::string Name;
     };
@@ -59,8 +62,8 @@ namespace rocRoller
     // Specializations for supported Register Type / DataType combinations
     template <>
     Generator<Instruction> LogicalNotGenerator<Register::Type::Scalar, DataType::Bool>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg);
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&);
     template <>
     Generator<Instruction> LogicalNotGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg);
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::LogicalNot const&);
 }
