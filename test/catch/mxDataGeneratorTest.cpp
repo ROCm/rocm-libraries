@@ -19,31 +19,43 @@ namespace mxDataGeneratorTest
         mxDataGeneratorTest() = default;
 
         template <typename rrDT>
-        void exeDataGeneratorTest(const int         dim1,
-                                  const int         dim2,
-                                  const float       min          = -1.f,
-                                  const float       max          = 1.f,
-                                  const int         blockScaling = 1,
-                                  const DataPattern pattern      = DataPattern::Bounded)
+        void exeDataGeneratorTest(unsigned    dim1,
+                                  unsigned    dim2,
+                                  const float min          = -1.f,
+                                  const float max          = 1.f,
+                                  const int   blockScaling = 32)
         {
             using DGenDT = typename rrDT2DGenDT<rrDT>::type;
 
-            uint32_t seed = 1713573849u;
+            auto             dataType = TypeInfo<rrDT>::Var.dataType;
+            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
 
-            auto dgen = getDataGenerator<rrDT>(dim1, dim2, min, max, seed, blockScaling, pattern);
+            uint32_t seed = 9861u;
+
+            const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
 
             auto byteData = dgen.getDataBytes();
             auto scale    = dgen.getScaleBytes();
             auto ref      = dgen.getReferenceFloat();
 
+            auto rrVector1 = DGenVector<rrDT>(desc, min, max, seed, true, 32);
+            auto rrVector2 = getRandomVector<rrDT>(dgen, true);
+
+            std::vector<uint8_t>& byteData1 = reinterpret_cast<std::vector<uint8_t>&>(rrVector1);
+            std::vector<uint8_t>& byteData2 = reinterpret_cast<std::vector<uint8_t>&>(rrVector2);
+
             for(int i = 0; i < ref.size(); i++)
             {
-                CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData[0], i, i) == ref[i]);
+                int scale_i = i / blockScaling;
+                CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData[0], scale_i, i) == ref[i]);
+                CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData1[0], scale_i, i) == ref[i]);
+                CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData2[0], scale_i, i) == ref[i]);
             }
         }
     };
 
-    TEMPLATE_TEST_CASE("Use mxDataGenerator", "[mxDataGenerator]", FP8, BF8, Half, BFloat16, float)
+    TEMPLATE_TEST_CASE(
+        "Use mxDataGenerator", "[mxDataGenerator]", FP4, FP6, BF6, FP8, BF8, Half, BFloat16, float)
     {
         mxDataGeneratorTest t;
 

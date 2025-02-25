@@ -9,6 +9,7 @@
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 #include <common/F8Values.hpp>
 
@@ -364,6 +365,19 @@ namespace rocRollerTest
         }
     }
 
+    INSTANTIATE_TEST_SUITE_P(
+        F8TestGPU,
+        F8TestGPU,
+        ::testing::Combine(
+            ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
+                              GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}}),
+            ::testing::Values(rocRoller::DataType::FP8, rocRoller::DataType::BF8)));
+
+    class CPUF8Test : public GenericContextFixture
+    {
+    };
+
     template <typename F8Type>
     void numberConversion(double fp64)
     {
@@ -383,32 +397,152 @@ namespace rocRollerTest
             EXPECT_TRUE(std::isnan(f8));
     }
 
-    TEST_P(F8TestGPU, GPU_CPUConversions)
+    TEST_F(CPUF8Test, CPUConversions)
     {
-        auto const& FP8Values = FloatReference<rocRoller::FP8>::Values;
-        std::for_each(FP8Values.begin(), FP8Values.end(), numberConversion<rocRoller::FP8>);
+        auto settings = Settings::getInstance();
+        settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
 
-        auto const& BF8Values = FloatReference<rocRoller::BF8>::Values;
-        std::for_each(BF8Values.begin(), BF8Values.end(), numberConversion<rocRoller::BF8>);
+        auto const& FP8ValuesInNaNoo = FloatReference<rocRoller::FP8>::ValuesInNaNooMode;
+        std::for_each(
+            FP8ValuesInNaNoo.begin(), FP8ValuesInNaNoo.end(), numberConversion<rocRoller::FP8>);
+        auto const& BF8ValuesInNaNoo = FloatReference<rocRoller::BF8>::ValuesInNaNooMode;
+        std::for_each(
+            BF8ValuesInNaNoo.begin(), BF8ValuesInNaNoo.end(), numberConversion<rocRoller::BF8>);
+
+        settings->set(Settings::F8ModeOption, F8Mode::OCP);
+        auto const& FP8ValuesInOCP = FloatReference<rocRoller::FP8>::ValuesInOCPMode;
+        std::for_each(
+            FP8ValuesInOCP.begin(), FP8ValuesInOCP.end(), numberConversion<rocRoller::FP8>);
+        auto const& BF8ValuesInOCP = FloatReference<rocRoller::BF8>::ValuesInOCPMode;
+        std::for_each(
+            BF8ValuesInOCP.begin(), BF8ValuesInOCP.end(), numberConversion<rocRoller::BF8>);
     }
 
-    template <typename F8Type>
+    TEST_F(CPUF8Test, OutOfBoundsConversions)
+    {
+        auto settings = Settings::getInstance();
+
+        settings->set(Settings::F8ModeOption, F8Mode::NaNoo);
+
+        rocRoller::FP8 nF8;
+        nF8 = 241.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 256.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 448.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = 480.0;
+        EXPECT_FLOAT_EQ(nF8, 240.0);
+        nF8 = -241.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -256.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -448.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+        nF8 = -480.0;
+        EXPECT_FLOAT_EQ(nF8, -240.0);
+
+        rocRoller::BF8 nBF8;
+        nBF8 = 57345.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 65536.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 98304.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = 114688.0;
+        EXPECT_FLOAT_EQ(nBF8, 57344.0);
+        nBF8 = -57345.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -65536.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -98304.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+        nBF8 = -114688.0;
+        EXPECT_FLOAT_EQ(nBF8, -57344.0);
+
+        settings->set(Settings::F8ModeOption, F8Mode::OCP);
+
+        rocRoller::FP8 oF8;
+        oF8 = 449;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 479;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 480;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = 512;
+        EXPECT_FLOAT_EQ(oF8, 448.0);
+        oF8 = -449;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -479;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -480;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+        oF8 = -512;
+        EXPECT_FLOAT_EQ(oF8, -448.0);
+
+        rocRoller::BF8 oBF8;
+        oBF8 = 57345.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 65536.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 98304.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = 114688.0;
+        EXPECT_FLOAT_EQ(oBF8, 57344.0);
+        oBF8 = -57345.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -65536.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -98304.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+        oBF8 = -114688.0;
+        EXPECT_FLOAT_EQ(oBF8, -57344.0);
+    }
+
+    template <typename F8Type, F8Mode f8Mode>
     void checkSpecialValues(float& f32_inf, float& f32_nan, float& f32_zero)
     {
-        F8Type f8_inf(f32_inf);
-        // FP8/BF8 use the same value for NaN and Inf, so we are unable to know
-        // if the value is NaN or Inf, and we choose to return NaN in both cases.
-        EXPECT_TRUE(std::isnan(f8_inf));
-        EXPECT_FALSE(std::isinf(f8_inf));
+        auto settings = Settings::getInstance();
+        settings->set(Settings::F8ModeOption, f8Mode);
+
+        F8Type f8_pos_inf(f32_inf);
+        F8Type f8_neg_inf(-f32_inf);
+        if constexpr(f8Mode == F8Mode::NaNoo)
+        {
+            // In NaNoo mode, fp8/bf8 use the same value for nan and inf, so we are unable to know
+            // if the value is nan or inf, and we choose to return nan in both cases.
+            EXPECT_TRUE(std::isnan(f8_pos_inf));
+            EXPECT_FALSE(std::isinf(f8_pos_inf));
+            EXPECT_TRUE(std::isnan(f8_neg_inf));
+            EXPECT_FALSE(std::isinf(f8_neg_inf));
+        }
+
+        if constexpr(f8Mode == F8Mode::OCP)
+        {
+            if constexpr(std::is_same<F8Type, BF8>::value)
+            {
+                // In OCP mode, bf8 has  +/-inf & NaN as different bit patterns
+                EXPECT_FALSE(std::isnan(f8_pos_inf));
+                EXPECT_TRUE(std::isinf(f8_pos_inf));
+                EXPECT_FALSE(std::isnan(f8_neg_inf));
+                EXPECT_TRUE(std::isinf(f8_neg_inf));
+            }
+            else
+            {
+                EXPECT_TRUE(std::isnan(f8_pos_inf));
+                EXPECT_FALSE(std::isinf(f8_pos_inf));
+                EXPECT_TRUE(std::isnan(f8_neg_inf));
+                EXPECT_FALSE(std::isinf(f8_neg_inf));
+            }
+        }
 
         F8Type f8_nan(f32_nan);
         EXPECT_TRUE(std::isnan(f8_nan));
-
         F8Type f8_zero(f32_zero);
         EXPECT_TRUE(std::iszero(f8_zero));
     }
 
-    TEST_P(F8TestGPU, GPU_SpecialValues)
+    TEST_F(CPUF8Test, SpecialValues)
     {
         union
         {
@@ -426,15 +560,27 @@ namespace rocRollerTest
         EXPECT_TRUE(std::isinf(f32_inf.val));
         EXPECT_TRUE(std::isnan(f32_nan.val));
 
-        checkSpecialValues<rocRoller::FP8>(f32_inf.val, f32_nan.val, f32_zero.val);
-        checkSpecialValues<rocRoller::BF8>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::FP8, F8Mode::NaNoo>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF8, F8Mode::NaNoo>(f32_inf.val, f32_nan.val, f32_zero.val);
+
+        checkSpecialValues<rocRoller::FP8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
+        checkSpecialValues<rocRoller::BF8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
     }
 
-    INSTANTIATE_TEST_SUITE_P(F8TestGPU,
-                             F8TestGPU,
-                             ::testing::Combine(::testing::Values(GPUArchitectureTarget{
-                                                    GPUArchitectureGFX::GFX942, {.sramecc = true}}),
-                                                ::testing::Values(rocRoller::DataType::FP8,
-                                                                  rocRoller::DataType::BF8)));
+    TEST_F(CPUF8Test, ConvertScales)
+    {
+        float prevValue = 0;
+        for(int i = 0; i < 256; i++)
+        {
+            uint8_t scale    = i;
+            auto    curValue = rocRoller::scaleToFloat(scale);
+            if(prevValue != 0)
+                EXPECT_EQ(curValue, prevValue * 2.0f);
+            auto convertBack = rocRoller::floatToScale(curValue);
+            EXPECT_EQ(scale, convertBack);
+
+            prevValue = curValue;
+        }
+    }
 
 }

@@ -38,6 +38,30 @@ namespace rocRoller::KernelGraph
             }
         }
 
+        void operator()(Expression::ScaledMatrixMultiply const& expr)
+        {
+            if(expr.matA)
+            {
+                call(expr.matA);
+            }
+            if(expr.matB)
+            {
+                call(expr.matB);
+            }
+            if(expr.matC)
+            {
+                call(expr.matC);
+            }
+            if(expr.scaleA)
+            {
+                call(expr.scaleA);
+            }
+            if(expr.scaleB)
+            {
+                call(expr.scaleB);
+            }
+        }
+
         template <Expression::CTernary Expr>
         void operator()(Expr const& expr)
         {
@@ -387,12 +411,27 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
     {
         auto a = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+        trackRegister(tag, a, ReadWrite::READ);
+
+        if(op.scaleA == Operations::ScaleMode::Separate)
+        {
+            auto aScale = m_graph.mapper.get(
+                tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+            trackRegister(tag, aScale, ReadWrite::READ);
+        }
+
         auto b = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+        trackRegister(tag, b, ReadWrite::READ);
+
+        if(op.scaleB == Operations::ScaleMode::Separate)
+        {
+            auto bScale = m_graph.mapper.get(
+                tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+            trackRegister(tag, bScale, ReadWrite::READ);
+        }
+
         auto dst
             = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
-
-        trackRegister(tag, a, ReadWrite::READ);
-        trackRegister(tag, b, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 
