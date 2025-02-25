@@ -1,10 +1,9 @@
 
 #pragma once
 
-#include "Register.hpp"
-#include "RegisterAllocator.hpp"
-
-#include "../Utilities/Error.hpp"
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 // Used for std::iota
 #include <numeric>

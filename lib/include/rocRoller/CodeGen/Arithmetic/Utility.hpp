@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../InstructionValues/Register.hpp"
+#include <rocRoller/InstructionValues/Register.hpp>
 
 namespace rocRoller
 {

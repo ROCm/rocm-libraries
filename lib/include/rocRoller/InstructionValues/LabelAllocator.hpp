@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Register_fwd.hpp"
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 namespace rocRoller
 {
@@ -17,4 +17,4 @@ namespace rocRoller
     };
 }
 
-#include "LabelAllocator_impl.hpp"
+#include <rocRoller/InstructionValues/LabelAllocator_impl.hpp>

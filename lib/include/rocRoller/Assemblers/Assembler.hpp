@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "Assembler_fwd.hpp"
-
+#include <rocRoller/Assemblers/Assembler_fwd.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 
 namespace rocRoller

@@ -5,11 +5,10 @@
 #include <string>
 #include <vector>
 
-#include "../CodeGen/Instruction_fwd.hpp"
-#include "../CodeGen/WaitCount.hpp"
-#include "../Context_fwd.hpp"
-
-#include "../Utilities/EnumBitset.hpp"
+#include <rocRoller/CodeGen/Instruction_fwd.hpp>
+#include <rocRoller/CodeGen/WaitCount.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
 {
@@ -117,4 +116,4 @@ namespace rocRoller
     }
 }
 
-#include "Scheduling_impl.hpp"
+#include <rocRoller/Scheduling/Scheduling_impl.hpp>

@@ -9,18 +9,14 @@
 #include <string>
 #include <vector>
 
-#include <rocRoller/Utilities/LazySingleton.hpp>
-#include <rocRoller/Utilities/Settings_fwd.hpp>
-
 #include <rocRoller/Assemblers/Assembler_fwd.hpp>
-
 #include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
-
 #include <rocRoller/Utilities/Concepts.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
-
 #include <rocRoller/Utilities/DefaultArchitectureFilePath.hpp>
+#include <rocRoller/Utilities/LazySingleton.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
@@ -258,4 +254,4 @@ namespace rocRoller
     };
 }
 
-#include "Settings_impl.hpp"
+#include <rocRoller/Utilities/Settings_impl.hpp>

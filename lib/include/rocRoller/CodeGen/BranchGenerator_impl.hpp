@@ -5,10 +5,9 @@
 
 #pragma once
 
-#include "BranchGenerator.hpp"
-#include "CopyGenerator.hpp"
-
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>

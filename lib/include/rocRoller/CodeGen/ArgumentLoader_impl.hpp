@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ArgumentLoader.hpp"
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
 
 namespace rocRoller
 {

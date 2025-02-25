@@ -4,8 +4,7 @@
 #include <map>
 
 #include <rocRoller/Expression_fwd.hpp>
-
-#include "KernelGraph.hpp"
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 
 namespace rocRoller
 {

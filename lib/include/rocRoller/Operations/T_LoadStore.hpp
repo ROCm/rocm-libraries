@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Operation.hpp"
+#include <rocRoller/Operations/Operation.hpp>
 
 #include <rocRoller/Serialization/Base_fwd.hpp>
 

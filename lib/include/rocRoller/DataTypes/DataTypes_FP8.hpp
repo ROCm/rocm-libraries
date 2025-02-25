@@ -26,7 +26,8 @@
 
 #pragma once
 
-#include "DataTypes_F8_Utils.hpp"
+#include <rocRoller/DataTypes/DataTypes_F8_Utils.hpp>
+
 #include <cinttypes>
 #include <cmath>
 #include <iostream>

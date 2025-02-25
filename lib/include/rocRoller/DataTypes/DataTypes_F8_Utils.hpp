@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include "DataTypes_Half.hpp"
+#include <rocRoller/DataTypes/DataTypes_Half.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller

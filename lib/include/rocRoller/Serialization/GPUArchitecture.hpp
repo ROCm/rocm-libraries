@@ -7,10 +7,9 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
-
-#include "Base.hpp"
-#include "Containers.hpp"
-#include "Enum.hpp"
+#include <rocRoller/Serialization/Base.hpp>
+#include <rocRoller/Serialization/Containers.hpp>
+#include <rocRoller/Serialization/Enum.hpp>
 
 namespace rocRoller
 {

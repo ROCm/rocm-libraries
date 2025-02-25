@@ -2,7 +2,7 @@
 
 #include <unordered_map>
 
-#include "../../Context.hpp"
+#include <rocRoller/Context.hpp>
 
 namespace rocRoller
 {

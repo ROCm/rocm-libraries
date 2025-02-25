@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "../../Scheduling.hpp"
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {

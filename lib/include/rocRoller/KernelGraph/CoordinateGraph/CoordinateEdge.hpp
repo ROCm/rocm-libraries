@@ -2,8 +2,7 @@
 
 #include <string>
 
-#include "CoordinateEdge_fwd.hpp"
-
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 

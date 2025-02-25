@@ -31,7 +31,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "../Utilities/Comparison.hpp"
+#include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller
 {

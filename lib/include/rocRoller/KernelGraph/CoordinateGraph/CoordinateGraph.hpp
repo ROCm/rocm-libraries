@@ -8,9 +8,8 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
-
-#include "CoordinateEdge.hpp"
-#include "Dimension.hpp"
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 
 namespace rocRoller
 {
@@ -139,4 +138,4 @@ namespace rocRoller
     }
 }
 
-#include "CoordinateGraph_impl.hpp"
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph_impl.hpp>

@@ -5,17 +5,16 @@
 #include <numeric>
 #include <ranges>
 
-#include "RegisterAllocator.hpp"
-
-#include "../CodeGen/Instruction.hpp"
-#include "../Context.hpp"
-#include "../DataTypes/DataTypes.hpp"
-#include "../Operations/CommandArgument.hpp"
-#include "../Scheduling/Scheduling.hpp"
-#include "../Utilities/Error.hpp"
-#include "../Utilities/Generator.hpp"
-#include "../Utilities/Settings_fwd.hpp"
-#include "../Utilities/Utils.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

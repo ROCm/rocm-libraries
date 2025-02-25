@@ -10,8 +10,8 @@
 #include <memory>
 #include <string>
 
-#include "../InstructionValues/Register.hpp"
-#include "../Utilities/Error.hpp"
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
 {

@@ -1,25 +1,25 @@
-#include "lld/Common/Driver.h"
-#include "llvm/MC/MCAsmBackend.h"
-#include "llvm/MC/MCAsmInfo.h"
-#include "llvm/MC/MCCodeEmitter.h"
-#include "llvm/MC/MCContext.h"
-#include "llvm/MC/MCInstrInfo.h"
-#include "llvm/MC/MCObjectFileInfo.h"
-#include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCParser/MCAsmParser.h"
-#include "llvm/MC/MCParser/MCTargetAsmParser.h"
-#include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/MC/MCStreamer.h"
-#include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCTargetOptions.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Option/Option.h"
-#include "llvm/Support/FileSystem.h"
-#include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/Path.h"
-#include "llvm/Support/SourceMgr.h"
-#include "llvm/Support/TargetSelect.h"
+#include <lld/Common/Driver.h>
+#include <llvm/MC/MCAsmBackend.h>
+#include <llvm/MC/MCAsmInfo.h>
+#include <llvm/MC/MCCodeEmitter.h>
+#include <llvm/MC/MCContext.h>
+#include <llvm/MC/MCInstrInfo.h>
+#include <llvm/MC/MCObjectFileInfo.h>
+#include <llvm/MC/MCObjectWriter.h>
+#include <llvm/MC/MCParser/MCAsmParser.h>
+#include <llvm/MC/MCParser/MCTargetAsmParser.h>
+#include <llvm/MC/MCRegisterInfo.h>
+#include <llvm/MC/MCStreamer.h>
+#include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/MC/MCTargetOptions.h>
+#include <llvm/MC/TargetRegistry.h>
+#include <llvm/Option/Option.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/InitLLVM.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Path.h>
+#include <llvm/Support/SourceMgr.h>
+#include <llvm/Support/TargetSelect.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -28,7 +28,7 @@
 
 #include <rocRoller/Assemblers/InProcessAssembler.hpp>
 
-#include "llvm/Config/llvm-config.h"
+#include <llvm/Config/llvm-config.h>
 #if LLVM_VERSION_MAJOR >= 18
 LLD_HAS_DRIVER(elf)
 #endif

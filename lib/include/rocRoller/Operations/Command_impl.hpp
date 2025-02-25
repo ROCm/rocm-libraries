@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "Command.hpp"
-#include "Operations.hpp"
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
 
 namespace rocRoller
 {

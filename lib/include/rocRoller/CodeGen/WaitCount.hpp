@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 
-#include "../GPUArchitecture/GPUArchitecture.hpp"
-#include "../GPUArchitecture/GPUInstructionInfo.hpp"
-#include "../Utilities/Settings_fwd.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
 {
@@ -107,4 +107,4 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);
 }
 
-#include "WaitCount_Impl.hpp"
+#include <rocRoller/CodeGen/WaitCount_Impl.hpp>

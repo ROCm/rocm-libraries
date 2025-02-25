@@ -26,9 +26,9 @@
 
 #include <iostream>
 
-#include "rocRoller/Utilities/Error.hpp"
-#include "rocRoller/Utilities/Logging.hpp"
-#include "rocRoller/Utilities/Settings.hpp"
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 #include <spdlog/cfg/helpers.h>
 #include <spdlog/sinks/basic_file_sink.h>

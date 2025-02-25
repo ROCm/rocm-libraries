@@ -2,8 +2,7 @@
 
 #include <string>
 
-#include "ControlEdge_fwd.hpp"
-
+#include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 
 namespace rocRoller

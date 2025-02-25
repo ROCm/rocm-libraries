@@ -40,8 +40,8 @@
 #include <variant>
 #include <vector>
 
-#include "Concepts.hpp"
-#include "Generator.hpp"
+#include <rocRoller/Utilities/Concepts.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
@@ -432,4 +432,4 @@ namespace std
     };
 }
 
-#include "Utils_impl.hpp"
+#include <rocRoller/Utilities/Utils_impl.hpp>

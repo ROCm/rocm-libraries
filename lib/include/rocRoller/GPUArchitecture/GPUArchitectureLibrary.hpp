@@ -13,10 +13,10 @@
 #include <string>
 #include <vector>
 
-#include "GPUArchitecture.hpp"
-#include "GPUArchitectureTarget.hpp"
-#include "GPUCapability.hpp"
-#include "GPUInstructionInfo.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
 #include <rocRoller/Utilities/LazySingleton.hpp>
 
 namespace rocRoller
@@ -54,4 +54,4 @@ namespace rocRoller
     };
 }
 
-#include "GPUArchitectureLibrary_impl.hpp"
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary_impl.hpp>

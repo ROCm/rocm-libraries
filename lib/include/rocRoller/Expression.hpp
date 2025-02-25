@@ -30,12 +30,10 @@
 #include <memory>
 #include <stack>
 
+#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Expression_fwd.hpp>
-
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
-
-#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
@@ -875,4 +873,4 @@ namespace rocRoller
     } // namespace Expression
 } // namespace rocRoller
 
-#include "Expression_impl.hpp"
+#include <rocRoller/Expression_impl.hpp>

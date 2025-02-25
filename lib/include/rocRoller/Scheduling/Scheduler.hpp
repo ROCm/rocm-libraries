@@ -5,13 +5,12 @@
 #include <string>
 #include <vector>
 
-#include "Costs/Cost_fwd.hpp"
-#include "Scheduler_fwd.hpp"
-
-#include "../CodeGen/Instruction.hpp"
-#include "../Context_fwd.hpp"
-#include "../Utilities/Component.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduler_fwd.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
@@ -113,4 +112,4 @@ namespace rocRoller
     }
 }
 
-#include "Scheduler_impl.hpp"
+#include <rocRoller/Scheduling/Scheduler_impl.hpp>

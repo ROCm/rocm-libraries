@@ -6,12 +6,11 @@
 #include <tuple>
 #include <vector>
 
-#include "Scheduling.hpp"
-
-#include "../CodeGen/Instruction.hpp"
-#include "../CodeGen/WaitCount.hpp"
-#include "../Context.hpp"
-#include "../InstructionValues/Register.hpp"
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/CodeGen/WaitCount.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {
@@ -50,4 +49,4 @@ namespace rocRoller
     }
 }
 
-#include "MetaObserver_impl.hpp"
+#include <rocRoller/Scheduling/MetaObserver_impl.hpp>

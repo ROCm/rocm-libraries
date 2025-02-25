@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include "YAML.hpp"
+#include <rocRoller/Serialization/YAML.hpp>
 
 #ifdef ROCROLLER_USE_LLVM
 #include <rocRoller/Serialization/llvm/YAML.hpp>

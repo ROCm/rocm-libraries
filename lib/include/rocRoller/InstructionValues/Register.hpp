@@ -4,17 +4,16 @@
 #include <cassert>
 #include <concepts>
 
-#include "LDSAllocator.hpp"
-#include "RegisterAllocator_fwd.hpp"
-#include "Register_fwd.hpp"
-
-#include "../CodeGen/Instruction_fwd.hpp"
-#include "../Context_fwd.hpp"
-#include "../DataTypes/DataTypes.hpp"
-#include "../Expression_fwd.hpp"
-#include "../Operations/CommandArgument_fwd.hpp"
-#include "../Scheduling/Scheduling.hpp"
-#include "../Utilities/Generator.hpp"
+#include <rocRoller/CodeGen/Instruction_fwd.hpp>
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/InstructionValues/LDSAllocator.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
@@ -435,4 +434,4 @@ namespace rocRoller
     }
 }
 
-#include "Register_impl.hpp"
+#include <rocRoller/InstructionValues/Register_impl.hpp>

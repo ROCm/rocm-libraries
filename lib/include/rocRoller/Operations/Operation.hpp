@@ -1,11 +1,10 @@
 #pragma once
 
-#include <memory>
-
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
-
 #include <rocRoller/Serialization/Base_fwd.hpp>
+
+#include <memory>
 
 namespace rocRoller
 {

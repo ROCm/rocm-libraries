@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2023 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,8 @@
 
 #include <type_traits>
 
-#include "../DataTypes/DataTypes.hpp"
-
-#include "Base.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Serialization/Base.hpp>
 
 namespace rocRoller
 {
@@ -55,4 +54,4 @@ namespace rocRoller
         };
 
     } // namespace Serialization
-} // namespace Tensile
+} // namespace rocRoller

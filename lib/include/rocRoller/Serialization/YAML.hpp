@@ -40,4 +40,4 @@ namespace rocRoller
     }
 }
 
-#include "YAML_impl.hpp"
+#include <rocRoller/Serialization/YAML_impl.hpp>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "T_Mul.hpp"
+#include <rocRoller/Operations/T_Mul.hpp>
 
 namespace rocRoller
 {

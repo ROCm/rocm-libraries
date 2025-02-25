@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "Generator.hpp"
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {

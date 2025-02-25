@@ -1,8 +1,7 @@
 #pragma once
 
-#include "CommandArgument.hpp"
-
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 

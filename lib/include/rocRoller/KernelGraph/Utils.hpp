@@ -451,4 +451,4 @@ namespace rocRoller
     }
 }
 
-#include "Utils_impl.hpp"
+#include <rocRoller/KernelGraph/Utils_impl.hpp>

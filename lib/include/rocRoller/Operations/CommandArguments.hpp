@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CommandArgument_fwd.hpp"
-#include "CommandArguments_fwd.hpp"
-#include "OperationTag.hpp"
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/CommandArguments_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
 
 namespace rocRoller
 {
@@ -29,4 +29,4 @@ namespace rocRoller
     };
 }
 
-#include "CommandArguments_impl.hpp"
+#include <rocRoller/Operations/CommandArguments_impl.hpp>

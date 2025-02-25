@@ -9,7 +9,7 @@
 
 #include <cassert>
 
-#include "Error_fwd.hpp"
+#include <rocRoller/Utilities/Error_fwd.hpp>
 
 namespace rocRoller
 {
@@ -84,4 +84,4 @@ namespace rocRoller
 #define AssertRecoverable(...) AssertError(RecoverableError, __VA_ARGS__)
 }
 
-#include "Error_impl.hpp"
+#include <rocRoller/Utilities/Error_impl.hpp>

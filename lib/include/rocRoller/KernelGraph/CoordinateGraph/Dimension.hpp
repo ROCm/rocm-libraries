@@ -6,10 +6,9 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
-
-#include "Dimension_fwd.hpp"
 
 namespace rocRoller
 {

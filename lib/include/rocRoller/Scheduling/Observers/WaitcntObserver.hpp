@@ -1,11 +1,8 @@
 #pragma once
 
-#include <sstream>
-
-#include "../Scheduling.hpp"
-
-#include "../../Context.hpp"
-#include "../../GPUArchitecture/GPUInstructionInfo.hpp"
+#include <rocRoller/Context.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {
@@ -147,4 +144,4 @@ namespace rocRoller
     }
 }
 
-#include "WaitcntObserver_impl.hpp"
+#include <rocRoller/Scheduling/Observers/WaitcntObserver_impl.hpp>

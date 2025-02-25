@@ -5,8 +5,8 @@
 
 #pragma once
 
-#include "MetaObserver.hpp"
-#include "Scheduling.hpp"
+#include <rocRoller/Scheduling/MetaObserver.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {

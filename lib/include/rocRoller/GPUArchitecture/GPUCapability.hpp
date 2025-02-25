@@ -170,4 +170,4 @@ namespace rocRoller
     };
 }
 
-#include "GPUCapability_impl.hpp"
+#include <rocRoller/GPUArchitecture/GPUCapability_impl.hpp>

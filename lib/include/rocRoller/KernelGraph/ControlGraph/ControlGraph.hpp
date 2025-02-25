@@ -5,10 +5,9 @@
 
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
-
-#include "ControlEdge.hpp"
-#include "ControlGraph_fwd.hpp"
-#include "Operation.hpp"
+#include <rocRoller/KernelGraph/ControlGraph/ControlEdge.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph_fwd.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 
 namespace rocRoller
 {
@@ -230,4 +229,4 @@ namespace rocRoller
     }
 }
 
-#include "ControlGraph_impl.hpp"
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph_impl.hpp>

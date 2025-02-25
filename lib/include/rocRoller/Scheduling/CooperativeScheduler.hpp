@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "CooperativeScheduler_fwd.hpp"
-#include "Costs/Cost_fwd.hpp"
-#include "Scheduler.hpp"
+#include <rocRoller/Scheduling/CooperativeScheduler_fwd.hpp>
+#include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 
 namespace rocRoller
 {

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "GPUArchitecture.hpp"
-
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -9,6 +7,7 @@
 #include <string>
 #include <unordered_set>
 
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 

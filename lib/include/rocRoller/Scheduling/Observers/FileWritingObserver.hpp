@@ -6,9 +6,9 @@
 #include <stdlib.h>
 #include <vector>
 
-#include "../../Utilities/Error.hpp"
-#include "../../Utilities/Settings.hpp"
-#include "../../Utilities/Utils.hpp"
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

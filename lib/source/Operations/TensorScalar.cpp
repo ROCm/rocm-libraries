@@ -1,6 +1,6 @@
-#include "rocRoller/Operations/TensorScalar.hpp"
-#include "rocRoller/Operations/Command.hpp"
-#include "rocRoller/Operations/Operation.hpp"
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operation.hpp>
+#include <rocRoller/Operations/TensorScalar.hpp>
 
 namespace rocRoller
 {

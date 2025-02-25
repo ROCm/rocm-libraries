@@ -2,12 +2,10 @@
 
 #include <sstream>
 
-#include "WaitcntObserver.hpp"
-
-#include "../Scheduling.hpp"
-
-#include "../../Context.hpp"
-#include "../../GPUArchitecture/GPUInstructionInfo.hpp"
+#include <rocRoller/Context.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
+#include <rocRoller/Scheduling/Scheduling.hpp>
 
 namespace rocRoller
 {

@@ -7,12 +7,10 @@
 #include <string>
 #include <unordered_map>
 
-#include <rocRoller/AssemblyKernel_fwd.hpp>
-#include <rocRoller/Expression_fwd.hpp>
-
 #include <rocRoller/AssemblyKernelArgument.hpp>
-
+#include <rocRoller/AssemblyKernel_fwd.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -219,4 +217,4 @@ namespace rocRoller
     };
 }
 
-#include "AssemblyKernel_impl.hpp"
+#include <rocRoller/AssemblyKernel_impl.hpp>

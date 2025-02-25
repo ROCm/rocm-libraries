@@ -6,16 +6,14 @@
 #include <optional>
 #include <string>
 
+#include <rocRoller/AssemblyKernel_fwd.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/KernelArguments_fwd.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
+#include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
-
-#include "CommandArgument_fwd.hpp"
-#include "Command_fwd.hpp"
-
-#include "../AssemblyKernel_fwd.hpp"
-#include "../DataTypes/DataTypes.hpp"
-#include "../Expression_fwd.hpp"
-#include "../InstructionValues/Register_fwd.hpp"
-#include "../KernelArguments_fwd.hpp"
 
 namespace rocRoller
 {
@@ -97,4 +95,4 @@ namespace rocRoller
     bool isInteger(CommandArgumentValue val);
 }
 
-#include "CommandArgument_impl.hpp"
+#include <rocRoller/Operations/CommandArgument_impl.hpp>

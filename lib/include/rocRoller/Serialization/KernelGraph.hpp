@@ -6,13 +6,11 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-
-#include "Base.hpp"
-#include "Containers.hpp"
-
-#include "ControlGraph.hpp"
-#include "ControlToCoordinateMapper.hpp"
-#include "CoordinateGraph.hpp"
+#include <rocRoller/Serialization/Base.hpp>
+#include <rocRoller/Serialization/Containers.hpp>
+#include <rocRoller/Serialization/ControlGraph.hpp>
+#include <rocRoller/Serialization/ControlToCoordinateMapper.hpp>
+#include <rocRoller/Serialization/CoordinateGraph.hpp>
 
 namespace rocRoller
 {

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ArithmeticGenerator.hpp"
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 
 namespace rocRoller
 {

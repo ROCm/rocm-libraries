@@ -34,22 +34,21 @@
 #include <stdexcept>
 #include <string>
 
-#include "DataTypes_BF6.hpp"
-#include "DataTypes_BF8.hpp"
-#include "DataTypes_BFloat16.hpp"
-#include "DataTypes_FP4.hpp"
-#include "DataTypes_FP6.hpp"
-#include "DataTypes_FP8.hpp"
-#include "DataTypes_Half.hpp"
-#include "DataTypes_Int8.hpp"
-#include "DataTypes_Int8x4.hpp"
-#include "DataTypes_UInt8x4.hpp"
+#include <rocRoller/DataTypes/DataTypes_BF6.hpp>
+#include <rocRoller/DataTypes/DataTypes_BF8.hpp>
+#include <rocRoller/DataTypes/DataTypes_BFloat16.hpp>
+#include <rocRoller/DataTypes/DataTypes_FP4.hpp>
+#include <rocRoller/DataTypes/DataTypes_FP6.hpp>
+#include <rocRoller/DataTypes/DataTypes_FP8.hpp>
+#include <rocRoller/DataTypes/DataTypes_Half.hpp>
+#include <rocRoller/DataTypes/DataTypes_Int8.hpp>
+#include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
+#include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitecture_fwd.hpp>
+#include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
-#include "../Utilities/Comparison.hpp"
-#include "../Utilities/Error.hpp"
-
-#include "../GPUArchitecture/GPUArchitecture_fwd.hpp"
-#include "../InstructionValues/Register_fwd.hpp"
 namespace rocRoller
 {
     /**
