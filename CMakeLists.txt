@@ -1,12 +1,21 @@
 
-cmake_minimum_required(VERSION 3.16...3.19)
+cmake_minimum_required(VERSION 3.16...3.22)
 
-project(rocRoller VERSION 1.0)
+set(ROCROLLER_VERSION "1.0.0")
+set(ROCROLLER_SOVERSION 1)
+
+project(rocRoller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
+if(CMAKE_C_COMPILER)
+  # If the compiler is specified but the C language isn't enabled,
+  # LLVM pitches a fit, so for easy compatibility just enable the C language
+  enable_language(C)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 
 option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
+option(ROCROLLER_EMBED_ARCH_DEF        "Embed the generated GPU architecture msgpack in the library" ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
 
 option(CODE_ANALYSIS                    "When building, don't query for tests etc." OFF)
@@ -17,15 +26,15 @@ option(BUILD_CLIENTS                    "Build performance testing clients" ON)
 option(BUILD_TESTING                    "Build rocRoller test clients" ON)
 option(BUILD_DOCS                       "Build rocRoller documentation" ON)
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
 
 set(YAML_BACKEND "YAML_CPP" CACHE STRING "YAML backend used for serialization")
 set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 
 # For paths given when reporting errors
-add_compile_options(-fmacro-prefix-map=${CMAKE_SOURCE_DIR}=.)
+add_compile_options(-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   set(COROUTINES_COMPILE_OPTION )
@@ -43,8 +52,8 @@ if(ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(CODE_COVERAGE)
-  set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
-  set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
+  list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
+  list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 if(ROCROLLER_USE_HIP)
@@ -61,59 +70,14 @@ if(ROCROLLER_USE_HIP)
   find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lld/)
 endif()
 
-include(FetchContent)
-
-FetchContent_Declare(
-  libdivide
-  GIT_REPOSITORY https://github.com/ridiculousfish/libdivide.git
-  GIT_TAG v5.1
-  CONFIGURE_COMMAND ""
-  BUILD_COMMAND ""
-  INSTALL_COMMAND ""
-)
-
-if(NOT libdivide_POPULATED)
-  FetchContent_Populate(libdivide)
-endif()
-
-FetchContent_Declare(
-  spdlog
-  GIT_REPOSITORY https://github.com/gabime/spdlog.git
-  GIT_TAG 27cb4c76708608465c413f6d0e6b8d99a4d84302 # release 1.14.1
-)
-if(NOT spdlog_POPULATED)
-  FetchContent_Populate(spdlog)
-  add_subdirectory(${spdlog_SOURCE_DIR} ${spdlog_BINARY_DIR})
-  set_target_properties(spdlog PROPERTIES POSITION_INDEPENDENT_CODE ON)
-  target_compile_definitions(spdlog PRIVATE SPDLOG_USE_STD_FORMAT)
-endif()
-FetchContent_MakeAvailable(spdlog)
-set(spdlog_INCLUDES ${spdlog_SOURCE_DIR}/include)
-add_compile_definitions(SPDLOG_USE_STD_FORMAT)
-
-add_definitions(-DMSGPACK_NO_BOOST)
-set(MSGPACK_USE_BOOST OFF CACHE INTERNAL "")
-FetchContent_Declare(
-  msgpack
-  GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-  GIT_TAG cpp-4.1.1
-)
-FetchContent_MakeAvailable(msgpack)
+include(cmake/Dependencies.cmake)
+# both show up in headers, system package required
+rocroller_add_dependency(spdlog VERSION 1.14.1)
+rocroller_add_dependency(msgpack VERSION 3.3.0)
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
-  set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-  set(YAML_CPP_BUILD_TOOLS OFF)
-  FetchContent_Declare(
-    yaml-cpp
-    URL https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.zip
-  )
-  FetchContent_MakeAvailable(yaml-cpp)
-
-  target_compile_options(yaml-cpp PUBLIC ${EXTRA_COMPILE_OPTIONS})
-  target_link_options(yaml-cpp PUBLIC ${EXTRA_LINK_OPTIONS})
-  set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
-  set_property(TARGET yaml-cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-shadow")
-
+  # shows up in headers, system package required
+  rocroller_add_dependency(yaml-cpp VERSION 0.7.0)
   add_definitions(-DROCROLLER_USE_YAML_CPP)
 elseif(YAML_BACKEND STREQUAL "LLVM")
   add_definitions(-DROCROLLER_USE_LLVM)
@@ -135,16 +99,10 @@ else()
               "--inline-suppr"
               "-q"
               "--library=googletest"
-              "--suppressions-list=${CMAKE_SOURCE_DIR}/CppCheckSuppressions.txt"
+              "--suppressions-list=${PROJECT_SOURCE_DIR}/CppCheckSuppressions.txt"
       )
   endif()
 endif()
-
-
-# Default ARCHITECTURE_FILE_PATH
-set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/source/rocRoller/GPUArchitecture_def.msgpack")
-set(ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/DefaultArchitectureFilePath.cpp)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/DefaultArchitectureFilePath.cpp.in ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE})
 
 # Git hash
 execute_process(
@@ -153,7 +111,7 @@ execute_process(
     OUTPUT_VARIABLE ROCROLLER_GIT_HASH
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-set(ROCROLLER_GIT_VERSION_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/Utilities/Version.cpp)
+set(ROCROLLER_GIT_VERSION_CPP_FILE ${PROJECT_BINARY_DIR}/source/rocRoller/Utilities/Version.cpp)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in ${ROCROLLER_GIT_VERSION_CPP_FILE})
 
 add_subdirectory(GPUArchitectureGenerator)

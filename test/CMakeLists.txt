@@ -9,27 +9,10 @@ endif()
 
 include(CTest)
 
-FetchContent_Declare(
-  googletest
-  URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
-)
-FetchContent_MakeAvailable(googletest)
-
-target_compile_options(gtest PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_compile_options(gmock PUBLIC ${EXTRA_COMPILE_OPTIONS})
-
-FetchContent_Declare(
-  Catch2
-  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-  GIT_TAG        v3.7.0 # or a later release
-)
-
-FetchContent_MakeAvailable(Catch2)
-target_compile_options(Catch2 PRIVATE ${EXTRA_COMPILE_OPTIONS})
-target_compile_options(Catch2WithMain PRIVATE ${EXTRA_COMPILE_OPTIONS})
-target_link_options(Catch2 PRIVATE ${EXTRA_LINK_OPTIONS})
-target_link_options(Catch2WithMain PRIVATE ${EXTRA_LINK_OPTIONS})
-
+# Header only/static, not visible to library users, so not necessary to use system packages
+rocroller_add_dependency(googletest VERSION 1.12.1)
+rocroller_add_dependency(Catch2 VERSION 3.7.0)
+rocroller_add_dependency(mxDataGenerator HASH 05fd3a47fa83db1ccc81178ba360a8a7ade9bd49)
 
 # Component stand-alone test
 add_executable(ComponentTest standalone/ComponentTest.cpp)
@@ -39,8 +22,8 @@ target_link_libraries(ComponentTest
   rocroller_interface
   msgpackc-cxx
 )
-target_include_directories(ComponentTest PUBLIC
-  ${CMAKE_SOURCE_DIR}/lib/include
+target_include_directories(ComponentTest PRIVATE
+  ${PROJECT_SOURCE_DIR}/lib/include
                           )
 
 add_library(common_test_utilities OBJECT
@@ -49,17 +32,16 @@ add_library(common_test_utilities OBJECT
   common/mxDataGen.cpp
 )
 
-target_compile_features(common_test_utilities PUBLIC cxx_std_20)
 target_compile_options(common_test_utilities PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
 target_link_options(common_test_utilities PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(common_test_utilities
   rocroller_interface
   openblas
+  mxDataGenerator
 )
 
 target_include_directories(common_test_utilities PUBLIC
                            common/
-                           ${CMAKE_SOURCE_DIR}/extern/mxDataGenerator/lib/include
                            )
 
 
@@ -143,9 +125,7 @@ set(
 )
 
 if (NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
-  set(
-    rocRollerTests_SOURCES
-    ${rocRollerTests_SOURCES}
+  list(APPEND rocRollerTests_SOURCES
     unit/GemmGuidePost/GemmGuidePost.cpp
     unit/GemmGuidePost/GemmGuidePost_Minimal.cpp
     unit/GemmGuidePost/GemmGuidePost_Optimized.cpp
@@ -161,30 +141,19 @@ add_executable(
 
 find_package(OpenMP)
 target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_include_directories(rocRollerTests PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
-)
 target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests
-  rocroller_interface
   common_test_utilities
   msgpackc-cxx
   gtest_main
   gmock
-  openblas
   OpenMP::OpenMP_CXX
 )
-
-if(ROCROLLER_USE_HIP)
-  target_link_libraries(rocRollerTests hip::host)
-  target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
-endif()
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
 endif()
-
 
 set(
   rocRollerTests_catch_SOURCES
@@ -225,24 +194,14 @@ set(
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})
 target_compile_options(rocRollerTests_catch PUBLIC ${EXTRA_COMPILE_OPTIONS})
 
-target_include_directories(rocRollerTests_catch PUBLIC
-${CMAKE_CURRENT_SOURCE_DIR}/lib/include
-                           )
 target_link_options(rocRollerTests_catch PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests_catch
-  rocroller_interface
   common_test_utilities
   msgpackc-cxx
   Catch2::Catch2WithMain
-  openblas
   OpenMP::OpenMP_CXX
 )
-
-if(ROCROLLER_USE_HIP)
-  target_link_libraries(rocRollerTests_catch hip::host)
-  target_compile_definitions(rocRollerTests_catch PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
-endif()
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_compile_definitions(rocRollerTests_catch PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
@@ -252,34 +211,13 @@ endif()
 add_executable(
   ArchGenTests
   unit/GPUArchitectureGeneratorTest.cpp
-
-  ${isa_spec_manager_SOURCE_DIR}/source/common/isa_xml_reader.cpp
-  ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2/tinyxml2.cpp
-  ${isa_spec_manager_SOURCE_DIR}/source/common/amdisa_utility.cpp
 )
 
-add_dependencies(ArchGenTests spdlog)
-target_compile_features(ArchGenTests PUBLIC cxx_std_20)
 target_compile_options(ArchGenTests PUBLIC  ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
 target_link_options(ArchGenTests PUBLIC ${EXTRA_LINK_OPTIONS})
-target_include_directories(ArchGenTests PUBLIC
-                           ${CMAKE_SOURCE_DIR}/GPUArchitectureGenerator/include
-                           ${CMAKE_SOURCE_DIR}/lib/include
-                           ${CMAKE_SOURCE_DIR}/lib/include/rocRoller
-                           ${isa_spec_manager_SOURCE_DIR}/include
-                           ${isa_spec_manager_SOURCE_DIR}/source/common
+target_include_directories(ArchGenTests PRIVATE
+                           ${PROJECT_SOURCE_DIR}/GPUArchitectureGenerator/include
                            )
-
-target_include_directories(ArchGenTests SYSTEM PUBLIC ${spdlog_INCLUDES}
-                           ${LLVM_INCLUDE_DIRS}
-                           ${LLD_INCLUDE_DIRS}
-                           ${isa_spec_manager_SOURCE_DIR}/source/third_party/tinyxml2
-                           )
-
-if(ROCROLLER_USE_HIP)
-  target_link_libraries(ArchGenTests PUBLIC hip::host)
-  target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
-endif()
 
 target_link_libraries(
   ArchGenTests PUBLIC
@@ -288,11 +226,12 @@ target_link_libraries(
   gtest_main
   gmock
   msgpackc-cxx
+  isa_spec_manager
 )
 
 
 if (NOT CODE_ANALYSIS)
-  set(TEST_REPORT_DIR "${CMAKE_BINARY_DIR}/test_report")
+  set(TEST_REPORT_DIR "${PROJECT_BINARY_DIR}/test_report")
 
   include(GoogleTest)
   gtest_discover_tests(rocRollerTests
@@ -311,7 +250,7 @@ if (NOT CODE_ANALYSIS)
     DISCOVERY_MODE PRE_TEST
   )
 
-  list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+  # path to catch scripts added to CMAKE_MODULE_PATH when Catch2 is added
   include(Catch)
   catch_discover_tests(rocRollerTests_catch
       REPORTER JUnit
@@ -342,10 +281,10 @@ if (NOT CODE_ANALYSIS)
   # Add script linting
   add_test(NAME PythonLint
            COMMAND flake8
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/scripts)
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts)
   set_tests_properties(PythonLint
                        PROPERTIES
-                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"
+                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
                         "LABELS" "PYTHON")
 
   if (ROCROLLER_TESTS_SKIP_SLOW)
@@ -355,15 +294,15 @@ if (NOT CODE_ANALYSIS)
   # Add rrperf unit tests
   add_test(NAME PythonTest
            COMMAND pytest -s --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(PythonTest
                        PROPERTIES
-                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib"
+                        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR};PYTHONPATH=${PROJECT_SOURCE_DIR}/scripts/lib"
                         "LABELS" "PYTHON")
 
   add_test(NAME GraupelInstall
            COMMAND npm install
-           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/utils/graupel")
+           WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/utils/graupel")
 
   set_tests_properties(GraupelInstall
                         PROPERTIES
@@ -372,7 +311,7 @@ if (NOT CODE_ANALYSIS)
 
   add_test(NAME GraupelTests
            COMMAND npm test
-           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/utils/graupel")
+           WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/utils/graupel")
 
   set_tests_properties(GraupelTests PROPERTIES
                        ENVIRONMENT "JEST_JUNIT_OUTPUT_FILE=${TEST_REPORT_DIR}/graupel_tests.xml"

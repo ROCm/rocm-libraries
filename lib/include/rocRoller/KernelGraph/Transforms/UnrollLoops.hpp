@@ -45,8 +45,11 @@ namespace rocRoller
                 return "UnrollLoops";
             }
 
-            std::optional<int>
-                createTailLoop(KernelGraph& graph, int tag, int unrollAmount, int unrollDimension);
+            std::optional<int> createTailLoop(KernelGraph& graph,
+                                              int          tag,
+                                              int          unrollAmount,
+                                              int          unrollDimension,
+                                              int          forLoopDimension);
 
         private:
             int  createUnrollDimension(KernelGraph& graph, int forLoopDimension, int unrollAmount);

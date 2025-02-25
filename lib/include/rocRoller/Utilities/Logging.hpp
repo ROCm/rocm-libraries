@@ -31,8 +31,16 @@
 // #define SPDLOG_COMPILED_LIB 1
 #include <spdlog/spdlog.h>
 
+#if SPDLOG_VERSION > 10902
 // In order for linking to work for GCC, any includes from fmt must happen after including spdlog.h
 #include <spdlog/fmt/ranges.h>
+#else
+namespace spdlog
+{
+    template <typename... Args>
+    using format_string_t = fmt::format_string<Args...>;
+}
+#endif
 
 namespace rocRoller
 {

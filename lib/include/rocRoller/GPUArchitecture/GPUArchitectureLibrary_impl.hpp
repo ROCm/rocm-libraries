@@ -89,16 +89,22 @@ namespace rocRoller
     {
         TIMER(t, "GPUArchitectureLibrary::LoadLibrary");
 
-        std::string archFile = Settings::getInstance()->get(Settings::ArchitectureFile);
+        auto envPath
+            = std::filesystem::path(Settings::getInstance()->get(Settings::ArchitectureFile));
 
-        if(archFile.find(".yaml") != std::string::npos
-           || archFile.find(".yml") != std::string::npos)
+        if(!envPath.empty() && std::filesystem::exists(envPath))
         {
-            return GPUArchitecture::readYaml(archFile);
+            if(envPath.extension() == ".yaml" || envPath.extension() == ".yml")
+            {
+                return GPUArchitecture::readYaml(envPath);
+            }
+            else if(envPath.extension() == ".msgpack")
+            {
+                return GPUArchitecture::readMsgpack(envPath);
+            }
+            // ignore otherwise
         }
-        else
-        {
-            return GPUArchitecture::readMsgpack(archFile);
-        }
+
+        return GPUArchitecture::readEmbeddedMsgpack();
     }
 }

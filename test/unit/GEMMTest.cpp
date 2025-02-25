@@ -1038,7 +1038,6 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.m         = 64;
         gemm.n         = 128;
-        gemm.k         = 8;
         gemm.transA    = "T";
         gemm.transB    = "N";
         gemm.loadLDSA  = false;
@@ -1048,7 +1047,11 @@ namespace GEMMDriverTest
         gemm.tailLoops = true;
         gemm.unrollK   = 4;
         gemm.macK      = 8;
-        basicGEMM<float>(gemm);
+        for(auto k : {8, 16, 24, 32, 40, 48, 56, 64})
+        {
+            gemm.k = k;
+            basicGEMM<float>(gemm);
+        }
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)

@@ -246,7 +246,8 @@ namespace rocRoller
             int unrollDimension = createUnrollDimension(graph, forLoopDimension, unrollAmount);
 
             {
-                auto tailLoop = createTailLoop(graph, tag, unrollAmount, unrollDimension);
+                auto tailLoop
+                    = createTailLoop(graph, tag, unrollAmount, unrollDimension, forLoopDimension);
                 if(tailLoop)
                     m_unrolledLoopOps.insert(*tailLoop);
             }
@@ -496,7 +497,8 @@ namespace rocRoller
         std::optional<int> UnrollLoops::createTailLoop(KernelGraph& graph,
                                                        int          loop,
                                                        int          unrollAmount,
-                                                       int          unrollDimension)
+                                                       int          unrollDimension,
+                                                       int          forLoopDimension)
         {
             if(!m_params->tailLoops)
             {
@@ -607,9 +609,11 @@ namespace rocRoller
                 // ensure the tail loop happens immediately after the original loop
                 // and before any other operations that were sequenced after the
                 // original loop.
+                auto setCoordK = graph.control.addElement(SetCoordinate(loopSizeRoundedDown));
+                graph.mapper.connect<ForLoop>(setCoordK, forLoopDimension);
                 auto setCoord = graph.control.addElement(SetCoordinate(Expression::literal(0u)));
                 graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                graph.control.chain<Body>(setCoord, tailLoop);
+                graph.control.chain<Body>(setCoordK, setCoord, tailLoop);
                 // We are just adding more sequence edges and leaving the cleanup
                 // for the Simplify graph transformation.
                 for(auto node : graph.control.getOutputNodeIndices<Sequence>(loop))
@@ -617,7 +621,7 @@ namespace rocRoller
                     graph.control.chain<Sequence>(setCoord, node);
                 }
                 // The tail loop comes after the main loop.
-                graph.control.chain<Sequence>(loop, setCoord);
+                graph.control.chain<Sequence>(loop, setCoordK);
             }
 
             return tailLoop;
