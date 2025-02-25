@@ -85,7 +85,7 @@ class SIA3(SIA):
             startIterItem = numLocalWriteModPerIter - (writer.states.lwStartMfmaIndex % writer.states.numMfmaPerIter) * numLocalWritesPerSched
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt, startIterItem)
+              firstIter, lastLc, maxVmcnt, isNGLL, startIterItem)
 
 class SIA2(SIA):
     kernel = {"ScheduleIterAlg": 2}
@@ -113,7 +113,7 @@ class SIA2(SIA):
             readsToWait, readsToWaitNGLL = getReadsToWait(writer, kernel)
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt)
+              firstIter, lastLc, maxVmcnt, isNGLL)
 
 class SIA1(SIA):
     kernel = {"ScheduleIterAlg": 1}
@@ -141,7 +141,7 @@ class SIA1(SIA):
             readsToWait, readsToWaitNGLL = getReadsToWait(writer, kernel)
             schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
               itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-              firstIter, lastLc, maxVmcnt)
+              firstIter, lastLc, maxVmcnt, isNGLL)
 
 ################################################################################
 ################################################################################
@@ -774,11 +774,12 @@ def getReadsToWait(writer, kernel):
 
 def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSched, localWriteEndIter, \
   itemsGRToSchedLater, itemsLWToSched, startIter, readsToWait, readsToWaitNGLL, \
-  firstIter, lastLc, maxVmcnt, startIterItem = None):
+  firstIter, lastLc, maxVmcnt, isNGLL, startIterItem = None):
     # schedule here
     localwriteCnt        = 0
     globalReadInstOffset = 0
     additionalIndexList  = {}
+    skip = 0
     for u in range(startIter, localWriteEndIter+1):
         # If we have some LW not scheduled in last Iter, add them.
         newAdditionalIndexList = fastdeepcopy(additionalIndexList)
@@ -844,15 +845,37 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 additionalIndexList.pop(itemsLWToSchedIndex)
             else:
                 imod.add(item)
+
             # schedule global instruction that need to be scheduled later
+            numGlobalReadA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
+            numGlobalReadB = kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
+            dtvReadNum = numGlobalReadA if kernel["DirectToVgprA"] else numGlobalReadB
+            totalNumGR = numGlobalReadA + numGlobalReadB
+            nondtvReadNum = totalNumGR - dtvReadNum
+
+            readCntA = 1
+            readCntB = 1
+            readCntA = 2 if kernel["DirectToVgprA"] and kernel["reorderGRInstForDTVA"] and \
+                            kernel["NumLoadsCoalescedA"] % 2 == 0 else 1
+            readCntB = 2 if kernel["DirectToVgprB"] and kernel["reorderGRInstForDTVB"] and \
+                            kernel["NumLoadsCoalescedB"] % 2 == 0 else 1
+
+            if kernel["DirectToVgprA"]:  # In loop, load A first
+              readCnt = readCntA if (len(itemsGRToSchedLater) > nondtvReadNum) or isNGLL else readCntB
+            elif kernel["DirectToVgprB"]:  # In loop, load B first
+              readCnt = readCntB if (len(itemsGRToSchedLater) > nondtvReadNum) or isNGLL else readCntA
+            else:  # not kernel["DirectToVgprA"] and not kernel["DirectToVgprB"]
+              readCnt = 1
+
             if localwriteCnt % PRECISION == ((numLocalWritesPerSched % PRECISION) + globalReadInstOffset):
+              if not skip:
                 globalReadInstOffset = 0
                 reads = 0
                 while itemsGRToSchedLater:
                     itemGR = itemsGRToSchedLater[0]
                     readsInc = itemGR.countType(GlobalReadInstruction)
                     reads = reads + readsInc
-                    if reads > 1:
+                    if reads > readCnt:
                         break
                     # PK and StoreCUnroll is removed so you cannot find any HolderContainer in s_waitcnt
                     hasHolder, wcList = hasHolderInWaitCnt(itemGR)
@@ -864,6 +887,11 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                         imod.add(itemGR)
                     readsToWait = readsToWait + readsInc # GR instruction increments vmcnt
                     itemsGRToSchedLater.pop(0)
+
+              if readCnt == 2:
+                skip = skip ^ 1
+              else:
+                skip = 0
             localwriteCnt += 1
             writer.codes.perIterLocalWrite[u].add(imod)
             if isinstance(item, Module) and (not item.items()):

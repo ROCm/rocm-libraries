@@ -1169,7 +1169,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               flagInsert = True
           if flagInsert:
             iterCode.add(SSetPrior(prior=3, comment="store optimization"))
-
         if (mfmaIndex >= self.states.lwStartMfmaIndex):
           for j in range(self.states.numLocalWriteModPerMfma):
             # in case there are localWrite and globalread in same iteration
@@ -2651,6 +2650,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         tailLoopOpt1st, tailLoopOpt2nd = tailLoopOpt2nd, tailLoopOpt1st
         tc1, tc2 = tc2, tc1
 
+      # globalReadMode = 2 -> optimized by using more vgpr to reorder GR, waitcnt, v_or_b32 instructions.
+      # globalReadMode = 3 -> optimized by using wider global read instructions.
       globalReadMode1st = 2 if (((tensorParameters1st["glvw"] * tensorParameters1st["bpeGR"]) < 4) or \
                                tailLoopOpt1st == False) else 3
       globalReadMode2nd = 2 if (((tensorParameters2nd["glvw"] * tensorParameters2nd["bpeGR"]) < 4) or \

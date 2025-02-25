@@ -1396,6 +1396,18 @@ class Solution(collections.abc.Mapping):
     if (state["DirectToVgprB"]):
       state["tailLoopOptB"] = False
 
+    # reorder globalread instructions if dtv and TN cases. (along coalesced dim)
+    if state["ScheduleIterAlg"] == 3:
+      state["reorderGRInstForDTVA"] = True if state["ProblemType"]["TransposeA"] and \
+                                              state["DirectToVgprA"] and \
+                                              not state["ProblemType"]["SwizzleTensorA"] else False
+      state["reorderGRInstForDTVB"] = True if not state["ProblemType"]["TransposeB"] and \
+                                              state["DirectToVgprB"] and \
+                                              not state["ProblemType"]["SwizzleTensorB"] else False
+    else:
+      state["reorderGRInstForDTVA"] = False
+      state["reorderGRInstForDTVB"] = False
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
