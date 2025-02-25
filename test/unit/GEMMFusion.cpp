@@ -14,6 +14,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
@@ -23,7 +24,6 @@
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
-#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest

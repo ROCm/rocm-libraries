@@ -5,8 +5,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Operations/Command.hpp>
-
-#include <common/TensorDescriptor.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "Utilities.hpp"
