@@ -187,6 +187,15 @@ namespace rocRoller
             AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
         }
 
+        MacroTile::MacroTile(MacroTile& macTile, std::vector<uint> const& padBytesOfDim)
+            : MacroTile(macTile)
+        {
+            AssertFatal(this->layoutType == LayoutType::MATRIX_A
+                            || this->layoutType == LayoutType::MATRIX_B,
+                        "Only MacroTiles for A or B can be padded.");
+            this->padBytesOfDim = padBytesOfDim;
+        }
+
         std::string MacroTile::toString() const
         {
             if(!sizes.empty())
@@ -226,6 +235,17 @@ namespace rocRoller
             return product(sizes);
         }
 
+        uint MacroTile::paddingBytes() const
+        {
+            if(padBytesOfDim.empty())
+                return 0;
+
+            AssertFatal(!sizes.empty(), "MacroTile doesn't have sizes set.");
+            AssertFatal(sizes.size() == padBytesOfDim.size(),
+                        "MacroTile sizes and padBytesOfDim must have the same rank.");
+            return std::inner_product(sizes.rbegin(), sizes.rend(), padBytesOfDim.begin(), 0);
+        }
+
         ThreadTileIndex::ThreadTileIndex() = default;
         ThreadTileIndex::ThreadTileIndex(int const dim, Expression::ExpressionPtr size)
             : SubDimension(dim, size, Expression::literal(1u))
@@ -261,13 +281,31 @@ namespace rocRoller
             auto n = macTile.subTileSizes[1];
             auto k = macTile.subTileSizes[2];
 
+            auto M = macTile.sizes[0];
+            auto N = macTile.sizes[1];
+            auto K = macTile.sizes[2];
+
+            padBytesOfDim = {};
+
             if(macTile.layoutType == LayoutType::MATRIX_A)
             {
                 sizes = {m, k};
+                if(!macTile.padBytesOfDim.empty())
+                {
+                    auto padBytes0 = macTile.padBytesOfDim[0];
+                    auto padBytes1 = macTile.padBytesOfDim[1];
+                    padBytesOfDim  = {(M / m) * padBytes0, (K / k) * padBytes1};
+                }
             }
             if(macTile.layoutType == LayoutType::MATRIX_B)
             {
                 sizes = {k, n};
+                if(!macTile.padBytesOfDim.empty())
+                {
+                    auto padBytes0 = macTile.padBytesOfDim[0];
+                    auto padBytes1 = macTile.padBytesOfDim[1];
+                    padBytesOfDim  = {(K / k) * padBytes0, (N / n) * padBytes1};
+                }
             }
             if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
             {
@@ -304,6 +342,17 @@ namespace rocRoller
             return product(sizes);
         }
 
+        uint WaveTile::paddingBytes() const
+        {
+            if(padBytesOfDim.empty())
+                return 0;
+
+            AssertFatal(!sizes.empty(), "WaveTile doesn't have sizes set.");
+            AssertFatal(sizes.size() == padBytesOfDim.size(),
+                        "WaveTile sizes and padBytesOfDim must have the same rank.");
+            return std::inner_product(sizes.rbegin(), sizes.rend(), padBytesOfDim.begin(), 0);
+        }
+
         ElementNumber::ElementNumber() = default;
         ElementNumber::ElementNumber(int const dim, Expression::ExpressionPtr size)
             : SubDimension(dim, size, Expression::literal(1u))
@@ -316,6 +365,11 @@ namespace rocRoller
                 return "Adhoc";
             else
                 return "Adhoc." + m_name;
+        }
+
+        LDS::LDS(bool holdsTransposedTile)
+            : holdsTransposedTile(holdsTransposedTile)
+        {
         }
 
 #define DEFAULT_DIM_NAME(cls)     \

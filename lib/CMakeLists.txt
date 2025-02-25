@@ -4,9 +4,7 @@
 set(rocroller_src
 
  source/AssemblyKernel.cpp
- source/AssemblyKernel.cpp
  source/AssemblyKernelArgument.cpp
- source/AssemblyKernel_serialization.cpp
  source/AssemblyKernel_serialization.cpp
  source/AssertOpKinds.cpp
  source/Command_serialization.cpp
@@ -14,8 +12,10 @@ set(rocroller_src
  source/CommonSubexpressionElim.cpp
  source/Context.cpp
  source/DataTypes.cpp
- source/DataTypes_BF16_Utils.cpp
+ source/DataTypes_Utils.cpp
  source/DataTypes_F8_Utils.cpp
+ source/DataTypes_F6_Utils.cpp
+ source/DataTypes_BF16_Utils.cpp
  source/Error.cpp
  source/ExecutableKernel.cpp
  source/Expression.cpp
@@ -85,6 +85,7 @@ set(rocroller_src
  source/CodeGen/Arithmetic/MultiplyAdd.cpp
  source/CodeGen/Arithmetic/MultiplyHigh.cpp
  source/CodeGen/Arithmetic/Negate.cpp
+ source/CodeGen/Arithmetic/ScaledMatrixMultiply.cpp
  source/CodeGen/Arithmetic/NotEqual.cpp
  source/CodeGen/Arithmetic/RandomNumber.cpp
  source/CodeGen/Arithmetic/ShiftL.cpp
@@ -128,6 +129,7 @@ set(rocroller_src
  source/KernelGraph/Transformations/AddConvert.cpp
  source/KernelGraph/Transformations/AddDeallocate.cpp
  source/KernelGraph/Transformations/AddLDS.cpp
+ source/KernelGraph/Transformations/AddF6LDSPadding.cpp
  source/KernelGraph/Transformations/AddStreamK.cpp
  source/KernelGraph/Transformations/AddPRNG.cpp
  source/KernelGraph/Transformations/CleanArguments.cpp
@@ -180,6 +182,7 @@ set(rocroller_src
  source/Operations/Operation.cpp
  source/Operations/RandomNumberGenerator.cpp
  source/Operations/TensorScalar.cpp
+ source/Operations/T_LoadStore.cpp
 
  source/Schedulers/CooperativeScheduler.cpp
  source/Schedulers/PriorityScheduler.cpp
@@ -189,6 +192,7 @@ set(rocroller_src
 
  source/Utilities/ReadELF.cpp
  source/Utilities/Utils.cpp
+ source/Utilities/Settings.cpp
 
  ${ROCROLLER_GIT_VERSION_CPP_FILE}
 )
@@ -225,6 +229,7 @@ target_link_options(rocroller PUBLIC ${EXTRA_LINK_OPTIONS})
 #target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
 target_include_directories(rocroller PUBLIC
                            include
+                           include/rocRoller
                            )
 
 # Header only, not exposed in any public headers, system package not required

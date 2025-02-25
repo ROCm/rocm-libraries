@@ -12,5 +12,10 @@ namespace rocRoller
         void get2LiteralDwords(Register::ValuePtr& lsd,
                                Register::ValuePtr& msd,
                                Register::ValuePtr  input);
+
+        /**
+         * @brief Get the modifier string for MFMA's input matrix types
+        */
+        std::string getModifier(DataType dataType);
     }
 }
