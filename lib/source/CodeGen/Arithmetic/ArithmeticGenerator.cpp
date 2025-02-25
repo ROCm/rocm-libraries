@@ -8,7 +8,8 @@ namespace rocRoller
     Generator<Instruction> ArithmeticGenerator::moveToVGPR(Register::ValuePtr& val)
     {
         Register::ValuePtr tmp = val;
-        val                    = Register::Value::Placeholder(
+
+        val = Register::Value::Placeholder(
             m_context, Register::Type::Vector, tmp->variableType(), 1);
 
         co_yield m_context->copier()->copy(val, tmp, "");

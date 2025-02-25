@@ -52,6 +52,11 @@ namespace rocRoller
 
                 auto argName = kernel->uniqueArgName(name(expr));
 
+                Log::debug("LTSE: Adding arg {}: varType {}, expr {}",
+                           argName,
+                           toString(varType),
+                           toString(expr));
+
                 return kernel->addArgument(
                     {.name = argName, .variableType = varType, .expression = expr});
             }
@@ -231,6 +236,10 @@ namespace rocRoller
                            toString(v1),
                            toString(v2));
 
+                AssertFatal(resultVariableType(expr) == resultVariableType(v2),
+                            ShowValue(expr),
+                            ShowValue(v2));
+
                 return v2;
             }
             else
@@ -266,6 +275,10 @@ namespace rocRoller
                            toString(v0),
                            toString(v1),
                            toString(v2));
+
+                AssertFatal(resultVariableType(expr) == resultVariableType(v2),
+                            ShowValue(expr),
+                            ShowValue(v2));
 
                 return v2;
             }

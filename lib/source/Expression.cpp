@@ -16,459 +16,9 @@ namespace rocRoller
 {
     namespace Expression
     {
-        std::string toString(EvaluationTime t)
-        {
-            switch(t)
-            {
-            case EvaluationTime::Translate:
-                return "Translate";
-            case EvaluationTime::KernelLaunch:
-                return "KernelLaunch";
-            case EvaluationTime::KernelExecute:
-                return "KernelExecute";
-            case EvaluationTime::Count:
-            default:
-                break;
-            }
-            Throw<FatalError>("Invalid EvaluationTime");
-        }
-
-        std::string toString(AlgebraicProperty t)
-        {
-            switch(t)
-            {
-            case AlgebraicProperty::Commutative:
-                return "Commutative";
-            case AlgebraicProperty::Associative:
-                return "Associative";
-            case AlgebraicProperty::Count:
-            default:
-                break;
-            }
-            Throw<FatalError>("Invalid EvaluationTime");
-        }
-
-        /*
-         * to string
-         */
-
-        struct ExpressionToStringVisitor
-        {
-            std::string operator()(ScaledMatrixMultiply const& expr) const
-            {
-                return concatenate("ScaledMatrixMultiply(",
-                                   call(expr.matA),
-                                   ", ",
-                                   call(expr.matB),
-                                   ", ",
-                                   call(expr.matC),
-                                   ", ",
-                                   call(expr.scaleA),
-                                   ", ",
-                                   call(expr.scaleB),
-                                   ")");
-            }
-
-            template <CTernary Expr>
-            std::string operator()(Expr const& expr) const
-            {
-                return concatenate(ExpressionInfo<Expr>::name(),
-                                   "(",
-                                   call(expr.lhs),
-                                   ", ",
-                                   call(expr.r1hs),
-                                   ", ",
-                                   call(expr.r2hs),
-                                   ")");
-            }
-
-            template <CBinary Expr>
-            std::string operator()(Expr const& expr) const
-            {
-                return concatenate(
-                    ExpressionInfo<Expr>::name(), "(", call(expr.lhs), ", ", call(expr.rhs), ")");
-            }
-            template <CUnary Expr>
-            std::string operator()(Expr const& expr) const
-            {
-                return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
-            }
-
-            std::string operator()(Register::ValuePtr const& expr) const
-            {
-                // This allows an unallocated register value to be rendered into a string which
-                // improves debugging by allowing the string representation of that expression
-                // to be put into the source file as a comment.
-                // Trying to generate the code for the expression will throw an exception.
-
-                std::string tostr = "UNALLOCATED";
-                if(expr->canUseAsOperand())
-                    tostr = expr->toString();
-
-                return tostr + ":" + TypeAbbrev(expr->variableType());
-            }
-            std::string operator()(CommandArgumentPtr const& expr) const
-            {
-                if(expr)
-                    return concatenate("CommandArgument(", expr->name(), ")");
-                else
-                    return "CommandArgument(nullptr)";
-            }
-
-            std::string operator()(CommandArgumentValue const& expr) const
-            {
-                return std::visit(
-                    [](auto const& val) { return concatenate(val) + typeid(val).name(); }, expr);
-            }
-
-            std::string operator()(AssemblyKernelArgumentPtr const& expr) const
-            {
-                return expr->name;
-            }
-
-            std::string operator()(WaveTilePtr const& expr) const
-            {
-                return "WaveTile";
-            }
-
-            std::string operator()(DataFlowTag const& expr) const
-            {
-                return concatenate("DataFlowTag(", expr.tag, ")");
-            }
-
-            std::string call(Expression const& expr) const
-            {
-                std::string comment = getComment(expr);
-                if(comment.length() > 0)
-                {
-                    return concatenate("{", comment, ": ", std::visit(*this, expr), "}");
-                }
-
-                return std::visit(*this, expr);
-            }
-
-            std::string call(ExpressionPtr expr) const
-            {
-                if(!expr)
-                    return "nullptr";
-
-                return call(*expr);
-            }
-        };
-
-        std::string toString(Expression const& expr)
-        {
-            auto visitor = ExpressionToStringVisitor();
-            return visitor.call(expr);
-        }
-
-        std::string toString(ExpressionPtr const& expr)
-        {
-            auto visitor = ExpressionToStringVisitor();
-            return visitor.call(expr);
-        }
-
         ExpressionPtr fromKernelArgument(AssemblyKernelArgument const& arg)
         {
             return std::make_shared<Expression>(std::make_shared<AssemblyKernelArgument>(arg));
-        }
-
-        /*
-         * result type
-         */
-
-        class ExpressionResultTypeVisitor
-        {
-            std::weak_ptr<Context> m_context;
-
-        public:
-            template <typename T>
-            requires(CBinary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
-            {
-                auto lhsVal = call(expr.lhs);
-                auto rhsVal = call(expr.rhs);
-
-                auto regType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
-
-                VariableType varType;
-
-                if constexpr(std::same_as<T, ArithmeticShiftR>)
-                {
-                    varType = lhsVal.varType;
-                }
-                else
-                {
-                    varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
-                }
-
-                return {regType, varType};
-            }
-
-            ResultType operator()(ScaledMatrixMultiply const& expr)
-            {
-                auto matAVal = call(expr.matA);
-                auto matBVal = call(expr.matB);
-                auto matCVal = call(expr.matC);
-
-                auto regType = Register::PromoteType(matAVal.regType, matBVal.regType);
-                regType      = Register::PromoteType(regType, matCVal.regType);
-
-                auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
-                varType      = VariableType::Promote(varType, matCVal.varType);
-
-                return {regType, varType};
-            }
-
-            template <typename T>
-            requires(CTernary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
-            {
-                auto lhsVal  = call(expr.lhs);
-                auto r1hsVal = call(expr.r1hs);
-                auto r2hsVal = call(expr.r2hs);
-
-                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
-                regType      = Register::PromoteType(regType, r2hsVal.regType);
-
-                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
-                varType      = VariableType::Promote(varType, r2hsVal.varType);
-
-                return {regType, varType};
-            }
-
-            template <typename T>
-            requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
-            {
-                auto argVal = call(expr.arg);
-
-                if constexpr(std::same_as<T, MagicShifts>)
-                    return {argVal.regType, DataType::Int32};
-
-                return argVal;
-            }
-
-            template <DataType DATATYPE>
-            ResultType operator()(Convert<DATATYPE> const& expr)
-            {
-                auto argVal = call(expr.arg);
-                return {argVal.regType, DATATYPE};
-            }
-
-            template <DataType DATATYPE>
-            ResultType operator()(SRConvert<DATATYPE> const& expr)
-            {
-                // SR conversion currently only supports FP8 and BF8
-                static_assert(DATATYPE == DataType::FP8 || DATATYPE == DataType::BF8);
-                auto argVal = call(expr.lhs);
-                return {argVal.regType, DATATYPE};
-            }
-
-            ResultType operator()(BitFieldExtract const& expr)
-            {
-                auto argVal = call(expr.arg);
-                return {argVal.regType, expr.outputDataType};
-            }
-
-            template <typename T>
-            requires(CBinary<T>&& CComparison<T>) ResultType operator()(T const& expr)
-            {
-                auto lhsVal = call(expr.lhs);
-                auto rhsVal = call(expr.rhs);
-
-                // Can't compare between two different types on the GPU.
-                AssertFatal(lhsVal.regType == Register::Type::Literal
-                                || rhsVal.regType == Register::Type::Literal
-                                || lhsVal.varType == rhsVal.varType,
-                            ShowValue(lhsVal.varType),
-                            ShowValue(rhsVal.varType),
-                            ShowValue(expr));
-
-                auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
-                auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
-
-                switch(inputRegType)
-                {
-                case Register::Type::Literal:
-                    return {Register::Type::Literal, DataType::Bool};
-                case Register::Type::Scalar:
-                    return {Register::Type::Scalar, DataType::Bool};
-                case Register::Type::Vector:
-                    if(auto context = m_context.lock(); context)
-                    {
-                        if(context->kernel()->wavefront_size() == 32)
-                            return {Register::Type::Scalar, DataType::Bool32};
-                        return {Register::Type::Scalar, DataType::Bool64};
-                    }
-                    // If you are reading this, it probably means that this visitor
-                    // was called on an expression with registers that didn't have
-                    // a context.
-                    Throw<FatalError>("Need context to determine wavefront size", ShowValue(expr));
-                default:
-                    break;
-                }
-                Throw<FatalError>("Invalid register types for comparison: ",
-                                  ShowValue(lhsVal.regType),
-                                  ShowValue(rhsVal.regType));
-            }
-
-            template <typename T>
-            requires(CBinary<T>&& CLogical<T>) ResultType operator()(T const& expr)
-            {
-                auto lhsVal = call(expr.lhs);
-                auto rhsVal = call(expr.rhs);
-                return logical(lhsVal, rhsVal);
-            }
-
-            ResultType logical(ResultType lhsVal, ResultType rhsVal)
-            {
-                if(lhsVal.varType == DataType::Bool
-                   && (rhsVal.varType == DataType::Bool32 || rhsVal.varType == DataType::Bool64))
-                {
-                    std::swap(lhsVal, rhsVal);
-                }
-
-                // Can't compare between two different types on the GPU.
-                AssertFatal(
-                    lhsVal.regType == Register::Type::Literal
-                        || rhsVal.regType == Register::Type::Literal
-                        || lhsVal.varType == rhsVal.varType
-                        || (lhsVal.varType == DataType::Bool32 && rhsVal.varType == DataType::Bool)
-                        || (lhsVal.varType == DataType::Bool64 && rhsVal.varType == DataType::Bool),
-                    ShowValue(lhsVal.varType),
-                    ShowValue(rhsVal.varType));
-
-                auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
-                auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
-
-                switch(inputRegType)
-                {
-                case Register::Type::Scalar:
-                    if(inputVarType == DataType::Bool || inputVarType == DataType::Bool32
-                       || inputVarType == DataType::Bool64)
-                    {
-                        return {Register::Type::Scalar, DataType::Bool};
-                    }
-                default:
-                    break;
-                }
-                Throw<FatalError>("Invalid register types for logical: ",
-                                  ShowValue(lhsVal.regType),
-                                  ShowValue(lhsVal.varType),
-                                  ShowValue(rhsVal.regType),
-                                  ShowValue(rhsVal.varType),
-                                  ShowValue(inputRegType),
-                                  ShowValue(inputVarType));
-            }
-
-            template <typename T>
-            requires(CUnary<T>&& CLogical<T>) ResultType operator()(T const& expr)
-            {
-                auto val = call(expr.arg);
-                switch(val.regType)
-                {
-                case Register::Type::Scalar:
-                {
-                    if(!(val.varType == DataType::Bool || val.varType == DataType::Bool32
-                         || val.varType == DataType::Bool64 || val.varType == DataType::Raw32))
-                    {
-                        Throw<FatalError>("Invalid variable type for unary logical: ",
-                                          ShowValue(val.varType));
-                    }
-                    return val;
-                }
-                default:
-                    Throw<FatalError>("Invalid register type for unary logical: ",
-                                      ShowValue(val.regType));
-                }
-            }
-
-            ResultType operator()(Conditional const& expr)
-            {
-                auto lhsVal  = call(expr.lhs);
-                auto r1hsVal = call(expr.r1hs);
-                auto r2hsVal = call(expr.r2hs);
-
-                AssertFatal(r2hsVal.varType == r1hsVal.varType,
-                            ShowValue(r1hsVal.varType),
-                            ShowValue(r2hsVal.varType));
-                auto varType = r2hsVal.varType;
-
-                if(lhsVal.varType == DataType::Bool32 || lhsVal.varType == DataType::Bool64
-                   || lhsVal.regType == Register::Type::Vector
-                   || r1hsVal.regType == Register::Type::Vector
-                   || r2hsVal.regType == Register::Type::Vector)
-                {
-                    return {Register::Type::Vector, varType};
-                }
-                return {Register::Type::Scalar, varType};
-            }
-
-            ResultType operator()(CommandArgumentPtr const& expr)
-            {
-                AssertFatal(expr != nullptr, "Null subexpression!");
-                return {Register::Type::Literal, expr->variableType()};
-            }
-
-            ResultType operator()(AssemblyKernelArgumentPtr const& expr)
-            {
-                AssertFatal(expr != nullptr, "Null subexpression!");
-                return {Register::Type::Scalar, expr->variableType};
-            }
-
-            ResultType operator()(CommandArgumentValue const& expr)
-            {
-                return {Register::Type::Literal, variableType(expr)};
-            }
-
-            ResultType operator()(Register::ValuePtr const& expr)
-            {
-                AssertFatal(expr != nullptr, "Null subexpression!");
-                m_context = expr->context();
-                return {expr->regType(), expr->variableType()};
-            }
-
-            ResultType operator()(DataFlowTag const& expr)
-            {
-                return {expr.regType, expr.varType};
-            }
-
-            ResultType operator()(WaveTilePtr const& expr)
-            {
-                return call(expr->vgpr);
-            }
-
-            ResultType call(Expression const& expr)
-            {
-                return std::visit(*this, expr);
-            }
-
-            ResultType call(ExpressionPtr const& expr)
-            {
-                return call(*expr);
-            }
-        };
-
-        VariableType resultVariableType(ExpressionPtr const& expr)
-        {
-            ExpressionResultTypeVisitor v;
-            return v.call(expr).varType;
-        }
-
-        Register::Type resultRegisterType(ExpressionPtr const& expr)
-        {
-            ExpressionResultTypeVisitor v;
-            return v.call(expr).regType;
-        }
-
-        ResultType resultType(ExpressionPtr const& expr)
-        {
-            ExpressionResultTypeVisitor v;
-            return v.call(expr);
-        }
-
-        ResultType resultType(Expression const& expr)
-        {
-            ExpressionResultTypeVisitor v;
-            return v.call(expr);
         }
 
         /*
@@ -997,7 +547,12 @@ namespace rocRoller
 
         std::ostream& operator<<(std::ostream& stream, ResultType const& obj)
         {
-            return stream << "{" << obj.regType << ", " << obj.varType << "}";
+            return stream << toString(obj);
+        }
+
+        std::string toString(ResultType const& obj)
+        {
+            return concatenate("{", obj.regType, ", ", obj.varType, "}");
         }
 
         std::ostream& operator<<(std::ostream& stream, ExpressionPtr const& expr)
@@ -1083,6 +638,91 @@ namespace rocRoller
         int complexity(Expression const& expr)
         {
             return ExpressionComplexityVisitor().call(expr);
+        }
+
+        template <CExpression T>
+        struct ContainsVisitor
+        {
+            bool operator()(T const& expr)
+            {
+                return true;
+            }
+
+            template <CUnary U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return call(expr.arg);
+            }
+
+            template <CBinary U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return call(expr.lhs) || call(expr.rhs);
+            }
+
+            template <CTernary U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
+            }
+
+            template <CValue U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return false;
+            }
+
+            bool call(Expression const& expr)
+            {
+                return std::visit(*this, expr);
+            }
+
+            bool call(ExpressionPtr const& expr)
+            {
+                if(!expr)
+                    return false;
+
+                return call(*expr);
+            }
+        };
+
+        template <CExpression T>
+        __attribute__((noinline)) bool contains(Expression const& expr)
+        {
+            ContainsVisitor<T> v;
+            return v.call(expr);
+        }
+
+        template <CExpression T>
+        __attribute__((noinline)) bool contains(ExpressionPtr expr)
+        {
+            AssertFatal(expr != nullptr);
+
+            return contains<T>(*expr);
+        }
+
+        /**
+         * Force instantiation of contains() for every type of expression, so
+         * that it can be implemented in the .cpp file.
+         */
+        struct ContainsInstantiateVisitor
+        {
+            ExpressionPtr expr;
+
+            template <CExpression T>
+            bool operator()(T const& exprType)
+            {
+                return contains<T>(expr);
+            }
+        };
+
+        bool containsType(ExpressionPtr exprType, ExpressionPtr expr)
+        {
+            AssertFatal(exprType != nullptr);
+
+            ContainsInstantiateVisitor v{expr};
+
+            return std::visit(v, *exprType);
         }
     }
 }

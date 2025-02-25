@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16...3.19)
 
 project(rocRoller VERSION 1.0)
 
@@ -316,7 +316,9 @@ set(rocroller_src
  lib/source/Expression.cpp
  lib/source/Expression_evaluate.cpp
  lib/source/Expression_generate.cpp
+ lib/source/Expression_resultType.cpp
  lib/source/Expression_serialization.cpp
+ lib/source/Expression_toString.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
  lib/source/GPUInstructionInfo.cpp
@@ -335,6 +337,7 @@ set(rocroller_src
  lib/source/Assemblers/InProcessAssembler_assemble.cpp
  lib/source/Assemblers/SubprocessAssembler.cpp
 
+ lib/source/ExpressionTransformations/CombineShifts.cpp
  lib/source/ExpressionTransformations/DataFlowTagPropagation.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp
  lib/source/ExpressionTransformations/LowerExponential.cpp
@@ -598,6 +601,7 @@ set(
   test/unit/ComponentTest.cpp
   test/unit/ControlGraphTest.cpp
   test/unit/ConversionInstructions/Convert_F16_F32.cpp
+  test/unit/ConversionTest.cpp
   test/unit/CoordinateGraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/CostTest.cpp
@@ -617,10 +621,6 @@ set(
   test/unit/GPUInstructionInfoTest.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
-  test/unit/ConversionTest.cpp
-  test/unit/F8Test.cpp
-  test/unit/F6Test.cpp
-  test/unit/FP4Test.cpp
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp
@@ -712,9 +712,15 @@ set(
   test/catch/TestKernels.cpp
 
   test/catch/BinaryExpressionTest.cpp
+  test/catch/CommandArgumentValueTest.cpp
   test/catch/CustomAssertionTest.cpp
   test/catch/CustomMatcherTest.cpp
+  test/catch/ExpressionIdenticalTest.cpp
+  test/catch/ExpressionSerializationTest.cpp
   test/catch/ExpressionTest.cpp
+  test/catch/ExpressionToStringTest.cpp
+  test/catch/ExpressionTransformationTest.cpp
+  test/catch/FastArithmeticTest.cpp
   test/catch/KernelArgumentsTest.cpp
   test/catch/KernelGraphConstraintsTest.cpp
   test/catch/LargerLDSTest.cpp

@@ -55,21 +55,25 @@ namespace rocRoller
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
 
-                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
-                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
-
-                if(eval_lhs && eval_rhs && std::holds_alternative<ShiftL>(*lhs))
+                if(auto const* shift = std::get_if<ShiftL>(lhs.get()))
                 {
-                    auto shift   = std::get<ShiftL>(*lhs);
-                    auto comment = shift.comment + expr.comment;
-                    return std::make_shared<Expression>(
-                        ShiftLAdd({shift.lhs, shift.rhs, rhs, comment}));
+                    bool eval_shift_rhs = evaluationTimes(shift->rhs)[EvaluationTime::Translate];
+                    if(eval_shift_rhs)
+                    {
+                        auto comment = shift->comment + expr.comment;
+                        auto rv      = shiftLAdd(shift->lhs, shift->rhs, rhs);
+                        setComment(rv, comment);
+                        return rv;
+                    }
                 }
 
-                if(std::holds_alternative<Multiply>(*lhs))
+                if(auto const* multiply = std::get_if<Multiply>(lhs.get()))
                 {
-                    auto multiply = std::get<Multiply>(*lhs);
-                    return multiplyAdd(multiply.lhs, multiply.rhs, rhs);
+                    auto comment = multiply->comment + expr.comment;
+
+                    auto rv = multiplyAdd(multiply->lhs, multiply->rhs, rhs);
+                    setComment(rv, comment);
+                    return rv;
                 }
 
                 return std::make_shared<Expression>(Add({lhs, rhs, expr.comment}));
@@ -80,19 +84,19 @@ namespace rocRoller
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
 
-                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
-                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+                if(auto const* add = std::get_if<Add>(lhs.get()))
+                {
+                    bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+                    if(eval_rhs)
+                    {
+                        auto add     = std::get<Add>(*lhs);
+                        auto comment = add.comment + expr.comment;
+                        return std::make_shared<Expression>(
+                            AddShiftL{add.lhs, add.rhs, rhs, comment});
+                    }
+                }
 
-                if(eval_lhs && eval_rhs && std::holds_alternative<Add>(*lhs))
-                {
-                    auto add     = std::get<Add>(*lhs);
-                    auto comment = add.comment + expr.comment;
-                    return std::make_shared<Expression>(AddShiftL{add.lhs, add.rhs, rhs, comment});
-                }
-                else
-                {
-                    return std::make_shared<Expression>(expr);
-                }
+                return std::make_shared<Expression>(expr);
             }
 
             template <CValue Value>

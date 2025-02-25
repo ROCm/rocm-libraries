@@ -576,6 +576,7 @@ namespace rocRoller
         ExpressionPtr magicShifts(ExpressionPtr a);
         ExpressionPtr magicSign(ExpressionPtr a);
 
+        ExpressionPtr convert(VariableType vt, ExpressionPtr a);
         ExpressionPtr convert(DataType dt, ExpressionPtr a);
 
         template <DataType DATATYPE>
@@ -740,7 +741,10 @@ namespace rocRoller
         EvaluationTimes evaluationTimes(ExpressionPtr const& expr);
         EvaluationTimes evaluationTimes(Expression const& expr);
 
-        VariableType   resultVariableType(ExpressionPtr const& expr);
+        VariableType resultVariableType(Expression const& expr);
+        VariableType resultVariableType(ExpressionPtr const& expr);
+
+        Register::Type resultRegisterType(Expression const& expr);
         Register::Type resultRegisterType(ExpressionPtr const& expr);
 
         struct ResultType
@@ -749,8 +753,10 @@ namespace rocRoller
             VariableType   varType;
             bool           operator==(ResultType const&) const = default;
         };
-        ResultType    resultType(ExpressionPtr const& expr);
-        ResultType    resultType(Expression const& expr);
+        ResultType resultType(ExpressionPtr const& expr);
+        ResultType resultType(Expression const& expr);
+
+        std::string   toString(ResultType const& obj);
         std::ostream& operator<<(std::ostream&, ResultType const&);
 
         /**
@@ -801,6 +807,13 @@ namespace rocRoller
         CommandArgumentValue evaluate(ExpressionPtr const& expr);
         CommandArgumentValue evaluate(Expression const& expr);
 
+        /**
+         * Evaluate an expression if its evaluationTime is Translate, returns nullopt
+         * otherwise.
+         */
+        std::optional<CommandArgumentValue> tryEvaluate(ExpressionPtr const& expr);
+        std::optional<CommandArgumentValue> tryEvaluate(Expression const& expr);
+
         bool canEvaluateTo(CommandArgumentValue val, ExpressionPtr const& expr);
 
         /**
@@ -809,6 +822,19 @@ namespace rocRoller
          */
         CommandArgumentValue evaluate(ExpressionPtr const& expr, RuntimeArguments const& args);
         CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args);
+
+        /**
+         * Splits an expression and returns its operands in a tuple.
+         *
+         * Return type:
+         * std::tuple<ExpressionPtr> for unary expressions
+         * std::tuple<ExpressionPtr, ExpressionPtr> for binary expressions
+         * std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr> for ternary expressions
+         *
+         * Throws if expr is not of type Expr.
+         */
+        template <typename Expr>
+        requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) auto split(ExpressionPtr expr);
 
         /**
          * Returns an approximate total complexity for an expression, to be used as a heuristic.
@@ -823,6 +849,18 @@ namespace rocRoller
 
         std::string   toYAML(ExpressionPtr const& expr);
         ExpressionPtr fromYAML(std::string const& str);
+
+        /**
+         * Returns true if expr is of type T or if expr contains a subexpression of type T.
+         */
+        template <CExpression T>
+        bool contains(ExpressionPtr expr);
+
+        /**
+         * Returns true if expr is of type T or if expr contains a subexpression of type T.
+         */
+        template <CExpression T>
+        bool contains(Expression const& expr);
 
     } // namespace Expression
 } // namespace rocRoller

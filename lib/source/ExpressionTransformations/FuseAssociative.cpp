@@ -65,15 +65,15 @@ namespace rocRoller
 
                     bool eval_rhs = evaluationTimes(lhs_op.rhs)[EvaluationTime::Translate];
 
-                    OP operation;
                     if(eval_rhs)
                     {
+                        OP operation;
                         operation.lhs = lhs_op.lhs;
                         operation.rhs
                             = simplify(std::make_shared<Expression>(Add{lhs_op.rhs, literal(rhs)}));
-                    }
 
-                    return std::make_shared<Expression>(operation);
+                        return std::make_shared<Expression>(operation);
+                    }
                 }
                 return nullptr;
             }
@@ -104,7 +104,9 @@ namespace rocRoller
                 ExpressionPtr rv;
 
                 if(eval_lhs && eval_rhs)
+                {
                     rv = literal(evaluate(std::make_shared<Expression>(Expr{lhs, rhs})));
+                }
                 else if(CCommutativeBinary<Expr> && eval_lhs)
                 {
                     rv = associativeBinary.call(rhs, evaluate(lhs));
@@ -209,7 +211,9 @@ namespace rocRoller
                 ExpressionPtr rv;
 
                 if(eval_lhs && eval_rhs)
+                {
                     rv = literal(evaluate(std::make_shared<Expression>(Expr{lhs, rhs})));
+                }
                 else if(eval_rhs)
                 {
                     rv = collectedShift.call(lhs, evaluate(rhs));
@@ -235,7 +239,9 @@ namespace rocRoller
                 if(!expr)
                     return expr;
 
-                return std::visit(*this, *expr);
+                auto rv = std::visit(*this, *expr);
+
+                return rv;
             }
         };
 

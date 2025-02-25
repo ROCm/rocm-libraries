@@ -263,6 +263,9 @@ TEST_F(DataTypesTest, Promotions)
     ExpectEqual(DataType::Int64, DataType::Int32, DataType::Int64);
     ExpectEqual(DataType::Int64, DataType::Raw32, DataType::Int64);
     ExpectEqual(DataType::Int32, DataType::Raw32, DataType::Int32);
+
+    ExpectEqual(DataType::Bool32, DataType::Bool, DataType::Bool32);
+    ExpectEqual(DataType::Bool64, DataType::Bool, DataType::Bool64);
 }
 
 TEST_F(DataTypesTest, GetIntegerType)

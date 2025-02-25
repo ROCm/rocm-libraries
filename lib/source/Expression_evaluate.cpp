@@ -793,7 +793,14 @@ namespace rocRoller
 
             CommandArgumentValue call(Expression const& expr)
             {
-                return std::visit(*this, expr);
+                auto rv = std::visit(*this, expr);
+
+                auto exprType = resultVariableType(expr);
+                auto result   = resultType(rv).varType;
+                AssertFatal(
+                    exprType == result, ShowValue(expr), ShowValue(exprType), ShowValue(result));
+
+                return rv;
             }
 
             CommandArgumentValue call(ExpressionPtr const& expr)

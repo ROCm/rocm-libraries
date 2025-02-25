@@ -445,7 +445,9 @@ namespace rocRoller
                                                                        DataType::None});
                                        }
                                        else
+                                       {
                                            return m_expr.at(sinput);
+                                       }
                                    });
 
                     // Translate XOp to an Expression
