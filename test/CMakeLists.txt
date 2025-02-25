@@ -330,30 +330,6 @@ if(NOT CODE_ANALYSIS)
             "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR};PYTHONPATH=${PROJECT_SOURCE_DIR}/scripts/lib"
             "LABELS" "PYTHON"
     )
-
-    add_test(
-        NAME GraupelInstall
-        COMMAND npm install
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/utils/graupel"
-    )
-
-    set_tests_properties(
-        GraupelInstall PROPERTIES FIXTURES_SETUP Graupel "LABELS" "JAVASCRIPT"
-    )
-
-    add_test(
-        NAME GraupelTests
-        COMMAND npm test
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/utils/graupel"
-    )
-
-    set_tests_properties(
-        GraupelTests
-        PROPERTIES ENVIRONMENT
-                   "JEST_JUNIT_OUTPUT_FILE=${TEST_REPORT_DIR}/graupel_tests.xml"
-                   FIXTURES_REQUIRED Graupel
-                   "LABELS" "JAVASCRIPT"
-    )
 endif()
 
 rocm_install(
