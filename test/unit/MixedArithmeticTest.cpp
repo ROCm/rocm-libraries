@@ -442,7 +442,9 @@ namespace MixedArithmeticTest
             m_context->schedule(m_context->kernel()->postamble());
             m_context->schedule(m_context->kernel()->amdgpu_metadata());
 
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             int numResultValues = param.lhsValues.size() * param.rhsValues.size();
             int numResultBytes  = numResultValues * param.resultVarType.getElementSize();
@@ -682,7 +684,9 @@ namespace MixedArithmeticTest
             m_context->schedule(m_context->kernel()->postamble());
             m_context->schedule(m_context->kernel()->amdgpu_metadata());
 
-            CommandKernel commandKernel(m_context);
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
+            commandKernel.generateKernel();
 
             int numResultValues
                 = param.arg1Values.size() * param.arg2Values.size() * param.arg3Values.size();

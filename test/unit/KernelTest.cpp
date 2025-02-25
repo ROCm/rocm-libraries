@@ -152,6 +152,7 @@ amdhsa.kernels:
    .vgpr_count: 0
    .agpr_count: 0
    .max_flat_workgroup_size: 1
+   .workgroup_size: [ 1, 1, 1 ]
    .args: []
 ...
 .end_amdgpu_metadata
@@ -198,6 +199,7 @@ amdhsa.kernels:
       .vgpr_count: 2
       .agpr_count: 0
       .max_flat_workgroup_size: 256
+      .workgroup_size: [ 16, 8, 2 ]
       .args:
           - .name: foo
             .size: 4
@@ -386,7 +388,9 @@ amdhsa.kernels:
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto         ptr  = make_shared_device<float>();
         float        val  = 6.0f;

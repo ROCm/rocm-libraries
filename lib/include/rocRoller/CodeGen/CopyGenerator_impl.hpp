@@ -350,13 +350,13 @@ namespace rocRoller
                                                       std::vector<Register::ValuePtr> values,
                                                       std::string                     comment) const
     {
-        if(values.size() == 2
-           && (dest && dest->regType() == Register::Type::Vector
-               && dest->variableType().dataType == DataType::Halfx2)
-           && (values[0] && values[0]->regType() == Register::Type::Vector
-               && values[0]->variableType().dataType == DataType::Half)
-           && (values[1] && values[1]->regType() == Register::Type::Vector
-               && values[1]->variableType().dataType == DataType::Half))
+        if(values.size() == 2 && values[0] && values[1]
+           && values[0]->regType() == Register::Type::Vector
+           && values[1]->regType() == Register::Type::Vector
+           && values[0]->variableType().getElementSize() == 2
+           && values[1]->variableType().getElementSize() == 2
+           && dest->regType() == Register::Type::Vector
+           && dest->variableType().getElementSize() == 4)
         {
             co_yield packHalf(dest, values[0], values[1]);
         }

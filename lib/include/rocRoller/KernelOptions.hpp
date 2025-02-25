@@ -35,35 +35,10 @@ namespace rocRoller
         unsigned int loadGlobalWidth  = 8;
         unsigned int storeLocalWidth  = 4;
         unsigned int storeGlobalWidth = 4;
-        unsigned int unrollX          = 0;
-        unsigned int unrollY          = 0;
-        unsigned int unrollK          = 0;
-
-        bool fuseLoops                 = true;
-        bool allowAmbiguousMemoryNodes = false;
-
-        bool prefetch          = false;
-        int  prefetchInFlight  = 1;
-        int  prefetchLDSFactor = 0;
-        bool prefetchMixMemOps = false;
-
-        bool streamK        = false;
-        bool streamKTwoTile = false;
-
-        std::vector<int>  loopOverOutputTilesDimensions    = {};
-        std::string       loopOverOutputTilesTopLoop       = XLOOP;
-        std::vector<uint> loopOverOutputTilesCoordSizes    = {};
-        uint              loopOverOutputTilesIteratedTiles = 0;
-
-        uint numScratchTiles = 0;
-
-        EnumBitset<LayoutType> transposeMemoryAccess = {};
 
         bool assertWaitCntState = true;
 
-        bool packMultipleElementsInto1VGPR = true;
-        bool enableLongDwordInstructions   = true;
-        bool setNextFreeVGPRToMax          = false;
+        bool setNextFreeVGPRToMax = false;
 
         /**
          * The scale values are used for scaled MFMA instructions.

@@ -156,7 +156,8 @@ namespace ConvertInstructionsTest
                 auto deviceOutput = make_shared_device(output);
 
                 // rocRoller creates the commandKernel and launch the kernel
-                CommandKernel    commandKernel(m_context);
+                CommandKernel commandKernel;
+                commandKernel.setContext(m_context);
                 CommandArguments commandArgs = command->createArguments();
                 commandArgs.setArgument(outputTag, ArgumentType::Value, deviceOutput.get());
                 commandArgs.setArgument(inputTag, ArgumentType::Value, deviceInput.get());

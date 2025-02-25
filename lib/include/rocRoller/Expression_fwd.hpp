@@ -110,6 +110,8 @@ namespace rocRoller
             // --- Convert Operations ---
             Convert<DataType::Half>,
             Convert<DataType::Halfx2>,
+            Convert<DataType::BFloat16>,
+            Convert<DataType::BFloat16x2>,
             Convert<DataType::FP8x4>,
             Convert<DataType::BF8x4>,
             Convert<DataType::FP6x16>,

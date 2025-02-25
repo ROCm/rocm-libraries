@@ -105,7 +105,10 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         solutionParams.problemParams.k * solutionParams.problemParams.n, -1.0, 1.0);
     std::vector<C> h_C = random.vector<C>(
         solutionParams.problemParams.m * solutionParams.problemParams.n, -1.0, 1.0);
-    std::vector<D> h_D(solutionParams.problemParams.m * solutionParams.problemParams.n, 0.0);
+    std::vector<D> h_D(solutionParams.problemParams.m * solutionParams.problemParams.n,
+                       static_cast<D>(0.0));
+
+    auto context = rocRoller::Context::ForDefaultHipDevice(solutionParams.generateKernelName(), {});
 
     using unsegTypeA = typename UnsegmentedTypeOf<A>::type;
     using unsegTypeB = typename UnsegmentedTypeOf<B>::type;
@@ -138,6 +141,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
         if(defaultDevice.HasCapability(GPUCapability::ArchAccUnifiedRegs))
         {
             Client::GEMMClient::StreamKGEMMSolution<A, B, C, D> gemmKernel(solutionParams);
+            gemmKernel.setContext(context);
             result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
         }
         else
@@ -161,6 +165,7 @@ Client::GEMMClient::Result GEMM(Client::GEMMClient::SolutionParameters const& so
             outfile << toYAML(gemmKernel.getKernel()->getKernelGraph());
         }
 
+        gemmKernel.setContext(context);
         auto result = gemmKernel.benchmark(runParams, checkResult, doVisualize, h_A, h_B, h_C, h_D);
 
         return result;
@@ -247,16 +252,18 @@ int main(int argc, const char* argv[])
               Arg({"trans_B"}, "N: B is not to be transposed.  T: B is to be transposed."));
     po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar."));
     po.addArg("beta", Arg({"b", "beta"}, "Beta scalar."));
-    po.addArg(
-        "type_A",
-        Arg({"type_A"},
-            "Datatype of A matrix [float | half | fp8 | bf8 | fp6 | bf6 | fp4].  Default: float."));
-    po.addArg(
-        "type_B",
-        Arg({"type_B"},
-            "Datatype of B matrix [float | half | fp8 | bf8 | fp6 | bf6 | fp4].  Default: float."));
-    po.addArg("type_C", Arg({"type_C"}, "Datatype of C matrix [float | half].  Default: float."));
-    po.addArg("type_D", Arg({"type_D"}, "Datatype of D matrix [float | half].  Default: float."));
+    po.addArg("type_A",
+              Arg({"type_A"},
+                  "Datatype of A matrix [float | half | bf16 | fp8 | bf8 | fp6 | bf6 | fp4].  "
+                  "Default: float."));
+    po.addArg("type_B",
+              Arg({"type_B"},
+                  "Datatype of B matrix [float | half | bf16 | fp8 | bf8 | fp6 | bf6 | fp4].  "
+                  "Default: float."));
+    po.addArg("type_C",
+              Arg({"type_C"}, "Datatype of C matrix [float | half | bf16].  Default: float."));
+    po.addArg("type_D",
+              Arg({"type_D"}, "Datatype of D matrix [float | half | bf16].  Default: float."));
     po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
     po.addArg("hgemm",
               Arg({"hgemm"},
@@ -457,6 +464,18 @@ int main(int argc, const char* argv[])
             && problem.typeD == "half")
     {
         result = GEMM<Half, Half, Half, Half>(solution, runParams, checkResult, doVisualize);
+    }
+    else if(problem.typeA == "bf16" && problem.typeB == "bf16" && problem.typeC == "float"
+            && problem.typeD == "float")
+    {
+        result
+            = GEMM<BFloat16, BFloat16, float, float>(solution, runParams, checkResult, doVisualize);
+    }
+    else if(problem.typeA == "bf16" && problem.typeB == "bf16" && problem.typeC == "bf16"
+            && problem.typeD == "bf16")
+    {
+        result = GEMM<BFloat16, BFloat16, BFloat16, BFloat16>(
+            solution, runParams, checkResult, doVisualize);
     }
     else if(problem.typeA == "fp8" && problem.typeB == "fp8" && problem.typeC == "float"
             && problem.typeD == "float")

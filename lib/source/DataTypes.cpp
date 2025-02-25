@@ -110,6 +110,8 @@ namespace rocRoller
             return "Int64";
         case DataType::BFloat16:
             return "BFloat16";
+        case DataType::BFloat16x2:
+            return "BFloat16x2";
         case DataType::Raw32:
             return "Raw32";
         case DataType::UInt8:
@@ -180,6 +182,8 @@ namespace rocRoller
             return "I64";
         case DataType::BFloat16:
             return "B";
+        case DataType::BFloat16x2:
+            return "2xB";
         case DataType::Raw32:
             return "R";
         case DataType::UInt8:
@@ -482,6 +486,8 @@ namespace rocRoller
         registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();
         registerTypeInfo<Halfx2>();
+        registerTypeInfo<BFloat16>();
+        registerTypeInfo<BFloat16x2>();
         registerTypeInfo<double>();
         registerTypeInfo<float>();
         registerTypeInfo<std::complex<double>>();

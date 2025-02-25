@@ -220,14 +220,6 @@ namespace std
     {
         return static_cast<rocRoller::FP8>(std::cos(static_cast<float>(a)));
     }
-    inline rocRoller::FP8 exp2(const rocRoller::FP8& a)
-    {
-        return static_cast<rocRoller::FP8>(std::exp2(static_cast<float>(a)));
-    }
-    inline rocRoller::FP8 exp(const rocRoller::FP8& a)
-    {
-        return static_cast<rocRoller::FP8>(std::exp(static_cast<float>(a)));
-    }
 
     template <>
     struct is_floating_point<rocRoller::FP8> : true_type

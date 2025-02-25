@@ -204,6 +204,7 @@ namespace AddStreamKTest
                                                        rocRoller::KLOOP,
                                                        twoTile,
                                                        Expression::literal(numWGs),
+                                                       nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
         auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
@@ -405,6 +406,7 @@ namespace AddStreamKTest
                                                        rocRoller::KLOOP,
                                                        false,
                                                        Expression::literal(numWGs),
+                                                       nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
         auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);

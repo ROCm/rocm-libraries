@@ -25,8 +25,9 @@ namespace rocRoller
         class AddLDS : public GraphTransform
         {
         public:
-            AddLDS(ContextPtr context)
-                : m_context(context)
+            AddLDS(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
             {
             }
 
@@ -42,7 +43,8 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr m_context;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

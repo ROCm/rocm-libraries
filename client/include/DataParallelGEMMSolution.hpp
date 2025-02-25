@@ -33,8 +33,7 @@ namespace rocRoller
                     this->m_command  = makeCommand();
 
                     this->m_kernel = std::make_shared<CommandKernel>(
-                        makeKernel(makeKernelOptions(),
-                                   m_solutionParams.problemParams.m / m_solutionParams.macM,
+                        makeKernel(m_solutionParams.problemParams.m / m_solutionParams.macM,
                                    m_solutionParams.problemParams.n / m_solutionParams.macN));
                 }
 
@@ -53,6 +52,8 @@ namespace rocRoller
                     auto d_B = make_shared_device(h_B);
                     auto d_C = make_shared_device(h_C);
                     auto d_D = make_shared_device(h_D);
+
+                    this->m_kernel->generateKernel();
 
                     auto runtimeArgs = makeArgs(d_A, d_B, d_C, d_D);
 
@@ -181,44 +182,38 @@ namespace rocRoller
                     return command;
                 }
 
-                std::shared_ptr<KernelOptions> makeKernelOptions()
+                virtual void setCommandParameters(CommandParametersPtr params)
                 {
-                    auto kernelOptions     = std::make_shared<KernelOptions>();
-                    kernelOptions->unrollX = m_solutionParams.unrollX;
-                    kernelOptions->unrollY = m_solutionParams.unrollY;
+                    params->unrollX = m_solutionParams.unrollX;
+                    params->unrollY = m_solutionParams.unrollY;
 
                     if(m_solutionParams.prefetch)
                     {
-                        kernelOptions->prefetch          = true;
-                        kernelOptions->unrollK           = m_solutionParams.prefetchInFlight;
-                        kernelOptions->prefetchInFlight  = m_solutionParams.prefetchInFlight;
-                        kernelOptions->prefetchLDSFactor = m_solutionParams.prefetchLDSFactor;
+                        params->prefetch          = true;
+                        params->unrollK           = m_solutionParams.prefetchInFlight;
+                        params->prefetchInFlight  = m_solutionParams.prefetchInFlight;
+                        params->prefetchLDSFactor = m_solutionParams.prefetchLDSFactor;
 
                         if(m_solutionParams.prefetchLDSFactor != 0)
                         {
-                            kernelOptions->prefetchMixMemOps = true;
+                            params->prefetchMixMemOps = true;
                         }
                     }
                     else
                     {
-                        kernelOptions->prefetch = false;
+                        params->prefetch = false;
                     }
 
                     if(m_solutionParams.matchMemoryAccess)
                     {
-                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A]
+                        params->transposeMemoryAccess[LayoutType::MATRIX_A]
                             = m_solutionParams.problemParams.transA == TransposeType::T;
-                        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B]
+                        params->transposeMemoryAccess[LayoutType::MATRIX_B]
                             = m_solutionParams.problemParams.transB == TransposeType::T;
                     }
-
-                    kernelOptions->setNextFreeVGPRToMax = false;
-                    return kernelOptions;
                 }
 
-                CommandKernel makeKernel(std::shared_ptr<KernelOptions> kernelOptions,
-                                         uint                           num_workgroup_x,
-                                         uint                           num_workgroup_y)
+                CommandKernel makeKernel(uint num_workgroup_x, uint num_workgroup_y)
                 {
                     AssertFatal(m_solutionParams.problemParams.m % m_solutionParams.macM == 0,
                                 "MacroTile size mismatch (M)");
@@ -244,6 +239,13 @@ namespace rocRoller
                     {
                         wave_m = 32;
                         wave_n = 32;
+                        wave_k = 8;
+                        wave_b = 1;
+                    }
+                    else if constexpr(std::is_same_v<A, BFloat16> && std::is_same_v<B, BFloat16>)
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
                         wave_k = 8;
                         wave_b = 1;
                     }
@@ -315,7 +317,6 @@ namespace rocRoller
 
                     auto params = std::make_shared<CommandParameters>();
                     params->setManualKernelDimension(2);
-                    // TODO: Calculate these values internally based on workgroup sizes.
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
@@ -357,7 +358,9 @@ namespace rocRoller
                     auto NZ = std::make_shared<Expression::Expression>(1u);
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-                    params->setManualWorkitemCount({NX, NY, NZ});
+
+                    auto launch = std::make_shared<CommandLaunchParameters>();
+                    launch->setManualWorkitemCount({NX, NY, NZ});
 
                     if(m_solutionParams.scheduler != "")
                     {
@@ -366,20 +369,21 @@ namespace rocRoller
                         Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
                     }
 
-                    auto postParams = std::make_shared<CommandParameters>();
-                    postParams->setManualWavefrontCount(
+                    params->setManualWavefrontCount(
                         {static_cast<uint>(m_solutionParams.macM / wave_m / wavetilePerWavefrontM),
                          static_cast<uint>(m_solutionParams.macN / wave_n
                                            / wavetilePerWavefrontN)});
 
+                    this->setCommandParameters(params);
+
                     auto kernelName = m_solutionParams.generateKernelName();
 
                     // Build GEMM kernel
-                    return CommandKernel(BenchmarkSolution::m_command,
-                                         kernelName,
-                                         params,
-                                         postParams,
-                                         kernelOptions);
+                    auto commandKernel = CommandKernel(BenchmarkSolution::m_command, kernelName);
+                    commandKernel.setCommandParameters(params);
+                    commandKernel.setLaunchParameters(launch);
+
+                    return commandKernel;
                 }
 
                 CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,

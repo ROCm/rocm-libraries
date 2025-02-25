@@ -128,7 +128,9 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto         ptr  = make_shared_device<float>();
         float        val  = 6.0f;

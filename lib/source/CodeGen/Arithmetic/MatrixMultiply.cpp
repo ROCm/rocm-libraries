@@ -22,6 +22,8 @@ namespace rocRoller
                 return "f32";
             case DataType::Halfx2:
                 return "f16";
+            case DataType::BFloat16x2:
+                return "bf16";
             case DataType::FP8x4:
                 return "_fp8_fp8";
             case DataType::BF8x4:

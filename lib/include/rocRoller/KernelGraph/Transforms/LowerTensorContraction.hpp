@@ -16,7 +16,7 @@ namespace rocRoller
         class LowerTensorContraction : public GraphTransform
         {
         public:
-            LowerTensorContraction(std::shared_ptr<CommandParameters> params, ContextPtr context)
+            LowerTensorContraction(CommandParametersPtr params, ContextPtr context)
                 : m_params(params)
                 , m_context(context)
             {
@@ -29,8 +29,8 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<CommandParameters> m_params;
-            ContextPtr                         m_context;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

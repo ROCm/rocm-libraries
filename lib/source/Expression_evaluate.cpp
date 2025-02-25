@@ -48,6 +48,9 @@ namespace rocRoller
         template <typename T>
         concept CIntegral = std::integral<T> && !std::same_as<bool, T>;
 
+        template <typename T>
+        concept isFP32 = std::same_as<float, T>;
+
         /**
          * Visitor for a specific Operation expression.  Performs that
          * specific Operation (Add, subtract, etc).  Does not walk the
@@ -552,7 +555,7 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<Exponential2> : public UnaryEvaluatorVisitor<Exponential2>
         {
-            template <std::floating_point T>
+            template <isFP32 T>
             constexpr T evaluate(T const& arg) const
             {
                 return std::exp2(arg);
@@ -562,7 +565,7 @@ namespace rocRoller
         template <>
         struct OperationEvaluatorVisitor<Exponential> : public UnaryEvaluatorVisitor<Exponential>
         {
-            template <std::floating_point T>
+            template <isFP32 T>
             constexpr T evaluate(T const& arg) const
             {
                 return std::exp(arg);

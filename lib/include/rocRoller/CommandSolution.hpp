@@ -20,6 +20,7 @@ namespace rocRoller
     {
     public:
         CommandParameters();
+
         /**
          * Set (reset) a dimensions properties.
          */
@@ -44,14 +45,6 @@ namespace rocRoller
         void setManualWorkgroupSize(std::array<unsigned int, 3> const&);
         std::optional<std::array<unsigned int, 3>> getManualWorkgroupSize() const;
 
-        /**
-         * Manually override work item counts.
-         *
-         * TODO remove this.
-         */
-        void setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const&);
-        std::optional<std::array<Expression::ExpressionPtr, 3>> getManualWorkitemCount() const;
-
         void setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts);
         std::optional<std::pair<uint, uint>> getManualWavefrontCounts() const;
 
@@ -72,20 +65,47 @@ namespace rocRoller
 
         /**
          * @brief Enable/disable wave-storage strategy.
-     *
-     * When storing through LDS; the LDS traffic is done following
-     * the MFMA accumulator layout intead of straight threads.
+         *
+         * When storing through LDS; the LDS traffic is done following
+         * the MFMA accumulator layout intead of straight threads.
          */
         void setSplitStoreTileIntoWaveBlocks(bool);
         bool getSplitStoreTileIntoWaveBlocks() const;
 
+        /**
+         * Lowering parameters.
+         */
+        bool allowAmbiguousMemoryNodes   = false;
+        bool enableLongDwordInstructions = true;
+
+        uint numScratchTiles = 0;
+
+        EnumBitset<LayoutType> transposeMemoryAccess = {};
+
+        bool packMultipleElementsInto1VGPR = true;
+
+        unsigned int unrollX   = 0;
+        unsigned int unrollY   = 0;
+        unsigned int unrollK   = 0;
+        bool         fuseLoops = true;
+
+        bool prefetch          = false;
+        int  prefetchInFlight  = 1;
+        int  prefetchLDSFactor = 0;
+        bool prefetchMixMemOps = false;
+
+        bool streamK        = false;
+        bool streamKTwoTile = false;
+
+        std::vector<int>  loopOverOutputTilesDimensions    = {};
+        std::string       loopOverOutputTilesTopLoop       = XLOOP;
+        std::vector<uint> loopOverOutputTilesCoordSizes    = {};
+        uint              loopOverOutputTilesIteratedTiles = 0;
+
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
-        std::optional<std::array<Expression::ExpressionPtr, 3>>                     m_workitemCount;
         std::optional<std::pair<uint, uint>> m_wavefrontCounts;
-        // TODO: replace it with the conditional node in the control graph
-        float m_beta;
 
         int m_kernelDimension = 0;
 
@@ -94,54 +114,69 @@ namespace rocRoller
         bool m_splitStoreTileIntoWaveBlocks = true;
     };
 
+    /**
+     * CommandLaunchParameters - manual kernel launch parameters.
+     *
+     * TODO: Remove this!
+     */
+    class CommandLaunchParameters
+    {
+    public:
+        CommandLaunchParameters() = default;
+
+        /**
+         * Manually override work item counts.
+         */
+        void setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const&);
+        std::optional<std::array<Expression::ExpressionPtr, 3>> getManualWorkitemCount() const;
+
+    private:
+        std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
+    };
+
     class CommandKernel
     {
     public:
-        /**
-         * Initialize a CommandKernel with a Context. When this is done, instructions
-         * should have already been scheduled within the context. This is probably
-         * only useful for creating unit tests.
-         */
-        CommandKernel(ContextPtr);
+        CommandKernel() = default;
 
         /**
-         * Create a CommandKernel based on a Command object. This will generate
-         * a kernel and allow the launchKernel method to be called.
-         */
-        CommandKernel(CommandPtr command, std::string name);
-
-        /**
-         * Create a CommandKernel based on a Command object. This will
-         * generate a kernel and allow the launchKernel method to be
-         * called.
+         * @brief Create a CommandKernel based on a Command object.
          *
-         * @param preParams CommandParameters applied to the kernel
-         * graph after translation from a command to a graph but
-         * before all lowering stages.
-         *
-         * @param postParams CommandParameters applied to the kernel
-         * graph after all lowering stages but before code-generation.
+         * Callers should set the context, parameters, and then call
+         * `generateKernel`.
          */
-        // TODO: When we have a more robust way of parameterizing the
-        // graph, the two sets of command parameters might be
-        // unnecessary.  Currently we need two sets because:
-        // 1. before lowering you need to specify, eg, tile sizes
-        // 2. graph ids/indexing change during lowering.
-        // 3. during lowering new nodes might be created that didn't before
-        // 4. before code-generating you need to specify, eg, how many wavefronts
-        CommandKernel(CommandPtr                         command,
-                      std::string                        name,
-                      std::shared_ptr<CommandParameters> preParams,
-                      std::shared_ptr<CommandParameters> postParams    = nullptr,
-                      std::shared_ptr<KernelOptions>     kernelOptions = nullptr,
-                      ContextPtr                         ctx           = nullptr);
+        CommandKernel(CommandPtr command, std::string kernelName);
 
-        CommandKernel(CommandPtr                      command,
-                      ContextPtr                      ctx,
-                      KernelGraph::KernelGraph const& kernelGraph);
+        /**
+         * @brief Set context.
+	 *
+	 * This must be called before `generateKernel`.
+         */
+        void setContext(ContextPtr);
+
+        /**
+         * @brief CommandParameters applied to the kernel graph after
+         * translation from a command to a graph but before all
+         * lowering stages.
+         */
+        void                 setCommandParameters(CommandParametersPtr commandParams);
+        CommandParametersPtr getCommandParameters() const;
+
+        /**
+         * @brief Generates the kernel, assembles it, and records the
+         * info needed to launch the kernel, given command arguments.
+         */
+        void generateKernel();
+
+        void loadKernel();
 
         void addPredicate(Expression::ExpressionPtr expression);
         bool matchesPredicates(/* args */) const;
+
+        /**
+	 * @brief Set (manual) launch parameters.
+	 */
+        void setLaunchParameters(CommandLaunchParametersPtr);
 
         /**
          * Load (and compile) a kernel from the assembly source file `fileName`.
@@ -197,23 +232,18 @@ namespace rocRoller
         hipFunction_t getHipFunction() const;
 
     private:
-        CommandPtr m_command;
+        CommandPtr  m_command;
+        std::string m_name;
 
         std::vector<Expression::ExpressionPtr> m_predicates;
 
-        KernelGraph::KernelGraph           m_kernelGraph;
-        ContextPtr                         m_context;
-        std::shared_ptr<ExecutableKernel>  m_executableKernel;
-        std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;
-        std::shared_ptr<KernelOptions>     m_kernelOptions;
+        KernelGraph::KernelGraph          m_kernelGraph;
+        ContextPtr                        m_context;
+        std::shared_ptr<ExecutableKernel> m_executableKernel;
+        CommandParametersPtr              m_commandParameters;
+        CommandLaunchParametersPtr        m_launchParameters;
 
         Generator<Instruction> commandComments();
-
-        /**
-         * Generates the whole kernel, assembles it, and records the
-         * info needed to launch the kernel, given command arguments.
-         */
-        void generateKernel(std::string);
 
         void generateKernelGraph(std::string name);
         void generateKernelSource();
@@ -221,7 +251,6 @@ namespace rocRoller
         Generator<Instruction> kernelInstructions();
 
         void assembleKernel();
-        void loadKernel();
     };
 
     class CommandSolution

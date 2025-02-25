@@ -392,7 +392,8 @@ namespace TransposeLoadsTest
                 trLoadIdx[16 * x + y] = 32 * x + y;
 
         generateTransposeLoad<ElementType, PackType, unalignedVGPRs>(m_context, MN, K);
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
 
         auto d_a         = make_shared_device(packedData);
         auto d_result    = make_shared_device<uint32_t>(result.size());

@@ -1,9 +1,6 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
-#include <random>
-#include <variant>
-
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -45,8 +42,8 @@ namespace KernelGraphTest
 
         void SetUp()
         {
-            CurrentGPUContextFixture::SetUp();
             Settings::getInstance()->set(Settings::SaveAssembly, true);
+            CurrentGPUContextFixture::SetUp();
 
             fastArith = Expression::FastArithmetic(m_context);
         }
@@ -1020,9 +1017,9 @@ namespace KernelGraphTest
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
-        auto unrollLoopsTransform     = std::make_shared<UnrollLoops>(m_context);
+        auto unrollLoopsTransform     = std::make_shared<UnrollLoops>(params, m_context);
         auto fuseLoopsTransform       = std::make_shared<FuseLoops>();
-        auto addLDSTransform          = std::make_shared<AddLDS>(m_context);
+        auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
         auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
         auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
 
@@ -1103,8 +1100,8 @@ namespace KernelGraphTest
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
-        auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(m_context);
-        auto addLDSTransform             = std::make_shared<AddLDS>(m_context);
+        auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(params, m_context);
+        auto addLDSTransform             = std::make_shared<AddLDS>(params, m_context);
         auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
         auto addComputeIndexTransform    = std::make_shared<AddComputeIndex>();
         auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
@@ -1286,7 +1283,7 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
         auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
-        auto addLDSTransform          = std::make_shared<AddLDS>(m_context);
+        auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
         auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
 
         auto kgraph1 = kgraph0.transform(lowerTileTransform);
@@ -1518,6 +1515,8 @@ namespace KernelGraphTest
             = example.getRuntimeArguments(nx, d_alpha.get(), beta, d_a.get(), d_b.get(), d_c.get());
 
         CommandKernel commandKernel(command, testKernelName());
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
@@ -1603,6 +1602,8 @@ namespace KernelGraphTest
         command->addOperation(rocRoller::Operations::T_Store_Linear(reluTag, reluTensorTag));
 
         CommandKernel commandKernel(command, "LeakyRelu");
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         size_t nx    = 64;
         float  alpha = 0.9;
@@ -1666,6 +1667,8 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<Operations::Operation>(std::move(store_B)));
 
         CommandKernel commandKernel(command, "LinearCopy");
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         size_t nx = 64;
 
@@ -1730,12 +1733,18 @@ namespace KernelGraphTest
 
         auto command     = example.getCommand();
         auto params      = example.getCommandParameters(nx, ny);
+        auto launch      = example.getCommandLaunchParameters(nx, ny);
         auto runtimeArgs = example.getRuntimeArguments(nx, ny, d_a.get(), d_b.get());
 
         std::string colName    = (override) ? "ColOverride" : "";
         std::string kernelName = "TensorTileCopy" + colName + TypeInfo<T>::Name();
 
-        commandKernel = std::make_shared<CommandKernel>(command, kernelName, params);
+        commandKernel = std::make_shared<CommandKernel>(command, kernelName);
+        commandKernel->setContext(Context::ForDefaultHipDevice(kernelName));
+        commandKernel->setCommandParameters(params);
+        commandKernel->generateKernel();
+
+        commandKernel->setLaunchParameters(launch);
         commandKernel->launchKernel(runtimeArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
@@ -1849,8 +1858,14 @@ namespace KernelGraphTest
         auto command     = example.getCommand();
         auto runtimeArgs = example.getRuntimeArguments(nx, ny, d_a.get(), d_b.get(), d_c.get());
         auto params      = example.getCommandParameters(nx, ny);
+        auto launch      = example.getCommandLaunchParameters(nx, ny);
 
-        CommandKernel commandKernel(command, "TensorTileAdd", params);
+        CommandKernel commandKernel(command, "TensorTileAdd");
+        commandKernel.setContext(m_context);
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
+
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * ny * sizeof(int), hipMemcpyDefault),
@@ -2673,11 +2688,11 @@ namespace KernelGraphTest
         auto kgraph = example.getKernelGraph();
         auto params = example.getCommandParameters();
 
-        setKernelOptions({.unrollK           = 3,
-                          .prefetch          = true,
-                          .prefetchInFlight  = 3,
-                          .prefetchLDSFactor = 3,
-                          .prefetchMixMemOps = true});
+        params->unrollK           = 3;
+        params->prefetch          = true;
+        params->prefetchInFlight  = 3;
+        params->prefetchLDSFactor = 3;
+        params->prefetchMixMemOps = true;
 
         std::vector<GraphTransformPtr> transforms;
         transforms.push_back(std::make_shared<UpdateParameters>(params));
@@ -2685,7 +2700,7 @@ namespace KernelGraphTest
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
         transforms.push_back(std::make_shared<ConnectWorkgroups>());
-        transforms.push_back(std::make_shared<AddLDS>(m_context));
+        transforms.push_back(std::make_shared<AddLDS>(params, m_context));
         transforms.push_back(std::make_shared<AddComputeIndex>());
         transforms.push_back(std::make_shared<AddDeallocate>());
 

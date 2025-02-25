@@ -190,6 +190,7 @@ add_executable(
   lib/source/Costs/Cost.cpp
   lib/source/DataTypes_F8_Utils.cpp
   lib/source/DataTypes_F6_Utils.cpp
+  lib/source/DataTypes_BF16_Utils.cpp
   lib/source/Error.cpp
   lib/source/Logging.cpp
   lib/source/Scheduler.cpp
@@ -264,6 +265,7 @@ set(rocroller_src
  lib/source/DataTypes_Utils.cpp
  lib/source/DataTypes_F8_Utils.cpp
  lib/source/DataTypes_F6_Utils.cpp
+ lib/source/DataTypes_BF16_Utils.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp
  lib/source/Expression.cpp

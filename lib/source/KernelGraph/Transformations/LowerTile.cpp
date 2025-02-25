@@ -1,4 +1,5 @@
 
+#include "CommandSolution_fwd.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
@@ -916,18 +917,21 @@ namespace rocRoller
         /**
          * @brief Create an internal tile backed by a ThreadTile.
          */
-        int createInternalTile(KernelGraph& graph,
-                               VariableType varType,
-                               int          macTileTag,
-                               ContextPtr   context)
+        int createInternalTile(KernelGraph&         graph,
+                               VariableType         varType,
+                               int                  macTileTag,
+                               CommandParametersPtr params,
+
+                               ContextPtr context)
         {
-            return createInternalTile(graph, varType, macTileTag, {1, 1}, context);
+            return createInternalTile(graph, varType, macTileTag, {1, 1}, params, context);
         }
 
         int createInternalTile(KernelGraph&                     graph,
                                VariableType                     varType,
                                int                              macTileTag,
                                std::vector<unsigned int> const& numWaveTiles,
+                               CommandParametersPtr             params,
                                ContextPtr                       context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -950,8 +954,7 @@ namespace rocRoller
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
 
-            auto useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
+            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
 
             // Load multiple smaller-precision (< 32-bit) elements into contiguous VGPRs
             bool packed     = false;
@@ -966,7 +969,7 @@ namespace rocRoller
                 packFactor = unsegmentedElementBits / elementBits;
             }
 
-            if(context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
+            if(params->packMultipleElementsInto1VGPR && packFactor > 1
                && thrTileM % packFactor == 0)
             {
                 thrTileM /= packFactor;
@@ -975,7 +978,7 @@ namespace rocRoller
             }
 
             // Enable the use of longer word instructions if possible
-            if(context->kernelOptions().enableLongDwordInstructions && (packed || packFactor <= 1))
+            if(params->enableLongDwordInstructions && (packed || packFactor <= 1))
             {
                 auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
                                          context->kernelOptions().loadLocalWidth);
@@ -1065,6 +1068,7 @@ namespace rocRoller
                                std::vector<int> const&          sdim,
                                VariableType const&              varType,
                                std::vector<unsigned int> const& jammedTiles,
+                               CommandParametersPtr             params,
                                ContextPtr                       context)
 
         {
@@ -1078,11 +1082,10 @@ namespace rocRoller
 
             auto useWaveAccess = macTile.memoryType == MemoryType::WAVE_LDS;
             auto useSwappedAccess
-                = useWaveAccess
-                  && context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
+                = useWaveAccess && params->transposeMemoryAccess[macTile.layoutType];
 
-            auto internalMacTileTag
-                = createInternalTile(graph, getVariableType(graph, loadTag), macTileTag, context);
+            auto internalMacTileTag = createInternalTile(
+                graph, getVariableType(graph, loadTag), macTileTag, params, context);
             auto ldsTag = graph.coordinates.addElement(LDS());
 
             auto internalTile  = *graph.coordinates.get<MacroTile>(internalMacTileTag);
@@ -1251,6 +1254,7 @@ namespace rocRoller
                                      int                              macTileTag,
                                      std::vector<int> const&          sdim,
                                      std::vector<unsigned int> const& jammedTiles,
+                                     CommandParametersPtr             params,
                                      ContextPtr                       context)
 
         {
@@ -1262,8 +1266,8 @@ namespace rocRoller
             auto workgroupSizes = context->kernel()->workgroupSize();
             auto wavefrontSize  = context->kernel()->wavefront_size();
 
-            auto internalMacTileTag
-                = createInternalTile(graph, getVariableType(graph, storeTag), macTileTag, context);
+            auto internalMacTileTag = createInternalTile(
+                graph, getVariableType(graph, storeTag), macTileTag, params, context);
             auto ldsTag = graph.coordinates.addElement(LDS());
 
             auto internalTile  = *graph.coordinates.get<MacroTile>(internalMacTileTag);
@@ -1294,8 +1298,7 @@ namespace rocRoller
 
             graph.coordinates.addElement(Flatten(), {iMacYStoreLDS, iMacXStoreLDS}, {ldsTag});
 
-            auto useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
+            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
 
             // Load from LDS to VGPRs
             {
@@ -1367,8 +1370,9 @@ namespace rocRoller
                                             int                              macTileTag,
                                             std::vector<int> const&          sdim,
                                             std::vector<unsigned int> const& jammedTiles,
-                                            bool       splitStoreTileIntoWaveBlocks,
-                                            ContextPtr context)
+                                            bool                 splitStoreTileIntoWaveBlocks,
+                                            CommandParametersPtr params,
+                                            ContextPtr           context)
 
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -1381,7 +1385,7 @@ namespace rocRoller
 
             // Pass "jammedTiles" so that internal tile is smaller.
             auto internalMacTileTag = createInternalTile(
-                graph, getVariableType(graph, storeTag), macTileTag, jammedTiles, context);
+                graph, getVariableType(graph, storeTag), macTileTag, jammedTiles, params, context);
 
             auto ldsTag = graph.coordinates.addElement(LDS());
 
@@ -1421,8 +1425,7 @@ namespace rocRoller
 
             graph.coordinates.addElement(Flatten(), {iMacYStoreLDS, iMacXStoreLDS}, {ldsTag});
 
-            auto useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
+            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
 
             // Load from LDS to VGPRs
             {
@@ -1536,13 +1539,11 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            LowerTileVisitor(std::shared_ptr<CommandParameters> params,
-                             ContextPtr                         context,
-                             bool                               splitStoreTileIntoWaveBlocks)
+            LowerTileVisitor(CommandParametersPtr params, ContextPtr context)
+
                 : BaseGraphVisitor(context)
                 , m_params(params)
                 , m_kernel(context->kernel())
-                , m_splitStoreTileIntoWaveBlocks(splitStoreTileIntoWaveBlocks)
             {
             }
 
@@ -1635,6 +1636,7 @@ namespace rocRoller
                                       sdims,
                                       varType,
                                       wavetilesPerWavefront,
+                                      m_params,
                                       m_context);
                     break;
                 default:
@@ -1715,6 +1717,7 @@ namespace rocRoller
                                             macTileTag,
                                             sdims,
                                             wavetilesPerWavefront,
+                                            m_params,
                                             m_context);
                     break;
                 case MemoryType::JAMMED_WAVE_LDS:
@@ -1725,7 +1728,8 @@ namespace rocRoller
                                                    macTileTag,
                                                    sdims,
                                                    wavetilesPerWavefront,
-                                                   m_splitStoreTileIntoWaveBlocks,
+                                                   m_params->getSplitStoreTileIntoWaveBlocks(),
+                                                   m_params,
                                                    m_context);
                     break;
                 default:
@@ -1739,15 +1743,14 @@ namespace rocRoller
             }
 
         private:
-            AssemblyKernelPtr                  m_kernel;
-            std::shared_ptr<CommandParameters> m_params;
-            bool                               m_splitStoreTileIntoWaveBlocks;
+            AssemblyKernelPtr    m_kernel;
+            CommandParametersPtr m_params;
         };
 
         KernelGraph LowerTile::apply(KernelGraph const& graph)
         {
             TIMER(t, "KernelGraph::lowerTile");
-            auto visitor = LowerTileVisitor(m_params, m_context, m_splitStoreTileIntoWaveBlocks);
+            auto visitor = LowerTileVisitor(m_params, m_context);
             return rewrite(graph, visitor);
         }
     }

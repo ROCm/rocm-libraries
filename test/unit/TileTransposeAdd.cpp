@@ -123,9 +123,15 @@ namespace TileTransposeAddTest
         params->setDimensionInfo(tagLoadB, macTile);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
 
-        CommandKernel commandKernel(command, "TensorTileAdd", params);
+        CommandKernel commandKernel(command, "TensorTileAdd");
+        commandKernel.setContext(Context::ForDefaultHipDevice("TensorTileAdd"));
+        commandKernel.setCommandParameters(params);
+        commandKernel.generateKernel();
+
+        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * ny * sizeof(int), hipMemcpyDefault),

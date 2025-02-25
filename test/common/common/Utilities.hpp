@@ -9,10 +9,11 @@
 #include <memory>
 #include <sstream>
 
-#include <hip/amd_detail/amd_hip_fp16.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -168,6 +169,8 @@ double epsilon()
     double rv = 0.0;
     if constexpr(std::is_same_v<T, __half>)
         rv = std::pow(2.0, -10);
+    else if constexpr(std::is_same_v<T, BFloat16>)
+        rv = std::pow(2.0, -5);
     else if constexpr(std::is_same_v<T, FP8>)
         rv = std::pow(2.0, -3);
     else if constexpr(std::is_same_v<T, BF8>)
@@ -278,6 +281,18 @@ namespace rocRoller
                float                      beta,
                bool                       transA = false,
                bool                       transB = true);
+
+    void CPUMM(std::vector<BFloat16>&       D,
+               const std::vector<BFloat16>& C,
+               const std::vector<BFloat16>& A,
+               const std::vector<BFloat16>& B,
+               int                          M,
+               int                          N,
+               int                          K,
+               float                        alpha,
+               float                        beta,
+               bool                         transA = false,
+               bool                         transB = true);
 
     template <typename TA, typename TB>
     void CPUMM(std::vector<float>&       D,

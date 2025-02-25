@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandSolution_fwd.hpp"
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
@@ -15,8 +16,9 @@ namespace rocRoller
         class UnrollLoops : public GraphTransform
         {
         public:
-            UnrollLoops(ContextPtr context)
-                : m_context(context)
+            UnrollLoops(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
             {
             }
 
@@ -27,7 +29,8 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr m_context;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

@@ -46,6 +46,8 @@ namespace VectorAddBenchmark
         auto vectorAdd = rocRollerTest::Graphs::VectorAdd<int>();
 
         CommandKernel commandKernel(vectorAdd.getCommand(), "VectorAdd");
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto runtimeArgs
             = vectorAdd.getRuntimeArguments(nx, d_alpha.get(), d_a.get(), d_b.get(), d_c.get());

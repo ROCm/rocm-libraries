@@ -152,21 +152,32 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
-        //  clang-format off
+        // clang-format off
         static_assert(
-            std::same_as<
-                T,
-                float> || std::same_as<T, double> || std::same_as<T, Half> || std::same_as<T, FP8> || std::same_as<T, BF8> || std::same_as<T, FP6> || std::same_as<T, BF6> || std::same_as<T, FP4>,
+            std::same_as<T, float>
+	    || std::same_as<T, double>
+	    || std::same_as<T, Half>
+	    || std::same_as<T, BFloat16>
+	    || std::same_as<T, FP8>
+	    || std::same_as<T, BF8>
+	    || std::same_as<T, FP6>
+	    || std::same_as<T, BF6>
+	    || std::same_as<T, FP4>,
             "Unsupported floating point type");
-        //  clang-format on
+        // clang-format on
 
+        // clang-format off
         if constexpr(
-            std::same_as<
-                T,
-                FP8> || std::same_as<T, BF8> || std::same_as<T, FP6> || std::same_as<T, BF6> || std::same_as<T, FP4>)
+            std::same_as<T, BFloat16>
+	    || std::same_as<T, FP8>
+	    || std::same_as<T, BF8>
+	    || std::same_as<T, FP6>
+	    || std::same_as<T, BF6>
+	    || std::same_as<T, FP4>)
         {
             return {};
         }
+        // clang-format on
         else
         {
             T one_over_two_pi;

@@ -105,6 +105,16 @@ namespace MatrixMultiplyTest
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
+            if constexpr(std::is_same_v<TA, BFloat16>)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_bf16);
+
+                // TODO Remove this when we can generate BF16 kernels on archs that don't support BF16
+                if(!isLocalDevice())
+                {
+                    GTEST_SKIP();
+                }
+            }
 
             auto dataTypeA = TypeInfo<TA>::Var.dataType;
             auto dataTypeB = TypeInfo<TB>::Var.dataType;
@@ -192,20 +202,15 @@ namespace MatrixMultiplyTest
             setCommandTensorArg(commandArgs, tagTensorB, descB, (TB*)d_B.get());
             setCommandTensorArg(commandArgs, tagTensorD, descD, d_D.get());
 
-            auto kernelOptions                           = std::make_shared<KernelOptions>();
-            kernelOptions->packMultipleElementsInto1VGPR = true;
-            kernelOptions->enableLongDwordInstructions   = true;
-
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = transA == "T";
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = transB == "T";
-
-            kernelOptions->scaleA = scaleA;
-            kernelOptions->scaleB = scaleB;
-
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-            params->setManualWorkitemCount({NX, NY, NZ});
+
+            params->packMultipleElementsInto1VGPR = true;
+            params->enableLongDwordInstructions   = true;
+
+            params->transposeMemoryAccess[LayoutType::MATRIX_A] = transA == "T";
+            params->transposeMemoryAccess[LayoutType::MATRIX_B] = transB == "T";
 
             // TODO: the translate step should figure out that there is a
             // T_Mul and do the right thing for the T_Load_Tiled commands
@@ -223,16 +228,21 @@ namespace MatrixMultiplyTest
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
+            params->setManualWavefrontCount({1u, 1u});
 
-            auto postParams = std::make_shared<CommandParameters>();
-            postParams->setManualWavefrontCount({1u, 1u});
+            commandKernel = std::make_shared<CommandKernel>(command, "MatrixMultiplyMacroTile");
+            commandKernel->setContext(m_context);
+            commandKernel->setCommandParameters(params);
+            m_context->setScale(scaleA, scaleB);
+            commandKernel->generateKernel();
 
-            setKernelOptions(*kernelOptions);
-            commandKernel = std::make_shared<CommandKernel>(
-                command, testKernelName(), params, postParams, kernelOptions, m_context);
+            auto launch = std::make_shared<CommandLaunchParameters>();
+            launch->setManualWorkitemCount({NX, NY, NZ});
+            commandKernel->setLaunchParameters(launch);
 
             if(isLocalDevice())
             {
+
                 commandKernel->launchKernel(commandArgs.runtimeArguments());
 
                 std::vector<ACC> D(M * N);
@@ -409,8 +419,6 @@ namespace MatrixMultiplyTest
             auto params = std::make_shared<CommandParameters>();
             params->setManualKernelDimension(2);
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-            params->setManualWorkitemCount({NX, NY, NZ});
-
             // TODO: the translate step should figure out that there is a
             // T_Mul and do the right thing for the T_Load_Tiled commands
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
@@ -420,16 +428,17 @@ namespace MatrixMultiplyTest
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
+            params->setManualWavefrontCount({2u, 2u});
 
-            auto postParams = std::make_shared<CommandParameters>();
-            postParams->setManualWavefrontCount({2u, 2u});
+            auto launch = std::make_shared<CommandLaunchParameters>();
+            launch->setManualWorkitemCount({NX, NY, NZ});
 
-            auto kernelOptions    = std::make_shared<KernelOptions>();
-            kernelOptions->scaleA = scaleA;
-            kernelOptions->scaleB = scaleB;
+            CommandKernel commandKernel(command, "MatrixMultiplyAB");
+            commandKernel.setContext(m_context);
+            commandKernel.setCommandParameters(params);
+            commandKernel.generateKernel();
 
-            CommandKernel commandKernel(
-                command, "MatrixMultiplyAB", params, postParams, kernelOptions);
+            commandKernel.setLaunchParameters(launch);
             if(isLocalDevice())
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -549,14 +558,18 @@ namespace MatrixMultiplyTest
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
             params->setDimensionInfo(tagLoadC, macTileC);
-
-            auto postParams = std::make_shared<CommandParameters>();
-            postParams->setManualWavefrontCount({2u, 2u});
-
+            params->setManualWavefrontCount({2u, 2u});
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-            params->setManualWorkitemCount({NX, NY, NZ});
 
-            CommandKernel commandKernel(command, "ABC", params, postParams);
+            CommandKernel commandKernel(command, "ABC");
+            commandKernel.setContext(m_context);
+            commandKernel.setCommandParameters(params);
+            commandKernel.generateKernel();
+
+            auto launch = std::make_shared<CommandLaunchParameters>();
+            launch->setManualWorkitemCount({NX, NY, NZ});
+            commandKernel.setLaunchParameters(launch);
+
             if(isLocalDevice())
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -594,6 +607,11 @@ namespace MatrixMultiplyTest
     class MatrixMultiplyTestGPUMixed
         : public BaseMatrixMultiplyContextFixture<
               std::tuple<rocRoller::DataType, rocRoller::DataType, int>>
+    {
+    };
+
+    class MatrixMultiplyTestGPUBFloat16
+        : public BaseMatrixMultiplyContextFixture<std::tuple<int, int, int>>
     {
     };
 
@@ -647,6 +665,19 @@ namespace MatrixMultiplyTest
 
         EXPECT_EQ(expectedLocalWriteOffset, 128);
         EXPECT_EQ(numLocalRead, 16);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_FP32)
+    {
+        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        matrixMultiplyMacroTile<BFloat16, BFloat16, float>(mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUBFloat16, GPU_MatrixMultiplyMacroTile_BF16_BF16)
+    {
+        auto [mfma_m, mfma_n, mfma_k] = std::get<std::tuple<int, int, int>>(GetParam());
+        matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16>(
+            mfma_m, mfma_n, mfma_k, 1, 2.e-6, false);
     }
 
     TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
@@ -1502,4 +1533,10 @@ namespace MatrixMultiplyTest
                              ScaledMatrixMultiplyTestGPU,
                              ::testing::Combine(::testing::Values("gfx950"),
                                                 ::testing::Values(16, 32)));
+    INSTANTIATE_TEST_SUITE_P(
+        MatrixMultiplyTestGPUBFloat16,
+        MatrixMultiplyTestGPUBFloat16,
+        ::testing::Combine(mfmaSupportedISAValues(),
+                           ::testing::Values(std::tuple<int, int, int>{32, 32, 4},
+                                             std::tuple<int, int, int>{16, 16, 8})));
 }

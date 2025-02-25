@@ -192,24 +192,28 @@ namespace GEMMDriverTest
                                       DataDirection::ReadWrite,
                                       rocRoller::SCRATCH);
 
-            auto kernelOptions                           = std::make_shared<KernelOptions>();
-            kernelOptions->fuseLoops                     = gemm.fuseLoops;
-            kernelOptions->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
-            kernelOptions->unrollK                       = gemm.unrollK;
-            kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
-            kernelOptions->prefetch                      = gemm.prefetch;
-            kernelOptions->prefetchInFlight              = gemm.prefetchInFlight;
-            kernelOptions->prefetchLDSFactor             = gemm.prefetchLDSFactor;
-            kernelOptions->prefetchMixMemOps             = gemm.prefetchMixMemOps;
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
-            kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+            auto params = std::make_shared<CommandParameters>();
+            params->setManualKernelDimension(2);
+            // TODO: Calculate these values internally based on workgroup sizes.
+            params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
+
+            params->fuseLoops                     = gemm.fuseLoops;
+            params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
+            params->unrollK                       = gemm.unrollK;
+            params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
+            params->prefetch                      = gemm.prefetch;
+            params->prefetchInFlight              = gemm.prefetchInFlight;
+            params->prefetchLDSFactor             = gemm.prefetchLDSFactor;
+            params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
+            params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
+            params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
             if(gemm.loopOverTiles > 0)
             {
-                kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                kernelOptions->loopOverOutputTilesCoordSizes
+                params->loopOverOutputTilesDimensions = {0, 1};
+                params->loopOverOutputTilesCoordSizes
                     = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
-                kernelOptions->loopOverOutputTilesIteratedTiles = 2;
+                params->loopOverOutputTilesIteratedTiles = 2;
             }
 
             if(gemm.streamK)
@@ -221,18 +225,12 @@ namespace GEMMDriverTest
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
 
-                kernelOptions->numScratchTiles
-                    = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
+                params->numScratchTiles = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
 
-                kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                kernelOptions->streamK                       = true;
-                kernelOptions->streamKTwoTile                = gemm.streamKTwoTile;
+                params->loopOverOutputTilesDimensions = {0, 1};
+                params->streamK                       = true;
+                params->streamKTwoTile                = gemm.streamKTwoTile;
             }
-
-            auto params = std::make_shared<CommandParameters>();
-            params->setManualKernelDimension(2);
-            // TODO: Calculate these values internally based on workgroup sizes.
-            params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
             auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                 {gemm.macM, gemm.macK},
@@ -262,20 +260,24 @@ namespace GEMMDriverTest
             params->setDimensionInfo(tagRelu, macTileD);
 
             params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
-            params->setManualWorkitemCount({NX, NY, NZ});
 
             rocRoller::Log::getLogger()->debug(
                 "GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
             rocRoller::Log::getLogger()->debug(
                 "GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
 
-            auto postParams = std::make_shared<CommandParameters>();
-            postParams->setManualWavefrontCount(
+            params->setManualWavefrontCount(
                 {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
                  static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
-            CommandKernel commandKernel(
-                command, testKernelName(), params, postParams, kernelOptions);
+            CommandKernel commandKernel(command, testKernelName());
+            commandKernel.setContext(m_context);
+            commandKernel.setCommandParameters(params);
+            commandKernel.generateKernel();
+
+            auto launch = std::make_shared<CommandLaunchParameters>();
+            launch->setManualWorkitemCount({NX, NY, NZ});
+            commandKernel.setLaunchParameters(launch);
 
             CommandArguments commandArgs = command->createArguments();
 

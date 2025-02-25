@@ -235,7 +235,6 @@ namespace rocRollerTest
         else
             genHalfPrecisionMultiplyAdd(m_context, prob, N);
 
-        CommandKernel     commandKernel(m_context);
         RandomGenerator   random(314273u);
         auto              a = random.vector<Half>(N, -1.0, 1.0);
         auto              b = random.vector<Half>(N, -1.0, 1.0);
@@ -251,6 +250,9 @@ namespace rocRollerTest
         commandArgs.setArgument(prob.aTag, ArgumentType::Value, d_a.get());
         commandArgs.setArgument(prob.bTag, ArgumentType::Value, d_b.get());
 
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(Half) * N, hipMemcpyDefault),
@@ -456,7 +458,6 @@ namespace rocRollerTest
         HalfPrecisionProblem prob;
         genHalfPrecisionPack(m_context, prob, N);
 
-        CommandKernel     commandKernel(m_context);
         RandomGenerator   random(316473u);
         auto              a = random.vector<Half>(N, -1.0, 1.0);
         auto              b = random.vector<Half>(N, -1.0, 1.0);
@@ -472,6 +473,9 @@ namespace rocRollerTest
         commandArgs.setArgument(prob.aTag, ArgumentType::Value, d_a.get());
         commandArgs.setArgument(prob.bTag, ArgumentType::Value, d_b.get());
 
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(
@@ -567,9 +571,15 @@ namespace rocRollerTest
         params->setDimensionInfo(tagC, macTileVGPR);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
 
-        CommandKernel commandKernel(command, "HalfPrecisionAdd", params);
+        auto launch = std::make_shared<CommandLaunchParameters>();
+        launch->setManualWorkitemCount({NX, NY, NZ});
+
+        CommandKernel commandKernel(command, "HalfPrecisionAdd");
+        commandKernel.setContext(Context::ForDefaultHipDevice("HalfPrecisionAdd"));
+        commandKernel.setCommandParameters(params);
+        commandKernel.setLaunchParameters(launch);
+        commandKernel.generateKernel();
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * ny * sizeof(Half), hipMemcpyDefault),

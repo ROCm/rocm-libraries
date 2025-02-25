@@ -363,7 +363,8 @@ namespace rocRoller
 
                 CommandKernel makeKernel()
                 {
-                    CommandKernel commandKernel(m_context);
+                    CommandKernel commandKernel;
+                    commandKernel.setContext(m_context);
                     commandKernel.loadKernelFromAssembly(
                         "tensile_asm/Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1.s",
                         "Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1");

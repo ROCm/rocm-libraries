@@ -174,7 +174,9 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto         ptr  = make_shared_device<float>();
         float        val  = 6.0f;
@@ -324,7 +326,9 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto         h_ptr  = make_shared_device<int>();
         int          h_val  = 11;
@@ -431,7 +435,9 @@ namespace rocRollerTest
         int64_t result   = 0;
         auto    d_result = make_shared_device<int64_t>();
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         CommandArguments commandArgs = command->createArguments();
         commandArgs.setArgument(resultTag, ArgumentType::Value, d_result.get());
@@ -586,7 +592,9 @@ namespace rocRollerTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        CommandKernel commandKernel(m_context);
+        CommandKernel commandKernel;
+        commandKernel.setContext(m_context);
+        commandKernel.generateKernel();
 
         auto         h_ptr  = make_shared_device<int>();
         int          h_val  = 11;

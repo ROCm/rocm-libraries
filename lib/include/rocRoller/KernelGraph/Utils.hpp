@@ -382,10 +382,11 @@ namespace rocRoller
          *
          * Implemented in LowerTile.cpp.
          */
-        int createInternalTile(KernelGraph& graph,
-                               VariableType varType,
-                               int          macTileTag,
-                               ContextPtr   context);
+        int createInternalTile(KernelGraph&         graph,
+                               VariableType         varType,
+                               int                  macTileTag,
+                               CommandParametersPtr params,
+                               ContextPtr           context);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.  The
@@ -397,6 +398,7 @@ namespace rocRoller
                                VariableType                     varType,
                                int                              macTileTag,
                                std::vector<unsigned int> const& numWaveTiles,
+                               CommandParametersPtr             params,
                                ContextPtr                       context);
 
         /**

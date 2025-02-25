@@ -71,276 +71,289 @@ namespace rocRollerTest
 
     class F6Test : public GPUContextFixtureParam<rocRoller::DataType>
     {
-    };
-
-    /*
-     * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
-     * GPU, buffer_store to CPU
-     */
-    void genF6x16BufferLoadAndStore(rocRoller::ContextPtr m_context, int num_f6, DataType F6x16Type)
-    {
-        int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
-
-        auto k = m_context->kernel();
-
-        k->setKernelName("BufferLoadAndStoreF6x16");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        auto resultTag  = command->allocateTag();
-        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
-
-        auto aTag  = command->allocateTag();
-        auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
-
-        k->addArgument({"result",
-                        {DataType::UInt32, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        resultExpr});
-        k->addArgument(
-            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly, aExpr});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-
-            auto vgprSerial = m_context->kernel()->workitemIndex()[0];
-
-            int  size = num_f6 / numF6PerF6x16;
-            auto v_a  = Register::Value::Placeholder(m_context,
-                                                    Register::Type::Vector,
-                                                    F6x16Type,
-                                                    size,
-                                                    Register::AllocationOptions::FullyContiguous());
-
-            co_yield v_a->allocate();
-
-            auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-            co_yield bufDesc->setup();
-            co_yield bufDesc->setBasePointer(s_a);
-            co_yield bufDesc->setSize(Register::Value::Literal(N));
-            co_yield bufDesc->setOptions(Register::Value::Literal(0x00020000));
-
-            auto bufInstOpts = rocRoller::BufferInstructionOptions();
-
-            co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-            co_yield bufDesc->setBasePointer(s_result);
-            co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-    }
-
-    /**
-     * Packs F6 to F6x16 on CPU, flat_load that into F6x16 to GPU,
-     * flat_store to CPU
-     */
-    void genF6x16FlatLoadAndStore(rocRoller::ContextPtr m_context, int num_f6, DataType F6x16Type)
-    {
-        int  N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
-        auto k = m_context->kernel();
-
-        k->setKernelName("FlatLoadAndStoreF6x16");
-        k->setKernelDimensions(1);
-
-        auto command = std::make_shared<Command>();
-
-        auto resultTag  = command->allocateTag();
-        auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
-
-        auto aTag  = command->allocateTag();
-        auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
-
-        k->addArgument({"result",
-                        {DataType::UInt32, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        resultExpr});
-        k->addArgument(
-            {"a", {DataType::UInt32, PointerType::PointerGlobal}, DataDirection::ReadOnly, aExpr});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::UInt32, PointerType::PointerGlobal},
-                                               1);
-
-            auto v_ptr
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::UInt32, PointerType::PointerGlobal},
-                                               1);
-
-            int  size = num_f6 / numF6PerF6x16;
-            auto v_a  = Register::Value::Placeholder(m_context,
-                                                    Register::Type::Vector,
-                                                    F6x16Type,
-                                                    size,
-                                                    Register::AllocationOptions::FullyContiguous());
-
-            co_yield v_a->allocate();
-            co_yield v_ptr->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
-
-            co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
-
-            co_yield m_context->mem()->loadFlat(v_a, v_ptr, 0, N);
-            co_yield m_context->mem()->storeFlat(v_result, v_a, 0, N);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-    }
-
-    void executeF6x16LoadAndStore(rocRoller::ContextPtr m_context,
-                                  int                   num_f6,
-                                  DataType              F6x16Type,
-                                  int                   isFlat)
-    {
-        std::vector<uint8_t> data(num_f6);
-        for(uint32_t i = 0; i < num_f6; i++)
+    public:
+        /*
+         * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
+         * GPU, buffer_store to CPU
+         */
+        void genF6x16BufferLoadAndStore(int num_f6, DataType F6x16Type)
         {
-            data[i] = (i + 10) % 64;
+            int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
+
+            auto k = m_context->kernel();
+
+            k->setKernelName("BufferLoadAndStoreF6x16");
+            k->setKernelDimensions(1);
+
+            auto command = std::make_shared<Command>();
+
+            auto resultTag  = command->allocateTag();
+            auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+
+            auto aTag  = command->allocateTag();
+            auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
+
+            k->addArgument({"result",
+                            {DataType::UInt32, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            resultExpr});
+            k->addArgument({"a",
+                            {DataType::UInt32, PointerType::PointerGlobal},
+                            DataDirection::ReadOnly,
+                            aExpr});
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+
+                auto vgprSerial = m_context->kernel()->workitemIndex()[0];
+
+                int  size = num_f6 / numF6PerF6x16;
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   F6x16Type,
+                                                   size,
+                                                   Register::AllocationOptions::FullyContiguous());
+
+                co_yield v_a->allocate();
+
+                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+                co_yield bufDesc->setup();
+                co_yield bufDesc->setBasePointer(s_a);
+                co_yield bufDesc->setSize(Register::Value::Literal(N));
+                co_yield bufDesc->setOptions(Register::Value::Literal(0x00020000));
+
+                auto bufInstOpts = rocRoller::BufferInstructionOptions();
+
+                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield bufDesc->setBasePointer(s_result);
+                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
         }
 
-        auto f6x16_data = packF6x16(data);
-
-        std::vector<uint32_t> result(f6x16_data.size());
-
-        if(isFlat)
-            genF6x16FlatLoadAndStore(m_context, num_f6, F6x16Type);
-        else
-            genF6x16BufferLoadAndStore(m_context, num_f6, F6x16Type);
-
-        CommandKernel commandKernel(m_context);
-
-        auto d_a      = make_shared_device(f6x16_data);
-        auto d_result = make_shared_device<uint32_t>(result.size());
-
-        KernelArguments runtimeArgs;
-        runtimeArgs.append<void*>("result", d_result.get());
-        runtimeArgs.append<void*>("a", d_a.get());
-
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-        ASSERT_THAT(
-            hipMemcpy(
-                result.data(), d_result.get(), sizeof(uint32_t) * result.size(), hipMemcpyDefault),
-            HasHipSuccess(0));
-
-        auto actual_f6 = unpackF6x16(result);
-        for(int i = 0; i < data.size(); i++)
+        /**
+         * Packs F6 to F6x16 on CPU, flat_load that into F6x16 to GPU,
+         * flat_store to CPU
+         */
+        void genF6x16FlatLoadAndStore(int num_f6, DataType F6x16Type)
         {
-            EXPECT_EQ(actual_f6[i], data[i]);
+            int  N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
+            auto k = m_context->kernel();
+
+            k->setKernelName("FlatLoadAndStoreF6x16");
+            k->setKernelDimensions(1);
+
+            auto command = std::make_shared<Command>();
+
+            auto resultTag  = command->allocateTag();
+            auto resultExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::UInt32, PointerType::PointerGlobal}, resultTag, ArgumentType::Value));
+
+            auto aTag  = command->allocateTag();
+            auto aExpr = std::make_shared<Expression::Expression>(command->allocateArgument(
+                {DataType::UInt32, PointerType::PointerGlobal}, aTag, ArgumentType::Value));
+
+            k->addArgument({"result",
+                            {DataType::UInt32, PointerType::PointerGlobal},
+                            DataDirection::WriteOnly,
+                            resultExpr});
+            k->addArgument({"a",
+                            {DataType::UInt32, PointerType::PointerGlobal},
+                            DataDirection::ReadOnly,
+                            aExpr});
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+
+                auto v_result
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   1);
+
+                auto v_ptr
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   1);
+
+                int  size = num_f6 / numF6PerF6x16;
+                auto v_a
+                    = Register::Value::Placeholder(m_context,
+                                                   Register::Type::Vector,
+                                                   F6x16Type,
+                                                   size,
+                                                   Register::AllocationOptions::FullyContiguous());
+
+                co_yield v_a->allocate();
+                co_yield v_ptr->allocate();
+                co_yield v_result->allocate();
+
+                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
+
+                co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
+
+                co_yield m_context->mem()->loadFlat(v_a, v_ptr, 0, N);
+                co_yield m_context->mem()->storeFlat(v_result, v_a, 0, N);
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
         }
-    }
 
-    void loadStoreTileF6(ContextPtr                      m_context,
-                         std::shared_ptr<CommandKernel>& commandKernel,
-                         DataType                        F6Type,
-                         bool                            launch,
-                         size_t                          nx, // tensor size x
-                         size_t                          ny, // tensor size y
-                         int                             m, // macro tile size x
-                         int                             n, // macro tile size y
-                         int                             t_m = 1, // thread tile size x
-                         int                             t_n = 1) // thread tile size y
-    {
-        AssertFatal(nx % numF6PerF6x16 == 0, "Invalid F6 Dimensions");
-
-        int numF6    = nx * ny;
-        int numF6x16 = numF6 / numF6PerF6x16;
-
-        unsigned int workgroup_size_x = m / t_m;
-        unsigned int workgroup_size_y = n / t_n;
-
-        // each workgroup will get one tile; since workgroup_size matches m * n
-        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
-        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
-        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
-
-        // generate fp6 values
-        std::vector<uint8_t> data(numF6);
-        for(uint32_t i = 0; i < numF6; i++)
+        void executeF6x16LoadAndStore(int num_f6, DataType F6x16Type, int isFlat)
         {
-            data[i] = (i + 10) % 64;
-        }
-        auto a = packF6x16(data);
+            std::vector<uint8_t> data(num_f6);
+            for(uint32_t i = 0; i < num_f6; i++)
+            {
+                data[i] = (i + 10) % 64;
+            }
 
-        auto d_a = make_shared_device(a);
-        auto d_b = make_shared_device<uint32_t>(a.size());
+            auto f6x16_data = packF6x16(data);
 
-        auto command = std::make_shared<Command>();
+            std::vector<uint32_t> result(f6x16_data.size());
 
-        auto tagTensorA
-            = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
-        auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+            if(isFlat)
+                genF6x16FlatLoadAndStore(num_f6, F6x16Type);
+            else
+                genF6x16BufferLoadAndStore(num_f6, F6x16Type);
 
-        auto tagTensorB
-            = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
-        command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
+            CommandKernel commandKernel;
+            commandKernel.setContext(m_context);
 
-        auto commandArgs = command->createArguments();
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+            auto d_a      = make_shared_device(f6x16_data);
+            auto d_result = make_shared_device<uint32_t>(result.size());
 
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
+            KernelArguments runtimeArgs;
+            runtimeArgs.append<void*>("result", d_result.get());
+            runtimeArgs.append<void*>("a", d_a.get());
 
-        auto params = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-        auto macTileVGPR
-            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-
-        params->setDimensionInfo(tagLoadA, macTileVGPR);
-
-        commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileF6", params);
-        if(launch)
-        {
-            commandKernel->launchKernel(commandArgs.runtimeArguments());
-
-            auto r = std::vector<uint32_t>(a.size());
-            ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), numF6x16 * sizeof(FP6x16), hipMemcpyDefault),
+            ASSERT_THAT(hipMemcpy(result.data(),
+                                  d_result.get(),
+                                  sizeof(uint32_t) * result.size(),
+                                  hipMemcpyDefault),
                         HasHipSuccess(0));
 
-            for(size_t i = 0; i < a.size(); ++i)
+            auto actual_f6 = unpackF6x16(result);
+            for(int i = 0; i < data.size(); i++)
             {
-                EXPECT_EQ(r[i], a[i]);
+                EXPECT_EQ(actual_f6[i], data[i]);
             }
         }
-    }
+
+        void loadStoreTileF6(std::shared_ptr<CommandKernel>& commandKernel,
+                             DataType                        F6Type,
+                             bool                            launch,
+                             size_t                          nx, // tensor size x
+                             size_t                          ny, // tensor size y
+                             int                             m, // macro tile size x
+                             int                             n, // macro tile size y
+                             int                             t_m = 1, // thread tile size x
+                             int                             t_n = 1) // thread tile size y
+        {
+            REQUIRE_ARCH_CAP(GPUCapability::HasExplicitCO);
+
+            AssertFatal(nx % numF6PerF6x16 == 0, "Invalid F6 Dimensions");
+
+            int numF6    = nx * ny;
+            int numF6x16 = numF6 / numF6PerF6x16;
+
+            unsigned int workgroup_size_x = m / t_m;
+            unsigned int workgroup_size_y = n / t_n;
+
+            // each workgroup will get one tile; since workgroup_size matches m * n
+            auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
+            auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
+            auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+
+            // generate fp6 values
+            std::vector<uint8_t> data(numF6);
+            for(uint32_t i = 0; i < numF6; i++)
+            {
+                data[i] = (i + 10) % 64;
+            }
+            auto a = packF6x16(data);
+
+            auto d_a = make_shared_device(a);
+            auto d_b = make_shared_device<uint32_t>(a.size());
+
+            auto command = std::make_shared<Command>();
+
+            auto tagTensorA
+                = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
+            auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
+
+            auto tagTensorB = command->addOperation(
+                rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
+            command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
+
+            auto commandArgs = command->createArguments();
+            commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
+            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
+            commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
+
+            commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
+            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);
+            commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
+
+            auto params = std::make_shared<CommandParameters>();
+            params->setManualKernelDimension(2);
+            params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+
+            auto launchParams = std::make_shared<CommandLaunchParameters>();
+            launchParams->setManualWorkitemCount({NX, NY, NZ});
+
+            auto macTileVGPR
+                = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+
+            params->setDimensionInfo(tagLoadA, macTileVGPR);
+
+            commandKernel = std::make_shared<CommandKernel>(command, "loadStoreTileF6");
+            commandKernel->setContext(m_context);
+            commandKernel->setCommandParameters(params);
+            commandKernel->setLaunchParameters(launchParams);
+            commandKernel->generateKernel();
+            if(launch)
+            {
+                commandKernel->launchKernel(commandArgs.runtimeArguments());
+
+                auto r = std::vector<uint32_t>(a.size());
+                ASSERT_THAT(
+                    hipMemcpy(r.data(), d_b.get(), numF6x16 * sizeof(FP6x16), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+                for(size_t i = 0; i < a.size(); ++i)
+                {
+                    EXPECT_EQ(r[i], a[i]);
+                }
+            }
+        }
+    };
 
     TEST_P(F6Test, GPU_F6x16BufferLoadAndStore)
     {
@@ -350,11 +363,11 @@ namespace rocRollerTest
                              : DataType::BF6x16;
         if(isLocalDevice())
         {
-            executeF6x16LoadAndStore(m_context, num_f6, F6x16Type, false);
+            executeF6x16LoadAndStore(num_f6, F6x16Type, false);
         }
         else
         {
-            genF6x16BufferLoadAndStore(m_context, num_f6, F6x16Type);
+            genF6x16BufferLoadAndStore(num_f6, F6x16Type);
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
@@ -369,11 +382,11 @@ namespace rocRollerTest
 
         if(isLocalDevice())
         {
-            executeF6x16LoadAndStore(m_context, num_f6, F6x16Type, true);
+            executeF6x16LoadAndStore(num_f6, F6x16Type, true);
         }
         else
         {
-            genF6x16FlatLoadAndStore(m_context, num_f6, F6x16Type);
+            genF6x16FlatLoadAndStore(num_f6, F6x16Type);
             auto assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
@@ -405,8 +418,7 @@ namespace rocRollerTest
         int N = 4 * macN;
 
         std::shared_ptr<CommandKernel> commandKernel;
-        loadStoreTileF6(m_context,
-                        commandKernel,
+        loadStoreTileF6(commandKernel,
                         std::get<rocRoller::DataType>(GetParam()),
                         isLocalDevice(),
                         M,
@@ -415,6 +427,9 @@ namespace rocRollerTest
                         macN,
                         1,
                         elementsPerWorkitem);
+
+        if(!commandKernel)
+            return;
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
 

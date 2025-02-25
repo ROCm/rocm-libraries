@@ -27,7 +27,7 @@ namespace rocRoller
                     this->m_command = makeCommand();
                     this->m_kernel  = std::make_shared<CommandKernel>(
                         DataParallelGEMMSolution<A, B, C, D>::makeKernel(
-                            makeKernelOptions(), this->m_solutionParams.numWGs, 1));
+                            this->m_solutionParams.numWGs, 1));
                 }
 
                 Result benchmark(Client::RunParameters const& runParams,
@@ -45,6 +45,9 @@ namespace rocRoller
                     auto d_B = make_shared_device(h_B);
                     auto d_C = make_shared_device(h_C);
                     auto d_D = make_shared_device(h_D);
+
+                    this->m_kernel->generateKernel();
+                    this->m_kernel->loadKernel();
 
                     // Create scratch space
                     auto scratchSpaceRequired = this->m_kernel->scratchSpaceRequired();
@@ -95,9 +98,9 @@ namespace rocRoller
                     return command;
                 }
 
-                std::shared_ptr<KernelOptions> makeKernelOptions()
+                virtual void setCommandParameters(CommandParametersPtr params) override
                 {
-                    auto kernelOptions = DataParallelGEMMSolution<A, B, C, D>::makeKernelOptions();
+                    DataParallelGEMMSolution<A, B, C, D>::setCommandParameters(params);
 
                     uint num_workgroup_x = this->m_solutionParams.numWGs;
                     uint num_workgroup_y = 1;
@@ -107,13 +110,12 @@ namespace rocRoller
                                 "is launched "
                                 "with workgroup_size_y == 1");
 
-                    kernelOptions->numScratchTiles = std::min((uint)(this->m_solutionParams.numWGs),
-                                                              num_workgroup_x * num_workgroup_y);
+                    params->numScratchTiles = std::min((uint)(this->m_solutionParams.numWGs),
+                                                       num_workgroup_x * num_workgroup_y);
 
-                    kernelOptions->loopOverOutputTilesDimensions = {0, 1};
-                    kernelOptions->streamK                       = true;
-                    kernelOptions->streamKTwoTile = this->m_solutionParams.streamKTwoTile;
-                    return kernelOptions;
+                    params->loopOverOutputTilesDimensions = {0, 1};
+                    params->streamK                       = true;
+                    params->streamKTwoTile                = this->m_solutionParams.streamKTwoTile;
                 }
 
                 CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,
