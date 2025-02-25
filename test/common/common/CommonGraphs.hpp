@@ -10,6 +10,7 @@
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 
@@ -98,17 +99,42 @@ namespace rocRollerTest
          * - Assign(D = TensorContraction(A, B))
          * - StoreTiled(D)
          */
-        template <typename T>
         class MatrixMultiply
         {
         public:
-            MatrixMultiply();
+            MatrixMultiply(rocRoller::DataType              aType,
+                           rocRoller::DataType              bType  = rocRoller::DataType::None,
+                           rocRoller::DataType              cdType = rocRoller::DataType::None,
+                           rocRoller::Operations::ScaleMode aMode
+                           = rocRoller::Operations::ScaleMode::None,
+                           rocRoller::Operations::ScaleMode bMode
+                           = rocRoller::Operations::ScaleMode::None);
 
             CommandPtr  getCommand();
             KernelGraph getKernelGraph();
 
+            void setTileSize(int m, int n, int k);
+            void setMFMA(int m, int n, int k, int b);
+            void setUseLDS(bool a, bool b, bool d);
+
+            std::shared_ptr<CommandParameters> getCommandParameters() const;
+
         private:
             void createCommand();
+
+            rocRoller::DataType m_aType;
+            rocRoller::DataType m_bType;
+            rocRoller::DataType m_cdType;
+
+            rocRoller::Operations::ScaleMode m_aMode;
+            rocRoller::Operations::ScaleMode m_bMode;
+
+            int  m_macM, m_macN, m_macK;
+            int  m_waveM, m_waveN, m_waveK, m_waveB;
+            bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
+
+            rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagD;
+            rocRoller::Operations::OperationTag m_tagScaleA, m_tagScaleB;
 
             CommandPtr m_command;
         };

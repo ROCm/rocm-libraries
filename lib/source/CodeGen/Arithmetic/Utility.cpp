@@ -27,5 +27,25 @@ namespace rocRoller
             lsd = Register::Value::Literal(static_cast<uint32_t>(value));
             msd = Register::Value::Literal(static_cast<uint32_t>(value >> 32));
         }
+
+        std::string getModifier(DataType dtype)
+        {
+            switch(dtype)
+            {
+            case DataType::FP8x4:
+                return "0b000";
+            case DataType::BF8x4:
+                return "0b001";
+            case DataType::FP6x16:
+                return "0b010";
+            case DataType::BF6x16:
+                return "0b011";
+            case DataType::FP4x8:
+                return "0b100";
+            default:
+                Throw<FatalError>("Unable to determine MFMA modifier: unhandled data type.",
+                                  ShowValue(dtype));
+            }
+        }
     }
 }
