@@ -20,26 +20,27 @@
  *
  * ************************************************************************ */
 
-// Predeclare rocblas_abort_once() for friend declaration in rocblas_ostream.hpp
-static void rocblas_abort_once [[noreturn]] ();
+#ifdef WIN32
+#include <windows.h>
+#endif
 
 #include "rocblas_ostream.hpp"
 #include <csignal>
 #include <fcntl.h>
-#include <iostream>
 #include <type_traits>
+
 #ifdef WIN32
 #include <io.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <windows.h>
-
 #define FDOPEN(A, B) _fdopen(A, B)
-#define OPEN(A) _open(A, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_APPEND, _S_IREAD | _S_IWRITE);
+#define OPEN_TRUNC(A) _open(A, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_APPEND, _S_IREAD | _S_IWRITE)
+#define OPEN(A) _open(A, _O_RDWR | _O_CREAT | _O_APPEND, _S_IREAD | _S_IWRITE)
 #define CLOSE(A) _close(A)
 #else
+#include <sys/stat.h>
+#include <sys/types.h>
 #define FDOPEN(A, B) fdopen(A, B)
-#define OPEN(A) open(A, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644);
+#define OPEN_TRUNC(A) open(A, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC, 0644)
+#define OPEN(A) open(A, O_RDWR | O_CREAT | O_APPEND | O_CLOEXEC, 0644)
 #define CLOSE(A) close(A)
 #endif
 
@@ -48,7 +49,7 @@ static void rocblas_abort_once [[noreturn]] ();
  ***********************************************************************/
 
 // Abort function which is called only once by rocblas_abort
-static void rocblas_abort_once()
+static void rocblas_internal_pre_abort()
 {
 #ifndef WIN32
     // Make sure the alarm and abort actions are default
@@ -71,17 +72,23 @@ static void rocblas_abort_once()
 
     // Flush all
     fflush(NULL);
-
-    // Abort
-    std::abort();
 }
 
 // Abort function which safely flushes all IO
 extern "C" void rocblas_abort()
 {
     // If multiple threads call rocblas_abort(), the first one wins
-    static int once = (rocblas_abort_once(), 0);
+    static int once = (rocblas_internal_pre_abort(), std::abort(), 0);
 }
+
+std::recursive_mutex& rocblas_internal_ostream::worker_map_mutex()
+{
+    static std::recursive_mutex map_mutex;
+    return map_mutex;
+}
+
+// static members
+std::unordered_map<std::string, bool> rocblas_internal_ostream::m_file_open_map;
 
 // Get worker for writing to a file descriptor
 std::shared_ptr<rocblas_internal_ostream::worker> rocblas_internal_ostream::get_worker(int fd)
@@ -162,7 +169,13 @@ rocblas_internal_ostream::rocblas_internal_ostream(int fd)
 // Construct rocblas_internal_ostream from a filename opened for writing with truncation
 rocblas_internal_ostream::rocblas_internal_ostream(const char* filename)
 {
-    int fd       = OPEN(filename);
+    bool append = already_open_file(filename);
+    int  fd;
+    if(append)
+        fd = OPEN(filename);
+    else
+        fd = OPEN_TRUNC(filename);
+
     m_worker_ptr = get_worker(fd);
     if(!m_worker_ptr)
     {
@@ -175,6 +188,18 @@ rocblas_internal_ostream::rocblas_internal_ostream(const char* filename)
 rocblas_internal_ostream::~rocblas_internal_ostream()
 {
     flush(); // Flush any pending IO
+}
+
+bool rocblas_internal_ostream::already_open_file(const char* filename)
+{
+    std::lock_guard<std::recursive_mutex> lock(worker_map_mutex());
+
+    std::string file(filename);
+    if(m_file_open_map.find(file) != m_file_open_map.end())
+        return true;
+
+    m_file_open_map[file] = true;
+    return false;
 }
 
 // Flush the output
