@@ -2,8 +2,6 @@
 
 #include "GPUArchitecture.hpp"
 
-#include "Utilities/Utils.hpp"
-
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -12,6 +10,7 @@
 #include <unordered_set>
 
 #include <rocRoller/Utilities/Timer.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {

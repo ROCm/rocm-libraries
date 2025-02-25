@@ -227,6 +227,9 @@ TEST_F(GPUArchitectureTest, Validate94xInstructions)
     EXPECT_EQ(
         GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::v_fmac_f32),
         true);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx942", GPUCapability::v_mov_b64),
+        true);
 }
 
 TEST_F(GPUArchitectureTest, MFMA)

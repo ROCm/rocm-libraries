@@ -325,7 +325,7 @@ namespace rocRoller
             return std::make_shared<Value>(ctx, regType, variableType, count, allocOptions);
         }
 
-        inline AllocationState Value::allocationState() const
+        inline constexpr AllocationState Value::allocationState() const
         {
             if(!IsRegister(m_regType))
                 return AllocationState::NoAllocation;
@@ -381,7 +381,7 @@ namespace rocRoller
             m_contiguousIndices.reset();
         }
 
-        inline bool Value::isPlaceholder() const
+        inline constexpr bool Value::isPlaceholder() const
         {
             return allocationState() == Register::AllocationState::Unallocated;
         }
@@ -394,17 +394,17 @@ namespace rocRoller
             return std::visit([](auto const& val) { return val == 0; }, m_literalValue);
         }
 
-        inline bool Value::isSpecial() const
+        inline constexpr bool Value::isSpecial() const
         {
             return IsSpecial(m_regType);
         }
 
-        inline bool Value::isSCC() const
+        inline constexpr bool Value::isSCC() const
         {
             return m_regType == Type::SCC;
         }
 
-        inline bool Value::isExec() const
+        inline constexpr bool Value::isExec() const
         {
             return m_regType == Type::EXEC;
         }

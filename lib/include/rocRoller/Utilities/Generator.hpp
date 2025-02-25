@@ -86,8 +86,8 @@ namespace rocRoller
 
         /// @brief  Takes the next value from the range.  Will not return a value
         /// if we have reached the end of the range.
-        virtual std::optional<T> take_value() = 0;
-        virtual void             increment()  = 0;
+        virtual constexpr std::optional<T> take_value() = 0;
+        virtual constexpr void             increment()  = 0;
     };
 
     template <typename T, CInputRangeOf<T> TheRange>
@@ -96,8 +96,8 @@ namespace rocRoller
         template <std::convertible_to<TheRange> ARange>
         explicit ConcreteRange(ARange&& r);
 
-        virtual std::optional<T> take_value() override;
-        virtual void             increment() override;
+        virtual constexpr std::optional<T> take_value() override;
+        virtual constexpr void             increment() override;
 
     private:
         TheRange m_range;
@@ -333,24 +333,24 @@ namespace rocRoller
 
             Generator<T> get_return_object();
 
-            static void return_void() noexcept {}
-            void        unhandled_exception() noexcept;
+            static constexpr void return_void() noexcept {}
+            constexpr void        unhandled_exception() noexcept;
 
-            static std::suspend_always initial_suspend() noexcept
+            static constexpr std::suspend_always initial_suspend() noexcept
             {
                 return {};
             }
-            static std::suspend_always final_suspend() noexcept
+            static constexpr std::suspend_always final_suspend() noexcept
             {
                 return {};
             }
 
-            std::suspend_always yield_value(T v) noexcept;
+            constexpr std::suspend_always yield_value(T v) noexcept;
 
             template <CInputRangeOf<T> ARange>
-            std::suspend_always yield_value(ARange&& r) noexcept;
+            constexpr std::suspend_always yield_value(ARange&& r) noexcept;
 
-            std::suspend_always yield_value(std::initializer_list<T> r) noexcept;
+            constexpr std::suspend_always yield_value(std::initializer_list<T> r) noexcept;
 
             /****
              * Implementation & Interface
@@ -358,9 +358,9 @@ namespace rocRoller
 
             void check_exception() const;
 
-            GeneratorState state() const;
+            constexpr GeneratorState state() const;
 
-            std::optional<T> const& value() const;
+            constexpr std::optional<T> const& value() const;
 
             void discard_value();
             void advance_range();
@@ -437,12 +437,12 @@ namespace rocRoller
 
         // cppcheck-suppress functionConst
         // cppcheck-suppress functionStatic
-        iterator begin();
+        constexpr iterator begin();
         // cppcheck-suppress functionConst
         // cppcheck-suppress functionStatic
-        iterator end();
+        constexpr iterator end();
 
-        GeneratorState state() const;
+        constexpr GeneratorState state() const;
 
         /**
          * Returns a `Container<T>` constructed with `begin()` and `end()` as arguments.
@@ -450,7 +450,7 @@ namespace rocRoller
          * Be careful that the Generator will exit and will not yield an infinite sequence.
          */
         template <template <typename...> typename Container>
-        Container<T> to();
+        constexpr Container<T> to();
 
         /**
          * Yields values that satisfy the predicate.
@@ -480,7 +480,7 @@ namespace rocRoller
         /**
          * Returns true if `*this` is an empty generator.
          */
-        bool empty();
+        constexpr bool empty();
 
     private:
         Handle m_coroutine;
@@ -524,7 +524,7 @@ namespace rocRoller
      * therefore you cannot call this on persistent generators.
      */
     template <std::ranges::input_range Range>
-    inline bool empty(Range range);
+    inline constexpr bool empty(Range range);
 
 }
 

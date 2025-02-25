@@ -20,6 +20,7 @@
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
+#include <common/GEMMProblem.hpp>
 
 namespace GEMMDriverTest
 {

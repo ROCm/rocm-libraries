@@ -4,7 +4,7 @@
 #include <span>
 #include <variant>
 
-#include "DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 
 namespace rocRoller
 {

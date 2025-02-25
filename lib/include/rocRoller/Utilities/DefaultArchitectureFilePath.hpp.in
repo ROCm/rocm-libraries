@@ -1,4 +1,0 @@
-namespace rocRoller
-{
-    auto constexpr DefaultArchitectureFilePath = "@ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH@";
-};

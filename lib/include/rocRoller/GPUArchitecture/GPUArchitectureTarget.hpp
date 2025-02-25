@@ -21,7 +21,9 @@ namespace rocRoller
     {
     public:
         GPUArchitectureTarget() = default;
-        explicit GPUArchitectureTarget(std::string const&);
+        explicit GPUArchitectureTarget(std::string const& input);
+
+        GPUArchitectureTarget& operator=(std::string const& input);
 
         bool operator==(GPUArchitectureTarget a) const
         {

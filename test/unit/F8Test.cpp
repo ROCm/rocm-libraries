@@ -8,10 +8,10 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
-#include "F8Values.hpp"
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
+#include <common/F8Values.hpp>
 
 using namespace rocRoller;
 

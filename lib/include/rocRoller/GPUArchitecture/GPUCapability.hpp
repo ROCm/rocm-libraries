@@ -64,6 +64,8 @@ namespace rocRoller
             v_fma_f32,
             v_fmac_f32,
 
+            v_mov_b64,
+
             HasAtomicAdd,
 
             MaxVmcnt,

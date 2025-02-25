@@ -561,7 +561,7 @@ namespace rocRoller
                 return call(a.arg, b.arg);
             }
 
-            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            constexpr bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
             {
                 return a == b;
             }
@@ -596,7 +596,7 @@ namespace rocRoller
                 return a->sameAs(b);
             }
 
-            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            constexpr bool operator()(DataFlowTag const& a, DataFlowTag const& b)
             {
                 return a == b;
             }
@@ -608,7 +608,7 @@ namespace rocRoller
 
             // a & b are different operator/value classes
             template <class T, class U>
-            requires(!std::same_as<T, U>) bool operator()(T const& a, U const& b)
+            requires(!std::same_as<T, U>) constexpr bool operator()(T const& a, U const& b)
             {
                 return false;
             }
@@ -760,7 +760,7 @@ namespace rocRoller
                 return call(a.arg, b.arg);
             }
 
-            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            constexpr bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
             {
                 return a == b;
             }
@@ -786,7 +786,7 @@ namespace rocRoller
                 return a->sameAs(b);
             }
 
-            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            constexpr bool operator()(DataFlowTag const& a, DataFlowTag const& b)
             {
                 return a == b;
             }
@@ -912,6 +912,8 @@ namespace rocRoller
 
         struct ExpressionGetCommentVisitor
         {
+            bool includeRegisterComments = true;
+
             template <typename Expr>
             requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
                 operator()(Expr const& expr) const
@@ -921,7 +923,7 @@ namespace rocRoller
 
             std::string operator()(Register::ValuePtr const& expr) const
             {
-                if(expr)
+                if(includeRegisterComments && expr)
                     return expr->name();
 
                 return "";
@@ -938,19 +940,29 @@ namespace rocRoller
             }
         };
 
-        std::string getComment(Expression const& expr)
+        std::string getComment(Expression const& expr, bool includeRegisterComments)
         {
-            auto visitor = ExpressionGetCommentVisitor();
+            auto visitor = ExpressionGetCommentVisitor{includeRegisterComments};
             return visitor.call(expr);
         }
 
-        std::string getComment(ExpressionPtr const& expr)
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments)
         {
             if(!expr)
             {
                 return "";
             }
-            return getComment(*expr);
+            return getComment(*expr, includeRegisterComments);
+        }
+
+        std::string getComment(ExpressionPtr const& expr)
+        {
+            return getComment(expr, true);
+        }
+
+        std::string getComment(Expression const& expr)
+        {
+            return getComment(expr, true);
         }
 
         void appendComment(Expression& expr, std::string comment)
@@ -1026,7 +1038,7 @@ namespace rocRoller
             }
 
             template <CValue Value>
-            int operator()(Value const& expr) const
+            constexpr int operator()(Value const& expr) const
             {
                 return 0;
             }

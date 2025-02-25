@@ -4,6 +4,9 @@
 // Value "suites" for arithemtic and expression tests
 //
 
+#include <cstdint>
+#include <vector>
+
 namespace TestValues
 {
 

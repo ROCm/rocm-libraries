@@ -39,7 +39,7 @@ namespace rocRoller
     }
 
     template <typename T, CInputRangeOf<T> TheRange>
-    std::optional<T> ConcreteRange<T, TheRange>::take_value()
+    constexpr std::optional<T> ConcreteRange<T, TheRange>::take_value()
     {
         if(m_iter == m_range.end())
             return {};
@@ -47,7 +47,7 @@ namespace rocRoller
     }
 
     template <typename T, CInputRangeOf<T> TheRange>
-    void ConcreteRange<T, TheRange>::increment()
+    constexpr void ConcreteRange<T, TheRange>::increment()
     {
         if(m_iter != m_range.end())
             ++m_iter;
@@ -60,7 +60,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    void Generator<T>::promise_type::unhandled_exception() noexcept
+    constexpr void Generator<T>::promise_type::unhandled_exception() noexcept
     {
         m_exception = std::current_exception();
         m_value.reset();
@@ -68,7 +68,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    void Generator<T>::promise_type::check_exception() const
+    inline void Generator<T>::promise_type::check_exception() const
     {
         // NOTE: A thread-safe version of this would be similar to
         //     std::exception_ptr exc = nullptr;
@@ -96,7 +96,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    std::suspend_always Generator<T>::promise_type::yield_value(T v) noexcept
+    constexpr std::suspend_always Generator<T>::promise_type::yield_value(T v) noexcept
     {
         m_value = std::move(v);
         m_range.reset();
@@ -106,7 +106,7 @@ namespace rocRoller
 
     template <std::movable T>
     template <CInputRangeOf<T> ARange>
-    std::suspend_always Generator<T>::promise_type::yield_value(ARange&& r) noexcept
+    constexpr std::suspend_always Generator<T>::promise_type::yield_value(ARange&& r) noexcept
     {
         using MyRange = ConcreteRange<T, std::remove_reference_t<ARange>>;
         m_range.reset(new MyRange(std::forward<ARange>(r)));
@@ -128,13 +128,14 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    std::suspend_always Generator<T>::promise_type::yield_value(std::initializer_list<T> r) noexcept
+    constexpr std::suspend_always
+        Generator<T>::promise_type::yield_value(std::initializer_list<T> r) noexcept
     {
         return yield_value<std::initializer_list<T>>(std::move(r));
     }
 
     template <std::movable T>
-    GeneratorState Generator<T>::promise_type::state() const
+    constexpr GeneratorState Generator<T>::promise_type::state() const
     {
         check_exception();
 
@@ -155,7 +156,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    GeneratorState Generator<T>::state() const
+    inline constexpr GeneratorState Generator<T>::state() const
     {
         if(m_coroutine)
             m_coroutine.promise().check_exception();
@@ -167,7 +168,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    std::optional<T> const& Generator<T>::promise_type::value() const
+    constexpr std::optional<T> const& Generator<T>::promise_type::value() const
     {
         check_exception();
 
@@ -359,20 +360,20 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    auto Generator<T>::begin() -> iterator
+    constexpr auto Generator<T>::begin() -> iterator
     {
         return iterator{m_coroutine};
     }
 
     template <std::movable T>
-    auto Generator<T>::end() -> iterator
+    constexpr auto Generator<T>::end() -> iterator
     {
         return iterator{std::default_sentinel_t{}};
     }
 
     template <std::movable T>
     template <template <typename...> typename Container>
-    Container<T> Generator<T>::to()
+    constexpr Container<T> Generator<T>::to()
     {
         auto b = begin();
         auto e = end();
@@ -449,13 +450,13 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    bool Generator<T>::empty()
+    constexpr bool Generator<T>::empty()
     {
         return begin() == end();
     }
 
     template <std::ranges::input_range Range>
-    inline bool empty(Range range)
+    inline constexpr bool empty(Range range)
     {
         return range.begin() == range.end();
     }

@@ -22,7 +22,8 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "CommonGraphs.hpp"
+#include <common/CommonGraphs.hpp>
+
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"

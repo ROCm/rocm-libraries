@@ -59,6 +59,18 @@ FetchContent_Declare(
   INSTALL_COMMAND ""
 )
 
+FetchContent_Declare(
+  Catch2
+  GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+  GIT_TAG        v3.7.0 # or a later release
+)
+
+FetchContent_MakeAvailable(Catch2)
+target_compile_options(Catch2 PRIVATE ${EXTRA_COMPILE_OPTIONS})
+target_compile_options(Catch2WithMain PRIVATE ${EXTRA_COMPILE_OPTIONS})
+target_link_options(Catch2 PRIVATE ${EXTRA_LINK_OPTIONS})
+target_link_options(Catch2WithMain PRIVATE ${EXTRA_LINK_OPTIONS})
+
 if(NOT libdivide_POPULATED)
   FetchContent_Populate(libdivide)
 endif()
@@ -137,6 +149,7 @@ enable_testing()
 include(CTest)
 
 find_package(LLVM 13.0.1 REQUIRED)
+find_package(OpenMP)
 
 llvm_map_components_to_libnames(llvm_libs all)
 find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lib/cmake/lld/)
@@ -161,10 +174,25 @@ ExternalProject_Add(spdlog
  -DSPDLOG_BUILD_SHARED=OFF
 )
 
+set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack")
+set(ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE ${CMAKE_BINARY_DIR}/source/rocRoller/DefaultArchitectureFilePath.cpp)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/source/DefaultArchitectureFilePath.cpp.in ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE})
+
 # ArchitectureGenerator
 add_executable(
   GPUArchitectureGenerator
   GPUArchitectureGenerator/source/GPUArchitectureGenerator.cpp
+
+  lib/source/GPUArchitecture.cpp
+  lib/source/GPUArchitectureLibrary.cpp
+
+  lib/source/Assemblers/Assembler.cpp
+  lib/source/Costs/Cost.cpp
+  lib/source/DataTypes_F8_Utils.cpp
+  lib/source/Error.cpp
+  lib/source/Logging.cpp
+  lib/source/Scheduler.cpp
+  ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
 )
 add_dependencies(GPUArchitectureGenerator spdlog)
 target_compile_features(GPUArchitectureGenerator PUBLIC cxx_std_20)
@@ -172,16 +200,13 @@ target_compile_options(GPUArchitectureGenerator PUBLIC  ${COROUTINES_COMPILE_OPT
 target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   GPUArchitectureGenerator PUBLIC
-  -Wl,--whole-archive
-  rocroller
-  -Wl,--no-whole-archive
   ${llvm_libs}
   msgpackc-cxx
 )
 target_include_directories(GPUArchitectureGenerator PUBLIC
-                           lib/include
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
                            GPUArchitectureGenerator/include
-                           lib/include/rocRoller
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller
                            )
 
 target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
@@ -190,15 +215,17 @@ target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS})
 
+if(YAML_BACKEND STREQUAL "YAML_CPP")
+  target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)
+endif()
+
 if(ROCROLLER_USE_HIP)
   target_link_libraries(GPUArchitectureGenerator PUBLIC hip::host)
   target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
-set(ROCROLLER_DEFAULT_ARCHITECTURE_FILE_PATH "${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.msgpack")
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller/Utilities/DefaultArchitectureFilePath.hpp.in ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller/Utilities/DefaultArchitectureFilePath.hpp)
-
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/source/rocRoller)
+
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.yaml
   COMMAND ${CMAKE_BINARY_DIR}/GPUArchitectureGenerator ${CMAKE_BINARY_DIR}/source/rocRoller/GPUArchitecture_def.yaml -Y
@@ -397,6 +424,8 @@ set(rocroller_src
  lib/source/Schedulers/RandomScheduler.cpp
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp
+
+ ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
 )
 
 if(ROCROLLER_USE_HIP)
@@ -426,8 +455,8 @@ target_compile_options(rocroller PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COM
 target_link_options(rocroller PUBLIC ${EXTRA_LINK_OPTIONS})
 #target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
 target_include_directories(rocroller PUBLIC
-                           lib/include
-                           lib/include/rocRoller
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller
                            )
 
 # Using SYSTEM include paths for third party libraries speeds up cppcheck a lot
@@ -462,7 +491,7 @@ target_link_libraries(ComponentTest
   msgpackc-cxx
 )
 target_include_directories(ComponentTest PUBLIC
-                            lib/include
+${CMAKE_CURRENT_SOURCE_DIR}/lib/include
                             )
 
 # add_executable(CoroutineTest test/standalone/coroutine_test.cpp)
@@ -475,6 +504,24 @@ target_include_directories(ComponentTest PUBLIC
 #                             )
 
 # rocRoller unit tests
+
+add_library(common_test_utilities
+  test/common/Utilities.cpp
+)
+
+target_compile_features(common_test_utilities PUBLIC cxx_std_20)
+target_compile_options(common_test_utilities PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
+target_link_options(common_test_utilities PUBLIC ${EXTRA_LINK_OPTIONS})
+target_link_libraries(common_test_utilities
+  rocroller_interface
+  openblas
+)
+#target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
+target_include_directories(common_test_utilities PUBLIC
+                           ${CMAKE_CURRENT_SOURCE_DIR}/test/common/
+                           )
+
+
 set(
   rocRollerTests_SOURCES
   test/unit/ContextFixture.cpp
@@ -500,7 +547,6 @@ set(
   test/unit/DataTypesTest.cpp
   test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
-  test/unit/ExpressionTest.cpp
   test/unit/ExpressionTransformationTest.cpp
   test/unit/FastDivisionTest.cpp
   test/unit/LowerExponentialTest.cpp
@@ -518,7 +564,6 @@ set(
   test/unit/HazardObserverTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp
-  test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
   test/unit/KernelGraphTest/ConstantPropagation.cpp
   test/unit/KernelGraphTest/KernelGraphUtils.cpp
@@ -549,7 +594,6 @@ set(
   test/unit/TileTransposeAdd.cpp
   test/unit/TimerTest.cpp
   test/unit/TransposeLoadsTest.cpp
-  test/unit/Utilities.cpp
   test/unit/UtilsTest.cpp
   test/unit/VariantTest.cpp
   test/unit/VectorAddBenchmark.cpp
@@ -575,15 +619,15 @@ add_executable(
   ${rocRollerTests_SOURCES}
 )
 
-find_package(OpenMP)
 target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_include_directories(rocRollerTests PUBLIC
-                           lib/include
+${CMAKE_CURRENT_SOURCE_DIR}/lib/include
                            )
 target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests
   rocroller_interface
+  common_test_utilities
   msgpackc-cxx
   gtest_main
   gmock
@@ -600,6 +644,50 @@ if(YAML_BACKEND STREQUAL "YAML_CPP")
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
 endif()
 
+
+set(
+  rocRollerTests_catch_SOURCES
+
+  test/catch/CustomAssertions.cpp
+  test/catch/TestKernels.cpp
+
+  test/catch/BinaryExpressionTest.cpp
+  test/catch/CustomAssertionTest.cpp
+  test/catch/CustomMatcherTest.cpp
+  test/catch/ExpressionTest.cpp
+  test/catch/KernelArgumentsTest.cpp
+  test/catch/ScalarExpressionTest.cpp
+  test/catch/TernaryExpressionTest.cpp
+  test/catch/TestContextTest.cpp
+  test/catch/UtilsTest.cpp
+)
+
+add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})
+target_compile_options(rocRollerTests_catch PUBLIC ${EXTRA_COMPILE_OPTIONS})
+
+target_include_directories(rocRollerTests_catch PUBLIC
+${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+                           )
+target_link_options(rocRollerTests_catch PUBLIC ${EXTRA_LINK_OPTIONS})
+target_link_libraries(
+  rocRollerTests_catch
+  rocroller_interface
+  common_test_utilities
+  msgpackc-cxx
+  Catch2::Catch2WithMain
+  openblas
+  OpenMP::OpenMP_CXX
+)
+
+if(ROCROLLER_USE_HIP)
+  target_link_libraries(rocRollerTests_catch hip::host)
+  target_compile_definitions(rocRollerTests_catch PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
+endif()
+
+if(YAML_BACKEND STREQUAL "YAML_CPP")
+  target_compile_definitions(rocRollerTests_catch PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
+endif()
+
 # ArchGen unit tests
 add_executable(
   ArchGenTests
@@ -611,8 +699,8 @@ target_compile_options(ArchGenTests PUBLIC  ${COROUTINES_COMPILE_OPTION} ${EXTRA
 target_link_options(ArchGenTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_include_directories(ArchGenTests PUBLIC
                            GPUArchitectureGenerator/include
-                           lib/include
-                           lib/include/rocRoller
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include
+                           ${CMAKE_CURRENT_SOURCE_DIR}/lib/include/rocRoller
                            )
 
 target_include_directories(ArchGenTests SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
@@ -627,6 +715,7 @@ endif()
 target_link_libraries(
   ArchGenTests PUBLIC
   ${llvm_libs}
+  common_test_utilities
   rocroller_interface
   gtest_main
   gmock
@@ -663,6 +752,18 @@ if (NOT CODE_ANALYSIS)
     XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     DISCOVERY_MODE PRE_TEST
   )
+
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(Catch)
+catch_discover_tests(rocRollerTests_catch
+    REPORTER JUnit
+    OUTPUT_DIR ${TEST_REPORT_DIR}
+    OUTPUT_SUFFIX ".xml"
+    DISCOVERY_MODE PRE_TEST
+    EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+    PROPERTIES
+      "LABELS" "CATCH"
+      SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped")
 
   # Add script linting
   add_test(NAME PythonLint

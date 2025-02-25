@@ -72,9 +72,9 @@ namespace rocRoller
         std::array<Register::ValuePtr, MaxDstRegisters> const& getDsts() const;
         std::array<Register::ValuePtr, MaxSrcRegisters> const& getSrcs() const;
 
-        bool      hasRegisters() const;
-        bool      readsSpecialRegisters() const;
-        WaitCount getWaitCount() const;
+        bool           hasRegisters() const;
+        constexpr bool readsSpecialRegisters() const;
+        WaitCount      getWaitCount() const;
 
         /**
          * @brief Returns |currentSrc n previousDest| > 0 or |currentDest n previousDest| > 0
@@ -88,13 +88,13 @@ namespace rocRoller
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
 
-        int                    getLockValue() const;
+        constexpr int          getLockValue() const;
         Scheduling::Dependency getDependency() const;
 
         std::string const&                                 getOpCode() const;
         std::array<std::string, Instruction::MaxModifiers> getModifiers() const;
 
-        int getNopCount() const
+        constexpr int getNopCount() const
         {
             return m_nopCount;
         }
@@ -112,9 +112,9 @@ namespace rocRoller
 
         int nopCount() const;
 
-        bool        isCommentOnly() const;
-        bool        isLabel() const;
-        std::string getLabel() const;
+        constexpr bool isCommentOnly() const;
+        constexpr bool isLabel() const;
+        std::string    getLabel() const;
 
         /**
          * How many instructions actually executed by the GPU are included?

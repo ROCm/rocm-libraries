@@ -238,7 +238,7 @@ namespace rocRoller
         return (m_src[0] || m_dst[0]);
     }
 
-    inline bool Instruction::readsSpecialRegisters() const
+    inline constexpr bool Instruction::readsSpecialRegisters() const
     {
         for(auto& reg : m_src)
         {
@@ -250,7 +250,7 @@ namespace rocRoller
         return false;
     }
 
-    inline bool Instruction::isCommentOnly() const
+    inline constexpr bool Instruction::isCommentOnly() const
     {
         // clang-format off
         return m_nopCount == 0
@@ -276,7 +276,7 @@ namespace rocRoller
         return rv;
     }
 
-    inline bool Instruction::isLabel() const
+    inline constexpr bool Instruction::isLabel() const
     {
         return !m_label.empty();
     }
@@ -520,7 +520,7 @@ namespace rocRoller
         return *this;
     }
 
-    inline int Instruction::getLockValue() const
+    inline constexpr int Instruction::getLockValue() const
     {
         if(m_dependency == Scheduling::Dependency::Unlock)
         {

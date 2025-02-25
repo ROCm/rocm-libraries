@@ -1,5 +1,8 @@
 #pragma once
 
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
 #include <sstream>
 
 #include <rocRoller/Context_fwd.hpp>

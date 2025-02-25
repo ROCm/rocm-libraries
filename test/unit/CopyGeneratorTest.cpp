@@ -20,7 +20,7 @@ namespace CopyGeneratorTest
     {
     };
 
-    class CopyGeneratorTest : public GenericContextFixture
+    class CopyGenerator90aTest : public GenericContextFixture
     {
         std::string targetArchitecture()
         {
@@ -28,8 +28,16 @@ namespace CopyGeneratorTest
         }
     };
 
+    class CopyGenerator94xTest : public GenericContextFixture
+    {
+        std::string targetArchitecture()
+        {
+            return "gfx942";
+        }
+    };
+
     // Test if correct instructions are generated
-    TEST_F(CopyGeneratorTest, Instruction)
+    TEST_F(CopyGenerator90aTest, Instruction)
     {
         auto i32vr = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -133,7 +141,7 @@ namespace CopyGeneratorTest
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
     }
 
-    TEST_F(CopyGeneratorTest, IteratedCopy)
+    TEST_F(CopyGenerator90aTest, IteratedCopy)
     {
         int  n = 8;
         auto vr0
@@ -186,7 +194,7 @@ namespace CopyGeneratorTest
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
     }
 
-    TEST_F(CopyGeneratorTest, TestFillInt32)
+    TEST_F(CopyGenerator90aTest, TestFillInt32)
     {
         int  n = 8;
         auto sr0
@@ -232,7 +240,57 @@ namespace CopyGeneratorTest
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
     }
 
-    TEST_F(CopyGeneratorTest, TestFillInt64)
+    TEST_F(CopyGenerator94xTest, TestFillInt64)
+    {
+        int  n = 8;
+        auto sr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Scalar,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto vr0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto ar0
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int64,
+                                                n,
+                                                Register::AllocationOptions::FullyContiguous());
+
+        m_context->schedule(m_context->copier()->fill(sr0, Register::Value::Literal(11L)));
+        m_context->schedule(m_context->copier()->fill(vr0, Register::Value::Literal(12L)));
+        m_context->schedule(
+            m_context->copier()->fill(ar0, Register::Value::Literal((15L << 32) + 14)));
+
+        std::string expectedOutput = "";
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput
+                += "s_mov_b64 s[" + std::to_string(i) + ":" + std::to_string(i + 1) + "], 11\n";
+        }
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput
+                += "v_mov_b64 v[" + std::to_string(i) + ":" + std::to_string(i + 1) + "], 12\n";
+        }
+
+        for(int i = 0; i < n * 2; i += 2)
+        {
+            expectedOutput += "v_accvgpr_write a" + std::to_string(i) + ", 14\n";
+            expectedOutput += "v_accvgpr_write a" + std::to_string(i + 1) + ", 15\n";
+        }
+
+        EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGenerator90aTest, TestFillInt64)
     {
         int  n = 8;
         auto sr0
@@ -283,7 +341,7 @@ namespace CopyGeneratorTest
         EXPECT_EQ(NormalizedSource(expectedOutput), NormalizedSource(output()));
     }
 
-    TEST_F(CopyGeneratorTest, EnsureType)
+    TEST_F(CopyGenerator90aTest, EnsureType)
     {
         auto vr              = std::make_shared<Register::Value>(m_context,
                                                     Register::Type::Vector,
@@ -349,7 +407,7 @@ namespace CopyGeneratorTest
         EXPECT_EQ(dummy->variableType().dataType, literalRegister->variableType().dataType);
     }
 
-    TEST_F(CopyGeneratorTest, NoAllocation)
+    TEST_F(CopyGenerator90aTest, NoAllocation)
     {
         auto va = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 4);

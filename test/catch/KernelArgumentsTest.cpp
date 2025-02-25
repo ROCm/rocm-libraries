@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2017-2022 Advanced Micro Devices, Inc.
+ * Copyright 2017-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,15 +28,13 @@
 
 #include <cstddef>
 
-#include "SimpleFixture.hpp"
+#include <catch2/catch_template_test_macros.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 using namespace rocRoller;
 
-class KernelArgumentsTest : public SimpleFixture
-{
-};
-
-TEST_F(KernelArgumentsTest, Simple)
+TEST_CASE("KernelArguments simple test", "[kernel-arguments]")
 {
     KernelArguments args(true);
 
@@ -85,7 +83,7 @@ TEST_F(KernelArgumentsTest, Simple)
     args.append("t", ref.t);
     args.append("k", ref.k);
 
-    EXPECT_EQ(args.size(), sizeof(ref));
+    CHECK(args.size() == sizeof(ref));
 
     std::vector<uint8_t> reference(sizeof(ref), 0);
     memcpy(reference.data(), &ref, sizeof(ref));
@@ -93,17 +91,15 @@ TEST_F(KernelArgumentsTest, Simple)
     std::vector<uint8_t> result(args.size());
     memcpy(result.data(), args.data(), args.size());
 
-    EXPECT_EQ(result.size(), reference.size());
+    CHECK(result.size() == reference.size());
     for(size_t i = 0; i < std::min(result.size(), reference.size()); i++)
     {
-        EXPECT_EQ(static_cast<uint32_t>(result[i]), static_cast<uint32_t>(reference[i]))
-            << "(" << i << ")";
+        CAPTURE(i);
+        CHECK(static_cast<uint32_t>(result[i]) == static_cast<uint32_t>(reference[i]));
     }
-
-    // std::cout << args << std::endl;
 }
 
-TEST_F(KernelArgumentsTest, Binding)
+TEST_CASE("KernelArguments binding test", "[kernel-arguments]")
 {
     KernelArguments args(true);
 
@@ -152,11 +148,11 @@ TEST_F(KernelArgumentsTest, Binding)
     args.append("t", ref.t);
     args.append("k", ref.k);
 
-    EXPECT_EQ(args.size(), sizeof(ref));
+    CHECK(args.size() == sizeof(ref));
 
     // std::cout << args << std::endl;
 
-    EXPECT_THROW(args.data(), std::runtime_error);
+    CHECK_THROWS_AS(args.data(), std::runtime_error);
 
     args.bind("x", ref.x);
 
@@ -166,22 +162,22 @@ TEST_F(KernelArgumentsTest, Binding)
     std::vector<uint8_t> result(args.size());
     memcpy(result.data(), args.data(), args.size());
 
-    EXPECT_EQ(result.size(), reference.size());
+    CHECK(result.size() == reference.size());
     for(size_t i = 0; i < std::min(result.size(), reference.size()); i++)
     {
-        EXPECT_EQ(static_cast<uint32_t>(result[i]), static_cast<uint32_t>(reference[i]))
-            << "(" << i << ")";
+        CAPTURE(i);
+        CHECK(static_cast<uint32_t>(result[i]) == static_cast<uint32_t>(reference[i]));
     }
 
     // std::cout << args << std::endl;
 }
 
-TEST_F(KernelArgumentsTest, Iterator)
+TEST_CASE("KernelArguments iterator test", "[kernel-arguments]")
 {
     // Quick test for required m_log
     {
         KernelArguments args(false);
-        EXPECT_THROW(args.begin(), std::runtime_error);
+        CHECK_THROWS_AS(args.begin(), std::runtime_error);
     }
 
     KernelArguments args(true);
@@ -231,30 +227,30 @@ TEST_F(KernelArgumentsTest, Iterator)
     args.append("t", ref.t);
     args.append("k", ref.k);
 
-    EXPECT_EQ(args.size(), sizeof(ref));
+    CHECK(args.size() == sizeof(ref));
 
     // Check range based-iterator
     for(auto arg : args)
     {
-        EXPECT_NE(arg.first, nullptr);
-        EXPECT_NE(arg.second, 0);
+        CHECK(arg.first != nullptr);
+        CHECK(arg.second != 0);
     }
 
     auto begin = args.begin();
     auto end   = args.end();
 
     // End
-    EXPECT_NE(begin, end);
-    EXPECT_EQ(end->first, nullptr);
-    EXPECT_EQ(end->second, 0);
+    CHECK((begin != end));
+    CHECK(end->first == nullptr);
+    CHECK(end->second == 0);
 
     // Pre and post fix operators
     auto postInc = begin++;
-    EXPECT_NE(postInc, begin);
-    EXPECT_EQ(postInc, args.begin());
+    CHECK((postInc != begin));
+    CHECK((postInc == args.begin()));
     auto preInc = ++postInc;
-    EXPECT_EQ(preInc, begin);
-    EXPECT_EQ(preInc, postInc);
+    CHECK((preInc == begin));
+    CHECK((preInc == postInc));
 
     // Test logical order
     auto testIt      = args.begin();
@@ -272,12 +268,99 @@ TEST_F(KernelArgumentsTest, Iterator)
         static_cast<size_t>(testIt++) // k
     };
 
-    EXPECT_EQ(ref, reconstruct);
-    EXPECT_EQ(testIt, end);
+    CHECK(ref == reconstruct);
+    CHECK((testIt == end));
 
     // Test throws
     testIt.reset();
-    EXPECT_EQ(testIt, args.begin());
+    CHECK((testIt == args.begin()));
     char result;
-    EXPECT_THROW(result = static_cast<char>(testIt), std::bad_cast);
+    CHECK_THROWS_AS(result = static_cast<char>(testIt), std::bad_cast);
+}
+
+TEMPLATE_TEST_CASE("KernelArguments logging test non pointer numerical values",
+                   "[kernel-arguments][logging]",
+                   int32_t,
+                   int64_t,
+                   uint32_t,
+                   uint64_t,
+                   float,
+                   double,
+                   Half,
+                   FP8,
+                   BF8)
+{
+    using namespace Catch::Matchers;
+    TestType value(5.0f);
+
+    KernelArguments args(true);
+
+    args.append("a", value);
+
+    // e.g. [0..3] a: 05 00 00 00 (5)
+
+    auto bytesPart = concatenate("[0..", sizeof(TestType) - 1, "]");
+
+    CHECK_THAT(args.toString(),
+               ContainsSubstring(bytesPart) //
+                   && ContainsSubstring("a: ") //
+                   && ContainsSubstring("5"));
+}
+
+TEST_CASE("KernelArguments logging bool", "[kernel-arguments]")
+{
+    using namespace Catch::Matchers;
+    KernelArguments args(true);
+
+    SECTION("false")
+    {
+        args.append("a", false);
+
+        CHECK_THAT(args.toString(),
+                   ContainsSubstring("[0..0]") //
+                       && ContainsSubstring("a: ") //
+                       && ContainsSubstring("(0)"));
+    }
+
+    SECTION("true")
+    {
+        args.append("a", true);
+
+        CHECK_THAT(args.toString(),
+                   ContainsSubstring("0") //
+                       && ContainsSubstring("a: ") //
+                       && ContainsSubstring("(1)"));
+    }
+}
+
+TEMPLATE_TEST_CASE("KernelArguments logging test pointer values",
+                   "[kernel-arguments][logging]",
+                   int32_t,
+                   int64_t,
+                   uint8_t,
+                   uint32_t,
+                   uint64_t,
+                   float,
+                   double,
+                   Half,
+                   FP8,
+                   BF8)
+{
+    using namespace Catch::Matchers;
+    auto value = std::make_shared<TestType>();
+
+    KernelArguments args(true);
+
+    args.append("a", value.get());
+    value = nullptr;
+    args.append("b", value.get());
+
+    CHECK_THAT(args.toString(),
+               ContainsSubstring("[0..7]") //
+                   && ContainsSubstring("a: ") //
+                   && ContainsSubstring("0x") //
+                   && ContainsSubstring("b: ") //
+                   && ContainsSubstring("[8..15]") //
+                   && (ContainsSubstring("(nil)") //
+                       || ContainsSubstring("(0)")));
 }

@@ -1,10 +1,10 @@
 /**
- * Test suite utilites.
+ * Test suite utilities.
  */
 
 #include <cblas.h>
 
-#include "Utilities.hpp"
+#include "common/Utilities.hpp"
 
 int countSubstring(const std::string& str, const std::string& sub)
 {

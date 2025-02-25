@@ -15,8 +15,8 @@
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TestValues.hpp"
 #include "Utilities.hpp"
+#include <common/TestValues.hpp>
 
 using namespace rocRoller;
 

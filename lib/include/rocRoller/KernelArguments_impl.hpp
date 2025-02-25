@@ -122,7 +122,17 @@ namespace rocRoller
             return "<unbound>";
 
         std::ostringstream msg;
-        msg << value;
+
+        // Some pointer types (char, int8_t, uint8_t, etc) are interpreted
+        // as a string, we just want the pointer value.
+        if constexpr(std::is_pointer_v<T>)
+        {
+            msg << static_cast<void const*>(value);
+        }
+        else
+        {
+            msg << value;
+        }
         return msg.str();
     }
 

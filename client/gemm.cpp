@@ -6,7 +6,7 @@
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
 
-#include "../../test/unit/Utilities.hpp"
+#include <common/Utilities.hpp>
 
 #include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"

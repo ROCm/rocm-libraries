@@ -142,7 +142,7 @@ namespace rocRoller
                                         int          count,
                                         unsigned int alignment = 4);
 
-            AllocationState allocationState() const;
+            constexpr AllocationState allocationState() const;
 
             AllocationPtr allocation() const;
 
@@ -155,13 +155,13 @@ namespace rocRoller
             bool canAllocateNow() const;
             void allocateNow();
 
-            bool isPlaceholder() const;
-            bool isZeroLiteral() const;
+            constexpr bool isPlaceholder() const;
+            bool           isZeroLiteral() const;
 
-            bool isSpecial() const;
-            bool isSCC() const;
-            bool isVCC() const;
-            bool isExec() const;
+            constexpr bool isSpecial() const;
+            constexpr bool isSCC() const;
+            bool           isVCC() const;
+            constexpr bool isExec() const;
 
             /**
              * Asserts that `this` is in a valid state to be used as an operand to an instruction.
