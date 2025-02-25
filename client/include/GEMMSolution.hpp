@@ -61,7 +61,7 @@ namespace rocRoller
                 {
                     auto args = this->commandArguments(command, problemParams, runParams)
                                     .runtimeArguments();
-                    AssertFatal(commandKernel->matchesPredicates(args, spdlog::level::err),
+                    AssertFatal(commandKernel->matchesPredicates(args, LogLevel::Error),
                                 "Invalid run parameters: all predicates must match.");
                 }
 

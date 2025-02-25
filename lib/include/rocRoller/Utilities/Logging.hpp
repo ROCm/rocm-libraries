@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright 2019-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,120 +26,90 @@
 
 #pragma once
 
+// Only need the forward declaration of LogLevel
+#include <rocRoller/Utilities/Settings_fwd.hpp>
+
+#include <format>
 #include <string>
-
-// #define SPDLOG_COMPILED_LIB 1
-#include <spdlog/spdlog.h>
-
-#if SPDLOG_VERSION > 10902
-// In order for linking to work for GCC, any includes from fmt must happen after including spdlog.h
-#include <spdlog/fmt/ranges.h>
-#else
-namespace spdlog
-{
-    template <typename... Args>
-    using format_string_t = fmt::format_string<Args...>;
-}
-#endif
 
 namespace rocRoller
 {
     namespace Log
     {
-        using LoggerPtr = std::shared_ptr<spdlog::logger>;
+
+        class logger
+        {
+        public:
+            void log(LogLevel level, const std::string& str);
+
+            template <typename... Args>
+            void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args)
+            {
+                if(should_log(level))
+                {
+                    std::string buf;
+                    std::vformat_to(
+                        std::back_inserter(buf), fmt.get(), std::make_format_args(args...));
+                    log(level, buf);
+                }
+            }
+
+#define add_logging_method(method_name, level_name)                          \
+    inline void method_name(const std::string& str)                          \
+    {                                                                        \
+        log(LogLevel::level_name, str);                                      \
+    }                                                                        \
+    template <typename... Args>                                              \
+    inline void method_name(std::format_string<Args...> fmt, Args&&... args) \
+    {                                                                        \
+        log(LogLevel::level_name, fmt, std::forward<Args>(args)...);         \
+    }
+
+            add_logging_method(trace, Trace);
+            add_logging_method(debug, Debug);
+            add_logging_method(info, Info);
+            add_logging_method(warn, Warning);
+            add_logging_method(error, Error);
+            add_logging_method(critical, Critical);
+
+            bool should_log(LogLevel msg_level) const;
+        };
+
+        using LoggerPtr = std::shared_ptr<logger>;
         LoggerPtr getLogger();
 
-        inline void log(spdlog::level::level_enum level, const std::string& str)
+        inline void log(LogLevel level, const std::string& str)
         {
             static auto defaultLog = getLogger();
             defaultLog->log(level, str);
         }
 
         template <typename... Args>
-        inline void log(spdlog::level::level_enum        level,
-                        spdlog::format_string_t<Args...> fmt,
-                        Args&&... args)
+        inline void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args)
         {
             static auto defaultLog = getLogger();
             defaultLog->log(level, fmt, std::forward<Args>(args)...);
         }
 
-        inline void trace(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->trace(str);
-        }
+#define declare_logging_function(name)                                \
+    inline void name(const std::string& str)                          \
+    {                                                                 \
+        static auto defaultLog = getLogger();                         \
+        defaultLog->name(str);                                        \
+    }                                                                 \
+    template <typename... Args>                                       \
+    inline void name(std::format_string<Args...> fmt, Args&&... args) \
+    {                                                                 \
+        static auto defaultLog = getLogger();                         \
+        defaultLog->name(fmt, std::forward<Args>(args)...);           \
+    }
 
-        template <typename... Args>
-        inline void trace(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->trace(fmt, std::forward<Args>(args)...);
-        }
+        declare_logging_function(trace);
+        declare_logging_function(debug);
+        declare_logging_function(info);
+        declare_logging_function(warn);
+        declare_logging_function(error);
+        declare_logging_function(critical);
 
-        inline void debug(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->debug(str);
-        }
-
-        template <typename... Args>
-        inline void debug(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->debug(fmt, std::forward<Args>(args)...);
-        }
-
-        inline void info(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->info(str);
-        }
-
-        template <typename... Args>
-        inline void info(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->info(fmt, std::forward<Args>(args)...);
-        }
-
-        inline void warn(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->warn(str);
-        }
-
-        template <typename... Args>
-        inline void warn(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->warn(fmt, std::forward<Args>(args)...);
-        }
-
-        inline void error(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->error(str);
-        }
-
-        template <typename... Args>
-        inline void error(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->error(fmt, std::forward<Args>(args)...);
-        }
-
-        inline void critical(const std::string& str)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->critical(str);
-        }
-
-        template <typename... Args>
-        inline void critical(spdlog::format_string_t<Args...> fmt, Args&&... args)
-        {
-            static auto defaultLog = getLogger();
-            defaultLog->critical(fmt, std::forward<Args>(args)...);
-        }
     } // namespace Log
 } // namespace rocRoller

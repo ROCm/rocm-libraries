@@ -235,7 +235,7 @@ def significant_changes(summary, threshold=0.05):
                 ] = (
                     f"{sign} {(abs(percent)):6.2f}% "
                     f"| p={comparison.moods_pval:.4e} "
-                    f"| {A.problem_token(priority_problems())} "
+                    f"\n\t| {A.problem_token(priority_problems())}"
                     f"| {A.solution_token} "
                     f"| {token}\n"
                 )

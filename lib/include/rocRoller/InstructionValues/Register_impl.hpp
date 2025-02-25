@@ -85,6 +85,8 @@ namespace rocRoller
             case Type::VCC_LO:
             case Type::VCC_HI:
             case Type::EXEC:
+            case Type::EXEC_LO:
+            case Type::EXEC_HI:
                 return true;
 
             default:
@@ -153,6 +155,10 @@ namespace rocRoller
                 return "VCC_HI";
             case Type::EXEC:
                 return "EXEC";
+            case Type::EXEC_LO:
+                return "EXEC_LO";
+            case Type::EXEC_HI:
+                return "EXEC_HI";
             }
             Throw<FatalError>("Invalid register type!");
         }
@@ -510,6 +516,12 @@ namespace rocRoller
             case Type::EXEC:
                 os << "exec";
                 return;
+            case Type::EXEC_LO:
+                os << "exec_lo";
+                return;
+            case Type::EXEC_HI:
+                os << "exec_hi";
+                return;
             default:
                 break;
             }
@@ -600,6 +612,8 @@ namespace rocRoller
             case Type::VCC_LO:
             case Type::VCC_HI:
             case Type::EXEC:
+            case Type::EXEC_LO:
+            case Type::EXEC_HI:
                 specialString(os);
                 return;
             case Type::Literal:

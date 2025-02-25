@@ -1,3 +1,4 @@
+#include <rocRoller/CodeGen/AddInstruction.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Multiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Utilities/Component.hpp>
@@ -152,18 +153,19 @@ namespace rocRoller
         }
         else if(numHighComponents >= 2)
         {
-            co_yield_(Instruction("s_add_u32",
-                                  {dest->subset({1})},
-                                  {highComponents[0], highComponents[1]},
-                                  {},
-                                  "most significant: sum"));
+            co_yield ScalarAddUInt32(m_context,
+                                     dest->subset({1}),
+                                     highComponents[0],
+                                     highComponents[1],
+                                     "most significant: sum");
+
             if(numHighComponents == 3)
             {
-                co_yield_(Instruction("s_add_u32",
-                                      {dest->subset({1})},
-                                      {dest->subset({1}), highComponents[2]},
-                                      {},
-                                      "most significant: sum"));
+                co_yield ScalarAddUInt32(m_context,
+                                         dest->subset({1}),
+                                         dest->subset({1}),
+                                         highComponents[2],
+                                         "most significant: sum");
             }
         }
         else
@@ -308,19 +310,20 @@ namespace rocRoller
         }
         else if(numHighComponents == 2)
         {
-            co_yield_(Instruction("v_add_u32",
-                                  {dest->subset({1})},
-                                  {highComponents[0], highComponents[1]},
-                                  {},
-                                  "most significant: sum"));
+            co_yield VectorAddUInt32(m_context,
+                                     dest->subset({1}),
+                                     highComponents[0],
+                                     highComponents[1],
+                                     "most significant: sum");
         }
         else if(numHighComponents == 3)
         {
-            co_yield_(Instruction("v_add3_u32",
-                                  {dest->subset({1})},
-                                  {highComponents[0], highComponents[1], highComponents[2]},
-                                  {},
-                                  "most significant: sum"));
+            co_yield VectorAdd3UInt32(m_context,
+                                      dest->subset({1}),
+                                      highComponents[0],
+                                      highComponents[1],
+                                      highComponents[2],
+                                      "most significant: sum");
         }
         else
         {

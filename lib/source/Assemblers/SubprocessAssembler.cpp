@@ -85,13 +85,9 @@ namespace rocRoller
     {
         TIMER(t, "Assembler::assembleMachineCode");
 
-        int foo = 5;
-
         std::filesystem::path tmpFolder = makeTempFolder();
 
         auto deleteDir = [tmpFolder](auto*) { std::filesystem::remove_all(tmpFolder); };
-
-        // std::shared_ptr<int> tmpFolderGuard(&foo, deleteDir);
 
         auto assemblyFile   = tmpFolder / "kernel.s";
         auto objectFile     = tmpFolder / "kernel.o";
@@ -105,6 +101,10 @@ namespace rocRoller
         std::string assemblerPath = Settings::getInstance()->get(Settings::SubprocessAssemblerPath);
 
         {
+
+            auto const arch          = GPUArchitectureLibrary::getInstance()->GetArch(target);
+            auto const wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
             std::vector<std::string> args = {assemblerPath,
                                              "-x",
                                              "assembler",
@@ -112,7 +112,7 @@ namespace rocRoller
                                              "amdgcn-amd-amdhsa",
                                              "-mcode-object-version=5",
                                              concatenate("-mcpu=", toString(target)),
-                                             "-mwavefrontsize64",
+                                             (wavefrontSize == 64) ? "-mwavefrontsize64" : "",
                                              "-c",
                                              "-o",
                                              objectFile,

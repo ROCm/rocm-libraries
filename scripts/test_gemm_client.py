@@ -10,7 +10,7 @@ import pytest
 import subprocess
 
 gemm = (
-    pathlib.Path(__file__).parent.parent / "build" / "bin" / "client" / "gemm"
+    pathlib.Path(__file__).parent.parent / "build" / "bin" / "client" / "rocRoller_gemm"
 ).resolve()
 
 
