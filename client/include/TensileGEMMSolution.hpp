@@ -2,6 +2,8 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelOptions.hpp>
 
+#include "../../test/unit/TensorDescriptor.hpp"
+
 #include "GEMMParameters.hpp"
 #include "GEMMSolution.hpp"
 #include "visualize.hpp"
@@ -375,24 +377,29 @@ namespace rocRoller
                 {
                     CommandArguments commandArgs = this->m_command->createArguments();
 
+                    unsigned const M = m_solutionParams.problemParams.m;
+                    unsigned const N = m_solutionParams.problemParams.n;
+                    unsigned const K = m_solutionParams.problemParams.k;
+
+                    TensorDescriptor descC(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeC),
+                        M * N,
+                        {M, M * K});
+                    setCommandTensorArg(commandArgs, m_tagC, descC, m_dC.get());
+
+                    TensorDescriptor descA(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeA),
+                        M * K,
+                        {M, M * K});
+                    setCommandTensorArg(commandArgs, m_tagA, descA, (A*)m_dA.get());
+
+                    TensorDescriptor descB(
+                        getDataTypeFromString(m_solutionParams.problemParams.typeB),
+                        K * N,
+                        {N, N * K});
+                    setCommandTensorArg(commandArgs, m_tagB, descB, (B*)m_dB.get());
+
                     commandArgs.setArgument(m_tagD, ArgumentType::Value, m_dD.get());
-                    commandArgs.setArgument(m_tagC, ArgumentType::Value, m_dC.get());
-
-                    commandArgs.setArgument(m_tagA, ArgumentType::Value, (A*)m_dA.get());
-                    commandArgs.setArgument(m_tagB, ArgumentType::Value, (B*)m_dB.get());
-
-                    commandArgs.setArgument(m_tagC,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.n);
-                    commandArgs.setArgument(m_tagA,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
-                    commandArgs.setArgument(m_tagB,
-                                            ArgumentType::Limit,
-                                            (size_t)m_solutionParams.problemParams.k
-                                                * m_solutionParams.problemParams.n);
 
                     commandArgs.setArgument(
                         m_offsetDTag, ArgumentType::Value, (unsigned long long)0);
@@ -416,36 +423,6 @@ namespace rocRoller
                                             ArgumentType::Stride,
                                             1,
                                             (unsigned int)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
-
-                    commandArgs.setArgument(m_tagC,
-                                            ArgumentType::Stride,
-                                            0,
-                                            (unsigned int)m_solutionParams.problemParams.m);
-                    commandArgs.setArgument(m_tagC,
-                                            ArgumentType::Stride,
-                                            1,
-                                            (unsigned int)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
-
-                    commandArgs.setArgument(m_tagA,
-                                            ArgumentType::Stride,
-                                            0,
-                                            (unsigned int)m_solutionParams.problemParams.m);
-                    commandArgs.setArgument(m_tagA,
-                                            ArgumentType::Stride,
-                                            1,
-                                            (unsigned int)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
-
-                    commandArgs.setArgument(m_tagB,
-                                            ArgumentType::Stride,
-                                            0,
-                                            (unsigned int)m_solutionParams.problemParams.n);
-                    commandArgs.setArgument(m_tagB,
-                                            ArgumentType::Stride,
-                                            1,
-                                            (unsigned int)m_solutionParams.problemParams.n
                                                 * m_solutionParams.problemParams.k);
 
                     commandArgs.setArgument(m_sizesFree0Tag,

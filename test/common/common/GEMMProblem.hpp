@@ -1,3 +1,5 @@
+#pragma once
+
 struct GEMMProblem
 {
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)

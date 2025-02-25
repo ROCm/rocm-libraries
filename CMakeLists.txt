@@ -189,9 +189,13 @@ add_executable(
   lib/source/Assemblers/Assembler.cpp
   lib/source/Costs/Cost.cpp
   lib/source/DataTypes_F8_Utils.cpp
+  lib/source/DataTypes_F6_Utils.cpp
   lib/source/Error.cpp
   lib/source/Logging.cpp
   lib/source/Scheduler.cpp
+  lib/source/Utilities/Settings.cpp
+  lib/source/Timer.cpp
+
   ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
 )
 add_dependencies(GPUArchitectureGenerator spdlog)
@@ -558,6 +562,7 @@ set(
   test/unit/GEMMFusion.cpp
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
+  test/unit/ConversionTest.cpp
   test/unit/F8Test.cpp
   test/unit/F6Test.cpp
   test/unit/FP4Test.cpp

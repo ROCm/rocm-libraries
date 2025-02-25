@@ -47,7 +47,7 @@ namespace rocRoller
             template <CUnary UnaryExp>
             Size operator()(UnaryExp const& expr)
             {
-                return call(expr);
+                return call(expr.arg);
             }
 
             Size operator()(DataFlowTag const& expr)
@@ -121,7 +121,7 @@ namespace rocRoller
             template <CUnary UnaryExp>
             MemoryType operator()(UnaryExp const& expr)
             {
-                return call(expr);
+                return call(expr.arg);
             }
 
             MemoryType operator()(DataFlowTag const& expr)
@@ -182,7 +182,7 @@ namespace rocRoller
             template <CUnary UnaryExp>
             LayoutType operator()(UnaryExp const& expr)
             {
-                return call(expr);
+                return call(expr.arg);
             }
 
             LayoutType operator()(DataFlowTag const& expr)

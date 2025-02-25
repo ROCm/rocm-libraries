@@ -279,29 +279,21 @@ namespace rocRoller
                bool                       transA = false,
                bool                       transB = true);
 
+    template <typename TA, typename TB>
     void CPUMM(std::vector<float>&       D,
                const std::vector<float>& C,
-               const std::vector<FP8>&   A,
-               const std::vector<FP8>&   B,
+               const std::vector<TA>&    A,
+               const std::vector<TB>&    B,
                int                       M,
                int                       N,
                int                       K,
                float                     alpha,
                float                     beta,
                bool                      transA = false,
-               bool                      transB = true);
-
-    void CPUMM(std::vector<float>&       D,
-               const std::vector<float>& C,
-               const std::vector<BF8>&   A,
-               const std::vector<BF8>&   B,
-               int                       M,
-               int                       N,
-               int                       K,
-               float                     alpha,
-               float                     beta,
-               bool                      transA = false,
-               bool                      transB = true);
+               bool                      transB = true)
+    {
+        CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
+    }
 }
 
 /*
@@ -317,27 +309,42 @@ namespace rocRoller
                              std::vector<TB>&          B,
                              size_t                    sizeB,
                              std::vector<TC>&          C,
-                             size_t                    sizeC)
+                             size_t                    sizeC,
+                             float                     min = -1.f,
+                             float                     max = 1.f)
     {
         auto rngA = RandomGenerator(seed + 1);
         auto rngB = RandomGenerator(seed + 2);
         auto rngC = RandomGenerator(seed + 3);
 
+        // TODO: use data-generator here, avoid hard coded values below
+        auto generateVector = [&](auto& vec, RandomGenerator& rng, size_t sz) {
+            using elemT = typename std::remove_reference_t<decltype(vec)>::value_type;
+            if constexpr(std::is_same_v<elemT, FP4x8>)
+                vec = rng.vector<FP4>(sz, -6.f, 6.f);
+            else if constexpr(std::is_same_v<elemT, FP6x16>)
+                vec = rng.vector<FP6>(sz, -7.5f, 7.5f);
+            else if constexpr(std::is_same_v<elemT, BF6x16>)
+                vec = rng.vector<BF6>(sz, -28.f, 28.f);
+            else
+                vec = rng.vector<elemT>(sz, min, max);
+        };
+
 #pragma omp parallel sections
         {
 #pragma omp section
             {
-                A = rngA.vector<TA>(sizeA, -1.f, 1.f);
+                generateVector(A, rngA, sizeA);
             }
 
 #pragma omp section
             {
-                B = rngB.vector<TB>(sizeB, -1.f, 1.f);
+                generateVector(B, rngB, sizeB);
             }
 
 #pragma omp section
             {
-                C = rngC.vector<TC>(sizeC, -1.f, 1.f);
+                C = rngC.vector<TC>(sizeC, min, max);
             }
         }
     }

@@ -16,6 +16,7 @@
 #include "GenericContextFixture.hpp"
 #include "Scheduling/Observers/FileWritingObserver.hpp"
 #include "SourceMatcher.hpp"
+#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -96,32 +97,22 @@ namespace TileTransposeAddTest
 
         CommandArguments commandArgs = command->createArguments();
 
-        commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(
-            tagTensorA, ArgumentType::Stride, 0, (size_t)((ny * !transpose.a) + transpose.a));
-        commandArgs.setArgument(
-            tagTensorA, ArgumentType::Stride, 1, (size_t)((nx * transpose.a) + !transpose.a));
+        TensorDescriptor descA(DataType::Int32,
+                               {size_t(nx), size_t(ny)},
+                               {(size_t)((ny * !transpose.a) + transpose.a),
+                                (size_t)((nx * transpose.a) + !transpose.a)});
+        TensorDescriptor descB(DataType::Int32,
+                               {size_t(nx), size_t(ny)},
+                               {(size_t)((ny * !transpose.b) + transpose.b),
+                                (size_t)((nx * transpose.b) + !transpose.b)});
+        TensorDescriptor descC(DataType::Int32,
+                               {size_t(nx), size_t(ny)},
+                               {(size_t)((ny * !transpose.c) + transpose.c),
+                                (size_t)((nx * transpose.c) + !transpose.c)});
 
-        commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(
-            tagTensorB, ArgumentType::Stride, 0, (size_t)((ny * !transpose.b) + transpose.b));
-        commandArgs.setArgument(
-            tagTensorB, ArgumentType::Stride, 1, (size_t)((nx * transpose.b) + !transpose.b));
-
-        commandArgs.setArgument(tagTensorC, ArgumentType::Value, d_c.get());
-        commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)nx * ny);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)nx);
-        commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)ny);
-        commandArgs.setArgument(
-            tagTensorC, ArgumentType::Stride, 0, (size_t)((ny * !transpose.c) + transpose.c));
-        commandArgs.setArgument(
-            tagTensorC, ArgumentType::Stride, 1, (size_t)((nx * transpose.c) + !transpose.c));
+        setCommandTensorArg(commandArgs, tagTensorA, descA, d_a.get());
+        setCommandTensorArg(commandArgs, tagTensorB, descB, d_b.get());
+        setCommandTensorArg(commandArgs, tagTensorC, descC, d_c.get());
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);

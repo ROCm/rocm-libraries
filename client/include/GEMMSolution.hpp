@@ -6,7 +6,7 @@
 #include "BenchmarkSolution.hpp"
 #include "GEMMParameters.hpp"
 
-#include "../../../test/unit/Utilities.hpp"
+#include <common/Utilities.hpp>
 
 using namespace rocRoller;
 

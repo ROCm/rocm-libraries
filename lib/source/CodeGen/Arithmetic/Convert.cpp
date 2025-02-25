@@ -108,13 +108,25 @@ namespace rocRoller
                                                                       Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
+        // conversion cannot operate on ACCVGPR
+        AssertFatal(dest->regType() != rocRoller::Register::Type::Accumulator);
 
         auto dataType = getArithDataType(arg);
 
         switch(dataType)
         {
         case DataType::Float:
-            co_yield_(Instruction("v_cvt_f16_f32", {dest}, {arg}, {}, ""));
+            if(arg->regType() == rocRoller::Register::Type::Accumulator)
+            {
+                // If arg is ACCVGPR, we first copy the value to dest (Vector)
+                // and then convert.
+                co_yield m_context->copier()->copy(dest, arg, "");
+                co_yield_(Instruction("v_cvt_f16_f32", {dest}, {dest}, {}, ""));
+            }
+            else
+            {
+                co_yield_(Instruction("v_cvt_f16_f32", {dest}, {arg}, {}, ""));
+            }
             break;
         case DataType::Halfx2:
             co_yield generateOp<Expression::BitwiseAnd>(

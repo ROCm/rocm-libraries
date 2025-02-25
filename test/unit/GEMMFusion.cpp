@@ -19,6 +19,7 @@
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
+#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
 
@@ -278,54 +279,23 @@ namespace GEMMDriverTest
 
             CommandArguments commandArgs = command->createArguments();
 
+            TensorDescriptor descA(dataType, {size_t(M), size_t(K)}, gemm.transA);
+            TensorDescriptor descB(dataType, {size_t(K), size_t(N)}, gemm.transB);
+            TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
+
+            setCommandTensorArg(commandArgs, tagTensorA, descA, deviceA.get());
+            setCommandTensorArg(commandArgs, tagTensorB, descB, deviceB.get());
+            setCommandTensorArg(commandArgs, tagTensorC, descC, deviceC.get());
+            setCommandTensorArg(commandArgs, tagTensorRelu, descRelu, deviceD.get());
+
             commandArgs.setArgument(tagTensorA, ArgumentType::Value, deviceA.get());
             commandArgs.setArgument(tagTensorB, ArgumentType::Value, deviceB.get());
             commandArgs.setArgument(tagTensorC, ArgumentType::Value, deviceC.get());
             commandArgs.setArgument(tagTensorRelu, ArgumentType::Value, deviceD.get());
 
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)M * K);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)K);
-            if(gemm.transA == "N")
-            {
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)M);
-            }
-            else
-            {
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)K);
-                commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
-            }
-
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)K * N);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)K);
-            commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)N);
-            if(gemm.transB == "N")
-            {
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)K);
-            }
-            else
-            {
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)N);
-                commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 1, (size_t)1);
-            }
-
-            commandArgs.setArgument(tagTensorC, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorC, ArgumentType::Stride, 1, (size_t)M);
-
             commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, alpha);
-
             commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
-
-            commandArgs.setArgument(tagTensorRelu, ArgumentType::Limit, (size_t)M * N);
-            commandArgs.setArgument(tagTensorRelu, ArgumentType::Size, 0, (size_t)M);
-            commandArgs.setArgument(tagTensorRelu, ArgumentType::Size, 1, (size_t)N);
-            commandArgs.setArgument(tagTensorRelu, ArgumentType::Stride, 0, (size_t)1);
-            commandArgs.setArgument(tagTensorRelu, ArgumentType::Stride, 1, (size_t)M);
 
             commandArgs.setArgument(
                 tagScalarReluAlpha, ArgumentType::Value, static_cast<T>(reluAlpha));

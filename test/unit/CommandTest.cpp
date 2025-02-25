@@ -1,6 +1,6 @@
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
-
+#include "TensorDescriptor.hpp"
 #include <rocRoller/Operations/Command.hpp>
 
 using namespace rocRoller;
@@ -56,6 +56,35 @@ TEST_F(CommandTest, ToString)
     EXPECT_THAT(msg.str(), ::testing::HasSubstr("T_EXECUTE"));
 
     EXPECT_EQ(msg.str(), command->toString());
+}
+
+TEST_F(CommandTest, ConvertOp)
+{
+    // A command to convert a Float tensor into Half type
+    auto command = std::make_shared<rocRoller::Command>();
+
+    EXPECT_EQ(0, command->operations().size());
+
+    auto tagTensor = command->addOperation(Operations::Tensor(1, DataType::Float));
+    auto load_linear
+        = std::make_shared<Operations::Operation>(Operations::T_Load_Linear(tagTensor));
+    auto tagLoad = command->addOperation(load_linear);
+
+    auto cvtOp = std::make_shared<Operations::XOp>(Operations::E_Cvt(tagLoad, DataType::Half));
+    Operations::T_Execute execute(command->getNextTag());
+    auto                  tagConvert = execute.addXOp(cvtOp);
+    command->addOperation(execute);
+
+    EXPECT_EQ(execute.getInputs(), std::unordered_set<Operations::OperationTag>({tagLoad}));
+    EXPECT_EQ(execute.getOutputs(), std::unordered_set<Operations::OperationTag>({tagConvert}));
+
+    constexpr auto result = R"(
+        Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
+        T_LOAD_LINEAR 1 Source 0
+        T_EXECUTE 1
+        E_Cvt 2, 1)";
+
+    EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
 }
 
 TEST_F(CommandTest, VectorAdd)
@@ -210,6 +239,26 @@ TEST_F(CommandTest, SetCommandArguments)
 
     commandArgs.setArgument(tagScalarB, ArgumentType::Value, 2);
     EXPECT_THROW({ commandArgs.setArgument(tagScalarB, ArgumentType::Limit, 10); }, FatalError);
+}
+
+TEST_F(CommandTest, TensorDescriptor)
+{
+    auto command = std::make_shared<rocRoller::Command>();
+
+    auto tagTensor = command->addOperation(rocRoller::Operations::Tensor(2, DataType::Float));
+
+    TensorDescriptor desc(DataType::Float, {512u, 1024u}, "T");
+
+    CommandArguments commandArgs = command->createArguments();
+    auto             device      = make_shared_device<float>(512u * 1024u);
+    setCommandTensorArg(commandArgs, tagTensor, desc, device.get());
+
+    // Below should NOT error out as arguments have been set in setCommandTensorArg
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Value, device.get()); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Size, 0, 512u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Size, 1, 1024u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Stride, 0, 1024u); });
+    EXPECT_NO_THROW({ commandArgs.setArgument(tagTensor, ArgumentType::Stride, 1, 1u); });
 }
 
 TEST_F(CommandTest, GetRuntimeArguments)
