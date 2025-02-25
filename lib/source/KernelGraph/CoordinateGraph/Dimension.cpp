@@ -224,7 +224,7 @@ namespace rocRoller
             return MacroTileNumber(sdim, size, Expression::literal(1u));
         }
 
-        MacroTileIndex MacroTile::tileIndex(int sdim) const
+        MacroTileIndex MacroTile::tileIndex(int sdim, uint jamming) const
         {
             AssertFatal(!sizes.empty(), "MacroTile doesn't have sizes set.");
             int stride = 1;
@@ -234,7 +234,7 @@ namespace rocRoller
                 stride = stride * sizes[d];
             }
             return MacroTileIndex(sdim,
-                                  Expression::literal(static_cast<uint>(sizes.at(sdim))),
+                                  Expression::literal(static_cast<uint>(sizes.at(sdim)) * jamming),
                                   Expression::literal(stride));
         }
 

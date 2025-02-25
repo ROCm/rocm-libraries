@@ -43,6 +43,13 @@ namespace rocRoller
             Count
         };
 
+        enum class GraphModification : int
+        {
+            DeleteElement = 0,
+            AddElement,
+            SetElement
+        };
+
         constexpr Direction opposite(Direction);
 
         namespace mi = boost::multi_index;
@@ -96,7 +103,7 @@ namespace rocRoller
              */
             ElementType getElementType(Element const& e) const;
 
-            virtual void clearCache();
+            virtual void clearCache(GraphModification modification);
 
             template <typename T>
             int addElement(T&& element);

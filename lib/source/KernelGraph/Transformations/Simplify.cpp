@@ -128,18 +128,113 @@ namespace rocRoller::KernelGraph
      */
     KernelGraph removeRedundantBodyEdges(KernelGraph const& original)
     {
-        auto graph  = original;
-        auto logger = rocRoller::Log::getLogger();
+        auto graph = original;
 
         auto edges
             = filter(graph.control.isElemType<Body>(), graph.control.getEdges()).to<std::vector>();
         for(auto edge : edges)
-        {
             removeBodyEdgeIfRedundant(graph, edge);
-        }
 
         return graph;
     }
+
+    /*
+     * Helper for removeRedundantNOPs (early return).
+     *
+     * Returns true if it modified the graph; false otherwise.
+     */
+    bool removeNOPIfRedundant(KernelGraph& graph, int nop)
+    {
+        auto hasBody = !empty(graph.control.getOutputNodeIndices<Body>(nop));
+        if(hasBody)
+            return false;
+
+        auto singleIncomingSequence = only(graph.control.getInputNodeIndices<Sequence>(nop));
+        if(singleIncomingSequence)
+        {
+            auto inNode = *singleIncomingSequence;
+
+            auto incomingEdge = only(graph.control.getNeighbours<GD::Upstream>(nop));
+            if(!incomingEdge)
+                return false;
+
+            auto outgoingEdges = graph.control.getNeighbours<GD::Downstream>(nop).to<std::vector>();
+
+            for(auto outEdge : outgoingEdges)
+            {
+                auto outNode = *only(graph.control.getNeighbours<GD::Downstream>(outEdge));
+                graph.control.addElement(Sequence(), {inNode}, {outNode});
+            }
+
+            Log::debug("Deleting single-incoming NOP: {}", nop);
+
+            graph.control.deleteElement(*incomingEdge);
+            for(auto outgoingEdge : outgoingEdges)
+                graph.control.deleteElement(outgoingEdge);
+            graph.control.deleteElement(nop);
+
+            return true;
+        }
+
+        auto inputs = graph.control.getInputNodeIndices(nop, [](ControlEdge) { return true; })
+                          .to<std::vector>();
+        auto outputs = graph.control.getOutputNodeIndices(nop, [](ControlEdge) { return true; })
+                           .to<std::vector>();
+
+        auto dontGoThroughNOP = [&](int x) -> bool {
+            auto tail = *only(graph.control.getNeighbours<GD::Upstream>(x));
+            auto head = *only(graph.control.getNeighbours<GD::Downstream>(x));
+            return (nop != tail) && (nop != head);
+        };
+
+        for(auto input : inputs)
+        {
+            auto reachable = graph.control.depthFirstVisit(input, dontGoThroughNOP, GD::Downstream)
+                                 .to<std::unordered_set>();
+            for(auto output : outputs)
+            {
+                if(!reachable.contains(output))
+                    return false;
+            }
+        }
+
+        // If we get here, you can get to all outputs from each input
+        // without going through the NOP.  Delete it!
+
+        auto incoming = only(graph.control.getNeighbours<GD::Upstream>(nop));
+        auto outgoing = only(graph.control.getNeighbours<GD::Downstream>(nop));
+        if((!incoming) || (!outgoing))
+            return false;
+        graph.control.deleteElement(*incoming);
+        graph.control.deleteElement(*outgoing);
+        graph.control.deleteElement(nop);
+
+        return true;
+    }
+
+    /**
+     * @brief Remove redundant NOP nodes.
+     */
+    KernelGraph removeRedundantNOPs(KernelGraph const& original)
+    {
+        auto graph        = removeRedundantSequenceEdges(original);
+        bool graphChanged = true;
+        while(graphChanged)
+        {
+            graphChanged = false;
+            auto nops    = graph.control.getNodes<NOP>().to<std::vector>();
+            for(auto nop : nops)
+                graphChanged |= removeNOPIfRedundant(graph, nop);
+            if(graphChanged)
+                graph = removeRedundantSequenceEdges(graph);
+        }
+        return graph;
+    }
+
+    // Remove removeRedundantNOPs is not fully tested.
+    //
+    // Note: if we remove enough NOPs, some edges might become
+    // redundant.  Do fixed-point iterations, or is that too slow?
 
     KernelGraph Simplify::apply(KernelGraph const& original)
     {

@@ -1078,74 +1078,81 @@ namespace KernelGraphTest
         auto params  = example.getCommandParameters();
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto addLDSTransform           = std::make_shared<AddLDS>(params, m_context);
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
-        auto unrollLoopsTransform     = std::make_shared<UnrollLoops>(params, m_context);
-        auto fuseLoopsTransform       = std::make_shared<FuseLoops>();
-        auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
+        auto unrollLoopsTransform      = std::make_shared<UnrollLoops>(params, m_context);
+        auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
+        auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
+
         auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
         auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
-        auto kgraph1 = kgraph0.transform(lowerTileTransform);
+        auto kgraph1 = kgraph0.transform(addLDSTransform);
+        kgraph1      = kgraph1.transform(lowerTileTransform);
         kgraph1      = kgraph1.transform(lowerTensorContractionTransform);
 
         // Verify the number of Multiply nodes in the graph after lowerTile
         auto multiplyNodes = kgraph1.control.getNodes<Multiply>().to<std::vector>();
         EXPECT_EQ(multiplyNodes.size(), macK / waveK);
 
-        auto kgraph_unrolled = kgraph1.transform(unrollLoopsTransform);
+        // Verify number of loads
+        auto loads = kgraph0.control.getNodes<LoadTiled>().to<std::vector>();
+        EXPECT_EQ(loads.size(), 3); // A, B, C
+
+        loads = kgraph1.control.getNodes<LoadTiled>().to<std::vector>();
+        EXPECT_EQ(loads.size(), 4); // 1 for A, 2 for B (no LDS), 1 for C
+
+        loads = kgraph1.control.getNodes<LoadLDSTile>().to<std::vector>();
+        EXPECT_EQ(loads.size(), 2); // 2 for A
+
+        auto forLoops = kgraph1.control.getNodes<ForLoopOp>().to<std::vector>();
+        EXPECT_EQ(forLoops.size(), 5); // main: X, Y, K; epilogue: X, Y
+
+        auto kgraphUnrolled = kgraph1.transform(unrollLoopsTransform);
 
         // Verify that loops have been unrolled
-        auto unrolledForLoops = kgraph_unrolled.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(unrolledForLoops.size(), 10);
+        auto unrolledForLoops = kgraphUnrolled.control.getNodes<ForLoopOp>().to<std::vector>();
+        EXPECT_EQ(unrolledForLoops.size(), 10); // main: X (Y (K K)) (Y (K K)); epilogue:  X (Y Y)
 
-        auto kgraph_fused = kgraph_unrolled.transform(fuseLoopsTransform);
+        auto kgraphFused = kgraphUnrolled.transform(fuseLoopsTransform);
+        kgraphFused      = kgraphFused.transform(removeDuplicatesTransform);
 
         // Verify that loops have been fused
-        auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
+        auto fusedForLoops = kgraphFused.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(fusedForLoops.size(), 5);
 
-        auto fusedLoads = kgraph_fused.control.getNodes<LoadTiled>().to<std::vector>();
-        EXPECT_EQ(fusedLoads.size(), 12);
+        auto fusedLoads = kgraphFused.control.getNodes<LoadTiled>().to<std::vector>();
+        EXPECT_EQ(fusedLoads.size(), 9); // 1 for A, 4 for B, 4 for C
 
         // Verify that single iteration loops have been removed.
-        auto kgraph_clean    = kgraph_fused.transform(cleanLoopsTransform);
-        auto cleanedForLoops = kgraph_clean.control.getNodes<ForLoopOp>().to<std::vector>();
+        auto kgraphClean     = kgraphFused.transform(cleanLoopsTransform);
+        auto cleanedForLoops = kgraphClean.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(cleanedForLoops.size(), 1);
 
         // Verify that there is only a single StoreLDSTile node per K loop
-        auto unrolled_kgraph_lds = kgraph_unrolled.transform(addLDSTransform);
-        auto unrolledStoreLDS
-            = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
+        auto unrolledStoreLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), 4);
 
-        // Verify number of ComputeIndexes: A loads; B load; C load; D
-        // store: 3 + 3 + 3 + 3 = 12
+        // Verify number of ComputeIndexes: A loads; A LDS loads; B loads; C load; D
+        // store: 3 + (2+2) + 3 + 3 + 3 = 12
         kgraph1             = kgraph1.transform(addComputeIndexTransform);
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 12);
+        EXPECT_EQ(computeIndexes.size(), 16);
 
         // Verify number of Deallocates
         auto addDeallocate  = std::make_shared<AddDeallocate>();
         auto kgraph2        = kgraph1.transform(addDeallocate);
         auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 14);
+        EXPECT_EQ(addDeallocates.size(), 16);
 
-        unrolled_kgraph_lds = kgraph_fused.transform(addLDSTransform);
-        auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
+        auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
+        EXPECT_EQ(storeLDS.size(), 4);
+
+        auto fusedStoreLDS = kgraphFused.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
-
-        // Verify number of ComputeIndexes after unroll/fuse/lds
-        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
-        computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 20);
-
-        // Verify number of Deallocates after unroll/fuse/lds
-        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
-        addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 35);
     }
 
     TEST_F(KernelGraphTest, InlineIncrement)
@@ -1160,24 +1167,24 @@ namespace KernelGraphTest
         auto params = example.getCommandParameters();
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto addLDSTransform           = std::make_shared<AddLDS>(params, m_context);
         auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
         auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(params, m_context);
-        auto addLDSTransform             = std::make_shared<AddLDS>(params, m_context);
         auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
         auto addComputeIndexTransform    = std::make_shared<AddComputeIndex>();
         auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
 
         kgraph = kgraph.transform(updateParametersTransform);
+        kgraph = kgraph.transform(addLDSTransform);
         kgraph = kgraph.transform(lowerLinearTransform);
         kgraph = kgraph.transform(lowerTileTransform);
         kgraph = kgraph.transform(lowerTensorContractionTransform);
 
         // Usual lowering, should be able to inline everything.
         auto kgraph1 = kgraph.transform(unrollLoopsTransform);
-        kgraph1      = kgraph1.transform(addLDSTransform);
         kgraph1      = kgraph1.transform(cleanLoopsTransform);
         kgraph1      = kgraph1.transform(addComputeIndexTransform);
 
@@ -1346,12 +1353,12 @@ namespace KernelGraphTest
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
         auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
+        auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
         auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
 
-        auto kgraph1 = kgraph0.transform(lowerTileTransform);
-        kgraph1      = kgraph1.transform(addLDSTransform);
+        auto kgraph1 = kgraph0.transform(addLDSTransform);
+        kgraph1      = kgraph1.transform(lowerTileTransform);
         kgraph1      = kgraph1.transform(addComputeIndexTransform);
 
         namespace CG = rocRoller::KernelGraph::ControlGraph;
@@ -2079,7 +2086,7 @@ namespace KernelGraphTest
             = kgraph.coordinates.addElement(MakeOutput(), {linear5i_index}, {linear5o_index});
         int sd5o_index   = kgraph.coordinates.addElement(SubDimension(0));
         int split3_index = kgraph.coordinates.addElement(Split(), {linear5o_index}, {sd5o_index});
-        int u5o_index    = kgraph.coordinates.addElement(User(""));
+        int u5o_index    = kgraph.coordinates.addElement(User({}, ""));
         int join1_index  = kgraph.coordinates.addElement(Join(), {sd5o_index}, {u5o_index});
         int dataflow6_index
             = kgraph.coordinates.addElement(DataFlow(), {linear5i_index}, {u5o_index});
@@ -2533,7 +2540,7 @@ namespace KernelGraphTest
         m_context->schedule(k->prolog());
 
         // global result
-        auto user = kgraph.coordinates.addElement(User("result"));
+        auto user = kgraph.coordinates.addElement(User({}, "result"));
         auto wg   = kgraph.coordinates.addElement(Workgroup());
         kgraph.coordinates.addElement(PassThrough(), {wg}, {user});
 
@@ -2627,7 +2634,7 @@ namespace KernelGraphTest
         m_context->schedule(k->prolog());
 
         // global result
-        auto user = kgraph.coordinates.addElement(User("result"));
+        auto user = kgraph.coordinates.addElement(User({}, "result"));
         auto wg   = kgraph.coordinates.addElement(Workgroup());
         kgraph.coordinates.addElement(PassThrough(), {wg}, {user});
 
@@ -2719,11 +2726,12 @@ namespace KernelGraphTest
 
         std::vector<GraphTransformPtr> transforms;
         transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, m_context));
         transforms.push_back(std::make_shared<LowerLinear>(m_context));
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
         transforms.push_back(std::make_shared<ConnectWorkgroups>());
-        transforms.push_back(std::make_shared<AddLDS>(params, m_context));
+        transforms.push_back(std::make_shared<AddPrefetch>(params, m_context));
         transforms.push_back(std::make_shared<AddComputeIndex>());
         transforms.push_back(std::make_shared<AddDeallocate>());
 
@@ -2793,7 +2801,7 @@ namespace KernelGraphTest
         auto loadA = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));
         kgraph.control.addElement(Body(), {kernel}, {loadA});
 
-        auto user0 = kgraph.coordinates.addElement(User("user0"));
+        auto user0 = kgraph.coordinates.addElement(User({}, "user0"));
         auto vgprA = kgraph.coordinates.addElement(VGPR());
         kgraph.coordinates.addElement(DataFlow(), {user0}, {vgprA});
         kgraph.mapper.connect<VGPR>(loadA, vgprA);
@@ -2832,7 +2840,7 @@ namespace KernelGraphTest
         auto loadA = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));
         kgraph.control.addElement(Body(), {kernel}, {loadA});
 
-        auto user0 = kgraph.coordinates.addElement(User("user0"));
+        auto user0 = kgraph.coordinates.addElement(User(Operations::OperationTag(0), "user0"));
         auto vgprA = kgraph.coordinates.addElement(VGPR());
         kgraph.coordinates.addElement(DataFlow(), {user0}, {vgprA});
         kgraph.mapper.connect<VGPR>(loadA, vgprA);

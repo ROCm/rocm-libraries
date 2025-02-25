@@ -1,3 +1,4 @@
+
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderEpilogueBlocks.hpp>
@@ -36,7 +37,7 @@ namespace rocRoller
         {
             using GD = rocRoller::Graph::Direction;
 
-            void orderEpilogueBlocks(KernelGraph& graph, int tag)
+            void orderEpilogueBlocks(KernelGraph& graph, int tag, UnrollColouring const& colouring)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::OrderEpilogueBlocks({})", tag);
                 //Right now we only do this for the YLOOP, this is Specific to GEMM
@@ -59,33 +60,20 @@ namespace rocRoller
                 if(stores.size() <= 1 || forChildren.size() <= 1)
                     return;
 
-                //This portion of the code finds all the loads and stores of the Epilogues
-                //and eliminates Sequence edges between connected via SetCoordinates.
-                auto loads = filter(graph.control.isElemType<LoadTiled>(),
-                                    graph.control.depthFirstVisit(forChildren, GD::Downstream))
-                                 .to<std::vector>();
-                std::vector<int> setCoords;
-
-                for(const auto& store : stores)
+                for(auto t : forChildren)
                 {
-                    setCoords.push_back(getTopSetCoordinate(graph, store));
-                }
-                for(const auto& load : loads)
-                {
-                    setCoords.push_back(getTopSetCoordinate(graph, load));
+                    Log::debug("  Ordering under {}", t);
                 }
 
-                for(const auto& setCoord : setCoords)
+                auto reachable = graph.control.depthFirstVisit(forChildren, GD::Downstream)
+                                     .to<std::unordered_set>();
+
+                for(auto k : colouring.separators)
                 {
-                    auto setCoordChildren
-                        = graph.control.getOutputNodeIndices<Sequence>(setCoord).to<std::vector>();
-                    for(const auto& child : setCoordChildren)
+                    if(reachable.contains(k))
                     {
-                        if(isOperation<SetCoordinate>(graph.control.getElement(child)))
-                        {
-                            graph.control.deleteElement<Sequence>(std::vector<int>{setCoord},
-                                                                  std::vector<int>{child});
-                        }
+                        Log::debug("  Deleting separator {}", k);
+                        graph.control.deleteElement(k);
                     }
                 }
 
@@ -116,21 +104,36 @@ namespace rocRoller
             }
         }
 
-        KernelGraph OrderEpilogueBlocks::apply(KernelGraph const& k)
+        KernelGraph OrderEpilogueBlocks::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::OrderEpilogueBlocks");
-            auto newGraph = k;
+            auto graph = original;
 
-            for(const auto node :
-                newGraph.control.depthFirstVisit(*newGraph.control.roots().begin()))
+            // Exclude Unrolls that aren't associated with
+            // JammedWaveTileNumbers from the colouring.
+            auto exclude = std::unordered_set<int>();
+            for(auto unroll : graph.coordinates.getNodes<Unroll>())
             {
-                if(isOperation<ForLoopOp>(newGraph.control.getElement(node)))
+                bool isJammed = false;
+                for(auto input :
+                    graph.coordinates.getInputNodeIndices(unroll, [](auto) { return true; }))
                 {
-                    OrderEpilogueBlocksNS::orderEpilogueBlocks(newGraph, node);
+                    auto maybeJammed = graph.coordinates.get<JammedWaveTileNumber>(input);
+                    if(maybeJammed)
+                        isJammed = true;
                 }
+
+                if(!isJammed)
+                    exclude.insert(unroll);
+            }
+            auto colouring = colourByUnrollValue(original, -1, exclude);
+
+            for(const auto node : graph.control.getNodes<ForLoopOp>())
+            {
+                OrderEpilogueBlocksNS::orderEpilogueBlocks(graph, node, colouring);
             }
 
-            return newGraph;
+            return graph;
         }
     }
 }

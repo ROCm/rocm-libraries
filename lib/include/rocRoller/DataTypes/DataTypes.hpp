@@ -147,7 +147,7 @@ namespace rocRoller
         VGPR,
         WAVE,
         WAVE_LDS,
-        JAMMED_WAVE_LDS,
+        WAVE_SPLIT,
         WAVE_SWIZZLE,
         Literal,
         None,

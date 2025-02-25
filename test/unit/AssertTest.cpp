@@ -54,16 +54,12 @@ namespace AssertTest
         }
 
         AssertOpKind assertOpKind;
-        using AssertOpKind::Count;
-        using AssertOpKind::MemoryViolation;
-        using AssertOpKind::NoOp;
-        using AssertOpKind::STrap;
-        std::string outputMsg;
+        std::string  outputMsg;
         std::tie(assertOpKind, outputMsg) = GetParam();
 
         ::testing::FLAGS_gtest_death_test_style = "threadsafe";
 
-        if(assertOpKind == Count)
+        if(assertOpKind == AssertOpKind::Count)
         {
             EXPECT_THAT(
                 [&]() {
@@ -114,14 +110,14 @@ namespace AssertTest
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
             EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 0"));
-            if(assertOpKind != NoOp)
+            if(assertOpKind != AssertOpKind::NoOp)
             {
                 EXPECT_THAT(output(), testing::HasSubstr("s_cmp_eq_i32 s3, 1"));
                 EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc1"));
                 EXPECT_THAT(output(), testing::HasSubstr("AssertFailed"));
                 EXPECT_THAT(output(), testing::HasSubstr("// Lock for Assert Assert Test"));
                 EXPECT_THAT(output(), testing::HasSubstr("// Unlock for Assert Assert Test"));
-                if(assertOpKind == STrap)
+                if(assertOpKind == AssertOpKind::STrap)
                 {
                     EXPECT_THAT(output(), testing::HasSubstr("s_trap 2"));
                 }
@@ -160,7 +156,7 @@ namespace AssertTest
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
                     (void)hipDeviceSynchronize();
                 };
-                if(assertOpKind != NoOp)
+                if(assertOpKind != AssertOpKind::NoOp)
                 {
                     EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
                 }
@@ -181,16 +177,12 @@ namespace AssertTest
         }
 
         AssertOpKind assertOpKind;
-        using AssertOpKind::Count;
-        using AssertOpKind::MemoryViolation;
-        using AssertOpKind::NoOp;
-        using AssertOpKind::STrap;
-        std::string outputMsg;
+        std::string  outputMsg;
         std::tie(assertOpKind, outputMsg) = GetParam();
 
         ::testing::FLAGS_gtest_death_test_style = "threadsafe";
 
-        if(assertOpKind == Count)
+        if(assertOpKind == AssertOpKind::Count)
         {
             EXPECT_THAT(
                 [&]() {
@@ -234,9 +226,9 @@ namespace AssertTest
 
             m_context->schedule(k->postamble());
             m_context->schedule(k->amdgpu_metadata());
-            if(assertOpKind != NoOp)
+            if(assertOpKind != AssertOpKind::NoOp)
             {
-                if(assertOpKind == STrap)
+                if(assertOpKind == AssertOpKind::STrap)
                 {
                     EXPECT_THAT(output(), testing::HasSubstr("s_trap 2"));
                 }
@@ -267,7 +259,7 @@ namespace AssertTest
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
                     (void)hipDeviceSynchronize();
                 };
-                if(assertOpKind != NoOp)
+                if(assertOpKind != AssertOpKind::NoOp)
                 {
                     EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
                 }

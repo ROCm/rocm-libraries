@@ -85,7 +85,7 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        void Hypergraph<Node, Edge, Hyper>::clearCache()
+        void Hypergraph<Node, Edge, Hyper>::clearCache(GraphModification)
         {
             m_locationCache.clear();
         }
@@ -97,7 +97,7 @@ namespace rocRoller
             int index = m_nextIndex++;
             AssertFatal(m_elements.find(index) == m_elements.end());
             m_elements.emplace(index, std::forward<T>(element));
-            clearCache();
+            clearCache(GraphModification::AddElement);
             return index;
         }
 
@@ -116,7 +116,7 @@ namespace rocRoller
             AssertFatal(m_elements.find(index) != m_elements.end());
 
             m_elements[index] = std::forward<T>(element);
-            clearCache();
+            clearCache(GraphModification::SetElement);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -163,7 +163,7 @@ namespace rocRoller
                 AssertFatal(getElementType(cIdx) == connectingType);
             }
 
-            clearCache();
+            clearCache(GraphModification::AddElement);
 
             m_elements.emplace(index, std::forward<T>(element));
 
@@ -221,7 +221,7 @@ namespace rocRoller
         {
             auto elem = getElement(index);
 
-            clearCache();
+            clearCache(GraphModification::DeleteElement);
 
             auto& src = m_incidence.template get<BySrc>();
 
@@ -254,7 +254,7 @@ namespace rocRoller
         {
             AssertFatal(!inputs.empty() && !outputs.empty());
 
-            clearCache();
+            clearCache(GraphModification::DeleteElement);
 
             for(int cIdx : inputs)
             {

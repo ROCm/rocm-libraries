@@ -122,67 +122,6 @@ the scheduling of operations in unrolled segment $u$ are:
 
 */
 
-/*
- * A unique LDS allocation is required for each: User, ForLoop, and
- * Unroll.  This is encapsulated by the LDSSpec struct (see below).
- *
- * Transformations are done using a "stage and commit" approach.
- *
- * During staging, we search for all Load/Store operations tagged for
- * LDS and:
- *
- * 1. Compute the LDS specifier.
- *
- * 2. Record all transformations that need to happen.  These include:
- *
- *    a. Creating a unique LDS storage node.
- *
- *    b. Updating the coordinate-transform graph to compute LDS buffer
- *       indexes.
- *
- *    c. Adding load-from-global and store-into-lds operations.
- *
- *    d. Transforming existing load operations into load-from-lds
- *       operations.
- *
- *    e. Adding appropriate synchronisation (barrier) operations.
- *
- * After staging, we know how the graph must change ahead-of-time; and
- * we commit our changes.
- *
- * Note that coordinate transforms for LDS index calculations are more
- * generic than the LDS allocations for load/store operations.  For
- * example, the coordinate transform might contain ForLoop and Unroll
- * dimensions, but which coordinate transform to use doesn't depend on
- * their values.  This is directly related to the PassThrough edges
- * that we add between LDS nodes: the transform is the same, but the
- * storage location is different.  In other words, the transform is
- * less specific than the storage node.
- *
- *
- * Prefetching; currently only a single pre-fetch is supported.
- *
- * If prefetching is requested, we look for prefetch candidates (see
- * findPrefetch).  For each ForLoop prefetch candidate we:
- *
- * 1. Colour the body of ForLoop according to the value of its Unroll
- *    coordinate.
- *
- * 2. Cut any edges between different colours and detach each colour
- *    island from the ForLoop.
- *
- * 3. Add a pre-loop global-prefetch segment:
- *
- *    a. For each colour, issue a global read.
- *
- *    b. Issue store-into-LDS for the first colour.
- *
- *    c. Issue a barrier.
- *
- * 4. Construct prefetch segments.
- *
- */
-
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
@@ -191,6 +130,7 @@ the scheduling of operations in unrolled segment $u$ are:
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -201,161 +141,107 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace CF = rocRoller::KernelGraph::ControlGraph;
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
         using GD = rocRoller::Graph::Direction;
-        using LD = rocRoller::KernelGraph::Connections::LDSLoadStore;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
         using namespace Register;
 
         /**
-         * @brief Return Unroll coordinate beside (as part of a Split
-         * edge) the ForLoop coordinate.
+         * @brief For LDS load/stores, follow DataFlow edges from the
+         * LDS node to find the associated User node.
          */
-        std::optional<int> findUnrollNeighbour(KernelGraph const& kgraph, int forLoopCoord)
+        int getLDSOperationTarget(KernelGraph const& k, int opTag)
         {
-            if(forLoopCoord < 0)
-                return {};
+            auto [target, direction] = getOperationTarget(opTag, k);
 
-            std::optional<int> rv;
-
-            auto forNeighbours
-                = kgraph.coordinates.getNeighbours<GD::Upstream>(forLoopCoord).to<std::vector>();
-            for(auto forNeighbour : forNeighbours)
+            // TODO: Design a better way of binding storage to coordinates
+            auto maybeLDS = k.coordinates.get<LDS>(target);
+            if(maybeLDS)
             {
-                auto split = kgraph.coordinates.get<Split>(forNeighbour);
-                if(split)
-                {
-                    auto splitNeighbours
-                        = kgraph.coordinates.getNeighbours<GD::Downstream>(forNeighbour)
-                              .to<std::vector>();
-                    for(auto splitNeighbour : splitNeighbours)
-                    {
-                        auto unroll = kgraph.coordinates.get<Unroll>(splitNeighbour);
-                        if(unroll)
-                        {
-                            AssertFatal(!rv || rv == splitNeighbour,
-                                        "More than one Unroll neighbour found.");
-                            rv = splitNeighbour;
-                        }
-                    }
-                }
+                // If target is LDS; it might be a duplicated LDS
+                // node.  For the purposes of figuring out required
+                // coordinates, use the parent LDS as the target
+                // instead.
+                auto maybeParentLDS
+                    = only(k.coordinates.getOutputNodeIndices(target, CT::isEdge<Duplicate>));
+                if(maybeParentLDS)
+                    target = *maybeParentLDS;
             }
 
-            return rv;
+            auto isDataFlow
+                = [&](int tag) -> bool { return k.coordinates.get<DataFlow>(tag).has_value(); };
+
+            while(true)
+            {
+                auto edge
+                    = only(filter(isDataFlow, k.coordinates.getNeighbours(target, direction)));
+                if(!edge)
+                    break;
+                target = *only(k.coordinates.getNeighbours(*edge, direction));
+            }
+
+            return target;
         }
 
-        /**
-         * @brief LDS specification.
-         *
-         * This uniquely identifies an LDS allocation.
-         */
-        struct LDSSpec
+        template <Graph::Direction Dir>
+        void insertInstead(rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph& coordinates,
+                           int                                                       newTag,
+                           int                                                       oldTag)
         {
-            int userCoord;
-            int forLoopCoord;
-            int unrollCoord;
-            int unrollCoordValue;
-            int operation;
-
-            VariableType variableType;
-            MemoryType   memoryType;
-            bool         isTransposedTile;
-
-            bool jammed;
-
-            auto operator<=>(const LDSSpec&) const = default;
-        };
-
-        /**
-         * @brief Return LDS specifier for the load/store operation.
-         *
-         * This inspects the graph and figures out the User, ForLoop,
-         * Unroll etc coordinates that determine which LDS buffer the
-         * operation will populate.
-         *
-         * When determining the specific ForLoop and Unroll
-         * coordinates, only the containing for loop is considered.
-         *
-         * The containing loop's tag is also used to: determine where
-         * LDS is populated, and differentiate the LDS allocations.
-         * This means jammed loops will use unique LDS allocations.
-         *
-         * If there is no containing ForLoop, the location of the
-         * original operation is used to: determine where LDS is
-         * populated, and differentiate the LDS allocations.
-         */
-        LDSSpec getLDSSpec(KernelGraph const& k, int opTag)
-        {
-            auto [userTag, user]           = k.getDimension<User>(opTag);
-            auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(opTag);
-
-            auto [target, direction] = getOperationTarget(opTag, k);
-            auto [required, path]    = findRequiredCoordinates(target, direction, k);
-            auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, k);
-
-            auto isJammed = macroTile.memoryType == MemoryType::JAMMED_WAVE_LDS;
-
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(opTag, k);
-            int  forLoopCoord = -1;
-            int  operation    = opTag;
-            if(!isJammed && maybeForLoop)
+            auto edgeTags = coordinates.getNeighbours<Dir>(oldTag).template to<std::vector>();
+            for(auto edgeTag : edgeTags)
             {
-                operation = *maybeForLoop;
-                auto f    = getForLoopCoords(*maybeForLoop, k).first;
-                if(forLoopCoordinates.contains(f))
+                auto edge = coordinates.getElement(edgeTag);
+
+                auto upDirTags = coordinates.getNeighbours<Graph::opposite(Dir)>(edgeTag)
+                                     .template to<std::vector>();
+                auto downDirTags
+                    = coordinates.getNeighbours<Dir>(edgeTag).template to<std::vector>();
+
+                std::replace(upDirTags.begin(), upDirTags.end(), oldTag, newTag);
+
+                coordinates.deleteElement(edgeTag);
+                if constexpr(Dir == Graph::Direction::Upstream)
                 {
-                    forLoopCoord = f;
+                    coordinates.addElement(edge, downDirTags, upDirTags);
+                }
+                else
+                {
+                    coordinates.addElement(edge, upDirTags, downDirTags);
                 }
             }
+        }
 
-            auto maybeUnroll      = findUnrollNeighbour(k, forLoopCoord);
-            int  unrollCoord      = -1;
-            int  unrollCoordValue = -1;
-            if(maybeUnroll)
-            {
-                unrollCoord = *maybeUnroll;
-
-                auto setCoord
-                    = k.control.get<SetCoordinate>(getSetCoordinateForDim(k, unrollCoord, opTag));
-                AssertFatal(evaluationTimes(
-                                setCoord->value)[rocRoller::Expression::EvaluationTime::Translate],
-                            "Unroll value should be a literal");
-
-                unrollCoordValue = getUnsignedInt(evaluate(setCoord->value));
-            }
-
-            auto op               = k.control.get<LoadTiled>(opTag);
-            auto isTransposedTile = op && op->isTransposedTile;
-
-            return {userTag,
-                    forLoopCoord,
-                    unrollCoord,
-                    unrollCoordValue,
-                    operation,
-                    getVariableType(k, opTag),
-                    macroTile.memoryType,
-                    isTransposedTile,
-                    isJammed};
+        int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes)
+        {
+            return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
         }
 
         /**
          * @brief Container for info related to loading from Global
          * into LDS.
          */
-        struct ldsOperationInfo
+        struct LDSOperationInfo
         {
-            bool load;
-            int  user; // User coordinate
-            int  globalOperation; // LoadTiled/StoreTiled operation
-            int  ldsOperation; // StoreLDSTile/LoadLDSTile operation
-            int  globalChain; // LoadTiled/StoreTiled operation
-            int  ldsChain; // StoreLDStile/LoadLDSTile operation
+            int user; // User coordinate
+            int globalOperation; // LoadTiled/StoreTiled operation
+            int ldsOperation; // StoreLDSTile/LoadLDSTile operation
+            int globalChain; // LoadTiled/StoreTiled operation
+            int ldsChain; // StoreLDStile/LoadLDSTile operation
         };
 
         /**
          * Add LDS transformer.
+         *
+         * Splits LoadTiled operations into:
+         * - LoadTiled
+         * - StoreLDSTile
+         * - LoadLDSTile
+         *
+         * Similarly for StoreTiled operations.
          */
         struct AddLDSVisitor
         {
@@ -365,27 +251,61 @@ namespace rocRoller
             {
             }
 
-            void addLoadOperations(KernelGraph& graph);
-            void addStoreOperations(KernelGraph& graph);
-            void addStoreOperation(KernelGraph& graph, int storetag, LDSSpec const& spec);
-            void addLoadOperationsPrefetch(KernelGraph& graph, int forLoop, int numUnroll);
-
-            void stageLoad(KernelGraph const&, int loadTag);
-            void stageStore(KernelGraph const&, int storeTag);
-            void stagePrefetch(KernelGraph const& graph);
+            void stage(KernelGraph const&, int);
             void commit(KernelGraph&);
 
         private:
-            std::set<LDSSpec>      m_loadSpecs;
-            std::map<int, LDSSpec> m_stagedLoads;
+            std::set<int> m_operations;
 
-            std::set<LDSSpec>      m_storeSpecs;
-            std::map<int, LDSSpec> m_stagedStores;
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
+        };
 
-            std::map<int, LDSSpec>              m_stagedOps;
-            std::map<LDSSpec, ldsOperationInfo> m_info;
+        /**
+         * Add Barrier transformer.
+         *
+         * Adds Barrier operations for non-prefetched load/store
+         * operations that go through LDS.
+         */
+        struct AddBarrierVisitor
+        {
+            AddBarrierVisitor(ContextPtr context)
+                : m_context(context)
+            {
+            }
 
-            // Prefetch related
+            void stage(KernelGraph const&, int);
+            void commit(KernelGraph&);
+
+        private:
+            std::set<int> m_storeLDSTileOperations;
+
+            ContextPtr m_context;
+        };
+
+        /**
+         * Add prefetch transformer.
+         */
+        struct AddPrefetchVisitor
+        {
+            AddPrefetchVisitor(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
+            {
+            }
+
+            void commitForLoop(KernelGraph& graph, int forLoop, int numUnroll);
+            void orderMultiplies(KernelGraph& graph, int forLoop, int numUnroll);
+
+            void stage(KernelGraph const& graph);
+            void commit(KernelGraph&);
+
+            std::unordered_set<int> storeLDSTileOperations() const;
+
+        private:
+            // Keys are: ForLoop tag, Unroll value/segment, LDS tag
+            std::map<int, std::map<int, std::map<int, LDSOperationInfo>>> m_info;
+
             std::map<int, int>                                    m_scopes;
             std::map<int, int>                                    m_prefetchLoops;
             std::map<int, std::map<int, std::unordered_set<int>>> m_prefetchUnrollBodyStarts;
@@ -395,8 +315,12 @@ namespace rocRoller
             std::map<int, std::map<int, std::vector<int>>> m_loadFromLDSChains;
             std::map<int, std::unordered_set<int>>         m_prefetchDelete;
 
+            std::unordered_set<int> m_storeLDSTileOperations;
+
             CommandParametersPtr m_params;
             ContextPtr           m_context;
+
+            void trackStores(KernelGraph const& graph, int start);
         };
 
         /**
@@ -473,314 +397,268 @@ namespace rocRoller
 
         KernelGraph AddLDS::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::addLDS");
-            Log::debug("KernelGraph::addLDS()");
+            TIMER(t, "KernelGraph::AddLDS");
 
-            auto k = original;
+            auto graph = original;
 
             auto visitor = AddLDSVisitor(m_params, m_context);
+            for(auto const& loadTag : graph.control.getNodes<LoadTiled>())
+                visitor.stage(graph, loadTag);
+            for(auto const& storeTag : graph.control.getNodes<StoreTiled>())
+                visitor.stage(graph, storeTag);
 
-            // Add LDS operations
-            for(auto const& loadTag : k.control.getNodes<LoadTiled>())
-            {
-                visitor.stageLoad(k, loadTag);
-            }
+            visitor.commit(graph);
 
-            for(auto const& storeTag : k.control.getNodes<StoreTiled>())
+            return graph;
+        }
+
+        ConstraintStatus NoLDSTiles(const KernelGraph& graph)
+        {
+            ConstraintStatus retval;
+            for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
-                visitor.stageStore(k, storeTag);
+                auto tile = *graph.coordinates.get<MacroTile>(tag);
+                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS)
+                {
+                    retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
+                }
             }
+            return retval;
+        }
+
+        std::vector<GraphConstraint> AddLDS::postConstraints() const
+        {
+            return {NoLDSTiles};
+        }
+
+        void AddPrefetchVisitor::trackStores(KernelGraph const& graph, int start)
+        {
+            for(auto tag : graph.control.depthFirstVisit(start, GD::Downstream))
+            {
+                auto maybeStoreLDSTile = graph.control.get<StoreLDSTile>(tag);
+                if(maybeStoreLDSTile)
+                    m_storeLDSTileOperations.insert(tag);
+            }
+        }
+
+        std::unordered_set<int> AddPrefetchVisitor::storeLDSTileOperations() const
+        {
+            return m_storeLDSTileOperations;
+        }
+
+        KernelGraph AddPrefetch::apply(KernelGraph const& original)
+        {
+            TIMER(t, "KernelGraph::AddPrefetch");
+
+            auto graph = removeRedundantNOPs(removeRedundantBodyEdges(original));
+
+            std::unordered_set<int> storeHasBarrierAlready;
 
             if(m_params->prefetch)
             {
+                auto visitor = AddPrefetchVisitor(m_params, m_context);
                 AssertFatal(m_params->unrollK > 1, "KLoop must be unrolled when prefetching.");
-                visitor.stagePrefetch(k);
+                visitor.stage(graph);
+                visitor.commit(graph);
+
+                storeHasBarrierAlready = visitor.storeLDSTileOperations();
             }
 
-            visitor.commit(k);
+            auto barrierVisitor = AddBarrierVisitor(m_context);
+            for(auto const& tag : graph.control.getNodes<StoreLDSTile>())
+            {
+                if(!storeHasBarrierAlready.contains(tag))
+                    barrierVisitor.stage(graph, tag);
+            }
+            barrierVisitor.commit(graph);
 
-            return k;
+            return graph;
         }
 
-        /*
-         * Stage everything for a load.  Does not modify the graph.
-         */
-        void AddLDSVisitor::stageLoad(KernelGraph const& k, int loadTag)
+        void AddLDSVisitor::stage(KernelGraph const& k, int opTag)
         {
-            auto [userTag, user] = k.getDimension<User>(loadTag);
-            auto [tileTag, tile] = k.getDimension<MacroTile>(loadTag);
-
-            if(tile.memoryType == MemoryType::JAMMED_WAVE_LDS)
-                Throw<FatalError>("JAMMED AddLDSVisitor::stageLoad");
+            auto [userTag, user] = k.getDimension<User>(opTag);
+            auto [tileTag, tile] = k.getDimension<MacroTile>(opTag);
 
             if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
                 return;
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::AddLDS()::stageLoad({}): User {}, MacroTile {}",
-                loadTag,
-                userTag,
-                tileTag);
+                "KernelGraph::AddLDS()::stage({}): User {}, MacroTile {}", opTag, userTag, tileTag);
 
-            auto spec = getLDSSpec(k, loadTag);
-
-            //
-            // Stage: create unique LDS allocation
-            //
-            m_loadSpecs.insert(spec);
-
-            //
-            // Stage: convert LoadTile to LoadLDSTile
-            //
-            m_stagedLoads[loadTag] = spec;
-            m_stagedOps[loadTag]   = spec;
+            m_operations.insert(opTag);
         }
 
-        /*
-         * Stage everything for a store.  Does not modify the graph.
-         */
-        void AddLDSVisitor::stageStore(KernelGraph const& k, int storeTag)
-        {
-            auto [userTag, user] = k.getDimension<User>(storeTag);
-            auto [tileTag, tile] = k.getDimension<MacroTile>(storeTag);
-
-            if(!(tile.memoryType == MemoryType::JAMMED_WAVE_LDS
-                 || tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
-                return;
-
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::AddLDS()::stageStore({}): User {}, MacroTile {}",
-                storeTag,
-                userTag,
-                tileTag);
-
-            auto spec = getLDSSpec(k, storeTag);
-            m_storeSpecs.insert(spec);
-            m_stagedStores[storeTag] = spec;
-            m_stagedOps[storeTag]    = spec;
-        }
-
-        /*
-         * Commit everything.  Modifies the graph.
-         */
         void AddLDSVisitor::commit(KernelGraph& k)
         {
-            rocRoller::Log::getLogger()->debug("KernelGraph::AddLDS()::commit()");
-
             //
-            // Commit: Create operations for LoadTiled.
+            // Commit: Create operations and DataFlow
             //
-            for(auto spec : m_loadSpecs)
+            for(auto opTag : m_operations)
             {
-                auto userTag            = spec.userCoord;
-                auto loadTileFromGlobal = k.control.addElement(LoadTiled(spec.variableType));
-                auto storeTileIntoLDS
-                    = k.control.addElement(StoreLDSTile(spec.variableType.dataType));
+                Log::debug("KernelGraph::AddLDS()::commit({})", opTag);
 
-                auto loadChain  = loadTileFromGlobal;
-                auto storeChain = storeTileIntoLDS;
+                auto isLoad  = k.control.get<LoadTiled>(opTag).has_value();
+                auto tileTag = k.mapper.get<MacroTile>(opTag);
+                auto userTag = k.mapper.get<User>(opTag);
+                auto varType = getVariableType(k, opTag);
 
-                if(spec.unrollCoord >= 0)
+                // Create new coordinates
+                auto              ldsTag      = k.coordinates.addElement(LDS());
+                std::vector<uint> jammedTiles = {1, 1};
+                bool              splitStore  = false;
+
+                if(!isLoad)
                 {
-                    auto setCoordForLoad
-                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
-                    k.mapper.connect<Unroll>(setCoordForLoad, spec.unrollCoord);
-                    auto setCoordForStore
-                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
-                    k.mapper.connect<Unroll>(setCoordForStore, spec.unrollCoord);
-
-                    k.control.addElement(Body(), {setCoordForLoad}, {loadTileFromGlobal});
-                    k.control.addElement(Body(), {setCoordForStore}, {storeTileIntoLDS});
-                    loadChain  = setCoordForLoad;
-                    storeChain = setCoordForStore;
+                    // For StoreTiled operations, the waves are
+                    // "serialized" in OrderEpilogueBlocks, so we can
+                    // use a smaller internal tile.
+                    jammedTiles = m_params->getWaveTilesPerWavefront();
+                    splitStore  = m_params->getSplitStoreTileIntoWaveBlocks();
                 }
 
-                AssertFatal(!m_info.contains(spec));
+                auto internalTag = createInternalTile(
+                    k, varType, tileTag, jammedTiles, splitStore, m_params, m_context);
 
-                m_info[spec]
-                    = {true, userTag, loadTileFromGlobal, storeTileIntoLDS, loadChain, storeChain};
-            }
-
-            //
-            // Commit: Create operations for StoreTiled.
-            //
-            for(auto spec : m_storeSpecs)
-            {
-                auto userTag         = spec.userCoord;
-                auto loadTileFromLDS = k.control.addElement(LoadLDSTile(spec.variableType));
-                auto storeTileToGlobal
-                    = k.control.addElement(StoreTiled(spec.variableType.dataType));
-
-                auto loadChain  = loadTileFromLDS;
-                auto storeChain = storeTileToGlobal;
-
-                if(spec.unrollCoord >= 0)
+                // Connect coordinates with DataFlow edges
+                insertInstead<Graph::Direction::Downstream>(k.coordinates, internalTag, tileTag);
+                if(false && isLoad)
                 {
-                    auto setCoordForLoad
-                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
-                    k.mapper.connect<Unroll>(setCoordForLoad, spec.unrollCoord);
-                    auto setCoordForStore
-                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
-                    k.mapper.connect<Unroll>(setCoordForStore, spec.unrollCoord);
-
-                    k.control.addElement(Body(), {setCoordForLoad}, {loadTileFromLDS});
-                    k.control.addElement(Body(), {setCoordForStore}, {storeTileToGlobal});
-                    loadChain  = setCoordForLoad;
-                    storeChain = setCoordForStore;
-                }
-
-                AssertFatal(!m_info.contains(spec));
-
-                m_info[spec]
-                    = {false, userTag, storeTileToGlobal, loadTileFromLDS, storeChain, loadChain};
-            }
-
-            // At this point: load/store operations have been added,
-            // but they aren't connected (through the mapper nor in
-            // the graphs).
-
-            //
-            // Commit: Change all LoadTiled operations to LoadLDSTile
-            //
-            std::set<int> updatedTiles;
-            for(auto [opTag, opSpec] : m_stagedOps)
-            {
-                auto globalOp = m_info.at(opSpec).globalOperation;
-                auto ldsOp    = m_info.at(opSpec).ldsOperation;
-                for(auto& c : k.mapper.getConnections(opTag))
-                {
-                    if(std::holds_alternative<Connections::LDSTypeAndSubDimension>(c.connection))
-                    {
-                        auto ldsConnection
-                            = std::get<Connections::LDSTypeAndSubDimension>(c.connection);
-
-                        auto newConnection = Connections::TypeAndSubDimension{
-                            ldsConnection.id, ldsConnection.subdimension};
-                        if(ldsConnection.direction == LD::LOAD_FROM_GLOBAL
-                           || ldsConnection.direction == LD::STORE_INTO_GLOBAL)
-                        {
-                            // Operation was LoadTiled or StoreTiled, connections are for
-                            // global traffic.
-                            //
-                            // Therefore use globalOp.
-
-                            k.mapper.connect(globalOp, c.coordinate, newConnection);
-                        }
-                        else if((m_info[opSpec].load
-                                 && ldsConnection.direction == LD::STORE_INTO_LDS)
-                                || (!m_info[opSpec].load
-                                    && ldsConnection.direction == LD::LOAD_FROM_LDS))
-                        {
-                            // Operation was LoadTiled, connections are for traffic into LDS; or
-                            // Operation was StoreTiled, connections are for traffic out of LDS.
-                            //
-                            // Therefore use ldsOp.
-
-                            k.mapper.connect(ldsOp, c.coordinate, newConnection);
-                        }
-                        else
-                        {
-                            // Otherwise, use original opTag.
-
-                            k.mapper.connect(opTag, c.coordinate, newConnection);
-                        }
-                        k.mapper.disconnect(opTag, c.coordinate, c.connection);
-                    }
-                }
-
-                // Update dimension and operation
-                auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(opTag);
-
-                if(m_info[opSpec].load)
-                {
-                    k.control.setElement(opTag,
-                                         LoadLDSTile(opSpec.variableType, opSpec.isTransposedTile));
+                    k.coordinates.addElement(DataFlow(), {tileTag}, {ldsTag});
+                    k.coordinates.addElement(DataFlow(), {ldsTag}, {internalTag});
                 }
                 else
                 {
-                    k.control.setElement(opTag, StoreLDSTile(opSpec.variableType.dataType));
+                    k.coordinates.addElement(DataFlow(), {internalTag}, {ldsTag});
+                    k.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
                 }
 
-                if(!updatedTiles.contains(macroTileTag))
+                // Create new operations and update old operation
+                bool isTransposedTile = false;
+                if(isLoad)
                 {
-                    if(macroTile.memoryType == MemoryType::WAVE_LDS
-                       || macroTile.memoryType == MemoryType::JAMMED_WAVE_LDS)
-                        macroTile.memoryType = MemoryType::WAVE;
-                    else
-                        macroTile.memoryType = MemoryType::VGPR;
-                    k.coordinates.setElement(macroTileTag, macroTile);
-
-                    updatedTiles.insert(macroTileTag);
+                    auto loadTile    = k.control.get<LoadTiled>(opTag).value();
+                    isTransposedTile = loadTile.isTransposedTile;
                 }
-            }
+                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType, isTransposedTile));
+                auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
-            //
-            // Commit: Connect load/store operations in the control graph.
-            //
-            addLoadOperations(k);
-            addStoreOperations(k);
-        }
+                // Update tile
+                auto tile = k.coordinates.getNode<MacroTile>(tileTag);
+                if(tile.memoryType == MemoryType::WAVE_LDS)
+                    tile.memoryType = MemoryType::WAVE;
+                if(tile.memoryType == MemoryType::LDS)
+                    tile.memoryType = MemoryType::VGPR;
+                k.coordinates.setElement(tileTag, tile);
 
-        void addLoadOperationsNoPrefetch(KernelGraph&         graph,
-                                         int                  loadTileFromGlobalChain,
-                                         int                  storeTileIntoLDSChain,
-                                         int                  operation,
-                                         std::set<int> const& dependencies)
-        {
-            // Iteration barrier (right before StoreLDSTile) to ensure
-            // that no worker could write into the same portion of LDS
-            // while another worker is reading from it in a previous
-            // iteration.
-            auto iterationBarrier = graph.control.addElement(Barrier());
-            graph.control.addElement(Sequence(), {loadTileFromGlobalChain}, {iterationBarrier});
-            graph.control.addElement(Sequence(), {iterationBarrier}, {storeTileIntoLDSChain});
-
-            auto barrier = graph.control.addElement(Barrier());
-            graph.control.addElement(Sequence(), {storeTileIntoLDSChain}, {barrier});
-
-            auto maybeForLoop = graph.control.get<ForLoopOp>(operation);
-            if(maybeForLoop)
-            {
-                for(auto const& dependency : dependencies)
+                if(!isLoad)
                 {
-                    for(auto body : filter(graph.control.isElemType<Body>(),
-                                           graph.control.getNeighbours<GD::Upstream>(dependency))
-                                        .to<std::vector>())
-                    {
-                        graph.control.deleteElement(body);
-                        graph.control.addElement(Sequence(), {barrier}, {dependency});
-                    }
+                    // For StoreTiled operations, the waves are
+                    // "serialized" in OrderEpilogueBlocks, so we can
+                    // use a smaller tile size.
+                    tile.sizes[0] /= m_params->getWaveTilesPerWavefront()[0];
+                    tile.sizes[1] /= m_params->getWaveTilesPerWavefront()[1];
+                    k.coordinates.setElement(tileTag, tile);
                 }
-                graph.control.addElement(Body(), {operation}, {loadTileFromGlobalChain});
 
-                auto existingLoads
-                    = filter(graph.control.isElemType<LoadTiled>(),
-                             graph.control.depthFirstVisit(operation, Graph::Direction::Downstream))
-                          .to<std::set>();
-                orderMemoryNodes(graph, existingLoads, {loadTileFromGlobalChain}, true);
+                // Update connections and connect operations
+                k.control.addElement(Sequence(), {storeLDSOp}, {loadLDSOp});
 
-                auto existingStoreLDS
-                    = filter(graph.control.isElemType<StoreLDSTile>(),
-                             graph.control.depthFirstVisit(operation, Graph::Direction::Downstream))
-                          .to<std::set>();
-                orderMemoryNodes(graph, existingStoreLDS, {storeTileIntoLDSChain}, true);
-            }
-            else
-            {
-                insertBefore(graph, operation, loadTileFromGlobalChain, barrier);
+                k.mapper.purge(opTag);
+                k.mapper.connect<User>(opTag, userTag);
+                k.mapper.connect<LDS>(storeLDSOp, ldsTag);
+                k.mapper.connect<LDS>(loadLDSOp, ldsTag);
+
+                if(isLoad)
+                {
+                    insertAfter(k, opTag, storeLDSOp, loadLDSOp);
+
+                    k.mapper.connect<MacroTile>(opTag, internalTag);
+                    k.mapper.connect<MacroTile>(storeLDSOp, internalTag);
+                    k.mapper.connect<MacroTile>(loadLDSOp, tileTag);
+                }
+                else
+                {
+                    insertBefore(k, opTag, storeLDSOp, loadLDSOp);
+
+                    k.mapper.connect<MacroTile>(storeLDSOp, tileTag);
+                    k.mapper.connect<MacroTile>(loadLDSOp, internalTag);
+                    k.mapper.connect<MacroTile>(opTag, internalTag);
+                }
             }
         }
 
-        int duplicateChain(KernelGraph& graph, std::vector<int> const& startNodes)
+        void AddBarrierVisitor::stage(KernelGraph const& graph, int opTag)
         {
-            return duplicateControlNodes(graph, nullptr, startNodes, [](int x) { return true; })[0];
+            auto maybeStoreLDSTile = graph.control.get<StoreLDSTile>(opTag);
+            if(!maybeStoreLDSTile)
+                return;
+            m_storeLDSTileOperations.insert(opTag);
         }
 
-        void
-            AddLDSVisitor::addLoadOperationsPrefetch(KernelGraph& graph, int forLoop, int numUnroll)
+        void AddBarrierVisitor::commit(KernelGraph& graph)
+        {
+            for(auto storeLDSTileTag : m_storeLDSTileOperations)
+            {
+                auto preBarrier  = graph.control.addElement(Barrier());
+                auto postBarrier = graph.control.addElement(Barrier());
+
+                insertBefore(graph, storeLDSTileTag, preBarrier, preBarrier);
+                insertAfter(graph, storeLDSTileTag, postBarrier, postBarrier);
+            }
+        }
+
+        void AddPrefetchVisitor::commit(KernelGraph& k)
+        {
+            Log::debug("KernelGraph::AddPrefetch()::commit()");
+
+            for(auto [forLoop, numUnroll] : m_prefetchLoops)
+            {
+                commitForLoop(k, forLoop, numUnroll);
+            }
+        }
+
+        void AddPrefetchVisitor::orderMultiplies(KernelGraph& graph, int forLoop, int u)
+        {
+            auto starts = m_prefetchUnrollBodyStarts[forLoop][u];
+
+            std::map<int, int> loadMap;
+            for(auto node : graph.control.depthFirstVisit(starts))
+            {
+                auto maybeLoadLDSTile = graph.control.get<LoadLDSTile>(node);
+                if(!maybeLoadLDSTile)
+                    continue;
+                auto tileTag     = graph.mapper.get<MacroTile>(node);
+                loadMap[tileTag] = getTopSetCoordinate(graph, node);
+            }
+
+            for(auto node : graph.control.depthFirstVisit(starts))
+            {
+                auto maybeMultiply = graph.control.get<Multiply>(node);
+                if(!maybeMultiply)
+                    continue;
+                auto [macATag, macA] = graph.getDimension<MacroTile>(
+                    node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                auto [macBTag, macB] = graph.getDimension<MacroTile>(
+                    node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+
+                if(loadMap.contains(macATag))
+                {
+                    graph.control.addElement(Sequence(), {loadMap[macATag]}, {node});
+                    m_prefetchUnrollBodyStarts[forLoop][u].erase(node);
+                }
+                if(loadMap.contains(macBTag))
+                {
+                    graph.control.addElement(Sequence(), {loadMap[macBTag]}, {node});
+                    m_prefetchUnrollBodyStarts[forLoop][u].erase(node);
+                }
+            }
+        }
+
+        void AddPrefetchVisitor::commitForLoop(KernelGraph& graph, int forLoop, int numUnroll)
         {
             auto logger = rocRoller::Log::getLogger();
-            logger->debug("KernelGraph::AddLDS()::addLoadOperationsPrefetch({})", forLoop);
+            logger->debug("KernelGraph::AddPrefetch()::commitForLoop({})", forLoop);
 
             AssertFatal(isOperation<ForLoopOp>(graph.control.getElement(forLoop)));
 
@@ -796,23 +674,20 @@ namespace rocRoller
                     graph.control.deleteElement(tag);
             }
 
+            for(int u = 0; u < numUnroll; ++u)
+                orderMultiplies(graph, forLoop, u);
+
             // At this point, each of the unrolled loop bodies are
             // detached and isolated from the rest of the graph.
 
-            std::set<LDSSpec> specsToErase;
-
-            std::map<int, std::vector<ldsOperationInfo>> globalLoadsByUnroll;
-            for(auto spec : m_loadSpecs)
+            std::map<int, std::vector<LDSOperationInfo>> loadsByUnroll;
+            for(int u = 0; u < numUnroll; u++)
             {
-                if(spec.operation == forLoop)
-                {
-                    globalLoadsByUnroll[spec.unrollCoordValue].push_back(m_info[spec]);
-                    specsToErase.insert(spec);
-                }
+                for(auto [target, info] : m_info[forLoop][u])
+                    loadsByUnroll[u].push_back(info);
             }
 
-            for(auto const& spec : specsToErase)
-                m_loadSpecs.erase(spec);
+            AssertFatal(loadsByUnroll.size() == numUnroll);
 
             //
             // Add Scope above the ForLoop
@@ -838,7 +713,7 @@ namespace rocRoller
             // Loads first
             for(int u = 0; u < numInFlight; ++u)
             {
-                for(auto load : globalLoadsByUnroll[u])
+                for(auto load : loadsByUnroll[u])
                 {
                     logger->debug(
                         "  prefetch: pre-loop global load: unroll {} user {}", u, load.user);
@@ -848,10 +723,11 @@ namespace rocRoller
             }
 
             // StoreLDS next
-            for(auto load : globalLoadsByUnroll[0])
+            for(auto load : loadsByUnroll[0])
             {
                 logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
                 auto storeChain = duplicateChain(graph, {load.ldsChain});
+                trackStores(graph, storeChain);
                 preChain.push_back(storeChain);
             }
 
@@ -864,7 +740,7 @@ namespace rocRoller
 
             auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) -> int {
                 std::vector<int> prefetchChain;
-                for(auto [user, _ignore1, chain] : m_prefetchFromLDSChains[forLoop][u])
+                for(auto [_ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
                 {
                     int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
                     prefetchChain.push_back(dchain);
@@ -909,7 +785,7 @@ namespace rocRoller
                 auto prefetchGlobalU   = (u + numInFlight) % numUnroll;
                 auto prefetchCoordExpr = literal(u + numInFlight);
 
-                for(auto load : globalLoadsByUnroll[prefetchGlobalU])
+                for(auto load : loadsByUnroll[prefetchGlobalU])
                 {
                     logger->debug("  prefetch: in-loop: set coordinate: load {} user {} expr {}",
                                   prefetchGlobalU,
@@ -966,6 +842,12 @@ namespace rocRoller
                     }
                 }
 
+                auto toOrder = filter(graph.control.isElemType<LoadLDSTile>(),
+                                      graph.control.depthFirstVisit(segmentBoundaries[u],
+                                                                    Graph::Direction::Downstream))
+                                   .to<std::vector>();
+                orderMemoryNodes(graph, toOrder, false);
+
                 auto globalPrefetchU = (u + numInFlight) % numUnroll;
                 auto ldsPrefetchU    = (u + 1) % numUnroll;
                 auto barrier         = graph.control.addElement(Barrier());
@@ -973,7 +855,7 @@ namespace rocRoller
                 auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
 
                 // Issue global loads
-                auto globalLoads = globalLoadsByUnroll[globalPrefetchU];
+                auto globalLoads = loadsByUnroll[globalPrefetchU];
                 logger->debug("  prefetch: in-loop: issue global loads {}",
                               globalLoads[0].globalChain);
                 if(separateMemOps)
@@ -1013,7 +895,8 @@ namespace rocRoller
                 }
 
                 // Commit in-flight to LDS
-                auto globalStores = globalLoadsByUnroll[ldsPrefetchU];
+                auto globalStores = loadsByUnroll[ldsPrefetchU];
+                trackStores(graph, globalStores[0].ldsChain);
                 if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
@@ -1035,6 +918,7 @@ namespace rocRoller
 
                 for(int i = 1; i < globalStores.size(); i++)
                 {
+                    trackStores(graph, globalStores[i].ldsChain);
                     graph.control.addElement(
                         Sequence(), {globalStores[i - 1].ldsChain}, {globalStores[i].ldsChain});
 
@@ -1115,248 +999,120 @@ namespace rocRoller
                 if(separateMemOps)
                 {
                     for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
-                    {
                         graph.control.addElement(Sequence(), {tag}, {nop});
-                    }
                 }
                 else
                 {
                     for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
-                    {
                         graph.control.addElement(Sequence(), {tag}, {segmentBoundaries[u + 1]});
-                    }
                 }
             }
         }
 
-        /*
-         * Splice load-from-global and store-to-lds operations into
-         * the control graph.
-         *
-         * Adds synchronisation as necessary.
-         */
-        void AddLDSVisitor::addLoadOperations(KernelGraph& graph)
+        void AddPrefetchVisitor::stage(KernelGraph const& k)
         {
-            if(!m_prefetchLoops.empty())
-            {
-                for(auto [forLoop, numUnroll] : m_prefetchLoops)
-                {
-                    addLoadOperationsPrefetch(graph, forLoop, numUnroll);
-                }
-            }
-
-            for(auto spec : m_loadSpecs)
-            {
-                std::vector<int> loads;
-                for(auto [loadTag, loadSpec] : m_stagedLoads)
-                {
-                    if(loadSpec == spec)
-                        loads.push_back(loadTag);
-                }
-
-                auto dependencies = getTopSetCoordinates(graph, loads);
-                auto info         = m_info.at(spec);
-                // TODO: Can we just insert load/store chains below containing for loop?
-                addLoadOperationsNoPrefetch(
-                    graph, info.globalChain, info.ldsChain, spec.operation, dependencies);
-            }
-        }
-
-        void AddLDSVisitor::addStoreOperation(KernelGraph& graph, int storeTag, LDSSpec const& spec)
-        {
-            auto storeDBarrierRW = graph.control.addElement(Barrier());
-            // Find all incoming edges into StoreLDSTile.
-            // Those should be changed to come into Barrier to avoid RW hazard.
-            auto incoming = graph.control.getNeighbours<GD::Upstream>(storeTag).to<std::vector>();
-            for(auto e : incoming)
-            {
-                auto elem = graph.control.getElement(e);
-                auto src  = graph.control.getNeighbours<GD::Upstream>(e).to<std::vector>();
-                graph.control.deleteElement(e);
-                graph.control.addElement(e, elem, src, std::vector<int>{storeDBarrierRW});
-            }
-            graph.control.addElement(Sequence(), {storeDBarrierRW}, {storeTag});
-
-            auto barrier = graph.control.addElement(Barrier());
-            graph.control.addElement(Sequence(), {storeTag}, {barrier});
-
-            auto loadMacroTileFromLDSNode = m_info[spec].ldsChain;
-            auto storeMacroTileIntoGlobal = m_info[spec].globalChain;
-
-            auto prevOperation = spec.jammed ? barrier : spec.operation;
-
-            graph.control.addElement(Sequence(), {prevOperation}, {loadMacroTileFromLDSNode});
-            graph.control.addElement(
-                Sequence(), {loadMacroTileFromLDSNode}, {storeMacroTileIntoGlobal});
-        }
-
-        void AddLDSVisitor::addStoreOperations(KernelGraph& graph)
-        {
-            rocRoller::Log::getLogger()->debug("KernelGraph::AddLDSVisitor::addStoreOperations()");
-
-            for(auto [storeTag, storeSpec] : m_stagedStores)
-            {
-                addStoreOperation(graph, storeTag, storeSpec);
-            }
-        }
-
-        void AddLDSVisitor::stagePrefetch(KernelGraph const& k)
-        {
-            auto logger = rocRoller::Log::getLogger();
-
             m_prefetchLoops = findPrefetch(k);
+
+            auto colouring = colourByUnrollValue(k);
+            auto isBody    = k.control.isElemType<Body>();
+
+            std::map<int, int> unrollCoordSizes;
+            {
+                for(auto unrollTag : k.coordinates.getNodes<Unroll>())
+                {
+                    auto unroll                 = *k.coordinates.get<Unroll>(unrollTag);
+                    unrollCoordSizes[unrollTag] = getUnsignedInt(evaluate(unroll.size));
+                }
+            }
 
             // Map: Operation (in loop body) to Unroll coordinate value
             std::map<int, int> operationUnroll;
 
-            //
-            // Find unroll bodies.
-            //
-            // Need to build `operationUnroll` mapping.
-            //
-            // First pass: Starting from each body edge out of the
-            // ForLoop, we do a depth first search along body edges
-            // and look for SetCoordinate nodes that set the appropriate
-            // Unroll coordinate.  We then associate the unroll value from
-            // the SetCoordinate node to the starting body edge.
-            //
-            // Second pass: Go through the body edges again, and
-            // propagate the Unroll value down.
-            //
-            // After the second pass, we have essentially coloured the
-            // body of the ForLoop according the prefetch Unroll
-            // value.
-            //
-            // Finally we need to find the unroll value for all of the multiplies.
-            // We do this by populating macroTileToCoordVal with mappings from
-            // macrotiles to unroll values by looking through all loadtiled nodes
-            // and mapping it's macrotile to the previously assigned unroll.
-            // Once we have a mapping for all the macrotiles, we assign the unroll
-            // for the multiply to the unroll of its LHS macrotile.
-            //
-            // If there are ever any nodes other than SetCoordinate, LoadTiled, and
-            // Multiply in the forloop, they will need to be handled.
-            //
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                auto bodies
-                    = k.control.getOutputNodeIndices<Body>(forLoop).to<std::unordered_set>();
-
                 auto forLoopCoord     = getForLoopCoords(forLoop, k).first;
                 auto maybeUnrollCoord = findUnrollNeighbour(k, forLoopCoord);
                 AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
                 auto unrollCoord = *maybeUnrollCoord;
 
-                std::map<int, int> bodyTopToCoordValue;
-                for(auto bodyTop : bodies)
+                Log::debug("AddPrefetch::stage: Unroll coordinate is {}", unrollCoord);
+
+                for(auto [opTag, opColours] : colouring.operationColour)
                 {
-                    for(auto bodyElem :
-                        filter(k.control.isElemType<SetCoordinate>(),
-                               k.control.depthFirstVisit(
-                                   bodyTop, k.control.isElemType<Body>(), GD::Downstream)))
-                    {
-                        auto setCoord   = *(k.control.get<SetCoordinate>(bodyElem));
-                        auto coordinate = k.mapper.get<Unroll>(bodyElem);
-                        if(coordinate != unrollCoord)
-                            continue;
-
-                        AssertFatal(
-                            evaluationTimes(
-                                setCoord.value)[rocRoller::Expression::EvaluationTime::Translate],
-                            "Unroll value should be a literal");
-
-                        auto unrollCoordValue = getUnsignedInt(evaluate(setCoord.value));
-
-                        bodyTopToCoordValue[bodyTop] = unrollCoordValue;
-                        break;
-                    }
-                    AssertFatal(bodyTopToCoordValue.count(bodyTop),
-                                "SetCoordinate must belong to an unroll.");
-                }
-
-                for(auto bodyTop : bodies)
-                {
-                    for(auto bodyElem : k.control.depthFirstVisit(
-                            bodyTop, k.control.isElemType<Body>(), GD::Downstream))
-                    {
-                        operationUnroll[bodyElem] = bodyTopToCoordValue[bodyTop];
-                    }
-                }
-
-                std::map<int, int> macroTileToCoordVal;
-                for(auto bodyTop : bodies)
-                {
-                    for(auto loadTag : filter(k.control.isElemType<LoadTiled>(),
-                                              k.control.depthFirstVisit(bodyTop, GD::Downstream)))
-                    {
-                        auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(loadTag);
-                        if(macroTileToCoordVal.count(macroTileTag))
-                        {
-                            AssertFatal(macroTileToCoordVal.at(macroTileTag)
-                                            == operationUnroll.at(loadTag),
-                                        "All loads that belong to a given unroll must use the same "
-                                        "macrotile.");
-                        }
-                        else
-                        {
-                            macroTileToCoordVal[macroTileTag] = operationUnroll.at(loadTag);
-                        }
-                    }
-                }
-
-                for(auto multiply : filter(k.control.isElemType<Multiply>(),
-                                           k.control.depthFirstVisit(forLoop, GD::Downstream)))
-                {
-                    auto node = k.control.getNode<Multiply>(multiply);
-
-                    auto [macroTileTagLHS, macLHS] = k.getDimension<MacroTile>(
-                        multiply, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-                    auto [macroTileTagRHS, macRHS] = k.getDimension<MacroTile>(
-                        multiply, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
-
-                    AssertFatal(macroTileToCoordVal.at(macroTileTagLHS)
-                                    == macroTileToCoordVal.at(macroTileTagRHS),
-                                "The LHS and RHS of a multiply must be part of the same unroll.");
-
-                    if(node.scaleA == Operations::ScaleMode::Separate)
-                    {
-                        auto [macroTileTagLHSScale, macLHSScale] = k.getDimension<MacroTile>(
-                            multiply,
-                            Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
-
-                        AssertFatal(
-                            macroTileToCoordVal.at(macroTileTagLHS)
-                                == macroTileToCoordVal.at(macroTileTagLHSScale),
-                            "The LHS and LHS_SCALE of a multiply must be part of the same unroll.");
-                    }
-
-                    if(node.scaleB == Operations::ScaleMode::Separate)
-                    {
-                        auto [macroTileTagRHSScale, macRHSScale] = k.getDimension<MacroTile>(
-                            multiply,
-                            Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
-                        AssertFatal(
-                            macroTileToCoordVal.at(macroTileTagLHS)
-                                == macroTileToCoordVal.at(macroTileTagRHSScale),
-                            "The LHS and RHS_SCALE of a multiply must be part of the same unroll.");
-                    }
-
-                    operationUnroll[multiply] = macroTileToCoordVal.at(macroTileTagLHS);
+                    if(opColours.contains(unrollCoord))
+                        operationUnroll[opTag] = opColours[unrollCoord];
                 }
             }
 
+            auto alreadySeen = std::unordered_set<int>();
+
             //
-            // Find top of unroll bodies
+            // Find global loads, LDS stores, and remaining (which
+            // will be top of unroll bodies)
             //
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                for(auto edge : filter(k.control.isElemType<Body>(),
-                                       k.control.getNeighbours<GD::Downstream>(forLoop)))
-                {
-                    auto node = *only(k.control.getNeighbours<GD::Downstream>(edge));
+                auto bodyEdges = filter(isBody, k.control.getNeighbours<GD::Downstream>(forLoop))
+                                     .to<std::vector>();
 
-                    m_prefetchUnrollBodyStarts[forLoop][operationUnroll[node]].insert(node);
-                    m_prefetchDelete[forLoop].insert(edge);
+                // Find global loads and detach them
+                auto isLoadTiled = k.control.isElemType<LoadTiled>();
+                for(auto loadTag : k.control.findNodes(bodyEdges, isLoadTiled, GD::Downstream))
+                {
+                    auto top = getTopSetCoordinate(k, loadTag);
+                    for(auto edge : k.control.getNeighbours(top, GD::Upstream))
+                        m_prefetchDelete[forLoop].insert(edge);
+                    for(auto edge : k.control.getNeighbours(top, GD::Downstream))
+                    {
+                        if(!isBody(edge))
+                            m_prefetchDelete[forLoop].insert(edge);
+                    }
+
+                    auto user   = k.mapper.get<User>(loadTag);
+                    auto target = getLDSOperationTarget(k, loadTag);
+
+                    AssertFatal(user == target);
+
+                    m_info[forLoop][operationUnroll[loadTag]][target].user            = user;
+                    m_info[forLoop][operationUnroll[loadTag]][target].globalOperation = loadTag;
+                    m_info[forLoop][operationUnroll[loadTag]][target].globalChain     = top;
+
+                    Log::debug(
+                        "AddPrefetch::stage: Global load operation {} top {} target {} user {}",
+                        loadTag,
+                        top,
+                        target,
+                        user);
+
+                    alreadySeen.insert(top);
+                }
+
+                // Find LDS stores and detach them
+                auto isStoreLDSTile = k.control.isElemType<StoreLDSTile>();
+                for(auto storeLDSTag :
+                    k.control.findNodes(bodyEdges, isStoreLDSTile, GD::Downstream))
+                {
+                    auto top = getTopSetCoordinate(k, storeLDSTag);
+                    for(auto edge : k.control.getNeighbours(top, GD::Upstream))
+                        m_prefetchDelete[forLoop].insert(edge);
+                    for(auto edge : k.control.getNeighbours(top, GD::Downstream))
+                    {
+                        if(!isBody(edge))
+                            m_prefetchDelete[forLoop].insert(edge);
+                    }
+
+                    auto target = getLDSOperationTarget(k, storeLDSTag);
+
+                    m_info[forLoop][operationUnroll[storeLDSTag]][target].ldsOperation
+                        = storeLDSTag;
+                    m_info[forLoop][operationUnroll[storeLDSTag]][target].ldsChain = top;
+
+                    Log::debug("AddPrefetch::stage: LDS store operation {} top {} target {}",
+                               storeLDSTag,
+                               top,
+                               target);
+
+                    alreadySeen.insert(top);
                 }
             }
 
@@ -1386,6 +1142,29 @@ namespace rocRoller
                 }
             }
 
+            // Find things that haven't been seen yet (so aren't
+            // global loads or LDS stores) and that aren't in a
+            // cluster, and mark them as the body-starts
+            for(auto [forLoop, numUnroll] : m_prefetchLoops)
+            {
+                auto headless = [&](int x) {
+                    if(alreadySeen.contains(x))
+                        return false;
+                    for(auto incomingEdge : k.control.getNeighbours<GD::Upstream>(x))
+                        if(!m_prefetchDelete[forLoop].contains(incomingEdge))
+                            return false;
+                    if(!operationUnroll.contains(x))
+                        return false;
+                    return true;
+                };
+
+                auto bodyEdges = filter(isBody, k.control.getNeighbours<GD::Downstream>(forLoop))
+                                     .to<std::vector>();
+
+                for(auto start : k.control.findNodes(bodyEdges, headless, GD::Downstream))
+                    m_prefetchUnrollBodyStarts[forLoop][operationUnroll[start]].insert(start);
+            }
+
             //
             // Within each segment, determine which LoadLDSTile
             // operations should be prefetched.
@@ -1402,84 +1181,86 @@ namespace rocRoller
                 AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
                 auto prefetchUnrollCoord = *maybeUnrollCoord;
 
-                for(auto u = 0; u < numUnroll; ++u)
+                auto bodyEdges = filter(isBody, k.control.getNeighbours<GD::Downstream>(forLoop))
+                                     .to<std::vector>();
+                auto isLoadLDSTile = k.control.isElemType<LoadLDSTile>();
+
+                int prefetchLDSUnrollCoord = -1;
                 {
-                    logger->debug("KernelGraph::AddLDS()::stagePrefetch: segment {}", u);
-
-                    auto starts = m_prefetchUnrollBodyStarts[forLoop][u];
-                    for(auto start : starts)
+                    // LDS prefetch colouring is based on the "small k", not jammed coordinates.
+                    for(auto loadLDSTileTag :
+                        k.control.findNodes(bodyEdges, isLoadLDSTile, GD::Downstream))
                     {
-                        for(auto elem :
-                            filter(k.control.isElemType<SetCoordinate>(),
-                                   k.control.depthFirstVisit(
-                                       start, k.control.isElemType<Body>(), GD::Downstream)))
+                        auto colour = colouring.operationColour[loadLDSTileTag];
+                        for(auto kv : colour)
                         {
-                            auto bodyChild = only(k.control.getOutputNodeIndices<Body>(elem));
-                            AssertFatal(bodyChild.has_value());
-                            auto loadTag = only(
-                                filter(k.control.isElemType<LoadTiled>(),
-                                       k.control.depthFirstVisit(*bodyChild, GD::Downstream)));
-                            if(!loadTag)
+                            auto unrollCoord = kv.first;
+                            if(unrollCoord == prefetchUnrollCoord)
                                 continue;
-
-                            auto setCoord   = *(k.control.get<SetCoordinate>(elem));
-                            auto coordinate = k.mapper.get<Unroll>(elem);
-
-                            AssertFatal(operationUnroll[elem] == u);
-
-                            AssertFatal(
-                                evaluationTimes(
-                                    setCoord
-                                        .value)[rocRoller::Expression::EvaluationTime::Translate],
-                                "Unroll value should be a literal");
-
-                            auto unrollCoordValue = getUnsignedInt(evaluate(setCoord.value));
-
-                            AssertFatal(coordinate != prefetchUnrollCoord);
-
-                            if(splitLDSPrefetchFactor == 0)
+                            auto incoming
+                                = k.coordinates.getInputNodeIndices(unrollCoord, CT::isEdge<Split>)
+                                      .to<std::vector>();
+                            auto incomingJammed
+                                = filterCoordinates<JammedWaveTileNumber>(incoming, k);
+                            if(incomingJammed.empty())
                             {
-                                // Mark as non-prefetchable
-                                m_loadFromLDSChains[forLoop][u].push_back(elem);
-                                break;
+                                prefetchLDSUnrollCoord = unrollCoord;
                             }
-
-                            if(splitLDSPrefetchFactor > 0)
-                            {
-                                auto [_ignore, unrollCoord] = k.getDimension<Unroll>(elem);
-                                auto unrollCoordSize = getUnsignedInt(evaluate(unrollCoord.size));
-
-                                if(unrollCoordValue >= unrollCoordSize / splitLDSPrefetchFactor)
-                                {
-                                    // Mark chain as non-prefetchable
-                                    m_loadFromLDSChains[forLoop][u].push_back(elem);
-                                    break;
-                                }
-                            }
-
-                            // Mark chain as a prefetchable
-                            auto userTag = k.mapper.get<User>(*loadTag);
-                            m_prefetchFromLDSChains[forLoop][u].insert(
-                                {userTag, unrollCoordValue, elem});
-                            m_prefetchUnrollBodyStarts[forLoop][u].erase(elem);
-
-                            for(auto inEdge : k.control.getNeighbours<GD::Upstream>(elem))
-                            {
-                                m_prefetchDelete[forLoop].insert(inEdge);
-                            }
-
-                            for(auto outEdge :
-                                filter(k.control.isElemType<Sequence>(),
-                                       k.control.getNeighbours<GD::Downstream>(elem)))
-                            {
-                                auto outNode
-                                    = *only(k.control.getNeighbours<GD::Downstream>(outEdge));
-
-                                m_prefetchUnrollBodyStarts[forLoop][u].insert(outNode);
-                                m_prefetchDelete[forLoop].insert(outEdge);
-                            }
-                            break;
                         }
+                    }
+                }
+                AssertFatal(prefetchLDSUnrollCoord != -1, "Can not find LDS prefetch coordinate.");
+
+                for(auto loadLDSTileTag :
+                    k.control.findNodes(bodyEdges, isLoadLDSTile, GD::Downstream))
+                {
+                    auto colour = colouring.operationColour[loadLDSTileTag];
+                    auto u      = colour[prefetchUnrollCoord];
+
+                    auto prefetchLDSUnrollValue = colour[prefetchLDSUnrollCoord];
+
+                    auto loadLDSTileChain = getTopSetCoordinate(k, loadLDSTileTag);
+
+                    if(splitLDSPrefetchFactor == 0)
+                    {
+                        // Keep load in same segment
+                        m_loadFromLDSChains[forLoop][u].push_back(loadLDSTileChain);
+                        break;
+                    }
+
+                    if(splitLDSPrefetchFactor > 0)
+                    {
+                        if(prefetchLDSUnrollValue
+                           >= unrollCoordSizes[prefetchLDSUnrollCoord] / splitLDSPrefetchFactor)
+                        {
+                            // Keep load in same segment
+                            m_loadFromLDSChains[forLoop][u].push_back(loadLDSTileChain);
+                            continue;
+                        }
+                    }
+
+                    // Move load to previous segment (it is prefetchable)
+                    auto target = getLDSOperationTarget(k, loadLDSTileTag);
+                    m_prefetchFromLDSChains[forLoop][u].insert(
+                        {target, prefetchLDSUnrollValue, loadLDSTileChain});
+                    m_prefetchUnrollBodyStarts[forLoop][u].erase(loadLDSTileChain);
+
+                    for(auto inEdge : k.control.getNeighbours<GD::Upstream>(loadLDSTileChain))
+                    {
+                        m_prefetchDelete[forLoop].insert(inEdge);
+                    }
+
+                    for(auto outEdge :
+                        filter(k.control.isElemType<Sequence>(),
+                               k.control.getNeighbours<GD::Downstream>(loadLDSTileChain)))
+                    {
+                        if(m_prefetchDelete[forLoop].contains(outEdge))
+                            continue;
+
+                        auto outNode = *only(k.control.getNeighbours<GD::Downstream>(outEdge));
+
+                        m_prefetchUnrollBodyStarts[forLoop][u].insert(outNode);
+                        m_prefetchDelete[forLoop].insert(outEdge);
                     }
                 }
             }
@@ -1531,16 +1312,22 @@ namespace rocRoller
                         if(k.control.get<Body>(bodyElem) || k.control.get<Sequence>(bodyElem)
                            || k.control.get<SetCoordinate>(bodyElem)
                            || k.control.get<LoadTiled>(bodyElem)
-                           || k.control.get<Multiply>(bodyElem))
+                           || k.control.get<LoadLDSTile>(bodyElem)
+                           || k.control.get<StoreLDSTile>(bodyElem)
+                           || k.control.get<Multiply>(bodyElem) || k.control.get<NOP>(bodyElem))
                         {
                             continue;
                         }
+
+                        auto op = k.control.getNode(bodyElem);
                         retval.combine(false,
-                                       concatenate("Found unsupported node '",
+                                       concatenate("Found unsupported node ",
+                                                   toString(op),
+                                                   " (",
                                                    bodyElem,
-                                                   "' in forloop '",
+                                                   ") in forloop ",
                                                    forLoop,
-                                                   "'."));
+                                                   "."));
                     }
                 }
             }

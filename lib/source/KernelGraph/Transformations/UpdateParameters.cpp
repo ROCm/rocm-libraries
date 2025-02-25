@@ -101,13 +101,22 @@ namespace rocRoller
             {
             }
 
+            MemoryType dropLDS(MemoryType const& type) const
+            {
+                if(type == MemoryType::WAVE_LDS)
+                    return MemoryType::WAVE;
+                if(type == MemoryType::LDS)
+                    return MemoryType::VGPR;
+                return type;
+            }
+
             template <CBinary BinaryExp>
             MemoryType operator()(BinaryExp const& expr)
             {
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
                 if(lhs == rhs)
-                    return lhs;
+                    return dropLDS(lhs);
                 if(lhs == MemoryType::WAVE || rhs == MemoryType::WAVE)
                     return MemoryType::WAVE;
                 if(lhs == MemoryType::VGPR || lhs == MemoryType::AGPR || lhs == MemoryType::Literal)
@@ -121,7 +130,7 @@ namespace rocRoller
             template <CUnary UnaryExp>
             MemoryType operator()(UnaryExp const& expr)
             {
-                return call(expr.arg);
+                return dropLDS(call(expr.arg));
             }
 
             MemoryType operator()(DataFlowTag const& expr)
