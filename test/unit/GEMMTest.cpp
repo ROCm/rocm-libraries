@@ -24,6 +24,7 @@
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
+#include <common/mxDataGen.hpp>
 
 #include "GEMMF8F6F4.hpp"
 
@@ -164,17 +165,25 @@ namespace GEMMDriverTest
 
             std::vector<uint8_t> hostScaleA, hostScaleB;
 
-            GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
+            TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, gemm.transA);
+            TensorDescriptor descAScale(dataTypeA, {size_t(M), size_t(K / 32)}, gemm.transA);
+            TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, gemm.transB);
+            TensorDescriptor descBScale(dataTypeB, {size_t(K / 32), size_t(N)}, gemm.transB);
+            TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
-            {
-                auto rng = RandomGenerator(51413u);
-                if(gemm.scaleAMode == Operations::ScaleMode::Separate)
-                    hostScaleA = rng.vector<uint8_t>(
-                        M * K / 32, floatToScale(0.03125f), floatToScale(1024.0f));
-                if(gemm.scaleBMode == Operations::ScaleMode::Separate)
-                    hostScaleB = rng.vector<uint8_t>(
-                        K * N / 32, floatToScale(0.03125f), floatToScale(1024.0f));
-            }
+            auto seed = 31415u;
+            DGenInput(seed,
+                      hostA,
+                      descA,
+                      hostB,
+                      descB,
+                      hostC,
+                      descC,
+                      hostScaleA,
+                      hostScaleB,
+                      gemm.scaleAMode == Operations::ScaleMode::Separate,
+                      gemm.scaleBMode == Operations::ScaleMode::Separate);
 
             if(setIdentity)
             {
@@ -424,13 +433,6 @@ namespace GEMMDriverTest
             commandKernel.setLaunchParameters(launch);
 
             CommandArguments commandArgs = command->createArguments();
-
-            TensorDescriptor descA(dataTypeA, {size_t(M), size_t(K)}, gemm.transA);
-            TensorDescriptor descAScale(dataTypeA, {size_t(M), size_t(K / 32)}, gemm.transA);
-            TensorDescriptor descB(dataTypeB, {size_t(K), size_t(N)}, gemm.transB);
-            TensorDescriptor descBScale(dataTypeB, {size_t(K / 32), size_t(N)}, gemm.transB);
-            TensorDescriptor descC(dataTypeD, {size_t(M), size_t(N)}, "N");
-            TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
             setCommandTensorArg(commandArgs, tagTensorA, descA, deviceA.get());
             setCommandTensorArg(commandArgs, tagTensorB, descB, deviceB.get());

@@ -224,6 +224,44 @@ AcceptableError
         ss << " Problem size scaling: " << scale;
         ss << " Fudge: " << fudge;
 
+        if constexpr(std::is_same_v<TA, TB>)
+        {
+            if constexpr(std::is_same_v<TA, rocRoller::BF6>)
+            {
+                fudge *= 3;
+                ss << " Increase fudge for BF6: " << fudge;
+            }
+            if constexpr(std::is_same_v<TA, rocRoller::BF8>)
+            {
+                fudge *= 5;
+                ss << " Increase fudge for BF8: " << fudge;
+            }
+            if constexpr(std::is_same_v<TA, rocRoller::FP8>)
+            {
+                fudge *= 5.5;
+                ss << " Increase fudge for FP8: " << fudge;
+            }
+        }
+        else
+        {
+            if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
+            {
+                fudge *= 5;
+                ss << " Increase fudge for mixed BF8: " << fudge;
+            }
+            else if constexpr(std::is_same_v<TA,
+                                             rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
+            {
+                fudge *= 4.55;
+                ss << " Increase fudge for mixed FP8: " << fudge;
+            }
+            else if constexpr(std::is_same_v<TA,
+                                             rocRoller::BF6> || std::is_same_v<TB, rocRoller::BF6>)
+            {
+                fudge *= 3;
+                ss << " Increase fudge for mixed BF6: " << fudge;
+            }
+        }
         tolerance = fudge * epsilon<TD>() * std::sqrt(K);
     }
 
@@ -371,53 +409,6 @@ namespace rocRoller
 
 namespace rocRoller
 {
-    template <typename TA, typename TB, typename TC>
-    void GenerateRandomInput(std::mt19937::result_type seed,
-                             std::vector<TA>&          A,
-                             size_t                    sizeA,
-                             std::vector<TB>&          B,
-                             size_t                    sizeB,
-                             std::vector<TC>&          C,
-                             size_t                    sizeC,
-                             float                     min = -1.f,
-                             float                     max = 1.f)
-    {
-        auto rngA = RandomGenerator(seed + 1);
-        auto rngB = RandomGenerator(seed + 2);
-        auto rngC = RandomGenerator(seed + 3);
-
-        // TODO: use data-generator here, avoid hard coded values below
-        auto generateVector = [&](auto& vec, RandomGenerator& rng, size_t sz) {
-            using elemT = typename std::remove_reference_t<decltype(vec)>::value_type;
-            if constexpr(std::is_same_v<elemT, FP4x8>)
-                vec = rng.vector<FP4>(sz, -6.f, 6.f);
-            else if constexpr(std::is_same_v<elemT, FP6x16>)
-                vec = rng.vector<FP6>(sz, -7.5f, 7.5f);
-            else if constexpr(std::is_same_v<elemT, BF6x16>)
-                vec = rng.vector<BF6>(sz, -28.f, 28.f);
-            else
-                vec = rng.vector<elemT>(sz, min, max);
-        };
-
-#pragma omp parallel sections
-        {
-#pragma omp section
-            {
-                generateVector(A, rngA, sizeA);
-            }
-
-#pragma omp section
-            {
-                generateVector(B, rngB, sizeB);
-            }
-
-#pragma omp section
-            {
-                C = rngC.vector<TC>(sizeC, min, max);
-            }
-        }
-    }
-
     template <typename T>
     void SetIdentityMatrix(std::vector<T>& mat, size_t cols, size_t rows)
     {

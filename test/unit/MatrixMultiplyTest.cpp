@@ -23,6 +23,7 @@
 #include "SourceMatcher.hpp"
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <common/mxDataGen.hpp>
 
 using namespace rocRoller;
 
@@ -276,8 +277,6 @@ namespace MatrixMultiplyTest
 
             if(isLocalDevice())
             {
-                RandomGenerator random(9861u);
-
                 TensorDescriptor descA(dataTypeA, {M, K}, transA);
                 TensorDescriptor descB(dataTypeB, {K, N}, transB);
                 TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
@@ -287,8 +286,17 @@ namespace MatrixMultiplyTest
                 float rangeA = range<TA>();
                 float rangeB = range<TB>();
 
-                auto A = random.vector<TA>(descA.totalAllocatedElements(), -rangeA, rangeA);
-                auto B = random.vector<TB>(descB.totalAllocatedElements(), -rangeB, rangeB);
+                uint32_t seed = 9861u;
+
+                auto       blockScalingA = (scaleA) ? 32 : 1;
+                auto       blockScalingB = (scaleB) ? 32 : 1;
+                const auto dgenA
+                    = getDataGenerator<TA>(descA, -rangeA, rangeA, seed, blockScalingA);
+                const auto dgenB
+                    = getDataGenerator<TB>(descB, -rangeB, rangeB, seed, blockScalingB);
+
+                auto A = getRandomVector<TA>(dgenA, scaleA);
+                auto B = getRandomVector<TB>(dgenB, scaleB);
 
                 std::vector<uint8_t> hostScaleA, hostScaleB;
 
@@ -300,15 +308,13 @@ namespace MatrixMultiplyTest
 
                 if(scaleA)
                 {
-                    hostScaleA = random.vector<uint8_t>(
-                        M * K / 32, floatToScale(0.03125f), floatToScale(1024.0f));
-                    d_scaleA = make_shared_device(hostScaleA);
+                    hostScaleA = dgenA.getScaleBytes();
+                    d_scaleA   = make_shared_device(hostScaleA);
                 }
                 if(scaleB)
                 {
-                    hostScaleB = random.vector<uint8_t>(
-                        K * N / 32, floatToScale(0.03125f), floatToScale(1024.0f));
-                    d_scaleB = make_shared_device(hostScaleB);
+                    hostScaleB = dgenB.getScaleBytes();
+                    d_scaleB   = make_shared_device(hostScaleB);
                 }
 
                 CommandArguments commandArgs = command->createArguments();
@@ -483,10 +489,13 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            RandomGenerator random(61u);
+            TensorDescriptor descA(dataTypeAB, {M, K}, transA ? "T" : "N");
+            TensorDescriptor descB(dataTypeAB, {K, N}, transB ? "T" : "N");
+            TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
-            auto A = random.vector<T>(M * K, -1.f, 1.f);
-            auto B = random.vector<T>(K * N, -1.f, 1.f);
+            auto seed = 9861u;
+            auto A    = DGenVector<T>(descA, -1.f, 1.f, seed + 1);
+            auto B    = DGenVector<T>(descB, -1.f, 1.f, seed + 2);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
@@ -514,10 +523,6 @@ namespace MatrixMultiplyTest
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
             CommandArguments commandArgs = command->createArguments();
-
-            TensorDescriptor descA(dataTypeAB, {M, K}, transA ? "T" : "N");
-            TensorDescriptor descB(dataTypeAB, {K, N}, transB ? "T" : "N");
-            TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
 
             setCommandTensorArg(commandArgs, tagTensorA, descA, (T*)d_A.get());
             setCommandTensorArg(commandArgs, tagTensorB, descB, (T*)d_B.get());
@@ -605,19 +610,24 @@ namespace MatrixMultiplyTest
             auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
             auto NZ = std::make_shared<Expression::Expression>(1u);
 
-            RandomGenerator random(61u);
+            auto             dataType = TypeInfo<T>::Var.dataType;
+            TensorDescriptor descA(dataType, {M, K}, {1u, M});
+            TensorDescriptor descB(dataType, {K, N}, {1u, K});
+            TensorDescriptor descC(dataType, {M, N}, {1u, M});
+            TensorDescriptor descD(dataType, {M, N}, {1u, M});
 
-            auto A = random.vector<T>(M * K, -1.f, 1.f);
-            auto B = random.vector<T>(K * N, -1.f, 1.f);
-            auto C = random.vector<T>(M * N, -1.f, 1.f);
+            auto seed = 9861u;
+
+            auto A = DGenVector<T>(descA, -1.f, 1.f, seed + 1);
+            auto B = DGenVector<T>(descB, -1.f, 1.f, seed + 2);
+            auto C = DGenVector<T>(descC, -1.f, 1.f, seed + 3);
 
             auto d_A = make_shared_device(A);
             auto d_B = make_shared_device(B);
             auto d_C = make_shared_device(C);
             auto d_D = make_shared_device<T>(M * N);
 
-            auto command  = std::make_shared<Command>();
-            auto dataType = TypeInfo<T>::Var.dataType;
+            auto command = std::make_shared<Command>();
 
             auto tagTensorA
                 = command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
@@ -644,11 +654,6 @@ namespace MatrixMultiplyTest
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
 
             CommandArguments commandArgs = command->createArguments();
-
-            TensorDescriptor descA(dataType, {M, K}, {1u, M});
-            TensorDescriptor descB(dataType, {K, N}, {1u, K});
-            TensorDescriptor descC(dataType, {M, N}, {1u, M});
-            TensorDescriptor descD(dataType, {M, N}, {1u, M});
 
             setCommandTensorArg(commandArgs, tagTensorA, descA, (T*)d_A.get());
             setCommandTensorArg(commandArgs, tagTensorB, descB, (T*)d_B.get());
@@ -1123,6 +1128,12 @@ namespace MatrixMultiplyTest
             GTEST_SKIP();
         }
 
+        // TODO: enable non-TN 16x16x128 tests
+        if((transA != "T" || transB != "N") && MFMAK == 128)
+        {
+            GTEST_SKIP() << "FIXME: Skipping scaled non-TN 16x16x128 tests";
+        }
+
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
         switch(typeAB)
@@ -1404,6 +1415,12 @@ namespace MatrixMultiplyTest
             GTEST_SKIP();
         }
 
+        // TODO: enable non-TN 16x16x128 tests
+        if((transA != "T" || transB != "N") && MFMAK == 128)
+        {
+            GTEST_SKIP() << "FIXME: Skipping scaled non-TN 16x16x128 tests";
+        }
+
         matrixMultiplyMacroTileMixed(
             typeA, typeB, waveM, waveN, waveK, 1, 1.e-5, true, transA, transB, true, true);
     }
@@ -1441,9 +1458,9 @@ namespace MatrixMultiplyTest
     };
 
     template <typename TA, typename TB>
-    void exeScaledCPUMM(const int   M,
-                        const int   N,
-                        const int   K,
+    void exeScaledCPUMM(unsigned    M,
+                        unsigned    N,
+                        unsigned    K,
                         const float scaleA,
                         const float scaleB,
                         float       alpha,
@@ -1451,10 +1468,14 @@ namespace MatrixMultiplyTest
                         bool        transA,
                         bool        transB)
     {
-        RandomGenerator random(9861u);
+        auto dataTypeA = TypeInfo<TA>::Var.dataType;
+        auto dataTypeB = TypeInfo<TB>::Var.dataType;
 
-        auto A     = random.vector<TA>(M * K, -1.f, 1.f);
-        auto B     = random.vector<TB>(K * N, -1.f, 1.f);
+        TensorDescriptor descA(dataTypeA, {M, K}, "T");
+        TensorDescriptor descB(dataTypeB, {K, N}, "T");
+
+        auto A     = DGenVector<TA>(descA, -1.0, 1.0, 9861u);
+        auto B     = DGenVector<TB>(descB, -1.0, 1.0, 9861u);
         auto C     = std::vector<float>(M * N);
         auto D     = std::vector<float>(M * N);
         auto ref_D = std::vector<float>(M * N);

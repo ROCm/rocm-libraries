@@ -12,7 +12,7 @@ F16TESTS=("*GPU_MatrixMultiplyMacroTileF16*"
 "*GPU_BasicGEMMF16*"
 )
 
-F8F6F4TESTS=("*GPU_MatrixMultiplyMacroTileF8F6F4*",
+F8F6F4TESTS=("*GPU_MatrixMultiplyMacroTileF8F6F4*"
 "*GPU_ScaledMatrixMultiplyMacroTileF8F6F4*"
 "*GPU_ScaledMatrixMultiplyMacroTileMixed*"
 "*GPU_MatrixMultiplyABF8F6F4*"
@@ -116,7 +116,7 @@ while getopts "ct:" opt; do
 done
 
 case "${SUITE}" in
-  "f16" | "f8" | "f6" | "f4" | "mixed" | "scaled" | "transpose")
+  "f16" | "f8f6f4" | "f8" | "f6" | "f4" | "mixed" | "scaled" | "transpose")
       RRTESTS_VARNAME="${SUITE^^}TESTS"
       RRPERF_TESTS_VARNAME="RRPERF_${SUITE^^}TESTS"
       read -r -a RRTESTS_LIST <<<"$(eval echo "\${${RRTESTS_VARNAME}[@]}")"

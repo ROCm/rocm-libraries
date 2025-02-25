@@ -10,6 +10,7 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -19,30 +20,6 @@
 
 namespace rocRoller
 {
-    template <typename T>
-    struct UnsegmentedTypeOf
-    {
-        typedef T type;
-    };
-
-    template <>
-    struct UnsegmentedTypeOf<FP6>
-    {
-        typedef FP6x16 type;
-    };
-
-    template <>
-    struct UnsegmentedTypeOf<BF6>
-    {
-        typedef BF6x16 type;
-    };
-
-    template <>
-    struct UnsegmentedTypeOf<FP4>
-    {
-        typedef FP4x8 type;
-    };
-
     /**
      * Random vector generator.
      *
