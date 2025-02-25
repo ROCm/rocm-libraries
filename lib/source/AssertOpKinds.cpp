@@ -9,16 +9,17 @@ namespace rocRoller
         {
         case AssertOpKind::NoOp:
             return "NoOp";
-            break;
         case AssertOpKind::MemoryViolation:
             return "MemoryViolation";
-            break;
         case AssertOpKind::STrap:
             return "STrap";
-            break;
         default:
             return "Invalid";
-            break;
         }
+    }
+
+    std::ostream& operator<<(std::ostream& stream, AssertOpKind const k)
+    {
+        return stream << toString(k);
     }
 }

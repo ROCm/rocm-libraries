@@ -33,9 +33,54 @@ namespace rocRoller
             throw std::runtime_error("Invalid ElementType");
         }
 
+        inline std::ostream& operator<<(std::ostream& stream, ElementType const& e)
+        {
+            return stream << toString(e);
+        }
+
+        inline std::string toString(Direction d)
+        {
+            switch(d)
+            {
+            case Direction::Upstream:
+                return "Upstream";
+            case Direction::Downstream:
+                return "Downstream";
+            default:
+                break;
+            }
+            throw std::runtime_error("Invalid Direction");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, Direction const& d)
+        {
+            return stream << toString(d);
+        }
+
         constexpr inline Direction opposite(Direction d)
         {
             return d == Direction::Downstream ? Direction::Upstream : Direction::Downstream;
+        }
+
+        inline std::string toString(GraphModification g)
+        {
+            switch(g)
+            {
+            case GraphModification::DeleteElement:
+                return "DeleteElement";
+            case GraphModification::AddElement:
+                return "AddElement";
+            case GraphModification::SetElement:
+                return "SetElement";
+            default:
+                break;
+            }
+            throw std::runtime_error("Invalid GraphModification");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, GraphModification const& g)
+        {
+            return stream << toString(g);
         }
 
         template <typename Node, typename Edge, bool Hyper>

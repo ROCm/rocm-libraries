@@ -29,7 +29,9 @@ namespace rocRoller::KernelGraph
         {
             READ,
             WRITE,
-            READWRITE
+            READWRITE,
+
+            Count
         };
 
         struct ReadWriteRecord
@@ -121,5 +123,8 @@ namespace rocRoller::KernelGraph
          */
         void trace(int start);
     };
+
+    std::string   toString(ControlFlowRWTracer::ReadWrite const& rw);
+    std::ostream& operator<<(std::ostream& stream, ControlFlowRWTracer::ReadWrite rw);
 
 }

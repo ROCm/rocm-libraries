@@ -7,7 +7,7 @@ namespace rocRoller
     {
         RegisterComponentBase(Scheduler);
 
-        std::string toString(SchedulerProcedure proc)
+        std::string toString(SchedulerProcedure const& proc)
         {
             switch(proc)
             {
@@ -28,9 +28,37 @@ namespace rocRoller
             Throw<FatalError>("Invalid Scheduler Procedure: ", ShowValue(static_cast<int>(proc)));
         }
 
-        std::ostream& operator<<(std::ostream& stream, SchedulerProcedure proc)
+        std::ostream& operator<<(std::ostream& stream, SchedulerProcedure const& proc)
         {
             return stream << toString(proc);
+        }
+
+        std::string toString(Dependency const& dep)
+        {
+            switch(dep)
+            {
+            case Dependency::None:
+                return "None";
+            case Dependency::SCC:
+                return "SCC";
+            case Dependency::VCC:
+                return "VCC";
+            case Dependency::Branch:
+                return "Branch";
+            case Dependency::Unlock:
+                return "Unlock";
+            case Dependency::M0:
+                return "M0";
+            default:
+                break;
+            }
+
+            Throw<FatalError>("Invalid Dependency: ", ShowValue(static_cast<int>(dep)));
+        }
+
+        std::ostream& operator<<(std::ostream& stream, Dependency const& dep)
+        {
+            return stream << toString(dep);
         }
 
         LockState::LockState(ContextPtr ctx)

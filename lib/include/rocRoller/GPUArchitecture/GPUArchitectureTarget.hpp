@@ -50,6 +50,8 @@ namespace rocRoller
     std::string toString(GPUArchitectureGFX const& gfx);
     std::string name(GPUArchitectureGFX const& gfx);
 
+    std::ostream& operator<<(std::ostream&, GPUArchitectureGFX const& gfx);
+
     struct GPUArchitectureFeatures
     {
     public:
@@ -126,6 +128,21 @@ namespace rocRoller
         constexpr bool isCDNAGPU() const
         {
             return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA35GPU();
+        }
+
+        constexpr bool isGFX9GPU() const
+        {
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU();
+        }
+
+        constexpr bool isGFX10GPU() const
+        {
+            return isRDNA1GPU() || isRDNA2GPU();
+        }
+
+        constexpr bool isGFX12GPU() const
+        {
+            return isRDNA4GPU();
         }
 
         auto operator<=>(const GPUArchitectureTarget&) const = default;

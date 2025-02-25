@@ -11,7 +11,7 @@ add_executable(
 target_compile_options(rocroller_gemm PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_link_options(rocroller_gemm PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
-    rocroller_gemm PUBLIC rocroller_interface common_test_utilities CLI11::CLI11
+    rocroller_gemm PUBLIC rocroller_interface common_test_utilities CLI11::CLI11 ${llvm_yaml_libs}
 )
 
 set_target_properties(
@@ -32,7 +32,7 @@ add_executable(rocroller_codegen_stress codegen_stress_test.cpp)
 target_compile_options(rocroller_codegen_stress PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_link_options(rocroller_codegen_stress PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
-    rocroller_codegen_stress PUBLIC rocroller_interface CLI11::CLI11
+    rocroller_codegen_stress PUBLIC rocroller_interface CLI11::CLI11 ${llvm_yaml_libs}
 )
 
 set_target_properties(

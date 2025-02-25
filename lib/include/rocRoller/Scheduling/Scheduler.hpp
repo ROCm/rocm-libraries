@@ -108,7 +108,8 @@ namespace rocRoller
                                std::vector<Generator<Instruction>::iterator>& iterators);
         };
 
-        std::ostream& operator<<(std::ostream&, SchedulerProcedure);
+        std::ostream& operator<<(std::ostream&, SchedulerProcedure const&);
+        std::ostream& operator<<(std::ostream&, Dependency const&);
     }
 }
 

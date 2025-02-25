@@ -120,6 +120,8 @@ set(
     unit/VectorAddBenchmark.cpp
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
+    unit/StreamTest.cpp
+    unit/EnumToStringTest.cpp
 )
 
 if(NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
@@ -171,6 +173,7 @@ set(
     catch/CommandTest.cpp
     catch/CustomAssertionTest.cpp
     catch/CustomMatcherTest.cpp
+    catch/DataTypesTest.cpp
     catch/ExpressionContainsSubExpressionTest.cpp
     catch/ExpressionIdenticalTest.cpp
     catch/ExpressionSerializationTest.cpp

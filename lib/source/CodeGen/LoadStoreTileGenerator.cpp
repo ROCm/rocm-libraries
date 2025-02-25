@@ -181,7 +181,7 @@ namespace rocRoller
                 auto baseTag = m_baseOffsets[offsetTag];
                 if(direct2LDS)
                 {
-                    auto tmp = m_context->registerTagManager()->getRegister(offsetTag);
+                    auto tmp = m_context->registerTagManager()->getRegister(baseTag);
                     co_yield generate(info.data, info.data->expression() + tmp->expression());
                     m_context->getScopeManager()->addRegister(offsetTag);
                     m_context->registerTagManager()->addRegister(offsetTag, info.data);
@@ -524,7 +524,7 @@ namespace rocRoller
                                                        Register::ValuePtr readOffset,
                                                        Register::ValuePtr readAddr)
         {
-            AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4);
+            AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
             if(setM0)
             {
@@ -535,8 +535,7 @@ namespace rocRoller
             }
             else
             {
-                co_yield generate(
-                    m0, m0->expression() + Expression::literal(numBytes * m_workgroupSizeTotal));
+                co_yield generate(m0, m0->expression() + Expression::literal(info.ldsWriteStride));
             }
 
             co_yield m_context->mem()->moveData<Dir>(info.kind,
@@ -825,17 +824,28 @@ namespace rocRoller
 
                 for(uint64_t j = 0; j < info.n; ++j)
                 {
-                    co_yield m_context->mem()->moveData<Dir>(
-                        info.kind,
-                        colOffsetReg->subset({0}),
-                        info.data->element(
-                            {static_cast<int>((i * info.n + j) / info.packedAmount)}),
-                        info.offset,
-                        CeilDivide(info.elementBits, 8u),
-                        "",
-                        j % info.packedAmount == 1,
-                        info.bufDesc,
-                        info.bufOpts);
+                    if(info.bufOpts.lds)
+                    {
+                        co_yield moveTileDirect2LDS<Dir>(info,
+                                                         CeilDivide(info.elementBits, 8u),
+                                                         i == 0 && j == 0,
+                                                         info.offset,
+                                                         colOffsetReg->subset({0}));
+                    }
+                    else
+                    {
+                        co_yield m_context->mem()->moveData<Dir>(
+                            info.kind,
+                            colOffsetReg->subset({0}),
+                            info.data->element(
+                                {static_cast<int>((i * info.n + j) / info.packedAmount)}),
+                            info.offset,
+                            CeilDivide(info.elementBits, 8u),
+                            "",
+                            j % info.packedAmount == 1,
+                            info.bufDesc,
+                            info.bufOpts);
+                    }
 
                     if(j < info.n - 1)
                     {
@@ -967,10 +977,15 @@ namespace rocRoller
 
                 if(kind == MemoryInstructions::MemoryKind::Buffer2LDS)
                 {
-                    // lds offset
-                    info.data = vgpr;
-                    // set lds modifier
+                    info.data        = vgpr;
                     info.bufOpts.lds = 1;
+
+                    // get lds write stride
+                    Register::ValuePtr           ldsWriteStrideRegister;
+                    RegisterExpressionAttributes _ignore;
+                    co_yield generateStride(ldsWriteStrideRegister, _ignore, tag, 2);
+                    auto ldsStride      = getUnsignedInt(ldsWriteStrideRegister->getLiteralValue());
+                    info.ldsWriteStride = ldsStride;
                 }
                 else if(m_context->registerTagManager()->hasRegister(macTileTag))
                 {
@@ -1047,7 +1062,8 @@ namespace rocRoller
             {
                 co_yield m_context->copier()->ensureType(
                     info.data, info.data, Register::Type::Vector);
-                co_yield getOffset(info, coords, tag, !allStridesAreLiteral && info.m > 1, true);
+                co_yield getOffset(
+                    info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
             }
 
             if(allStridesAreLiteral)
@@ -1154,6 +1170,7 @@ namespace rocRoller
                 "GEN: loadMacroTileDirect2LDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag));
 
             auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
+
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
@@ -1185,7 +1202,8 @@ namespace rocRoller
                 tag,
                 ldsOffset,
                 nullptr,
-                coords);
+                coords,
+                {});
             co_yield Instruction::Unlock("Unlock M0");
         }
 

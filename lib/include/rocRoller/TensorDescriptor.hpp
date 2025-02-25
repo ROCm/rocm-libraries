@@ -248,26 +248,4 @@ namespace rocRoller
         for(size_t i = 0; i < strides.size(); i++)
             commandArgs.setArgument(tag, ArgumentType::Stride, i, (size_t)strides[i]);
     }
-
-    inline DataType getDataTypeFromString(std::string const& typeName)
-    {
-        if(typeName == "float")
-            return DataType::Float;
-        else if(typeName == "half" || typeName == "fp16")
-            return DataType::Half;
-        else if(typeName == "bf16")
-            return DataType::BFloat16;
-        else if(typeName == "fp8")
-            return DataType::FP8;
-        else if(typeName == "bf8")
-            return DataType::BF8;
-        else if(typeName == "fp6")
-            return DataType::FP6;
-        else if(typeName == "bf6")
-            return DataType::BF6;
-        else if(typeName == "fp4")
-            return DataType::FP4;
-        else
-            throw std::runtime_error("Unsupported data type with name " + typeName);
-    }
 }

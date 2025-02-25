@@ -29,7 +29,8 @@ namespace rocRoller
             Count
         };
 
-        std::string toString(ElementType e);
+        std::ostream& operator<<(std::ostream&, ElementType const& e);
+        std::string   toString(ElementType e);
 
         /**
          * @brief Returns the complementary type to `t`.
@@ -43,12 +44,19 @@ namespace rocRoller
             Count
         };
 
+        std::ostream& operator<<(std::ostream&, Direction const& d);
+        std::string   toString(Direction d);
+
         enum class GraphModification : int
         {
             DeleteElement = 0,
             AddElement,
-            SetElement
+            SetElement,
+            Count
         };
+
+        std::ostream& operator<<(std::ostream&, GraphModification const& g);
+        std::string   toString(GraphModification g);
 
         constexpr Direction opposite(Direction);
 

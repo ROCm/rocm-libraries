@@ -630,7 +630,7 @@ namespace rocRoller
                     bool isLeaf = true;
                     for(auto edgeTag : kgraph.coordinates.getNeighbours(tag, direction))
                     {
-                        auto edge = std::get<CT::Edge>(kgraph.coordinates.getElement(edgeTag));
+                        auto edge = kgraph.coordinates.getEdge(edgeTag);
                         if(std::holds_alternative<CT::CoordinateTransformEdge>(edge))
                         {
                             // If a connected node, in the opposing
@@ -1023,6 +1023,47 @@ namespace rocRoller
                         },
                         [&](auto op) { Throw<FatalError>("Not handled yet."); }},
                     std::get<Operation>(element));
+            }
+        }
+
+        void moveConnections(rocRoller::KernelGraph::KernelGraph& k, int opTag1, int opTag2)
+        {
+            auto maybeGlobalOp   = k.control.get<LoadTiled>(opTag1);
+            auto maybeStoreLDSOp = k.control.get<StoreLDSTile>(opTag1);
+            for(auto& c : k.mapper.getConnections(opTag1))
+            {
+
+                if(maybeGlobalOp)
+                {
+                    k.mapper.connect(opTag2, c.coordinate, c.connection);
+                }
+                else if(maybeStoreLDSOp)
+                {
+                    auto maybeLDSTile = k.coordinates.get<LDS>(c.coordinate);
+                    auto maybeOffset  = k.coordinates.get<Offset>(c.coordinate);
+                    auto maybeStride  = k.coordinates.get<Stride>(c.coordinate);
+
+                    if(maybeLDSTile)
+                    {
+                        k.mapper.connect(opTag2, c.coordinate, c.connection);
+                    }
+                    if(maybeOffset || maybeStride)
+                    {
+                        auto newDimension = maybeOffset ? 1 : 2;
+                        if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
+                        {
+                            auto curConnection
+                                = std::get<Connections::TypeAndSubDimension>(c.connection);
+                            if(curConnection.subdimension == 0)
+                            {
+                                auto newConnection = Connections::TypeAndSubDimension{
+                                    curConnection.id, newDimension};
+                                k.mapper.connect(opTag2, c.coordinate, newConnection);
+                            }
+                        }
+                    }
+                }
+                k.mapper.disconnect(opTag1, c.coordinate, c.connection);
             }
         }
     }

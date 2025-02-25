@@ -30,6 +30,11 @@ namespace rocRoller
         throw std::runtime_error("Invalid GeneratorState");
     }
 
+    inline std::ostream& operator<<(std::ostream& stream, GeneratorState const& s)
+    {
+        return stream << toString(s);
+    }
+
     template <typename T, CInputRangeOf<T> TheRange>
     template <std::convertible_to<TheRange> ARange>
     ConcreteRange<T, TheRange>::ConcreteRange(ARange&& r)

@@ -23,10 +23,11 @@ namespace rocRoller
     public:
         enum Value : uint8_t
         {
-            VMQueue = 0,
-            LGKMSendMsgQueue,
-            LGKMDSQueue,
-            LGKMSmemQueue,
+            LoadQueue = 0,
+            StoreQueue,
+            SendMsgQueue,
+            SMemQueue,
+            DSQueue,
             EXPQueue,
             VSQueue,
             FinalInstruction,
@@ -77,13 +78,17 @@ namespace rocRoller
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
 
+    std::ostream& operator<<(std::ostream&, GPUWaitQueueType::Value const& v);
+
     class GPUWaitQueue
     {
     public:
         enum Value : uint8_t
         {
-            VMQueue = 0,
-            LGKMQueue,
+            LoadQueue = 0,
+            StoreQueue,
+            KMQueue,
+            DSQueue,
             EXPQueue,
             VSQueue,
             Count,
@@ -110,13 +115,18 @@ namespace rocRoller
         {
             switch(input)
             {
-            case GPUWaitQueueType::VMQueue:
-                m_value = Value::VMQueue;
+            case GPUWaitQueueType::LoadQueue:
+                m_value = Value::LoadQueue;
                 break;
-            case GPUWaitQueueType::LGKMSendMsgQueue:
-            case GPUWaitQueueType::LGKMDSQueue:
-            case GPUWaitQueueType::LGKMSmemQueue:
-                m_value = Value::LGKMQueue;
+            case GPUWaitQueueType::StoreQueue:
+                m_value = Value::StoreQueue;
+                break;
+            case GPUWaitQueueType::DSQueue:
+                m_value = Value::DSQueue;
+                break;
+            case GPUWaitQueueType::SendMsgQueue:
+            case GPUWaitQueueType::SMemQueue:
+                m_value = Value::KMQueue;
                 break;
             case GPUWaitQueueType::EXPQueue:
                 m_value = Value::EXPQueue;
@@ -150,6 +160,8 @@ namespace rocRoller
         Value                                         m_value = Value::Count;
         static std::unordered_map<std::string, Value> m_stringMap;
     };
+
+    std::ostream& operator<<(std::ostream&, GPUWaitQueue::Value const& v);
 
     class GPUInstructionInfo
     {

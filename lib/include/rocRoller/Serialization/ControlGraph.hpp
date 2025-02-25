@@ -283,15 +283,21 @@ namespace rocRoller
                 {
                     iot::mapRequired(io, "scalar", op.scalar);
                 }
-                if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
+                else if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
                 }
-                if constexpr(CIsAnyOf<Op,
-                                      KernelGraph::ControlGraph::LoadTiled,
-                                      KernelGraph::ControlGraph::LoadLDSTile>)
+                else if constexpr(CIsAnyOf<Op,
+                                           KernelGraph::ControlGraph::LoadTiled,
+                                           KernelGraph::ControlGraph::LoadLDSTile>)
                 {
                     iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
+                }
+                else
+                {
+                    // For all Ops other than above, they should have the same memeber (size).
+                    // If this assertion fails, the Op might have new members added.
+                    static_assert(sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
                 }
             }
 

@@ -23,19 +23,21 @@ namespace rocRoller
         MemoryInstructions(MemoryInstructions&& rhs)      = default;
         ~MemoryInstructions()                             = default;
 
-        enum MemoryKind
+        enum class MemoryKind
         {
             Global,
             Scalar,
             Local,
             Buffer,
-            Buffer2LDS
+            Buffer2LDS,
+            Count,
         };
 
-        enum MemoryDirection : int
+        enum class MemoryDirection : int
         {
             Load = 0,
-            Store
+            Store,
+            Count,
         };
 
         /**
@@ -362,6 +364,9 @@ namespace rocRoller
 
     std::string   toString(MemoryInstructions::MemoryDirection const& d);
     std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection n);
+
+    std::string   toString(MemoryInstructions::MemoryKind const& k);
+    std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryKind k);
 }
 
 #include <rocRoller/CodeGen/MemoryInstructions_impl.hpp>

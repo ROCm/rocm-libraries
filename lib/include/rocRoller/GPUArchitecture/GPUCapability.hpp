@@ -171,6 +171,8 @@ namespace rocRoller
         Value                                               m_value = Value::Count;
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
+
+    std::ostream& operator<<(std::ostream&, GPUCapability::Value);
 }
 
 #include <rocRoller/GPUArchitecture/GPUCapability_impl.hpp>

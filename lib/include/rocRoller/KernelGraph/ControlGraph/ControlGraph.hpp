@@ -42,7 +42,8 @@ namespace rocRoller
         {
             Invalid = 0, //< Cache is empty
             Partial, //< Cache does not have all the orders between nodes
-            Valid //< Cache has all orders of nodes
+            Valid, //< Cache has all orders of nodes
+            Count
         };
 
         /**
@@ -50,6 +51,12 @@ namespace rocRoller
          */
         std::string   toString(NodeOrdering n);
         std::ostream& operator<<(std::ostream& stream, NodeOrdering n);
+
+        /**
+         * Return a full representation of 'c'
+         */
+        std::string   toString(CacheStatus c);
+        std::ostream& operator<<(std::ostream& stream, CacheStatus c);
 
         /**
          * Return a 3-character representation of 'n'.

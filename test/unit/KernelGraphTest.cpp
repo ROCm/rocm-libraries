@@ -83,16 +83,14 @@ namespace KernelGraphTest
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(kgraph0.coordinates.get<User>(id).has_value());
         }
 
         auto top = kgraph0.coordinates.leaves().to<std::vector>();
         EXPECT_EQ(top.size(), 1);
         for(auto const& id : top)
         {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(kgraph0.coordinates.get<User>(id).has_value());
         }
 
         auto visitor = rocRoller::KernelGraph::BaseGraphVisitor(m_context);
@@ -709,8 +707,7 @@ namespace KernelGraphTest
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(kgraph0.coordinates.get<User>(id).has_value());
         }
 
         std::string expected0 = R".(
@@ -799,16 +796,14 @@ namespace KernelGraphTest
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(kgraph0.coordinates.get<User>(id).has_value());
         }
 
         auto top = kgraph0.coordinates.leaves().to<std::vector>();
         EXPECT_EQ(top.size(), 1);
         for(auto const& id : top)
         {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(kgraph0.coordinates.get<User>(id).has_value());
         }
 
         std::string expected0 = R".(

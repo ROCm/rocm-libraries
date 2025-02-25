@@ -231,6 +231,8 @@ namespace rocRoller
             return "WAVE_LDS";
         case MemoryType::WAVE_SPLIT:
             return "WAVE_SPLIT";
+        case MemoryType::WAVE_Direct2LDS:
+            return "WAVE_Direct2LDS";
         case MemoryType::WAVE_SWIZZLE:
             return "WAVE_SWIZZLE";
         case MemoryType::Literal:
@@ -241,6 +243,11 @@ namespace rocRoller
         case MemoryType::Count:;
         }
         return "INVALID";
+    }
+
+    std::ostream& operator<<(std::ostream& stream, MemoryType const& m)
+    {
+        return stream << toString(m);
     }
 
     std::string toString(LayoutType l)

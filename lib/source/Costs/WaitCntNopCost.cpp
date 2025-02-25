@@ -39,7 +39,9 @@ namespace rocRoller
             int vmCost = 0;
             if(architecture.HasCapability(GPUCapability::MaxVmcnt))
             {
-                int vm = status.waitCount.vmcnt();
+                auto loadcnt  = status.waitCount.loadcnt();
+                auto storecnt = status.waitCount.storecnt();
+                auto vm       = WaitCount::CombineValues(loadcnt, storecnt);
                 vmCost
                     = vm == -1 ? 0 : (architecture.GetCapability(GPUCapability::MaxVmcnt) - vm + 1);
             }
@@ -47,10 +49,12 @@ namespace rocRoller
             int lgkmCost = 0;
             if(architecture.HasCapability(GPUCapability::MaxLgkmcnt))
             {
-                int lgkm = status.waitCount.lgkmcnt();
-                lgkmCost = lgkm == -1
-                               ? 0
-                               : (architecture.GetCapability(GPUCapability::MaxLgkmcnt) - lgkm + 1);
+                auto kmcnt = status.waitCount.kmcnt();
+                auto dscnt = status.waitCount.dscnt();
+                auto lgkm  = WaitCount::CombineValues(kmcnt, dscnt);
+                lgkmCost   = lgkm == -1
+                                 ? 0
+                                 : (architecture.GetCapability(GPUCapability::MaxLgkmcnt) - lgkm + 1);
             }
 
             int expCost = 0;

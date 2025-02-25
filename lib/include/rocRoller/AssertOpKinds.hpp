@@ -7,6 +7,7 @@
 namespace rocRoller
 {
 
-    std::string toString(const AssertOpKind& assertOpKind);
+    std::string   toString(const AssertOpKind& assertOpKind);
+    std::ostream& operator<<(std::ostream&, AssertOpKind const);
 
 }

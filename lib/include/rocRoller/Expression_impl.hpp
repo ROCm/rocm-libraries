@@ -40,6 +40,71 @@ namespace rocRoller
 
     namespace Expression
     {
+        inline std::string toString(EvaluationTime t)
+        {
+            switch(t)
+            {
+            case EvaluationTime::Translate:
+                return "Translate";
+            case EvaluationTime::KernelLaunch:
+                return "KernelLaunch";
+            case EvaluationTime::KernelExecute:
+                return "KernelExecute";
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid EvaluationTime");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, EvaluationTime const& t)
+        {
+            return stream << toString(t);
+        }
+
+        inline std::string toString(AlgebraicProperty p)
+        {
+            switch(p)
+            {
+            case AlgebraicProperty::Commutative:
+                return "Commutative";
+            case AlgebraicProperty::Associative:
+                return "Associative";
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid AlgebraicProperty");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, AlgebraicProperty const& p)
+        {
+            return stream << toString(p);
+        }
+
+        inline std::string toString(Category c)
+        {
+            switch(c)
+            {
+            case Category::Arithmetic:
+                return "Arithmetic";
+            case Category::Comparison:
+                return "Comparison";
+            case Category::Logical:
+                return "Logical";
+            case Category::Conversion:
+                return "Conversion";
+            case Category::Value:
+                return "Value";
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid Category");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, Category const& c)
+        {
+            return stream << toString(c);
+        }
+
         inline ExpressionPtr operator+(ExpressionPtr a, ExpressionPtr b)
         {
             return std::make_shared<Expression>(Add{a, b});

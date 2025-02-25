@@ -23,7 +23,8 @@ namespace rocRoller
             MaxDstRegisters = 2,
             MaxSrcRegisters = 5,
             MaxModifiers    = 10,
-            MaxAllocations  = 4
+            MaxAllocations  = 4,
+            Count           = 255,
         };
 
         Instruction(std::string const&                        opcode,

@@ -25,7 +25,7 @@ namespace rocRoller
 
         struct InlineIncrementer
         {
-            std::vector<InlineIncrementStage> m_inlineIncrement;
+            std::vector<InlineIncrementStage> inlineIncrement;
 
             void stageForLoop(KernelGraph const& graph, int forLoop)
             {
@@ -63,7 +63,7 @@ namespace rocRoller
                             }
                         }
 
-                        m_inlineIncrement.push_back({assign, increment, forLoop, ops});
+                        inlineIncrement.push_back({assign, increment, forLoop, ops});
                     }
                 }
             }
@@ -96,7 +96,7 @@ namespace rocRoller
             void commit(KernelGraph& graph)
             {
                 // Commit staged changes
-                for(auto const& s : m_inlineIncrement)
+                for(auto const& s : inlineIncrement)
                 {
                     graph.control.deleteElement(s.increment);
                     if(s.lastRWOps.empty())
@@ -113,7 +113,7 @@ namespace rocRoller
                 }
 
                 // Sanity checks
-                for(auto const& s : m_inlineIncrement)
+                for(auto const& s : inlineIncrement)
                 {
                     auto forLoop = findContainingOperation<ForLoopOp>(s.assign, graph);
                     AssertFatal(forLoop.value_or(-1) == s.forLoop);

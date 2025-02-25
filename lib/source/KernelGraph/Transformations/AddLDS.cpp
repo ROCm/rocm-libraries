@@ -418,7 +418,8 @@ namespace rocRoller
             for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
                 auto tile = *graph.coordinates.get<MacroTile>(tag);
-                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS)
+                if(tile.memoryType == MemoryType::LDS || tile.memoryType == MemoryType::WAVE_LDS
+                   || tile.memoryType == MemoryType::WAVE_Direct2LDS)
                 {
                     retval.combine(false, concatenate("Tile has LDS memory type: ", tag));
                 }
@@ -480,7 +481,8 @@ namespace rocRoller
             auto [userTag, user] = k.getDimension<User>(opTag);
             auto [tileTag, tile] = k.getDimension<MacroTile>(opTag);
 
-            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
+            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS
+                 || tile.memoryType == MemoryType::WAVE_Direct2LDS))
                 return;
 
             rocRoller::Log::getLogger()->debug(
@@ -498,13 +500,15 @@ namespace rocRoller
             {
                 Log::debug("KernelGraph::AddLDS()::commit({})", opTag);
 
-                auto isLoad  = k.control.get<LoadTiled>(opTag).has_value();
-                auto tileTag = k.mapper.get<MacroTile>(opTag);
-                auto userTag = k.mapper.get<User>(opTag);
-                auto varType = getVariableType(k, opTag);
+                auto isLoad       = k.control.get<LoadTiled>(opTag).has_value();
+                auto tileTag      = k.mapper.get<MacroTile>(opTag);
+                auto userTag      = k.mapper.get<User>(opTag);
+                auto varType      = getVariableType(k, opTag);
+                auto tile         = k.coordinates.getNode<MacroTile>(tileTag);
+                auto isDirect2LDS = tile.memoryType == MemoryType::WAVE_Direct2LDS;
 
                 // Create new coordinates
-                auto              ldsTag      = k.coordinates.addElement(LDS());
+                auto              ldsTag      = k.coordinates.addElement(LDS(isDirect2LDS));
                 std::vector<uint> jammedTiles = {1, 1};
                 bool              splitStore  = false;
 
@@ -544,7 +548,8 @@ namespace rocRoller
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
                 // Update tile
-                auto tile = k.coordinates.getNode<MacroTile>(tileTag);
+                if(isDirect2LDS)
+                    tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::WAVE_LDS)
                     tile.memoryType = MemoryType::WAVE;
                 if(tile.memoryType == MemoryType::LDS)

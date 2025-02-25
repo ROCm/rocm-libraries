@@ -27,59 +27,73 @@ namespace rocRoller
     class WaitCount
     {
     public:
-        WaitCount();
-        explicit WaitCount(std::string const& message);
-        WaitCount(int vmcnt, int vscnt, int lgkmcnt, int expcnt);
-        WaitCount(GPUWaitQueue, int count);
+        WaitCount() = default;
+        explicit WaitCount(GPUArchitecture const& arch, std::string const& message = "");
+        WaitCount(GPUArchitecture const& arch,
+                  int                    loadcnt,
+                  int                    storecnt,
+                  int                    vscnt,
+                  int                    dscnt,
+                  int                    kmcnt,
+                  int                    expcnt);
+        WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
 
-        ~WaitCount();
+        ~WaitCount() = default;
 
         bool operator==(WaitCount a) const
         {
-            return a.m_vmcnt == m_vmcnt && a.m_vscnt == m_vscnt && a.m_lgkmcnt == m_lgkmcnt
-                   && a.m_expcnt == m_expcnt;
+            return a.m_loadcnt == m_loadcnt && a.m_storecnt == m_storecnt && a.m_vscnt == m_vscnt
+                   && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt;
         }
         bool operator!=(WaitCount a) const
         {
-            return a.m_vmcnt != m_vmcnt || a.m_vscnt != m_vscnt || a.m_lgkmcnt != m_lgkmcnt
-                   || a.m_expcnt != m_expcnt;
+            return a.m_loadcnt != m_loadcnt || a.m_storecnt != m_storecnt || a.m_vscnt != m_vscnt
+                   || a.m_dscnt != m_dscnt || a.m_kmcnt != m_kmcnt || a.m_expcnt != m_expcnt;
         }
 
-        static WaitCount VMCnt(int value);
-        static WaitCount VSCnt(int value);
-        static WaitCount LGKMCnt(int value);
-        static WaitCount EXPCnt(int value);
+        static WaitCount
+            LoadCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            StoreCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            VSCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            DSCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            KMCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            EXPCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
 
-        static WaitCount VMCnt(int value, std::string const& message);
-        static WaitCount VSCnt(int value, std::string const& message);
-        static WaitCount LGKMCnt(int value, std::string const& message);
-        static WaitCount EXPCnt(int value, std::string const& message);
-
-        static WaitCount Zero(GPUArchitecture const&);
-        static WaitCount Zero(std::string const& message, GPUArchitecture const&);
+        static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;
 
-        static inline int CombineValues(int lhs, int rhs);
+        static int CombineValues(int lhs, int rhs);
 
         void combine(WaitCount const& other);
 
-        int vmcnt() const;
+        int loadcnt() const;
+        int storecnt() const;
         int vscnt() const;
-        int lgkmcnt() const;
+        int dscnt() const;
+        int kmcnt() const;
         int expcnt() const;
 
         int getCount(GPUWaitQueue) const;
 
-        void setVmcnt(int value);
+        void setLoadcnt(int value);
+        void setStorecnt(int value);
         void setVscnt(int value);
-        void setLgkmcnt(int value);
+        void setDScnt(int value);
+        void setKMcnt(int value);
         void setExpcnt(int value);
 
-        void combineVmcnt(int value);
+        void combineLoadcnt(int value);
+        void combineStorecnt(int value);
         void combineVscnt(int value);
-        void combineLgkmcnt(int value);
+        void combineDScnt(int value);
+        void combineKMcnt(int value);
         void combineExpcnt(int value);
 
         std::vector<std::string> const& comments() const;
@@ -87,7 +101,7 @@ namespace rocRoller
         void addComment(std::string const& comment);
         void addComment(std::string&& comment);
 
-        WaitCount getAsSaturatedWaitCount(GPUArchitecture const& architecture) const;
+        WaitCount getAsSaturatedWaitCount(GPUArchitecture const& arch) const;
 
     private:
         /**
@@ -96,15 +110,17 @@ namespace rocRoller
          * On machines without separate vscnt, the vscnt field should not be used.
          *
          */
-        int m_vmcnt   = -1;
-        int m_vscnt   = -1;
-        int m_lgkmcnt = -1;
-        int m_expcnt  = -1;
+        int m_loadcnt  = -1;
+        int m_storecnt = -1;
+        int m_vscnt    = -1;
+        int m_dscnt    = -1;
+        int m_kmcnt    = -1;
+        int m_expcnt   = -1;
 
         std::vector<std::string> m_comments;
+
+        GPUArchitectureTarget m_target;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);
 }
-
-#include <rocRoller/CodeGen/WaitCount_Impl.hpp>

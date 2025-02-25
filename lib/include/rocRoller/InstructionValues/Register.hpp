@@ -35,6 +35,8 @@ namespace rocRoller
             /// Won't be using allocator
             /// (e.g. taking allocation from elsewhere or assigning particular register numbers)
             MANUAL = -1,
+
+            Count = 255,
         };
         struct AllocationOptions
         {
@@ -124,6 +126,8 @@ namespace rocRoller
             static ValuePtr Literal(CommandArgumentValue const& value);
 
             static ValuePtr Label(const std::string& label);
+
+            static ValuePtr NullLiteral();
 
             /**
              * Placeholder value to be filled in later.

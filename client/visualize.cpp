@@ -436,16 +436,13 @@ namespace rocRoller
                     return false;
                 }
 
-                auto const& node
-                    = std::get<KernelGraph::CoordinateGraph::Dimension>(coords->getElement(idx));
-                if(!std::holds_alternative<KernelGraph::CoordinateGraph::ElementNumber>(node))
+                auto const& node = coords->get<KernelGraph::CoordinateGraph::ElementNumber>(idx);
+                if(!node.has_value())
                 {
                     return false;
                 }
 
-                auto const& tt = std::get<KernelGraph::CoordinateGraph::ElementNumber>(node);
-
-                return std::visit(to_size_t, Expression::evaluate(tt.size)) == size;
+                return std::visit(to_size_t, Expression::evaluate(node->size)) == size;
             };
         }
 

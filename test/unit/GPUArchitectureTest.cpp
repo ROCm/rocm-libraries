@@ -145,23 +145,6 @@ TEST_F(GPUArchitectureTest, WaveFrontSize)
 
 TEST_F(GPUArchitectureTest, Validate90aInstructions)
 {
-    //Check that some flat instructions belong to both LGKMDSQueue and VMQueue.
-    std::vector<std::string> test_insts
-        = {"flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx3", "flat_store_dwordx4"};
-    for(std::string& inst : test_insts)
-    {
-        auto queues = GPUArchitectureLibrary::getInstance()
-                          ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, inst)
-                          .getWaitQueues();
-        EXPECT_NE(std::find(queues.begin(), queues.end(), GPUWaitQueueType::VMQueue), queues.end());
-        EXPECT_NE(std::find(queues.begin(), queues.end(), GPUWaitQueueType::LGKMDSQueue),
-                  queues.end());
-        EXPECT_EQ(GPUArchitectureLibrary::getInstance()
-                      ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, inst)
-                      .getWaitCount(),
-                  0);
-    }
-
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()
                   ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "s_sendmsg")
                   .getWaitCount(),
@@ -169,7 +152,7 @@ TEST_F(GPUArchitectureTest, Validate90aInstructions)
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()
                   ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "s_sendmsg")
                   .getWaitQueues()[0],
-              GPUWaitQueueType::LGKMSendMsgQueue);
+              GPUWaitQueueType::SendMsgQueue);
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()
                   ->GetInstructionInfo({GPUArchitectureGFX::GFX90A}, "s_sendmsg")
                   .getLatency(),

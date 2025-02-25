@@ -150,6 +150,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/AddComputeIndex.cpp
     source/KernelGraph/Transformations/AddConvert.cpp
     source/KernelGraph/Transformations/AddDeallocate.cpp
+    source/KernelGraph/Transformations/AddDirect2LDS.cpp
     source/KernelGraph/Transformations/AddF6LDSPadding.cpp
     source/KernelGraph/Transformations/AddLDS.cpp
     source/KernelGraph/Transformations/AddPRNG.cpp
@@ -287,7 +288,7 @@ endif()
 
 target_link_libraries(
     rocroller
-    PRIVATE ${llvm_libs} lldELF
+    PRIVATE ${llvm_libs} ${llvm_yaml_libs} lldELF
     PUBLIC msgpackc-cxx
 )
 target_include_directories(rocroller SYSTEM PUBLIC ${LLD_INCLUDE_DIRS})

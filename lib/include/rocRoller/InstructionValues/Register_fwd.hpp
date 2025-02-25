@@ -17,6 +17,7 @@ namespace rocRoller
             Accumulator,
             LocalData,
             Label,
+            NullLiteral,
             SCC,
             M0,
             VCC,

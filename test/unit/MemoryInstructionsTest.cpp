@@ -283,7 +283,6 @@ namespace MemoryInstructionsTest
     TEST_P(MemoryInstructionsTest, GPU_GlobalTestOffset)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasGlobalOffset);
-        REQUIRE_NOT_ARCH_CAP(GPUCapability::HasExplicitNC);
 
         auto k = m_context->kernel();
 
@@ -330,9 +329,9 @@ namespace MemoryInstructionsTest
             co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
 
             co_yield m_context->mem()->load(
-                MemoryInstructions::Global, v_a->subset({0}), v_ptr, v_offset, 4);
+                MemoryInstructions::MemoryKind::Global, v_a->subset({0}), v_ptr, v_offset, 4);
             co_yield m_context->mem()->store(
-                MemoryInstructions::Global, v_result, v_a, v_offset, 4);
+                MemoryInstructions::MemoryKind::Global, v_result, v_a, v_offset, 4);
         };
 
         m_context->schedule(kb());
@@ -390,14 +389,6 @@ namespace MemoryInstructionsTest
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
 
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                auto gpu = m_context->targetArchitecture().target();
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
-
                 auto v_result
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
@@ -429,7 +420,7 @@ namespace MemoryInstructionsTest
 
                 auto bPnS = bufDesc.basePointerAndStride();
                 co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::Global,
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                                  v_result,
                                                  v_a->subset({0, 1}),
                                                  Register::Value::Literal(16),
@@ -437,7 +428,7 @@ namespace MemoryInstructionsTest
 
                 auto size = bufDesc.size();
                 co_yield m_context->copier()->copy(v_a->subset({2}), size, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::Global,
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                                  v_result,
                                                  v_a->subset({2}),
                                                  Register::Value::Literal(24),
@@ -445,7 +436,7 @@ namespace MemoryInstructionsTest
 
                 auto dOpt = bufDesc.descriptorOptions();
                 co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::Global,
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                                  v_result,
                                                  v_a->subset({3}),
                                                  Register::Value::Literal(28),
@@ -634,14 +625,6 @@ namespace MemoryInstructionsTest
             Register::ValuePtr s_result;
             co_yield m_context->argLoader()->getValue("result", s_result);
 
-            // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-            auto gpu = m_context->targetArchitecture().target();
-            if(gpu.isRDNA4GPU())
-            {
-                co_yield_(Instruction(
-                    "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-            }
-
             auto v_result
                 = Register::Value::Placeholder(m_context,
                                                Register::Type::Vector,
@@ -672,7 +655,7 @@ namespace MemoryInstructionsTest
 
             auto bPnS = bufDesc.basePointerAndStride();
             co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_result,
                                              v_a->subset({0, 1}),
                                              Register::Value::Literal(16),
@@ -680,7 +663,7 @@ namespace MemoryInstructionsTest
 
             auto size = bufDesc.size();
             co_yield m_context->copier()->copy(v_a->subset({2}), size, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_result,
                                              v_a->subset({2}),
                                              Register::Value::Literal(24),
@@ -688,7 +671,7 @@ namespace MemoryInstructionsTest
 
             auto dOpt = bufDesc.descriptorOptions();
             co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::Global,
+            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
                                              v_result,
                                              v_a->subset({3}),
                                              Register::Value::Literal(28),
@@ -842,14 +825,17 @@ namespace MemoryInstructionsTest
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1}), v_ptr, 8, 8);
                 co_yield m_context->mem()->storeLocal(lds2_offset, v_a->subset({0, 1}), 0, 8);
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1, 2}), v_ptr, 16, 12);
-                co_yield m_context->mem()->store(MemoryInstructions::Local,
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
                                                  lds2_offset,
                                                  v_a->subset({0, 1, 2}),
                                                  Register::Value::Literal(8),
                                                  12);
                 co_yield m_context->mem()->loadGlobal(v_a->subset({0, 1, 2, 3}), v_ptr, 28, 16);
-                co_yield m_context->mem()->store(
-                    MemoryInstructions::Local, lds2_offset, v_a->subset({0, 1, 2, 3}), twenty, 16);
+                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
+                                                 lds2_offset,
+                                                 v_a->subset({0, 1, 2, 3}),
+                                                 twenty,
+                                                 16);
 
                 // Read 8 bytes from LDS1 and store to global data
                 co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 0, 1);
@@ -866,14 +852,17 @@ namespace MemoryInstructionsTest
                 co_yield m_context->mem()->loadLocal(
                     v_a->subset({0, 1}), lds2, 0, 8); // Use LDS2 value instead of offset register
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1}), 8, 8);
-                co_yield m_context->mem()->load(MemoryInstructions::Local,
+                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local,
                                                 v_a->subset({0, 1, 2}),
                                                 lds2_offset,
                                                 Register::Value::Literal(8),
                                                 12);
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1, 2}), 16, 12);
-                co_yield m_context->mem()->load(
-                    MemoryInstructions::Local, v_a->subset({0, 1, 2, 3}), lds2_offset, twenty, 16);
+                co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local,
+                                                v_a->subset({0, 1, 2, 3}),
+                                                lds2_offset,
+                                                twenty,
+                                                16);
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({0, 1, 2, 3}), 28, 16);
 
                 // Load 44 bytes into LDS3
@@ -959,13 +948,7 @@ namespace MemoryInstructionsTest
             auto kb = [&]() -> Generator<Instruction> {
                 Register::ValuePtr s_result;
                 co_yield m_context->argLoader()->getValue("result", s_result);
-                // TODO: Remove this once we can emit s_waitcnt_X for each counter X
-                auto gpu = m_context->targetArchitecture().target();
-                if(gpu.isRDNA4GPU())
-                {
-                    co_yield_(Instruction(
-                        "s_wait_idle", {}, {}, {}, "// WaitCnt for KMCnt & LoadCnt loading args"));
-                }
+
                 auto workitemIndex = k->workitemIndex();
 
                 auto lds3 = Register::Value::AllocateLDS(m_context, DataType::Int32, workItemCount);
@@ -1495,8 +1478,6 @@ namespace MemoryInstructionsTest
             co_yield bufDesc->setSize(Register::Value::Literal(N));
             co_yield Instruction::Comment("Set buffer option");
             co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
-
-            auto sgprSrd = bufDesc->allRegisters();
 
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
             bufInstOpts.lds  = true;

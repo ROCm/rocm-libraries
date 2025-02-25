@@ -378,7 +378,7 @@ namespace rocRollerTest
             for(int i = 0; i < N; i++)
             {
                 // Load and pack from flat into registers
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::Global,
+                co_yield m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Global,
                                                        v_a,
                                                        a_ptr,
                                                        Register::Value::Literal(i * 2),
@@ -392,7 +392,7 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::Local,
+                co_yield m_context->mem()->packAndStore(MemoryInstructions::MemoryKind::Local,
                                                         lds_offset,
                                                         v_lo,
                                                         v_hi,
@@ -405,7 +405,7 @@ namespace rocRollerTest
             for(int i = 0; i < N / 2; i++)
             {
                 // Load and pack from LDS
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::Local,
+                co_yield m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Local,
                                                        v_a,
                                                        lds_offset,
                                                        Register::Value::Literal(i * 8),
@@ -417,7 +417,7 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
 
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::Global,
+                co_yield m_context->mem()->packAndStore(MemoryInstructions::MemoryKind::Global,
                                                         v_result,
                                                         v_lo,
                                                         v_hi,
@@ -428,7 +428,7 @@ namespace rocRollerTest
             for(int i = 0; i < N / 2; i++)
             {
                 // Load and pack from LDS
-                co_yield m_context->mem()->loadAndPack(MemoryInstructions::Local,
+                co_yield m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Local,
                                                        v_a,
                                                        lds_offset,
                                                        Register::Value::Literal(i * 8 + 2),
@@ -440,7 +440,7 @@ namespace rocRollerTest
                 co_yield generateOp<Expression::LogicalShiftR>(
                     v_hi, v_a, Register::Value::Literal(16));
 
-                co_yield m_context->mem()->packAndStore(MemoryInstructions::Global,
+                co_yield m_context->mem()->packAndStore(MemoryInstructions::MemoryKind::Global,
                                                         v_result,
                                                         v_lo,
                                                         v_hi,

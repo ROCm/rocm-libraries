@@ -78,14 +78,6 @@ namespace rocRoller
          *
          * @param args The arguments to the Kernel
          * @param invocation Other information needed to launch the kernel.
-         */
-        void executeKernel(const KernelArguments& args, const KernelInvocation& invocation);
-
-        /**
-         * @brief Execute a kernel on a GPU.
-         *
-         * @param args The arguments to the Kernel
-         * @param invocation Other information needed to launch the kernel.
          * @param timer HIPTimer that will record how long the kernel took to execute
          * @param iteration Iteration number within the timer
          */
@@ -93,6 +85,17 @@ namespace rocRoller
                            const KernelInvocation&   invocation,
                            std::shared_ptr<HIPTimer> timer,
                            int                       iteration);
+
+        /**
+         * @brief Execute a kernel on a GPU with stream specified
+         *
+         * @param args The arguments to the Kernel
+         * @param invocation Other information needed to launch the kernel.
+         * @param stream The stream the kernel is executed on
+         */
+        void executeKernel(const KernelArguments&  args,
+                           const KernelInvocation& invocation,
+                           hipStream_t             stream = 0);
 
         /**
          * @brief Returns the hipFunction for the kernel
@@ -105,6 +108,21 @@ namespace rocRoller
         std::string              m_kernelName;
         bool                     m_kernelLoaded;
         std::shared_ptr<HIPData> m_hipData;
+
+        /**
+         * @brief Execute a kernel on a GPU with optional timer and stream
+         *
+         * @param args The arguments to the Kernel
+         * @param invocation Other information needed to launch the kernel.
+         * @param timer HIPTimer that will record how long the kernel took to execute
+         * @param iteration Iteration number within the timer
+         * @param stream The stream the kernel is executed on
+         */
+        void executeKernel(const KernelArguments&    args,
+                           const KernelInvocation&   invocation,
+                           std::shared_ptr<HIPTimer> timer,
+                           int                       iteration,
+                           hipStream_t               stream);
     };
 }
 

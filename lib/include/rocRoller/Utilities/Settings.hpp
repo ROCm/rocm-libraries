@@ -71,7 +71,8 @@ namespace rocRoller
         int                     getBitIndex() const;
     };
 
-    std::string toString(LogLevel level);
+    std::string   toString(LogLevel level);
+    std::ostream& operator<<(std::ostream&, LogLevel const&);
 
     /**
      * @brief Settings class is derived from lazy singleton class and handles options

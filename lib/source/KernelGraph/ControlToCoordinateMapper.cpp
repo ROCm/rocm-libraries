@@ -185,6 +185,11 @@ namespace rocRoller::KernelGraph
             }
         }
 
+        std::ostream& operator<<(std::ostream& stream, ComputeIndexArgument const& cia)
+        {
+            return stream << toString(cia);
+        }
+
         struct CSToStringVisitor
         {
             std::string operator()(std::monostate const&) const

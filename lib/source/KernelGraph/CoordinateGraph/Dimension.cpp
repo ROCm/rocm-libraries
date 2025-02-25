@@ -140,6 +140,15 @@ namespace rocRoller
         {
         }
 
+        LDS::LDS() = default;
+
+        LDS::LDS(bool const isDirect2LDS, bool const holdsTransposedTile)
+            : BaseDimension()
+            , isDirect2LDS(isDirect2LDS)
+            , holdsTransposedTile(holdsTransposedTile)
+        {
+        }
+
         Unroll::Unroll() = default;
 
         Unroll::Unroll(uint const usize)
@@ -384,11 +393,6 @@ namespace rocRoller
                 return "Adhoc";
             else
                 return "Adhoc." + m_name;
-        }
-
-        LDS::LDS(bool holdsTransposedTile)
-            : holdsTransposedTile(holdsTransposedTile)
-        {
         }
 
 #define DEFAULT_DIM_NAME(cls)     \

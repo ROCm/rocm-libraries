@@ -47,6 +47,8 @@ namespace ExpressionTest
             auto expr11 = Expression::fuseTernary((a << b) + b);
             auto expr12
                 = std::make_shared<Expression::Expression>(dataFlow) / convert<DataType::Float>(a);
+            auto expr13 = Expression::bfe(DataType::UInt8, a, 8, 8);
+            auto expr14 = Expression::multiplyAdd(b, b, b);
 
             auto expr = GENERATE_COPY(expr1,
                                       expr2,
@@ -59,7 +61,9 @@ namespace ExpressionTest
                                       expr9,
                                       expr10,
                                       expr11,
-                                      expr12);
+                                      expr12,
+                                      expr13,
+                                      expr14);
 
             CAPTURE(expr);
 

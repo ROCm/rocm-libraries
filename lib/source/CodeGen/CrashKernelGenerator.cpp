@@ -21,7 +21,7 @@ namespace rocRoller
             auto context = m_context.lock();
             co_yield writeToNullPtr();
             co_yield Instruction::Wait(
-                WaitCount::Zero("DEBUG: Wait after memory write", context->targetArchitecture()));
+                WaitCount::Zero(context->targetArchitecture(), "DEBUG: Wait after memory write"));
         }
         break;
         case AssertOpKind::STrap:

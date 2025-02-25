@@ -31,6 +31,27 @@ namespace rocRoller::KernelGraph::ControlGraph
         return stream << toString(n);
     }
 
+    inline std::string toString(CacheStatus c)
+    {
+        switch(c)
+        {
+        case CacheStatus::Invalid:
+            return "Invalid";
+        case CacheStatus::Partial:
+            return "Partial";
+        case CacheStatus::Valid:
+            return "Valid";
+        default:
+            break;
+        }
+        Throw<FatalError>("Invalid CacheStatus");
+    }
+
+    inline std::ostream& operator<<(std::ostream& stream, CacheStatus c)
+    {
+        return stream << toString(c);
+    }
+
     static_assert(CCountedEnum<NodeOrdering>);
 
     inline std::string abbrev(NodeOrdering n)

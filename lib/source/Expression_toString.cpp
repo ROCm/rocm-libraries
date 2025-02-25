@@ -16,38 +16,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-        std::string toString(EvaluationTime t)
-        {
-            switch(t)
-            {
-            case EvaluationTime::Translate:
-                return "Translate";
-            case EvaluationTime::KernelLaunch:
-                return "KernelLaunch";
-            case EvaluationTime::KernelExecute:
-                return "KernelExecute";
-            case EvaluationTime::Count:
-            default:
-                break;
-            }
-            Throw<FatalError>("Invalid EvaluationTime");
-        }
-
-        std::string toString(AlgebraicProperty t)
-        {
-            switch(t)
-            {
-            case AlgebraicProperty::Commutative:
-                return "Commutative";
-            case AlgebraicProperty::Associative:
-                return "Associative";
-            case AlgebraicProperty::Count:
-            default:
-                break;
-            }
-            Throw<FatalError>("Invalid EvaluationTime");
-        }
-
         /*
          * to string
          */
@@ -78,6 +46,18 @@ namespace rocRoller
             std::string operator()(Expr const& expr) const
             {
                 return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
+            }
+
+            std::string operator()(BitFieldExtract const& expr) const
+            {
+                return concatenate(ExpressionInfo<BitFieldExtract>::name(),
+                                   "(",
+                                   call(expr.arg),
+                                   ", width:",
+                                   expr.width,
+                                   ", offset:",
+                                   expr.offset,
+                                   ")");
             }
 
             std::string operator()(Register::ValuePtr const& expr) const

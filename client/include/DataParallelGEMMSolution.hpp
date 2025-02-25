@@ -41,10 +41,10 @@ namespace rocRoller
                 {
                     auto command = std::make_shared<Command>();
 
-                    auto typeA = getDataTypeFromString(solutionParams.typeA);
-                    auto typeB = getDataTypeFromString(solutionParams.typeB);
-                    auto typeC = getDataTypeFromString(solutionParams.typeC);
-                    auto typeD = getDataTypeFromString(solutionParams.typeD);
+                    auto typeA = fromString<DataType>(solutionParams.typeA);
+                    auto typeB = fromString<DataType>(solutionParams.typeB);
+                    auto typeC = fromString<DataType>(solutionParams.typeC);
+                    auto typeD = fromString<DataType>(solutionParams.typeD);
 
                     auto unitStrides = [](TransposeType t) -> std::vector<size_t> {
                         switch(t)
@@ -151,10 +151,10 @@ namespace rocRoller
 
                     int wave_m = 0, wave_n = 0, wave_k = 0, wave_b = 0;
 
-                    auto typeA = getDataTypeFromString(solutionParams.typeA);
-                    auto typeB = getDataTypeFromString(solutionParams.typeB);
-                    auto typeC = getDataTypeFromString(solutionParams.typeC);
-                    auto typeD = getDataTypeFromString(solutionParams.typeD);
+                    auto typeA = fromString<DataType>(solutionParams.typeA);
+                    auto typeB = fromString<DataType>(solutionParams.typeB);
+                    auto typeC = fromString<DataType>(solutionParams.typeC);
+                    auto typeD = fromString<DataType>(solutionParams.typeD);
 
                     auto isF8F6F4 = [](auto dtype) {
                         return (dtype == DataType::FP8 || dtype == DataType::BF8
@@ -247,16 +247,27 @@ namespace rocRoller
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
+                    auto memoryTypeA = MemoryType::WAVE;
+                    auto memoryTypeB = MemoryType::WAVE;
+                    if(solutionParams.direct2LDSA)
+                        memoryTypeA = MemoryType::WAVE_Direct2LDS;
+                    else if(solutionParams.loadLDSA)
+                        memoryTypeA = MemoryType::LDS;
+                    if(solutionParams.direct2LDSA)
+                        memoryTypeB = MemoryType::WAVE_Direct2LDS;
+                    else if(solutionParams.loadLDSB)
+                        memoryTypeB = MemoryType::LDS;
+
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
                         LayoutType::MATRIX_A,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+                        memoryTypeA);
                     auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macK, solutionParams.macN},
                         LayoutType::MATRIX_B,
                         {wave_m, wave_n, wave_k, wave_b},
-                        solutionParams.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+                        memoryTypeB);
                     auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macN},
                         LayoutType::MATRIX_ACCUMULATOR,
@@ -349,17 +360,17 @@ namespace rocRoller
                     size_t N = problemParams.n;
                     size_t K = problemParams.k;
 
-                    TensorDescriptor descA(getDataTypeFromString(problemParams.typeA),
+                    TensorDescriptor descA(fromString<DataType>(problemParams.typeA),
                                            {M, K},
                                            problemParams.transA == TransposeType::T ? "T" : "N");
-                    TensorDescriptor descB(getDataTypeFromString(problemParams.typeB),
+                    TensorDescriptor descB(fromString<DataType>(problemParams.typeB),
                                            {K, N},
                                            problemParams.transB == TransposeType::T ? "T" : "N");
 
                     setCommandTensorArg(commandArgs, m_tagTensorA, descA, (float*)nullptr);
                     setCommandTensorArg(commandArgs, m_tagTensorB, descB, (float*)nullptr);
 
-                    TensorDescriptor descC(getDataTypeFromString(problemParams.typeC), {M, N}, "N");
+                    TensorDescriptor descC(fromString<DataType>(problemParams.typeC), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorC, descC, (float*)nullptr);
 
                     commandArgs.setArgument(
@@ -367,7 +378,7 @@ namespace rocRoller
                     commandArgs.setArgument(
                         m_tagScalarBeta, ArgumentType::Value, problemParams.beta);
 
-                    TensorDescriptor descD(getDataTypeFromString(problemParams.typeD), {M, N}, "N");
+                    TensorDescriptor descD(fromString<DataType>(problemParams.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
 
                     return commandArgs;

@@ -99,6 +99,9 @@ class GEMMSolution:
     storeLDS_D: bool = True
     betaInFma: bool = True
 
+    direct2LDS_A: bool = False
+    direct2LDS_B: bool = False
+
     scheduler: str = "Priority"
 
     prefetch: bool = True
@@ -246,6 +249,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
+            "Direct2LDS": TF(self.direct2LDS_A) + TF(self.direct2LDS_B),
             "PF": TF(self.prefetch)
             + "/"
             + str(self.prefetchInFlight)

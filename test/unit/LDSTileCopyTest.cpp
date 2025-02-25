@@ -22,46 +22,54 @@ namespace LDSCopyTest
     {
     };
 
-    void moveConnections(rocRoller::KernelGraph::KernelGraph& k, int opTag1, int opTag2)
-    {
-        auto maybeGlobalOp   = k.control.get<LoadTiled>(opTag1);
-        auto maybeStoreLDSOp = k.control.get<StoreLDSTile>(opTag1);
-        for(auto& c : k.mapper.getConnections(opTag1))
-        {
-
-            if(maybeGlobalOp)
-            {
-                k.mapper.connect(opTag2, c.coordinate, c.connection);
-            }
-            else if(maybeStoreLDSOp)
-            {
-                auto maybeLDSTile = k.coordinates.get<LDS>(c.coordinate);
-                auto maybeOffset  = k.coordinates.get<Offset>(c.coordinate);
-
-                if(maybeLDSTile)
-                {
-                    k.mapper.connect(opTag2, c.coordinate, c.connection);
-                }
-                if(maybeOffset)
-                {
-                    if(std::holds_alternative<Connections::TypeAndSubDimension>(c.connection))
-                    {
-                        auto offsetConnection
-                            = std::get<Connections::TypeAndSubDimension>(c.connection);
-                        if(offsetConnection.subdimension == 0)
-                        {
-                            auto newConnection
-                                = Connections::TypeAndSubDimension{offsetConnection.id, 1};
-                            k.mapper.connect(opTag2, c.coordinate, newConnection);
-                        }
-                    }
-                }
-            }
-            k.mapper.disconnect(opTag1, c.coordinate, c.connection);
-        }
-    }
-
     // TODO: make it more general and works for GEMM problem as a graph transform
+    /*
+     * This function replaces a pair of {LoadTiled, StoreLDSTile} with a {LoadTileDirect2LDS}
+     * An example to illustrate:
+     *
+     * Original control graph:
+     *
+     * Kernel
+     *   |
+     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> LoadTiled
+     *                 |
+     *                 |[seq]
+     *                 |
+     *                 v
+     *              Barrier --[seq]--> Scope --[seq]--> ComputeIndex --[seq]--> ComputeIndex --[seq] -->StoreLDSTiled
+     *
+     *
+     * New control graph:
+     *
+     * Kernel
+     *   |
+     *   --[body]--> Scope --[body]--> ComputeIndex --[seq]--> ComputeIndex --[seq]--> NOP
+     *                                                                                  |
+     *                                                                                  |[seq]
+     *                                                                                  |
+     *                                                                                  v
+     *                                                                             ComputeIndex
+     *                                                                                  |
+     *                                                                                  |[seq]
+     *                                                                                  |
+     *                                                                                  v
+     *                                                                             ComputeIndex
+     *                                                                                  |
+     *                                                                                  |[seq]
+     *                                                                                  |
+     *                                                                                  v
+     *                                                                                 NOP
+     *                                                                                  |
+     *                                                                                  |[seq]
+     *                                                                                  |
+     *                                                                                  v
+     *                                                                                Barrier
+     *                                                                                  |
+     *                                                                                  |[seq]
+     *                                                                                  |
+     *                                                                                  v
+     *                                                                          LoadTileDirect2LDS
+    */
     void addDirect2LDS(rocRoller::KernelGraph::KernelGraph& kgraph)
     {
         auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
@@ -98,8 +106,8 @@ namespace LDSCopyTest
                             computeIndexTag = parent;
                         }
 
-                        auto forLoop = kgraph.control.get<Barrier>(parent);
-                        if(forLoop && containing)
+                        auto barrier = kgraph.control.get<Barrier>(parent);
+                        if(barrier && containing)
                         {
                             break;
                         }
@@ -120,12 +128,12 @@ namespace LDSCopyTest
                     reconnect<Graph::Direction::Upstream>(kgraph, -1, computeIndexTag);
                     kgraph.control.addElement(Sequence(), {loadGlobal}, {computeIndexTag});
                     kgraph.control.addElement(Sequence(), {storeLDS}, {barrier});
+
                     replaceWith(kgraph, loadGlobal, kgraph.control.addElement(NOP()), false);
                     replaceWith(kgraph, storeLDS, kgraph.control.addElement(NOP()), false);
                     replaceWith(kgraph, lastTag, kgraph.control.addElement(NOP()), false);
-                    purgeNodes(kgraph, {loadGlobal});
-                    purgeNodes(kgraph, {storeLDS});
-                    purgeNodes(kgraph, {lastTag});
+
+                    purgeNodes(kgraph, {loadGlobal, storeLDS, lastTag});
                 }
             }
         }
@@ -285,6 +293,9 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
+        // FIXME: this is a workaround as currrently the wait count observer
+        //        only emits lgckmcnt(0), while loadToLDS additionally
+        //        requires vmcnt(0).
         setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
 
         m_context->schedule(k->preamble());
@@ -296,14 +307,13 @@ namespace LDSCopyTest
 
         if(!isLocalDevice())
         {
-
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
         else
         {
-            std::vector<uint32_t> a(MN * K);
-            std::vector<uint32_t> result(MN * K, 0);
+            std::vector<uint32_t> a(MN * K, 1);
+            std::vector<uint32_t> result(MN * K);
             for(int i = 0; i < MN; i++)
                 for(int j = 0; j < K; j++)
                     a[i * K + j] = i * K + j;

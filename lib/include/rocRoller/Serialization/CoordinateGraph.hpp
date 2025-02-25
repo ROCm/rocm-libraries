@@ -45,6 +45,7 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "size", lds.size);
                 iot::mapRequired(io, "stride", lds.stride);
+                iot::mapRequired(io, "isDirect2LDS", lds.isDirect2LDS);
                 iot::mapRequired(io, "holdsTransposedTile", lds.holdsTransposedTile);
             }
 

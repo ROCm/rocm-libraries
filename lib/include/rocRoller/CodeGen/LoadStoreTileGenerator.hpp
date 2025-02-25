@@ -114,6 +114,7 @@ namespace rocRoller
                 uint64_t                          n;
                 uint32_t                          elementBits;
                 uint32_t                          packedAmount;
+                uint32_t                          ldsWriteStride;
                 Register::ValuePtr                data;
                 Register::ValuePtr                rowOffsetReg;
                 Register::ValuePtr                rowStrideReg;

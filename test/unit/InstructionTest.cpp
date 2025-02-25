@@ -197,8 +197,9 @@ TEST_F(InstructionTest, Label)
 
 TEST_F(InstructionTest, Wait)
 {
-    auto            inst  = Instruction::Wait(WaitCount::EXPCnt(2));
-    const WaitCount wait2 = WaitCount::EXPCnt(3);
+    auto            arch  = m_context->targetArchitecture();
+    auto            inst  = Instruction::Wait(WaitCount::EXPCnt(arch, 2));
+    const WaitCount wait2 = WaitCount::EXPCnt(arch, 3);
     auto            inst2 = Instruction::Wait(wait2);
     m_context->schedule(inst);
     m_context->schedule(inst2);
@@ -230,7 +231,8 @@ TEST_F(InstructionTest, WaitOnRegularInstruction)
 
     auto inst = Instruction("v_add_f32", {dst}, {src, Register::Value::Literal(5)}, {}, "Addition");
 
-    inst.addWaitCount(WaitCount::LGKMCnt(1));
+    auto arch = m_context->targetArchitecture();
+    inst.addWaitCount(WaitCount::KMCnt(arch, 1));
     m_context->schedule(inst);
 
     EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt lgkmcnt(1)\n"));
