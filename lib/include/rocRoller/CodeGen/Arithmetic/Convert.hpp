@@ -9,7 +9,6 @@ namespace rocRoller
         GetGenerator<Expression::Convert>(Register::ValuePtr dst,
                                           Register::ValuePtr arg,
                                           Expression::Convert const&);
-
     /**
      * @brief Generates instructions to convert register value to a new datatype.
      *
@@ -70,6 +69,12 @@ namespace rocRoller
         Generator<Instruction> generateFP8(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateBF8(Register::ValuePtr dest, Register::ValuePtr arg);
+
+        Generator<Instruction> generateFP6x16(Register::ValuePtr dest, Register::ValuePtr arg);
+
+        Generator<Instruction> generateBF6x16(Register::ValuePtr dest, Register::ValuePtr arg);
+
+        Generator<Instruction> generateFP4x8(Register::ValuePtr dest, Register::ValuePtr arg);
 
         Generator<Instruction> generateInt32(Register::ValuePtr dest, Register::ValuePtr arg);
 

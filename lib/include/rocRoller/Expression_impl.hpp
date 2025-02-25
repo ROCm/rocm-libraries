@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2024 Advanced Micro Devices, Inc.
+ * Copyright 2021-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -314,6 +314,7 @@ namespace rocRoller
         EXPRESSION_INFO(Add);
         EXPRESSION_INFO(Subtract);
         EXPRESSION_INFO(MatrixMultiply);
+        EXPRESSION_INFO(ScaledMatrixMultiply);
         EXPRESSION_INFO(Multiply);
         EXPRESSION_INFO(MultiplyAdd);
         EXPRESSION_INFO(MultiplyHigh);
@@ -445,6 +446,16 @@ namespace rocRoller
                 return {EvaluationTime::KernelExecute};
             }
 
+            EvaluationTimes operator()(ScaledMatrixMultiply const& expr) const
+            {
+                auto matA   = call(expr.matA);
+                auto matB   = call(expr.matB);
+                auto matC   = call(expr.matC);
+                auto scaleA = call(expr.scaleA);
+                auto scaleB = call(expr.scaleB);
+
+                return matA & matB & matC & scaleA & scaleB & ScaledMatrixMultiply::EvalTimes;
+            }
             template <CTernary Expr>
             EvaluationTimes operator()(Expr const& expr) const
             {

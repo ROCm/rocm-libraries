@@ -232,48 +232,6 @@ namespace rocRollerTest::Graphs
     }
 
     /*
-     * MatrixMultiply
-     */
-
-    template <typename T>
-    MatrixMultiply<T>::MatrixMultiply()
-    {
-        createCommand();
-    }
-
-    template <typename T>
-    void MatrixMultiply<T>::createCommand()
-    {
-        m_command = std::make_shared<rocRoller::Command>();
-
-        auto dataType = TypeInfo<T>::Var.dataType;
-
-        auto tagTensorA = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // A
-        auto tagLoadA   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
-
-        auto tagTensorB = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // B
-        auto tagLoadB   = m_command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorB));
-
-        auto tagStoreD = m_command->addOperation(
-            rocRoller::Operations::T_Mul(tagLoadA, tagLoadB)); // D = A * B
-
-        auto tagTensorD = m_command->addOperation(rocRoller::Operations::Tensor(2, dataType)); // D
-        m_command->addOperation(rocRoller::Operations::T_Store_Tiled(tagStoreD, tagTensorD));
-    }
-
-    template <typename T>
-    CommandPtr MatrixMultiply<T>::getCommand()
-    {
-        return m_command;
-    }
-
-    template <typename T>
-    KernelGraph MatrixMultiply<T>::getKernelGraph()
-    {
-        return rocRoller::KernelGraph::translate(m_command);
-    }
-
-    /*
      * GEMM
      */
 

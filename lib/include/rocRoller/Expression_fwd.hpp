@@ -20,6 +20,7 @@ namespace rocRoller
     {
         struct Add;
         struct MatrixMultiply;
+        struct ScaledMatrixMultiply;
         struct Multiply;
         struct MultiplyAdd;
         struct MultiplyHigh;
@@ -110,6 +111,9 @@ namespace rocRoller
 
             // --- TernaryMixed Operations ---
             MultiplyAdd,
+
+            // ---Quinary Operation(s) ---
+            ScaledMatrixMultiply,
 
             // --- Convert Operations ---
             Convert,

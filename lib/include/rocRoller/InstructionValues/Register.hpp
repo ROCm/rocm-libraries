@@ -139,7 +139,8 @@ namespace rocRoller
             static ValuePtr AllocateLDS(ContextPtr   ctx,
                                         VariableType varType,
                                         int          count,
-                                        unsigned int alignment = 4);
+                                        unsigned int alignment    = 4,
+                                        uint         paddingBytes = 0);
 
             constexpr AllocationState allocationState() const;
 
