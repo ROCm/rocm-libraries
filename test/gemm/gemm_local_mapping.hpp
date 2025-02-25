@@ -458,6 +458,20 @@ namespace rocwmma
                     ApplyDataLayout_t<ApplyRegisterFile_t<typename GlobalMapping::GRFragB>,
                                       LayoutLds> const&>(grFragB);
             }
+
+            __device__ constexpr static inline auto
+                formatLRFragA(LRFragA const& lrFragA)
+            {
+                using MfmaLayout = typename GetDataLayout_t<typename GlobalMapping::MfmaFragA>::Orientation;
+                return rocwmma::template applyDataLayout<MfmaLayout, 1u>(lrFragA);
+            }
+
+            __device__ constexpr static inline auto
+                formatLRFragB(LRFragB const& lrFragB)
+            {
+                using MfmaLayout = typename GetDataLayout_t<typename GlobalMapping::MfmaFragB>::Orientation;
+                return rocwmma::template applyDataLayout<MfmaLayout, 1u>(lrFragB);
+            }
         };
 
     } // namespace LocalMapping
