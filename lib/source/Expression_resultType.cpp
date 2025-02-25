@@ -77,6 +77,21 @@ namespace rocRoller
                 return {regType, varType};
             }
 
+            ResultType operator()(ScaledMatrixMultiply const& expr)
+            {
+                auto matAVal = call(expr.matA);
+                auto matBVal = call(expr.matB);
+                auto matCVal = call(expr.matC);
+
+                auto regType = Register::PromoteType(matAVal.regType, matBVal.regType);
+                regType      = Register::PromoteType(regType, matCVal.regType);
+
+                auto varType = VariableType::Promote(matAVal.varType, matBVal.varType);
+                varType      = VariableType::Promote(varType, matCVal.varType);
+
+                return {regType, varType};
+            }
+
             template <typename T>
             requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr)
             {

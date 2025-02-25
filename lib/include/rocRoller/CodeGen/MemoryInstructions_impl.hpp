@@ -248,6 +248,8 @@ namespace rocRoller
         auto ctx = m_context.lock();
         co_yield addLargerOffset2Addr(offset, addr, "global_load_dword");
 
+        co_yield addLargerOffset2Addr(offset, addr, "flat_load_dword");
+
         if(numBytes < m_wordSize)
         {
             AssertFatal(numBytes < m_wordSize && dest->registerCount() == 1);
@@ -316,6 +318,8 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
         co_yield addLargerOffset2Addr(offset, addr, "global_store_dword");
+
+        co_yield addLargerOffset2Addr(offset, addr, "flat_store_dword");
 
         if(numBytes < m_wordSize)
         {
@@ -465,6 +469,8 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
 
+        co_yield addLargerOffset2Addr(offset, newAddr, "ds_read_b32");
+
         if(numBytes < m_wordSize)
         {
             auto offsetModifier = genOffsetModifier(offset);
@@ -520,6 +526,8 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
+
+        co_yield addLargerOffset2Addr(offset, newAddr, "ds_write_b32");
 
         if(numBytes < m_wordSize)
         {
@@ -724,7 +732,7 @@ namespace rocRoller
             auto constantOffset = (offset <= 64) ? offset : 0;
             if(offset > 64)
             {
-                auto sOffset  = (offset <= 64 + m_wordSize) ? offset : stride;
+                auto sOffset  = (offset <= 64 + stride) ? offset : stride;
                 auto readAddr = data;
                 data          = nullptr;
                 co_yield generate(data, readAddr->expression() + Expression::literal(sOffset), ctx);
@@ -748,7 +756,15 @@ namespace rocRoller
             else
             {
                 opEnd += "dword";
-                stride = m_wordSize;
+                auto width = 1;
+                if(ctx->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+                {
+                    width = chooseWidth(
+                        remain / m_wordSize, {4, 3, 1}, ctx->kernelOptions().loadGlobalWidth);
+                }
+                auto widthStr = (width == 1) ? "" : "x" + std::to_string(width);
+                opEnd += widthStr;
+                stride = m_wordSize * width;
             }
 
             co_yield_(Instruction("buffer_load_" + opEnd,

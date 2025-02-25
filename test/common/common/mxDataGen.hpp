@@ -1,17 +1,40 @@
+#include "TensorDescriptor.hpp"
+
 #include <DataGenerator.hpp>
-#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 
 using namespace DGen;
 
 namespace rocRoller
 {
-    DGen::DataGeneratorOptions
-        setOptions(const float min, const float max, int blockScaling, const DataPattern pattern);
+    void setOptions(DataGeneratorOptions& opts,
+                    const float           min,
+                    const float           max,
+                    int                   blockScaling,
+                    const DataPattern     pattern);
 
     template <typename T>
     struct rrDT2DGenDT
     {
         typedef T type;
+    };
+
+    template <>
+    struct rrDT2DGenDT<FP4>
+    {
+        typedef DGen::ocp_e2m1_mxfp4 type;
+    };
+
+    template <>
+    struct rrDT2DGenDT<FP6>
+    {
+        typedef DGen::ocp_e2m3_mxfp6 type;
+    };
+
+    template <>
+    struct rrDT2DGenDT<BF6>
+    {
+        typedef DGen::ocp_e3m2_mxfp6 type;
     };
 
     template <>
@@ -46,106 +69,160 @@ namespace rocRoller
 
     template <typename rrDT>
     DGen::DataGenerator<typename rrDT2DGenDT<rrDT>::type>
-        getDataGenerator(const int         dim1,
-                         const int         dim2,
+        getDataGenerator(TensorDescriptor& desc,
                          const float       min,
                          const float       max,
                          const uint32_t    seed,
-                         const int         blockScaling,
-                         const DataPattern pattern)
+                         const int         blockScaling = 1,
+                         const DataPattern pattern      = Bounded)
     {
-        std::vector<int> size{dim1, dim2};
-        std::vector<int> stride{dim2, 1};
-        auto             opts = setOptions(min, max, blockScaling, pattern);
-        using DGenDT          = typename rrDT2DGenDT<rrDT>::type;
+        auto sizes   = desc.sizes();
+        auto strides = desc.strides();
+
+        DataGeneratorOptions opts;
+        setOptions(opts, min, max, blockScaling, pattern);
+        using DGenDT = typename rrDT2DGenDT<rrDT>::type;
         DGen::DataGenerator<DGenDT> dgen;
         dgen.setSeed(seed);
-        return dgen.generate(size, stride, opts);
+        std::vector<int> dgen_sizes(sizes.begin(), sizes.end());
+        std::vector<int> dgen_strides(strides.begin(), strides.end());
+        return dgen.generate(dgen_sizes, dgen_strides, opts);
     }
 
     template <typename rrDT>
-    std::vector<rrDT> DGenVector(const int         dim1,
-                                 const int         dim2,
-                                 const float       min          = -1.f,
-                                 const float       max          = 1.f,
-                                 const uint32_t    seed         = 1713573849,
-                                 const int         blockScaling = 1,
-                                 const DataPattern pattern      = DataPattern::Bounded)
+    std::vector<typename UnsegmentedTypeOf<rrDT>::type>
+        getRandomVector(const DGen::DataGenerator<typename rrDT2DGenDT<rrDT>::type>& dgen,
+                        bool                                                         hasScale)
     {
-        auto dgen = getDataGenerator<rrDT>(dim1, dim2, min, max, seed, blockScaling, pattern);
-        if constexpr(std::is_same_v<rrDT, FP8> or std::is_same_v<rrDT, BF8>)
+        using UDT = typename UnsegmentedTypeOf<rrDT>::type;
+
+        std::vector<uint8_t> dataByte = dgen.getDataBytes();
+
+        if constexpr(std::is_same_v<rrDT,
+                                    FP6> || std::is_same_v<rrDT, BF6> || std::is_same_v<rrDT, FP4>)
         {
-            // The random values (FP8/BF8) returned by data generator consist
-            // of DataBytes and ScaleBytes, while rocRoller does not separate
-            // data and scale (just need a 8-bit representation). To handle this,
-            // we ask data generator to return the values in float and
-            // cast them into corresponding types.
-            auto              refFloat = dgen.getReferenceFloat();
-            std::vector<rrDT> rrData;
-            std::transform(refFloat.begin(),
-                           refFloat.end(),
-                           std::back_inserter(rrData),
-                           [](auto value) { return rrDT(value); });
+
+            return reinterpret_cast<std::vector<UDT>&>(dataByte);
+        }
+
+        if constexpr(std::is_same_v<rrDT, FP8> || std::is_same_v<rrDT, BF8>)
+        {
+            if(hasScale)
+                return reinterpret_cast<std::vector<rrDT>&>(dataByte);
+            else
+            {
+                auto              refFloat = dgen.getReferenceFloat();
+                std::vector<rrDT> rrData;
+                std::transform(refFloat.begin(),
+                               refFloat.end(),
+                               std::back_inserter(rrData),
+                               [](auto value) { return rrDT(value); });
+                return rrData;
+            }
+        }
+
+        if constexpr(std::is_same_v<
+                         rrDT,
+                         float> || std::is_same_v<rrDT, Half> || std::is_same_v<rrDT, BFloat16>)
+        {
+            std::vector<rrDT>& rrData = reinterpret_cast<std::vector<rrDT>&>(dataByte);
             return rrData;
         }
-        std::vector<uint8_t> dataByte = dgen.getDataBytes();
-        std::vector<rrDT>&   rrData   = reinterpret_cast<std::vector<rrDT>&>(dataByte);
-        return rrData;
+
+        Throw<FatalError>("Unsupported data type");
+    }
+
+    template <typename rrDT>
+    std::vector<typename UnsegmentedTypeOf<rrDT>::type> DGenVector(TensorDescriptor& desc,
+                                                                   const float       min = -1.f,
+                                                                   const float       max = 1.f,
+                                                                   const uint32_t seed = 1713573849,
+                                                                   bool           hasScale = false,
+                                                                   const int      blockScaling = 1,
+                                                                   const DataPattern pattern
+                                                                   = Bounded)
+    {
+        if(hasScale)
+            AssertFatal(blockScaling == 32, "Block scaling size must be 32.");
+        auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling, pattern);
+        return getRandomVector<rrDT>(dgen, hasScale);
     }
 
     template <typename TA, typename TB, typename TC>
-    void DGenInput(std::vector<TA>& A,
-                   std::vector<TB>& B,
-                   std::vector<TC>& C,
-                   const int        M,
-                   const int        N,
-                   const int        K,
-                   const uint32_t   seed,
-                   int              dim = 2)
+    void DGenInput(const uint32_t        seed,
+                   std::vector<TA>&      hostA,
+                   TensorDescriptor&     descA,
+                   std::vector<TB>&      hostB,
+                   TensorDescriptor&     descB,
+                   std::vector<TC>&      hostC,
+                   TensorDescriptor&     descC,
+                   std::vector<uint8_t>& hostScaleA,
+                   std::vector<uint8_t>& hostScaleB,
+                   bool                  hasScaleA = false,
+                   bool                  hasScaleB = false,
+                   float                 min       = -1.f,
+                   float                 max       = 1.f
+
+    )
     {
-        if(dim == 2)
-        {
+        auto blockScalingA = (hasScaleA) ? 32 : 1;
+        auto blockScalingB = (hasScaleB) ? 32 : 1;
+        using STA          = typename SegmentedTypeOf<TA>::type;
+        using STB          = typename SegmentedTypeOf<TB>::type;
+
 #pragma omp parallel sections
+        {
+#pragma omp section
             {
-#pragma omp section
-                {
-                    A = DGenVector<TA>(M, K, -1.f, 1.f, seed + 1);
-                }
+                auto dgenA = getDataGenerator<STA>(descA, min, max, seed + 1, blockScalingA);
+                hostA      = getRandomVector<STA>(dgenA, hasScaleA);
+                if(hasScaleA)
+                    hostScaleA = dgenA.getScaleBytes();
+            }
 
 #pragma omp section
-                {
-                    B = DGenVector<TB>(K, N, -1.f, 1.f, seed + 2);
-                }
+            {
+                auto dgenB = getDataGenerator<STB>(descB, min, max, seed + 2, blockScalingB);
+                hostB      = getRandomVector<STB>(dgenB, hasScaleB);
+                if(hasScaleB)
+                    hostScaleB = dgenB.getScaleBytes();
+            }
 
 #pragma omp section
-                {
-                    C = DGenVector<TC>(M, N, -1.f, 1.f, seed + 3);
-                }
+            {
+                auto dgenC = getDataGenerator<TC>(descC, min, max, seed);
+                hostC      = getRandomVector<TC>(dgenC, false);
             }
         }
-        else if(dim == 1)
-        {
-#pragma omp parallel sections
-            {
-#pragma omp section
-                {
-                    A = DGenVector<TA>(1, M, -1.f, 1.f, seed + 1);
-                }
+    }
 
-#pragma omp section
-                {
-                    B = DGenVector<TB>(1, N, -1.f, 1.f, seed + 2);
-                }
+    template <typename TA, typename TB, typename TC>
+    void DGenInput(const uint32_t    seed,
+                   std::vector<TA>&  hostA,
+                   TensorDescriptor& descA,
+                   std::vector<TB>&  hostB,
+                   TensorDescriptor& descB,
+                   std::vector<TC>&  hostC,
+                   TensorDescriptor& descC,
+                   float             min = -1.f,
+                   float             max = 1.f
 
-#pragma omp section
-                {
-                    C = DGenVector<TC>(1, K, -1.f, 1.f, seed + 3);
-                }
-            }
-        }
-        else
-        {
-            Throw<FatalError>("Invalid number of dimensions, the data has to be 1-d or 2-d.");
-        }
+    )
+    {
+        std::vector<uint8_t> defaultHostScaleA;
+        std::vector<uint8_t> defaultHostScaleB;
+        DGenInput(seed,
+                  hostA,
+                  descA,
+                  hostB,
+                  descB,
+                  hostC,
+                  descC,
+                  defaultHostScaleA,
+                  defaultHostScaleB,
+                  false,
+                  false,
+                  min,
+                  max);
     }
 }

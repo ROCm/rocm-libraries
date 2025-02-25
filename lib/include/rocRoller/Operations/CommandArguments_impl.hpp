@@ -52,7 +52,7 @@ namespace rocRoller
     template <CCommandArgumentValue T>
     void CommandArguments::setArgument(Operations::OperationTag op, ArgumentType argType, T value)
     {
-        return setArgument(op, argType, -1, value);
+        setArgument(op, argType, -1, value);
     }
 
     inline RuntimeArguments CommandArguments::runtimeArguments() const

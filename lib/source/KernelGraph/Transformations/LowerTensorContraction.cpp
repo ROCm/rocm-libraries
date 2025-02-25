@@ -25,51 +25,42 @@ namespace rocRoller
             graph.mapper.connect<MacroTile>(load, newMacroTile);
         }
 
-        void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadATag, int loadBTag)
+        void addConnectionsMultiply(KernelGraph& graph,
+                                    int          waveMult,
+                                    int          loadTag,
+                                    NaryArgument argType)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LowerTensorContraction::addConnectionsMultiply(): Multiply({})",
                 waveMult);
 
-            auto loadA = graph.control.getElement(loadATag);
-            auto loadB = graph.control.getElement(loadBTag);
-            AssertFatal(isOperation<LoadTiled>(loadA) && isOperation<LoadTiled>(loadB),
-                        "Both operands should be LoadTiled");
+            auto load = graph.control.getElement(loadTag);
+            AssertFatal(isOperation<LoadTiled>(load), "Operand should be LoadTiled");
 
             // LoadTiled A
-            auto userATag = graph.mapper.get<User>(loadATag);
-            AssertFatal(userATag > 0, "User dimension not found");
-            graph.mapper.connect<User>(waveMult, userATag, 0);
+            auto userTag = graph.mapper.get<User>(loadTag);
+            AssertFatal(userTag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userTag, 0);
 
-            // LoadTiled B
-            auto userBTag = graph.mapper.get<User>(loadBTag);
-            AssertFatal(userBTag > 0, "User dimension not found");
-            graph.mapper.connect<User>(waveMult, userBTag, 1);
+            AssertFatal(userTag > 0, "User dimension not found");
 
-            AssertFatal(userATag > 0 && userBTag > 0, "User dimensions not found");
+            auto [waveTag, wave] = graph.getDimension<WaveTile>(loadTag);
 
-            auto [waveATag, waveA] = graph.getDimension<WaveTile>(loadATag);
-            auto [waveBTag, waveB] = graph.getDimension<WaveTile>(loadBTag);
-
-            auto macroTileA = graph.mapper.get<MacroTile>(loadATag);
-            auto macroTileB = graph.mapper.get<MacroTile>(loadBTag);
+            auto macroTile = graph.mapper.get<MacroTile>(loadTag);
 
             graph.mapper.connect(
-                waveMult, macroTileA, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-            graph.mapper.connect(
-                waveMult, macroTileB, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
-            graph.mapper.connect(
-                waveMult, waveATag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
-            graph.mapper.connect(
-                waveMult, waveBTag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
+                waveMult, macroTile, Connections::typeArgument<MacroTile>(argType));
+            graph.mapper.connect(waveMult, waveTag, Connections::typeArgument<WaveTile>(argType));
         }
 
         struct MatrixMultiplyInfo
         {
-            int kernel; //< Kernel operation
-            int loadA; //< Load operation that loads the A (LHS) operand
-            int loadB; //< Load operation that loads the B (RHS) operand
-            int storeD; //< Store operation that stores the result (D); can be -1
+            int                kernel; //< Kernel operation
+            int                loadA; //< Load operation that loads the A (LHS) operand
+            int                loadB; //< Load operation that loads the B (RHS) operand
+            std::optional<int> loadAScale; //< Load operation that loads the A (LHS) scale
+            std::optional<int> loadBScale; //< Load operation that loads the B (RHS) scale
+            int                storeD; //< Store operation that stores the result (D); can be -1
 
             std::vector<int> dependentAssigns; //< Assign operations that use the result (D)
             std::vector<int> siblingLoads; //< Load operations that flow into dependentAssigns
@@ -80,53 +71,78 @@ namespace rocRoller
         {
             MatrixMultiplyInfo info;
 
-            // Get tensor contraction operands
-            auto [aTag, aTile]
-                = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::LHS);
-            auto [bTag, bTile]
-                = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::RHS);
-
             auto parents = graph.control.parentNodes(tensorContractionTag).to<std::vector>();
-            AssertFatal(parents.size() == 2);
-            auto operandA = parents[0];
-            auto operandB = parents[1];
-            AssertFatal(aTag == graph.mapper.get<MacroTile>(operandA));
-            AssertFatal(bTag == graph.mapper.get<MacroTile>(operandB));
+            AssertFatal(parents.size() == 2 || parents.size() == 4, ShowValue(parents.size()));
+
+            // Get tensor contraction operands
+
+            std::optional<int> operandA, operandAScale;
+            std::optional<int> operandB, operandBScale;
+
+            std::map<int, int> parentTags;
+            for(auto p : parents)
+            {
+                auto mapped        = graph.mapper.get<MacroTile>(p);
+                parentTags[mapped] = p;
+            }
+
+            {
+                auto [aTag, aTile]
+                    = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::LHS);
+                operandA = parentTags.at(aTag);
+                parentTags.erase(aTag);
+            }
+
+            {
+                auto [bTag, bTile]
+                    = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::RHS);
+                operandB = parentTags.at(bTag);
+                parentTags.erase(bTag);
+            }
+
+            if(parents.size() == 4)
+            {
+                // TODO: We will need to implement versions of getDimension that return an
+                // optional<>.  Once that is done, we can support one scaled input and one
+                // non-scaled input.
+
+                auto [aScaledTag, aScaledTile]
+                    = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::LHS_SCALE);
+                operandAScale = parentTags.at(aScaledTag);
+                parentTags.erase(aScaledTag);
+
+                auto [bScaledTag, bScaledTile]
+                    = graph.getDimension<MacroTile>(tensorContractionTag, NaryArgument::RHS_SCALE);
+                operandBScale = parentTags.at(bScaledTag);
+                parentTags.erase(bScaledTag);
+            }
+
+            AssertFatal(parentTags.empty());
+
+            info.loadA      = *operandA;
+            info.loadB      = *operandB;
+            info.loadAScale = operandAScale;
+            info.loadBScale = operandBScale;
 
             // Find loads, stores, assigns etc
             auto reachableFromTC
                 = graph.control.depthFirstVisit(tensorContractionTag).to<std::unordered_set>();
 
-            std::vector<int> loadA;
-            std::vector<int> loadB;
             std::vector<int> stores;
             for(auto const index : graph.control.getNodes())
             {
                 auto elem = graph.control.getElement(index);
-                visit(rocRoller::overloaded{
-                          [&](auto op) {},
-                          [&](LoadTiled const& load) {
-                              auto reachableFromLoad
-                                  = graph.control.depthFirstVisit(index).to<std::unordered_set>();
-                              if(reachableFromLoad.contains(operandA))
-                                  loadA.push_back(index);
-                              else if(reachableFromLoad.contains(operandB))
-                                  loadB.push_back(index);
-                          },
-                          [&](StoreTiled const& store) {
-                              if(reachableFromTC.contains(index))
-                                  stores.push_back(index);
-                          },
-                          [&](Assign const& op) {
-                              if(reachableFromTC.contains(index))
-                                  info.dependentAssigns.push_back(index);
-                          }},
+                visit(rocRoller::overloaded{[&](auto op) {},
+                                            [&](StoreTiled const& store) {
+                                                if(reachableFromTC.contains(index))
+                                                    stores.push_back(index);
+                                            },
+                                            [&](Assign const& op) {
+                                                if(reachableFromTC.contains(index))
+                                                    info.dependentAssigns.push_back(index);
+                                            }},
                       std::get<Operation>(elem));
             }
-
-            AssertFatal(loadA.size() == 1 && loadB.size() == 1);
-            info.loadA = loadA[0];
-            info.loadB = loadB[0];
 
             AssertFatal(stores.size() <= 1);
             info.storeD = !stores.empty() ? stores[0] : -1;
@@ -158,7 +174,11 @@ namespace rocRoller
                           }},
                       std::get<Operation>(elem));
             }
-            AssertFatal(info.siblingLoads.size() <= 1);
+
+            if(!info.loadAScale.has_value() && info.loadBScale.has_value())
+            {
+                AssertFatal(info.siblingLoads.size() <= 1, ShowValue(info.siblingLoads.size()));
+            }
 
             return info;
         }
@@ -171,12 +191,7 @@ namespace rocRoller
             auto matK = sdimY.size;
             auto macK = literal(static_cast<uint>(tileA.sizes[1])); // M x K
 
-            auto toUInt32 = [](ExpressionPtr expr) -> ExpressionPtr {
-                return std::make_shared<Expression::Expression>(
-                    Expression::Convert<DataType::UInt32>{expr});
-            };
-
-            return toUInt32(matK / macK);
+            return Expression::convert<DataType::UInt32>(matK / macK);
         }
 
         /**
@@ -194,9 +209,23 @@ namespace rocRoller
 
             auto info = getMatrixMultiplyInfo(graph, tag);
 
+            AssertFatal(info.loadAScale.has_value() == info.loadBScale.has_value(),
+                        "A and B must both be scaled or neither.",
+                        ShowValue(info.loadAScale.has_value()),
+                        ShowValue(info.loadBScale.has_value()));
+            bool scaled    = info.loadAScale.has_value();
+            auto scaleMode = scaled ? Operations::ScaleMode::Separate : Operations::ScaleMode::None;
+
+            std::optional<int> scaleSize, scaledK;
+
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.loadA);
 
             auto [K, forK] = rangeFor(graph, accumulationCoordSize, rocRoller::KLOOP);
+
+            if(scaled)
+            {
+                scaledK = K;
+            }
 
             // A row block is x-workgroup, column block is for loop index
             // B row block is for loop index, column block is y-workgroup
@@ -205,6 +234,15 @@ namespace rocRoller
 
             graph.coordinates.addElement(PassThrough(), {macTileNumYA}, {K});
             graph.coordinates.addElement(PassThrough(), {macTileNumXB}, {K});
+
+            if(scaled)
+            {
+                auto macTileNumYAScale = graph.mapper.get<MacroTileNumber>(*info.loadAScale, 1);
+                auto macTileNumXBScale = graph.mapper.get<MacroTileNumber>(*info.loadBScale, 0);
+
+                graph.coordinates.addElement(PassThrough(), {macTileNumYAScale}, {*scaledK});
+                graph.coordinates.addElement(PassThrough(), {macTileNumXBScale}, {*scaledK});
+            }
 
             auto [waveATag, waveA] = graph.getDimension<WaveTile>(info.loadA);
             auto [waveBTag, waveB] = graph.getDimension<WaveTile>(info.loadB);
@@ -220,6 +258,21 @@ namespace rocRoller
             auto waveTileNumYA = graph.mapper.get<WaveTileNumber>(info.loadA, 1);
             auto waveTileNumXB = graph.mapper.get<WaveTileNumber>(info.loadB, 0);
 
+            std::optional<int>      waveAScaleTag, waveBScaleTag;
+            std::optional<WaveTile> waveAScale, waveBScale;
+            std::optional<int>      waveTileNumYAScale;
+            std::optional<int>      waveTileNumXBScale;
+
+            if(scaled)
+            {
+                std::tie(waveAScaleTag, waveAScale)
+                    = graph.getDimension<WaveTile>(*info.loadAScale);
+                std::tie(waveBScaleTag, waveBScale)
+                    = graph.getDimension<WaveTile>(*info.loadBScale);
+                waveTileNumYAScale = graph.mapper.get<WaveTileNumber>(*info.loadAScale, 1);
+                waveTileNumXBScale = graph.mapper.get<WaveTileNumber>(*info.loadBScale, 0);
+            }
+
             // Add an unroll dimension that connects to both A's WaveTileNumber[1] and B's
             // WaveTileNumber[0]. This is because we are unrolling the "small k" loop.
             auto tileA = graph.coordinates.getNode<MacroTile>(a);
@@ -229,50 +282,73 @@ namespace rocRoller
             graph.coordinates.addElement(PassThrough(), {waveTileNumYA}, {smallKUnroll});
             graph.coordinates.addElement(PassThrough(), {waveTileNumXB}, {smallKUnroll});
 
-            int lastWaveMult  = -1;
-            int lastSetCoordA = -1;
-            int lastSetCoordB = -1;
+            if(scaled)
+            {
+                graph.coordinates.addElement(PassThrough(), {*waveTileNumYAScale}, {smallKUnroll});
+                graph.coordinates.addElement(PassThrough(), {*waveTileNumXBScale}, {smallKUnroll});
+            }
+
+            int                lastWaveMult  = -1;
+            int                lastSetCoordA = -1;
+            int                lastSetCoordB = -1;
+            std::optional<int> lastSetCoordAScale;
+            std::optional<int> lastSetCoordBScale;
+
+            std::vector<int> nodesToOrder;
+
             for(uint k = 0; k < numWaveTiles; k++)
             {
-                auto setCoordA = graph.control.addElement(SetCoordinate(literal(k)));
-                graph.mapper.connect<Unroll>(setCoordA, smallKUnroll);
-                graph.control.addElement(Body(), {forK}, {setCoordA});
+                auto createUnrollLoad = [&, forK = forK](int load) -> std::tuple<int, int> {
+                    auto setCoord = graph.control.addElement(SetCoordinate(literal(k)));
+                    graph.mapper.connect<Unroll>(setCoord, smallKUnroll);
+                    graph.control.addElement(Body(), {forK}, {setCoord});
 
-                auto newLoadA = duplicateControlNode(graph, info.loadA);
-                if(k != 0)
-                    duplicateMacroTile(graph, newLoadA);
-                graph.control.addElement(Body(), {setCoordA}, {newLoadA});
+                    auto newLoad = duplicateControlNode(graph, load);
+                    if(k != 0)
+                        duplicateMacroTile(graph, newLoad);
+                    graph.control.addElement(Body(), {setCoord}, {newLoad});
 
-                auto setCoordB = graph.control.addElement(SetCoordinate(literal(k)));
-                graph.mapper.connect<Unroll>(setCoordB, smallKUnroll);
-                graph.control.addElement(Body(), {forK}, {setCoordB});
+                    return {setCoord, newLoad};
+                };
 
-                auto newLoadB = duplicateControlNode(graph, info.loadB);
-                if(k != 0)
-                    duplicateMacroTile(graph, newLoadB);
-                graph.control.addElement(Body(), {setCoordB}, {newLoadB});
+                auto [setCoordA, newLoadA] = createUnrollLoad(info.loadA);
+                auto [setCoordB, newLoadB] = createUnrollLoad(info.loadB);
 
-                auto waveMult = graph.control.addElement(Multiply());
+                std::optional<int> setCoordAScale, newLoadAScale;
+                std::optional<int> setCoordBScale, newLoadBScale;
+
+                if(scaled)
+                {
+                    std::tie(setCoordAScale, newLoadAScale) = createUnrollLoad(*info.loadAScale);
+                    std::tie(setCoordBScale, newLoadBScale) = createUnrollLoad(*info.loadBScale);
+                }
+
+                auto waveMult = graph.control.addElement(Multiply(scaleMode, scaleMode));
                 graph.mapper.connect(
                     waveMult, d, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
-                graph.control.addElement(Sequence(), {setCoordA}, {waveMult});
-                graph.control.addElement(Sequence(), {setCoordB}, {waveMult});
-                graph.control.addElement(Sequence(), {setCoordA}, {setCoordB});
+                addConnectionsMultiply(graph, waveMult, newLoadA, NaryArgument::LHS);
+                addConnectionsMultiply(graph, waveMult, newLoadB, NaryArgument::RHS);
 
-                addConnectionsMultiply(graph, waveMult, newLoadA, newLoadB);
-                if(lastWaveMult >= 0)
+                if(scaled)
                 {
-                    graph.control.addElement(Sequence(), {lastWaveMult}, {waveMult});
-                    graph.control.addElement(Sequence(), {lastSetCoordA}, {setCoordA});
-                    graph.control.addElement(Sequence(), {lastSetCoordA}, {setCoordB});
-                    graph.control.addElement(Sequence(), {lastSetCoordB}, {setCoordA});
-                    graph.control.addElement(Sequence(), {lastSetCoordB}, {setCoordB});
+                    addConnectionsMultiply(
+                        graph, waveMult, *newLoadAScale, NaryArgument::LHS_SCALE);
+                    addConnectionsMultiply(
+                        graph, waveMult, *newLoadBScale, NaryArgument::RHS_SCALE);
                 }
 
-                lastWaveMult  = waveMult;
-                lastSetCoordA = setCoordA;
-                lastSetCoordB = setCoordB;
+                nodesToOrder.insert(nodesToOrder.end(), {setCoordA, setCoordB});
+                if(scaled)
+                    nodesToOrder.insert(nodesToOrder.end(), {*setCoordAScale, *setCoordBScale});
+                nodesToOrder.push_back(waveMult);
+            }
+
+            auto prev = nodesToOrder.begin();
+            for(auto cur = prev + 1; prev != nodesToOrder.end() && cur != nodesToOrder.end();
+                prev++, cur++)
+            {
+                graph.control.addElement(Sequence(), {*prev}, {*cur});
             }
 
             // Add loops to iterate over wavetiles within a wavefront
@@ -386,6 +462,8 @@ namespace rocRoller
 
             // Delete original loadA and loadB.
             purgeNodes(graph, {info.loadA, info.loadB});
+            if(scaled)
+                purgeNodes(graph, {*info.loadAScale, *info.loadBScale});
         }
 
         KernelGraph LowerTensorContraction::apply(KernelGraph const& graph)

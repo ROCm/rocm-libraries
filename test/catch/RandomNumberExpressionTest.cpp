@@ -176,5 +176,11 @@ namespace ExpressionTest
             }
             REQUIRE_THAT(d_result, HasDeviceVectorEqualTo(h_result));
         }
+
+        if(context->targetArchitecture().HasCapability(GPUCapability::HasPRNG))
+        {
+            auto instructions = context->instructions()->toString();
+            CHECK(instructions.find("v_prng_b32") != std::string::npos);
+        }
     }
 }

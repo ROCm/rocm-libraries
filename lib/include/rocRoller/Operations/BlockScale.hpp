@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Operations/Operation.hpp>
 #include <rocRoller/Serialization/Base_fwd.hpp>
 
@@ -29,22 +30,19 @@ namespace rocRoller
              * @param scale Optional tag of scale tensor (if not provided, treated as inline block scale)
              * @param strides Strides of the scale
             */
-            BlockScale(OperationTag                data,
-                       int                         dimensions,
-                       std::optional<OperationTag> scale   = {},
-                       std::vector<size_t> const&  strides = {});
-            enum class PointerMode
-            {
-                Separate, //< Scale is separate from data
-                Inline, //< Scale is inline with data
-            };
+            explicit BlockScale(OperationTag                data,
+                                int                         dimensions,
+                                std::optional<OperationTag> scale   = {},
+                                std::vector<size_t> const&  strides = {});
 
             std::unordered_set<OperationTag> getInputs() const;
             std::string                      toString() const;
-            PointerMode                      pointerMode() const;
+            ScaleMode                        scaleMode() const;
             const std::vector<size_t>&       strides() const;
 
-            bool operator==(BlockScale const&) const;
+            bool                        operator==(BlockScale const&) const;
+            OperationTag                data() const;
+            std::optional<OperationTag> scale() const;
 
         private:
             OperationTag                m_data;

@@ -39,6 +39,7 @@ namespace rocRoller
             {"HasExplicitNC", Value::HasExplicitNC},
 
             {"HasDirectToLds", Value::HasDirectToLds},
+            {"HasWiderDirectToLds", Value::HasWiderDirectToLds},
             {"HasAddLshl", Value::HasAddLshl},
             {"HasLshlOr", Value::HasLshlOr},
             {"HasSMulHi", Value::HasSMulHi},
@@ -48,11 +49,17 @@ namespace rocRoller
 
             {"HasMFMA", Value::HasMFMA},
             {"HasMFMA_fp8", Value::HasMFMA_fp8},
+            {"HasMFMA_f8f6f4", Value::HasMFMA_f8f6f4},
             {"HasMFMA_f64", Value::HasMFMA_f64},
             {"HasMFMA_bf16_32x32x4", Value::HasMFMA_bf16_32x32x4},
             {"HasMFMA_bf16_32x32x4_1k", Value::HasMFMA_bf16_32x32x4_1k},
             {"HasMFMA_bf16_16x16x8", Value::HasMFMA_bf16_16x16x8},
             {"HasMFMA_bf16_16x16x16_1k", Value::HasMFMA_bf16_16x16x16_1k},
+
+            {"HasMFMA_16x16x32_f16", Value::HasMFMA_16x16x32_f16},
+            {"HasMFMA_32x32x16_f16", Value::HasMFMA_32x32x16_f16},
+            {"HasMFMA_16x16x32_bf16", Value::HasMFMA_16x16x32_bf16},
+            {"HasMFMA_32x32x16_bf16", Value::HasMFMA_32x32x16_bf16},
 
             {"HasAccumOffset", Value::HasAccumOffset},
             {"HasGlobalOffset", Value::HasGlobalOffset},
@@ -103,5 +110,14 @@ namespace rocRoller
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
 
             {"MaxLdsSize", Value::MaxLdsSize},
+
+            {"HasNaNoo", Value::HasNaNoo},
+
+            {"HasDSReadTransposeB16", Value::HasDSReadTransposeB16},
+            {"HasDSReadTransposeB8", Value::HasDSReadTransposeB8},
+            {"HasDSReadTransposeB6", Value::HasDSReadTransposeB6},
+            {"HasDSReadTransposeB4", Value::HasDSReadTransposeB4},
+
+            {"HasPRNG", Value::HasPRNG},
     };
 }

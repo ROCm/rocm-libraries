@@ -15,7 +15,7 @@
 TEST_CASE("identifyParallelDimensionSets works for MatrixMultiply", "[kernel-graph]")
 {
     using namespace rocRoller;
-    auto example = rocRollerTest::Graphs::MatrixMultiply<int>();
+    auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Int32);
 
     auto kgraph = KernelGraph::translate(example.getCommand());
 
@@ -100,7 +100,7 @@ SCENARIO("IdentifyParallelDimensions transformation works for MatrixMultiply", "
     using namespace rocRoller;
     auto ctx = TestContext::ForDefaultTarget();
 
-    auto example = rocRollerTest::Graphs::MatrixMultiply<float>();
+    auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Float);
 
     GIVEN("The initial kernel graph for a MatrixMultiply")
     {

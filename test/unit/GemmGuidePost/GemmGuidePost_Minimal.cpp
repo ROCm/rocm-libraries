@@ -17,8 +17,7 @@ using namespace rocRoller;
 
 Generator<Instruction> rocRollerTest::SGEMM_Minimal_Program(rocRoller::ContextPtr m_context)
 {
-    auto fmm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
-        m_context, DataType::Float, DataType::Float);
+    auto fmm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(m_context);
 
     auto label_4 = m_context->labelAllocator()->label("label_0013");
     auto label_2 = m_context->labelAllocator()->label("openLoopL_12");

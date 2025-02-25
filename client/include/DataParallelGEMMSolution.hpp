@@ -126,6 +126,12 @@ namespace rocRoller
                     auto typeC = getDataTypeFromString(solutionParams.typeC);
                     auto typeD = getDataTypeFromString(solutionParams.typeD);
 
+                    auto isF8F6F4 = [](auto dtype) {
+                        return (dtype == DataType::FP8 || dtype == DataType::BF8
+                                || dtype == DataType::FP6 || dtype == DataType::BF6
+                                || dtype == DataType::FP4);
+                    };
+
                     if(typeA == DataType::Float && typeB == DataType::Float)
                     {
                         wave_m = 32;
@@ -147,6 +153,22 @@ namespace rocRoller
                         wave_m = 16;
                         wave_n = 16;
                         wave_k = 32;
+                        wave_b = 1;
+                    }
+                    else if((typeA == DataType::FP4 && typeB == DataType::FP4)
+                            || (typeA == DataType::FP6 && typeB == DataType::FP6)
+                            || (typeA == DataType::BF6 && typeB == DataType::BF6))
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
+                        wave_b = 1;
+                    }
+                    else if(typeA != typeB && isF8F6F4(typeA) && isF8F6F4(typeB))
+                    {
+                        wave_m = 16;
+                        wave_n = 16;
+                        wave_k = 128;
                         wave_b = 1;
                     }
                     else

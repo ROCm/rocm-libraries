@@ -20,6 +20,7 @@ namespace rocRoller
     {
         struct Add;
         struct MatrixMultiply;
+        struct ScaledMatrixMultiply;
         struct Multiply;
         struct MultiplyAdd;
         struct MultiplyHigh;
@@ -112,6 +113,9 @@ namespace rocRoller
             // --- TernaryMixed Operations ---
             MultiplyAdd,
 
+            // ---Quinary Operation(s) ---
+            ScaledMatrixMultiply,
+
             // --- Convert Operations ---
             Convert<DataType::Half>,
             Convert<DataType::Halfx2>,
@@ -121,6 +125,9 @@ namespace rocRoller
             Convert<DataType::BF8>,
             Convert<DataType::FP8x4>,
             Convert<DataType::BF8x4>,
+            Convert<DataType::FP6x16>,
+            Convert<DataType::BF6x16>,
+            Convert<DataType::FP4x8>,
             Convert<DataType::Float>,
             Convert<DataType::Double>,
             Convert<DataType::Int32>,
