@@ -188,7 +188,7 @@ namespace rocRoller
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).
-        */
+         */
         std::string help() const;
 
         Settings();

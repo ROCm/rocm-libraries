@@ -112,6 +112,12 @@ namespace rocRoller
             Generator<int> nodesInBody(int node) const;
 
             /**
+             * Yields (in no particular order) all nodes that contain `node` in their body.
+             * Note
+             */
+            Generator<int> nodesContaining(int node) const;
+
+            /**
              * Returns a string containing a text table describing the relationship between
              * all nodes in the graph.
              */

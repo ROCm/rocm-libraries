@@ -50,7 +50,7 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            if(!m_context->targetArchitecture().target().is9XGPU())
+            if(!m_context->targetArchitecture().target().isCDNAGPU())
             {
                 GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
             }
@@ -614,7 +614,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -759,7 +759,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -929,8 +929,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU()
-           || m_context->targetArchitecture().target().gfx == GPUArchitectureGFX::GFX900)
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }
@@ -1175,7 +1174,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
         {
             GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
         }

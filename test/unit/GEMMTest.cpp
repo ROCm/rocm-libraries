@@ -605,7 +605,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
     {
-        if(m_context->targetArchitecture().target().is908GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMBeta0StreamK test";
         }
@@ -644,7 +644,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
     {
-        if(m_context->targetArchitecture().target().is908GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -681,7 +681,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(!m_context->targetArchitecture().target().is90aGPU())
+        if(!m_context->targetArchitecture().target().isCDNA2GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -734,7 +734,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(!m_context->targetArchitecture().target().is90aGPU())
+        if(!m_context->targetArchitecture().target().isCDNA2GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1686,7 +1686,7 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
-        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 152);
+        EXPECT_EQ(countSubstring(generatedCode, "v_pack_b32_f16"), 152);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)

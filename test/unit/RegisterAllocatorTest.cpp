@@ -596,7 +596,7 @@ namespace RegisterAllocatorTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(!m_context->targetArchitecture().target().is9XGPU())
+        if(!m_context->targetArchitecture().target().isCDNAGPU())
             GTEST_SKIP() << "Skipping SGPR alignment tests for " << GetParam();
 
         std::vector<char> assembledKernel = m_context->instructions()->assemble();

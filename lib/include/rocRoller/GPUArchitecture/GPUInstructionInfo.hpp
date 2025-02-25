@@ -192,7 +192,6 @@ namespace rocRoller
         static bool isSALU(std::string const& inst);
         static bool isIntInst(std::string const& inst);
         static bool isUIntInst(std::string const& inst);
-        static bool isSDWA(std::string const& inst);
 
         static bool isVector(std::string const& inst);
         static bool isVALU(std::string const& inst);

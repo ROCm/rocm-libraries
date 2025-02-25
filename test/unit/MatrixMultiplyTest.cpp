@@ -79,7 +79,7 @@ namespace MatrixMultiplyTest
         }
 
     public:
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
 
         template <typename TA, typename TB, typename ACC>
         void matrixMultiplyMacroTile(int         wave_m,

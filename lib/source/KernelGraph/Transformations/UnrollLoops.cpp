@@ -68,7 +68,7 @@ namespace rocRoller
             {
                 auto length = Expression::evaluate(forLoopLength);
                 if(isInteger(length))
-                    return getUnsignedInt(length);
+                    return std::max(1u, getUnsignedInt(length));
             }
 
             return 1u;
@@ -267,10 +267,11 @@ namespace rocRoller
                 }
 
                 auto unrollAmount = getUnrollAmount(graph, tag, m_params);
-                if(unrollAmount == 1)
-                    return;
 
                 Log::debug("  Unrolling loop {}, amount {}", tag, unrollAmount);
+
+                if(unrollAmount == 1)
+                    return;
 
                 auto loopCarriedDependencies = findLoopCarriedDependencies(graph, tag);
 

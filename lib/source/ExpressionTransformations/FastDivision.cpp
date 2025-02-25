@@ -9,11 +9,7 @@
 #include <bit>
 
 #include "llvm/Config/llvm-config.h"
-#if LLVM_VERSION_MAJOR >= 14
 #include "llvm/Support/DivisionByConstantInfo.h"
-#else
-#include "llvm/ADT/APInt.h"
-#endif
 
 #define cast_to_unsigned(N) static_cast<typename std::make_unsigned<T>::type>(N)
 
@@ -34,7 +30,6 @@ namespace rocRoller
                                   unsigned int& numPostShifts,
                                   bool&         isAdd)
         {
-#if LLVM_VERSION_MAJOR >= 14
             llvm::UnsignedDivisionByConstantInfo magicu
                 = llvm::UnsignedDivisionByConstantInfo::get(llvm::APInt(32, divisor));
 
@@ -42,13 +37,6 @@ namespace rocRoller
             numPreShifts  = magicu.PreShift;
             numPostShifts = magicu.PostShift;
             isAdd         = magicu.IsAdd;
-#else
-            auto magicu = llvm::APInt(32, divisor).magicu();
-
-            magicNumber = magicu.m.getLimitedValue();
-            numShifts   = magicu.s;
-            isAdd       = magicu.a;
-#endif
         }
 
         void magicNumbersSigned(int           divisor,
@@ -56,19 +44,12 @@ namespace rocRoller
                                 unsigned int& numShifts,
                                 bool&         isNegative)
         {
-#if LLVM_VERSION_MAJOR >= 14
             llvm::SignedDivisionByConstantInfo magics
                 = llvm::SignedDivisionByConstantInfo::get(llvm::APInt(32, divisor, true));
 
             magicNumber = magics.Magic.getSExtValue();
             numShifts   = magics.ShiftAmount;
             isNegative  = magicNumber < 0L;
-#else
-            auto magics = llvm::APInt(32, divisor, true).magic();
-            magicNumber = (long int)magics.m.getLimitedValue();
-            numShifts   = magics.s;
-            isNegative  = magics.m.isNegative();
-#endif
         }
 
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
@@ -223,7 +204,6 @@ namespace rocRoller
         template <>
         ExpressionPtr magicNumberDivisionByConstant(ExpressionPtr lhs, unsigned int rhs)
         {
-#if LLVM_VERSION_MAJOR >= 14
             u_int64_t    magicNumber;
             unsigned int numPreShifts, numPostShifts;
             bool         isAdd;
@@ -251,37 +231,12 @@ namespace rocRoller
             {
                 return logicalShiftR(magicMultiple, numPostShiftsExpr);
             }
-#else
-            u_int64_t    magicNumber;
-            unsigned int numShifts;
-            bool         isAdd;
-
-            magicNumbersUnsigned(rhs, magicNumber, numShifts, isAdd);
-
-            auto magicNumberExpr = literal(static_cast<unsigned int>(magicNumber));
-            auto magicMultiple   = multiplyHigh(lhs, magicNumberExpr);
-
-            if(isAdd)
-            {
-                ExpressionPtr one           = literal(1u);
-                ExpressionPtr numShiftsExpr = literal(numShifts - 1u);
-                return logicalShiftR(logicalShiftR(lhs - magicMultiple, one) + magicMultiple,
-                                     numShiftsExpr);
-            }
-            else
-            {
-
-                ExpressionPtr numShiftsExpr = literal(numShifts);
-                return logicalShiftR(magicMultiple, numShiftsExpr);
-            }
-#endif
         }
 
         // Magic number division for signed integers
         template <>
         ExpressionPtr magicNumberDivisionByConstant(ExpressionPtr lhs, int rhs)
         {
-#if LLVM_VERSION_MAJOR >= 14
             int64_t      magicNumber;
             unsigned int numShifts;
             bool         isNegative;
@@ -305,30 +260,6 @@ namespace rocRoller
             ExpressionPtr shifted       = (magicMultiple >> numShiftsExpr);
 
             return shifted + logicalShiftR(shifted, signBitsExpr);
-#else
-            int64_t      magicNumber;
-            unsigned int numShifts;
-            bool         isNegative;
-
-            magicNumbersSigned(rhs, magicNumber, numShifts, isNegative);
-
-            auto magicNumberExpr = literal(static_cast<int>(magicNumber));
-            auto magicMultiple   = multiplyHigh(lhs, magicNumberExpr);
-
-            if(rhs > 0 && isNegative)
-            {
-                magicMultiple = magicMultiple + lhs;
-            }
-            else if(rhs < 0 && !isNegative)
-            {
-                magicMultiple = magicMultiple - lhs;
-            }
-
-            ExpressionPtr numShiftsExpr = literal(numShifts);
-            ExpressionPtr signBitsExpr  = literal<int32_t>(sizeof(int) * 8 - 1);
-
-            return (magicMultiple >> numShiftsExpr) + logicalShiftR(magicMultiple, signBitsExpr);
-#endif
         }
 
         template <typename T>

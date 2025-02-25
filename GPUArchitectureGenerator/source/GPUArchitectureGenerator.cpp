@@ -15,15 +15,18 @@ const std::string HELP_MESSAGE
       "\n"
       "Options:\n"
       "  -Y               output YAML (msgpack by default)\n"
+      "  --xml_dir        source directory for ISA xml files\n"
       "  -h, --help       display this help and exit";
 
-const std::string YAML_ARG = "-Y";
+const std::string YAML_ARG    = "-Y";
+const std::string XML_DIR_ARG = "--xml_dir";
 
 struct ProgramArgs
 {
     std::string outputFile;
     std::string assembler = GPUArchitectureGenerator::DEFAULT_ASSEMBLER;
     bool        useYAML   = false;
+    std::string xmlDir    = "";
 
     static ProgramArgs       ParseArgs(int argc, const char* argv[]);
     [[noreturn]] static void Help(bool error = false);
@@ -45,6 +48,13 @@ ProgramArgs ProgramArgs::ParseArgs(int argc, const char* argv[])
         {
             rv.useYAML = true;
             iter       = args.erase(iter);
+            iter--;
+        }
+        if(*iter == XML_DIR_ARG)
+        {
+            iter      = args.erase(iter);
+            rv.xmlDir = *iter;
+            iter      = args.erase(iter);
             iter--;
         }
     }
@@ -79,7 +89,7 @@ int main(int argc, const char* argv[])
         return 1;
     }
 
-    GPUArchitectureGenerator::FillArchitectures(args.assembler);
+    GPUArchitectureGenerator::FillArchitectures(args.assembler, args.xmlDir);
 
     try
     {

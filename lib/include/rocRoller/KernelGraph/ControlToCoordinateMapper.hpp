@@ -240,7 +240,16 @@ namespace rocRoller::KernelGraph
         template <typename T>
         int get(int control, int subDimension = 0) const;
 
+        /**
+         * @brief Get the coordinate index associated with the control
+         * flow node `control`.
+         */
         int get(int control, Connections::ConnectionSpec conn = {}) const;
+
+        /**
+         * @brief Get the coordinate index associated with the control
+         * flow node `control`.
+         */
         int get(int control, NaryArgument arg) const;
 
         /**

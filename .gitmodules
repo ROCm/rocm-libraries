@@ -2,3 +2,7 @@
 	path = extern/spdlog
 	url = https://github.com/gabime/spdlog.git
 	branch = v1.x
+
+[submodule "extern/mxDataGenerator"]
+	path = extern/mxDataGenerator
+	url = ssh://git@github.com/ROCm/mxDataGenerator.git

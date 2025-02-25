@@ -31,17 +31,33 @@ namespace GPUArchitectureGenerator
     }
 
     inline void AddInstructionInfo(rocRoller::GPUArchitectureTarget const& isaVersion,
-                                   rocRoller::GPUInstructionInfo const&    instruction_info)
+                                   rocRoller::GPUInstructionInfo const&    instruction_info,
+                                   std::shared_ptr<amdisa::IsaSpec> const& spec,
+                                   std::map<std::string, amdisa::Instruction> const& alias_lookup)
     {
         auto [iter, _] = GPUArchitectures.try_emplace(isaVersion, isaVersion);
 
         std::string instruction = instruction_info.getInstruction();
-        bool        isBranch    = instruction_info.isBranch()
-                        || (BranchInstructions.find(instruction) != BranchInstructions.end()
-                            && (std::find(BranchInstructions.at(instruction).begin(),
-                                          BranchInstructions.at(instruction).end(),
-                                          isaVersion)
-                                != BranchInstructions.at(instruction).end()));
+        bool        isBranch    = instruction_info.isBranch();
+
+        if(spec)
+        {
+            if(instruction != "v_fma_mix_f32"
+               && //TODO: Remove this when MRISA supports instruction, or instruction is not needed anymore
+               alias_lookup.find(instruction) == alias_lookup.end())
+            {
+
+                std::cerr << "Instruction must be in MRISA: " << isaVersion << std::endl
+                          << instruction << std::endl;
+                std::abort();
+            }
+        }
+
+        if(!isBranch && spec && alias_lookup.contains(instruction))
+        {
+            isBranch = alias_lookup.at(instruction).is_branch;
+        }
+
         bool isImplicit
             = instruction_info.hasImplicitAccess()
               || (ImplicitReadInstructions.find(instruction) != ImplicitReadInstructions.end()
@@ -141,13 +157,79 @@ namespace GPUArchitectureGenerator
         return std::get<0>(result) == 0 && std::get<1>(result).length() == 0;
     }
 
-    void FillArchitectures(std::string const& hipcc)
+    std::map<std::string, amdisa::Instruction> buildISALookup(amdisa::IsaSpec const& spec)
+    {
+        std::map<std::string, amdisa::Instruction> alias_lookup;
+        for(auto const& specInstruction : spec.instructions)
+        {
+            auto instruction = specInstruction.name;
+            for(auto const& alias : specInstruction.aliased_names)
+            {
+                auto lowerAlias = alias;
+                std::transform(lowerAlias.begin(), lowerAlias.end(), lowerAlias.begin(), ::tolower);
+                alias_lookup[lowerAlias] = specInstruction;
+            }
+            auto lowerInstruction = instruction;
+            std::transform(lowerInstruction.begin(),
+                           lowerInstruction.end(),
+                           lowerInstruction.begin(),
+                           ::tolower);
+            alias_lookup[lowerInstruction] = specInstruction;
+        }
+        return alias_lookup;
+    }
+
+    std::map<std::string, std::tuple<amdisa::IsaSpec, std::map<std::string, amdisa::Instruction>>>
+        LoadSpecs(std::string const& xmlDir)
+    {
+        std::map<std::string,
+                 std::tuple<amdisa::IsaSpec, std::map<std::string, amdisa::Instruction>>>
+            retval;
+
+        if(!xmlDir.empty())
+        {
+            for(auto const& file : std::filesystem::directory_iterator(xmlDir))
+            {
+                if(!file.is_regular_file() || file.path().extension() != ".xml")
+                {
+                    continue;
+                }
+                amdisa::IsaSpec spec;
+
+                std::string err_msg;
+                if(!amdisa::IsaXmlReader::ReadSpec(file.path(), spec, err_msg))
+                {
+                    std::cerr << "Error reading ISA XML: " << file.path() << std::endl
+                              << err_msg << std::endl;
+                    std::abort();
+                }
+
+                retval[spec.architecture.name] = {spec, buildISALookup(spec)};
+            }
+        }
+
+        return retval;
+    }
+
+    void FillArchitectures(std::string const& hipcc, std::string const& xmlDir)
     {
         GPUArchitectures.clear();
 
-        for(const auto& isaVersion : SupportedArchitectures)
+        auto specMap = LoadSpecs(xmlDir);
+
+        for(auto const& isaVersion : SupportedArchitectures)
         {
-            for(const auto& query : AssemblerQueries)
+            std::shared_ptr<amdisa::IsaSpec>           spec;
+            std::map<std::string, amdisa::Instruction> alias_lookup;
+
+            std::string archName = isaVersion.name();
+            if(specMap.find(archName) != specMap.end())
+            {
+                spec         = std::make_shared<amdisa::IsaSpec>(std::get<0>(specMap.at(archName)));
+                alias_lookup = std::get<1>(specMap.at(archName));
+            }
+
+            for(auto const& query : AssemblerQueries)
             {
                 if(TryAssembler(
                        hipcc, isaVersion, std::get<0>(query.second), std::get<1>(query.second)))
@@ -155,14 +237,14 @@ namespace GPUArchitectureGenerator
                     AddCapability(isaVersion, query.first, 0);
                 }
             }
-            for(const auto& cap : ArchSpecificCaps)
+            for(auto const& cap : ArchSpecificCaps)
             {
                 if(std::find(cap.second.begin(), cap.second.end(), isaVersion) != cap.second.end())
                 {
                     AddCapability(isaVersion, cap.first, 0);
                 }
             }
-            for(const auto& cap : PredicateCaps)
+            for(auto const& cap : PredicateCaps)
             {
                 if(cap.second(isaVersion))
                 {
@@ -196,24 +278,24 @@ namespace GPUArchitectureGenerator
             else
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxLdsSize, 1 << 16);
 
-            for(const auto& info : InstructionInfos)
+            for(auto const& info : InstructionInfos)
             {
                 if(std::find(std::get<0>(info).begin(), std::get<0>(info).end(), isaVersion)
                    != std::get<0>(info).end())
                 {
-                    for(const auto& instruction : std::get<1>(info))
+                    for(auto const& instruction : std::get<1>(info))
                     {
-                        AddInstructionInfo(isaVersion, instruction);
+                        AddInstructionInfo(isaVersion, instruction, spec, alias_lookup);
                     }
                 }
             }
 
-            for(const auto& group : GroupedInstructionInfos)
+            for(auto const& group : GroupedInstructionInfos)
             {
                 if(std::find(std::get<0>(group).begin(), std::get<0>(group).end(), isaVersion)
                    != std::get<0>(group).end())
                 {
-                    for(const auto& instruction : std::get<0>(std::get<1>(group)))
+                    for(auto const& instruction : std::get<0>(std::get<1>(group)))
                     {
                         AddInstructionInfo(
                             isaVersion,
@@ -223,12 +305,14 @@ namespace GPUArchitectureGenerator
                                                           -1,
                                                           false,
                                                           false,
-                                                          std::get<3>(std::get<1>(group))));
+                                                          std::get<3>(std::get<1>(group))),
+                            spec,
+                            alias_lookup);
                     }
                 }
             }
 
-            for(const auto& instruction : BranchInstructions)
+            for(auto const& instruction : ImplicitReadInstructions)
             {
                 if(std::find(instruction.second.begin(), instruction.second.end(), isaVersion)
                    != instruction.second.end())
@@ -237,21 +321,21 @@ namespace GPUArchitectureGenerator
                     {
                         AddInstructionInfo(isaVersion,
                                            rocRoller::GPUInstructionInfo(
-                                               instruction.first, -1, {}, -1, false, true));
+                                               instruction.first, -1, {}, -1, true, false),
+                                           spec,
+                                           alias_lookup);
                     }
                 }
             }
 
-            for(const auto& instruction : ImplicitReadInstructions)
+            if(spec)
             {
-                if(std::find(instruction.second.begin(), instruction.second.end(), isaVersion)
-                   != instruction.second.end())
+                for(auto const& specInstruction : alias_lookup)
                 {
-                    if(!GPUArchitectures[isaVersion].HasInstructionInfo(instruction.first))
+                    auto converted = ConvertSpecInstruction(specInstruction.second);
+                    if(!GPUArchitectures[isaVersion].HasInstructionInfo(converted.getInstruction()))
                     {
-                        AddInstructionInfo(isaVersion,
-                                           rocRoller::GPUInstructionInfo(
-                                               instruction.first, -1, {}, -1, true, false));
+                        AddInstructionInfo(isaVersion, converted, spec, alias_lookup);
                     }
                 }
             }
@@ -260,7 +344,7 @@ namespace GPUArchitectureGenerator
 
     void FillArchitectures()
     {
-        FillArchitectures(DEFAULT_ASSEMBLER);
+        FillArchitectures(DEFAULT_ASSEMBLER, "");
     }
 
     void GenerateFile(std::string const& fileName, bool asYAML)
@@ -277,5 +361,12 @@ namespace GPUArchitectureGenerator
             outputFile << rocRoller::GPUArchitecture::writeMsgpack(GPUArchitectures) << std::endl;
         }
         outputFile.close();
+    }
+
+    rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction)
+    {
+        auto name = instruction.name;
+        std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+        return rocRoller::GPUInstructionInfo(name, -1, {}, 0, false, instruction.is_branch, 0);
     }
 }

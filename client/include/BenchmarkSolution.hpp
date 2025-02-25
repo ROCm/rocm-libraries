@@ -32,10 +32,10 @@ namespace rocRoller
         class BenchmarkSolution
         {
         public:
-            rocRoller::CommandPtr                     getCommand();
-            std::shared_ptr<rocRoller::CommandKernel> getKernel();
-            BenchmarkResults                          benchmark(RunParameters const& runParams,
-                                                                CommandArguments     runtimeArgs);
+            rocRoller::CommandPtr       getCommand();
+            rocRoller::CommandKernelPtr getKernel();
+            BenchmarkResults            benchmark(RunParameters const& runParams,
+                                                  CommandArguments     runtimeArgs);
 
             virtual void setContext(ContextPtr context)
             {

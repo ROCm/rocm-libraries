@@ -24,12 +24,12 @@ namespace rocRoller
             VALUWrite(ContextPtr context)
                 : WaitStateObserver<VALUWrite>(context)
             {
-                m_checkACCVGPR = context->targetArchitecture().target().is908GPU();
+                m_checkACCVGPR = context->targetArchitecture().target().isCDNA1GPU();
             };
 
             constexpr static bool required(GPUArchitectureTarget const& target)
             {
-                return target.is9XGPU();
+                return target.isCDNAGPU();
             }
 
             int                   getMaxNops(Instruction const& inst) const;
