@@ -18,9 +18,8 @@ namespace rocRoller
     Generator<Instruction> RandomNumberGenerator::generate(Register::ValuePtr dest,
                                                            Register::ValuePtr seed)
     {
-        AssertFatal(false,
-                    "Random number expression should be replaced with equivalent expressions "
-                    "during transformation");
-        co_return;
+        AssertFatal(seed != nullptr);
+        AssertFatal(dest != nullptr);
+        co_yield_(Instruction("v_prng_b32", {dest}, {seed}, {}, "Generate a random number"));
     }
 }

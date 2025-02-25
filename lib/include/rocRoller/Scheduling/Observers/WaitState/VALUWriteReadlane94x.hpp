@@ -7,11 +7,12 @@ namespace rocRoller
     namespace Scheduling
     {
         /**
-         * @brief 94x rule for VALU Write followed by a Readlane requiring 1 NOP
+         * @brief 94x/950 rule for VALU Write followed by a Readlane or Permlane
          *
          * | Arch | 1st Inst  | 2nd Inst             | NOPs |
          * | ---- | --------- | -------------------- | ---- |
          * | 94x  | v_* write | v_readlane_* read    | 1    |
+         * | 950  | v_* write | v_permlane* read     | 2    |
          *
          */
         class VALUWriteReadlane94x : public WaitStateObserver<VALUWriteReadlane94x>
@@ -40,7 +41,7 @@ namespace rocRoller
 
         private:
             bool      m_checkACCVGPR;
-            int const m_maxNops = 1;
+            int const m_maxNops = 2;
         };
 
         static_assert(CWaitStateObserver<VALUWriteReadlane94x>);

@@ -2,6 +2,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
+#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
@@ -17,26 +18,6 @@ using namespace rocRoller;
 
 namespace TransposeLoadsTest
 {
-    template <uint elementBits>
-    std::string dsReadTRMnemonic()
-    {
-        if constexpr(elementBits == 16 || elementBits == 8 || elementBits == 4)
-            return "ds_read_b64_tr_b" + std::to_string(elementBits);
-
-        if constexpr(elementBits == 6)
-            return "ds_read_b96_tr_b6";
-    }
-
-    template <uint elementBits>
-    constexpr uint bitsPerTrLoad()
-    {
-        if constexpr(elementBits == 16 || elementBits == 8 || elementBits == 4)
-            return 64;
-
-        if constexpr(elementBits == 6)
-            return 96;
-    }
-
     template <typename ElementType, typename PackType, bool unalignedVGPRs>
     void generateTransposeLoad(rocRoller::ContextPtr m_context, const int MN, const int K)
     {
@@ -51,12 +32,11 @@ namespace TransposeLoadsTest
         const uint     numWorkitemsPerWave  = workitemCountX;
         const auto     packDataTypeInfo     = DataTypeInfo::Get(packDataType);
         const uint     packBytes            = packDataTypeInfo.elementBits / 8;
-        const uint     bytesPerTrLoad       = bitsPerTrLoad<elementBits>() / 8;
+        const uint     bytesPerTrLoad       = bitsPerTransposeLoad(elementBits) / 8;
         const uint     bytesPerWorkitem     = bytesPerTrLoad * /*numberOfLDSTrLoads*/ 2;
         const uint     bytesPerWord         = 4;
         const uint     registerCountPerLoad = bytesPerTrLoad / packBytes;
-        const uint     threadTrLoadOffset   = 16 * (bytesPerTrLoad + extraLdsBytes);
-        std::string    ds_tr_read_mnemonic  = dsReadTRMnemonic<elementBits>();
+        const uint     threadTrLoadOffset   = MN * (bytesPerTrLoad + extraLdsBytes);
 
         auto k = m_context->kernel();
 
@@ -205,7 +185,6 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Multiply>(
                 vLinearWorkitemOffset, vWorkitemX, vBytesPerWorkitem);
-            co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
 
             co_yield generateOp<Expression::Add>(vAPtr, vAPtr, vLinearWorkitemOffset);
             if constexpr(elementBits == 6)
@@ -234,6 +213,7 @@ namespace TransposeLoadsTest
                 vLDSPtr, vA1, bytesPerTrLoad + extraLdsBytes, bytesPerTrLoad);
             co_yield m_context->mem()->barrier();
 
+            co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
             co_yield generateOp<Expression::Add>(vTrLoadIdxAddr, vTrLoadIdxAddr, vLinearWordOffset);
             co_yield m_context->mem()->loadFlat(
                 vTransposeWorkitemIdx, vTrLoadIdxAddr, /*offset*/ 0, bytesPerWord);
@@ -254,19 +234,13 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Add>(vLDSPtr, vLDSBasePtr, vTransposeOffset);
 
-            // TODO: use MemoryInstructions method when available
-            // co_yield m_context->mem()->loadLocalTranspose(vA0T, vLDSPtr, /*offset*/0, bytesPerTrLoad);
-            co_yield_(Instruction(ds_tr_read_mnemonic,
-                                  {vA0T},
-                                  {vLDSPtr},
-                                  {concatenate("offset:", 0)},
-                                  "transpose from lds"));
-            // co_yield m_context->mem()->loadLocalTranspose(vA1T, vLDSPtr, threadTrLoadOffset, bytesPerTrLoad);
-            co_yield_(Instruction(ds_tr_read_mnemonic,
-                                  {vA1T},
-                                  {vLDSPtr},
-                                  {concatenate("offset:", threadTrLoadOffset)},
-                                  "transpose from lds"));
+            co_yield m_context->mem()->transposeLoadLocal(
+                vA0T, vLDSPtr, /*offset*/ 0, bytesPerTrLoad + extraLdsBytes, elementBits);
+            co_yield m_context->mem()->transposeLoadLocal(vA1T,
+                                                          vLDSPtr,
+                                                          /*offset*/ threadTrLoadOffset,
+                                                          bytesPerTrLoad + extraLdsBytes,
+                                                          elementBits);
 
             co_yield m_context->mem()->barrier();
             if constexpr(elementBits == 6)
@@ -283,7 +257,6 @@ namespace TransposeLoadsTest
                 co_yield m_context->copier()->copy(vA0, vA0T);
                 co_yield m_context->copier()->copy(vA1, vA1T);
 
-                const uint regCount = bitsPerTrLoad<elementBits>() / 32;
                 co_yield m_context->mem()->storeFlat(vResultPtr,
                                                      vA0,
                                                      /*offset*/ 0,
@@ -298,7 +271,7 @@ namespace TransposeLoadsTest
             {
                 co_yield generateOp<Expression::Add>(vResultPtr, vResultPtr, vLinearWordOffset);
 
-                const uint regCount = bitsPerTrLoad<elementBits>() / 32;
+                const uint regCount = bitsPerTransposeLoad(elementBits) / 32;
                 for(uint regIdx = 0; regIdx < regCount; regIdx++)
                 {
                     co_yield m_context->mem()->storeFlat(vResultPtr,
@@ -379,7 +352,7 @@ namespace TransposeLoadsTest
         std::vector<StoredAsType> data(MN * K);
         for(int i = 0; i < MN; i++)
             for(int j = 0; j < K; j++)
-                data[i * K + j] = rand() % 16;
+                data[i * K + j] = rand() % 10;
 
         auto packedData = pack<StoredAsType, elementBits>(data);
         ASSERT_TRUE(packedData.size() > 0);
@@ -387,9 +360,22 @@ namespace TransposeLoadsTest
         std::vector<uint32_t> result(packedData.size());
 
         std::vector<uint32_t> trLoadIdx(64);
-        for(int x = 0; x < 4; x++)
-            for(int y = 0; y < 16; y++)
-                trLoadIdx[16 * x + y] = 32 * x + y;
+        {
+            const int factor = 2;
+            const int NX1    = MN / 16;
+            const int NX0    = 4 / NX1;
+            // each thread points to 64b or 96b
+            const int NY0 = bitsPerTransposeLoad(elementBits) / elementBits;
+            const int NY1 = 16 / NY0;
+            for(int x0 = 0; x0 < NX0; x0++)
+                for(int x1 = 0; x1 < NX1; x1++)
+                    for(int y0 = 0; y0 < NY0; y0++)
+                        for(int y1 = 0; y1 < NY1; y1++)
+                        {
+                            trLoadIdx[NX1 * NY0 * NY1 * x0 + NY0 * NY1 * x1 + NY1 * y0 + y1]
+                                = factor * NX1 * NY0 * NY1 * x0 + NX1 * NY1 * y0 + NY1 * x1 + y1;
+                        }
+        }
 
         generateTransposeLoad<ElementType, PackType, unalignedVGPRs>(m_context, MN, K);
         CommandKernel commandKernel;
@@ -414,38 +400,31 @@ namespace TransposeLoadsTest
         auto result_unpacked = unpack<StoredAsType, elementBits>(result);
         ASSERT_TRUE(packedData.size() > 0);
 
-        if constexpr(elementBits == 6)
         {
-            // Each block of 16 lanes is transposed as a 16x16 submatrix
-            const int NX = 16; // lanes
-            const int NY = 96 / elementBits;
-            // Data is swizzled as if 4 SIMDs is a 2x2 grid
-            const int NT = 2; // 2x DS_READ_B96_TR_B6
-            const int NW = 2; // SIMD X
-            const int NZ = 2; // SIMD Y
-            for(int t = 0; t < NT; t++)
-                for(int w = 0; w < NW; w++)
-                    for(int z = 0; z < NZ; z++)
-                        for(int x = 0; x < NX; x++)
-                            for(int y = 0; y < NY; y++)
-                                EXPECT_EQ(
-                                    data[(4 * t + 2 * z + w) * NX * NY + NY * x + y],
-                                    result_unpacked[(4 * w + 2 * t + z) * NX * NY + NX * y + x]);
-        }
-        else
-        {
-            // scale MN & K to check 32x64 as 16x128 layout
-            const int scale = MN / 16;
-            const int NW    = 4;
-            const int NZ    = MN / NW / scale;
-            const int NX    = 32 / elementBits;
-            const int NY    = (K * scale) / NX;
-            for(int z = 0; z < NZ; z++)
-                for(int w = 0; w < NW; w++)
-                    for(int x = 0; x < NX; x++)
-                        for(int y = 0; y < NY; y++)
-                            ASSERT_EQ(data[(w * NZ + z) * NX * NY + x * NY + y],
-                                      result_unpacked[(z * NW + w) * NX * NY + y * NX + x]);
+            int NY0 = 4;
+            int NY2 = 32 / elementBits;
+            if constexpr(elementBits == 6)
+            {
+                NY0 = 2;
+                NY2 = 96 / elementBits;
+            }
+
+            const int NY1 = K / NY2 / NY0;
+            const int NX0 = MN / 16;
+
+            for(int y0 = 0; y0 < NY0; y0++)
+                for(int y1 = 0; y1 < NY1; y1++)
+                    for(int x0 = 0; x0 < NX0; x0++)
+                        for(int x1 = 0; x1 < 4; x1++)
+                            for(int x2 = 0; x2 < 4; x2++)
+                                for(int y2 = 0; y2 < NY2; y2++)
+                                {
+                                    ASSERT_EQ(data[y1 * NY0 * NY2 * NX0 * 16 + y0 * NY2 * NX0 * 16
+                                                   + y2 * NX0 * 16 + x0 * 16 + x1 * 4 + x2],
+                                              result_unpacked[y0 * NY1 * NX0 * NY2 * 16
+                                                              + y1 * NX0 * NY2 * 16 + x0 * 16 * NY2
+                                                              + x1 * 4 * NY2 + x2 * NY2 + y2]);
+                                }
         }
     }
 
@@ -453,8 +432,8 @@ namespace TransposeLoadsTest
     void checkGeneratedCode(rocRoller::ContextPtr m_context)
     {
         constexpr uint elementBits     = TypeInfo<ElementType>::ElementBits;
-        constexpr uint dsReadWriteBits = bitsPerTrLoad<elementBits>();
-        std::string    mnemonic        = dsReadTRMnemonic<elementBits>();
+        const uint     dsReadWriteBits = bitsPerTransposeLoad(elementBits);
+        std::string    mnemonic        = transposeLoadMnemonic(elementBits);
 
         // FIXME: waiting for std::format :(
         std::string flatLoadDWordX{"flat_load_dwordx" + std::to_string(dwordX) + " "};

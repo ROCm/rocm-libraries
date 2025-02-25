@@ -25,21 +25,18 @@ namespace rocRollerTest
     {
     };
 
+    struct Gfx950
+    {
+    };
+
     template <typename Arch>
     class HazardObserverTest : public GenericContextFixture
     {
     protected:
         GPUArchitectureTarget targetArchitecture() override
         {
-            // clang-format off
-            static_assert(
-                std::is_same_v<Arch, Gfx908> ||
-        std::is_same_v<Arch, Gfx90a> ||
-        std::is_same_v<Arch, Gfx940> ||
-        std::is_same_v<Arch, Gfx941> ||
-        std::is_same_v<Arch, Gfx942>,
-                "Unsupported Arch");
-            // clang-format on
+            static_assert(CIsAnyOf<Arch, Gfx908, Gfx90a, Gfx940, Gfx941, Gfx942, Gfx950>,
+                          "Unsupported Arch");
 
             if constexpr(std::is_same_v<Arch, Gfx908>)
                 return {GPUArchitectureGFX::GFX908};
@@ -49,8 +46,10 @@ namespace rocRollerTest
                 return {GPUArchitectureGFX::GFX940};
             else if constexpr(std::is_same_v<Arch, Gfx941>)
                 return {GPUArchitectureGFX::GFX941};
-            else
+            else if constexpr(std::is_same_v<Arch, Gfx942>)
                 return {GPUArchitectureGFX::GFX942};
+            else
+                return {GPUArchitectureGFX::GFX950};
         }
 
         void peekAndSchedule(Instruction& inst, uint expectedNops = 0)
@@ -269,7 +268,7 @@ namespace rocRollerTest
 
     TYPED_TEST(HazardObserverTest, VALUWriteReadlane94X)
     {
-        auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 2);
+        auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 8);
         auto s = this->createRegisters(Register::Type::Scalar, DataType::UInt32, 2);
 
         {
@@ -309,11 +308,45 @@ namespace rocRollerTest
             EXPECT_THAT(this->output(), Not(HasSubstr("s_nop")));
             this->clearOutput();
         }
+
+        // Tests for v_permlane*, only on GFX950
+        if constexpr(std::is_same_v<TypeParam, Gfx950>)
+        {
+            {
+                std::vector<Instruction> insts
+                    = {Instruction("v_subrev_u32", {v[0]}, {s[0], v[0]}, {}, ""),
+                       Instruction::InoutInstruction("v_permlane32_swap", {v[0], v[1]}, {}, ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                this->peekAndSchedule(insts[0]);
+                this->peekAndSchedule(insts[1], 2);
+
+                EXPECT_THAT(this->output(), HasSubstr("s_nop 3"));
+                this->clearOutput();
+            }
+            {
+                std::vector<Instruction> insts
+                    = {Instruction::InoutInstruction("v_permlane16_swap", {v[0], v[1]}, {}, ""),
+                       Instruction::InoutInstruction("v_permlane16_swap", {v[2], v[3]}, {}, ""),
+                       Instruction::InoutInstruction("v_permlane32_swap", {v[4], v[5]}, {}, ""),
+                       Instruction::InoutInstruction("v_permlane32_swap", {v[6], v[7]}, {}, ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                this->peekAndSchedule(insts[0]);
+                this->peekAndSchedule(insts[1]);
+                this->peekAndSchedule(insts[2]);
+                this->peekAndSchedule(insts[3]);
+                this->peekAndSchedule(insts[4]);
+
+                EXPECT_THAT(this->output(), Not(HasSubstr("s_nop")));
+                this->clearOutput();
+            }
+        }
     }
 
     TYPED_TEST(HazardObserverTest, VCMPX_EXEC94X)
     {
-        auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 2);
+        auto v = this->createRegisters(Register::Type::Vector, DataType::UInt32, 3);
         auto s = this->createRegisters(Register::Type::Scalar, DataType::UInt32, 2);
 
         {
@@ -374,6 +407,21 @@ namespace rocRollerTest
             this->peekAndSchedule(insts[1]);
 
             EXPECT_THAT(this->output(), Not(HasSubstr("s_nop")));
+            this->clearOutput();
+        }
+
+        // Tests for v_permlane*, only on GFX950
+        if constexpr(std::is_same_v<TypeParam, Gfx950>)
+        {
+            std::vector<Instruction> insts
+                = {Instruction("v_cmpx_eq_u32", {}, {s[0], v[0]}, {}, ""),
+                   Instruction::InoutInstruction("v_permlane32_swap", {v[1], v[2]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            this->peekAndSchedule(insts[0]);
+            this->peekAndSchedule(insts[1], 4);
+
+            EXPECT_THAT(this->output(), HasSubstr("s_nop 3"));
             this->clearOutput();
         }
     }

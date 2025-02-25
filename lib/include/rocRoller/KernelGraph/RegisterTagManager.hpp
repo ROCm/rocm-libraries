@@ -23,6 +23,8 @@ namespace rocRoller
         uint     elementBlockSize = 0; //< If non-zero, elements are loaded in blocks.
         Expression::ExpressionPtr
             elementBlockStride; //< If non-null, stride between element blocks.
+        Expression::ExpressionPtr
+            trLoadPairStride; //< If non-null, stride between element blocks of transpose loads of a wavetile.
     };
     std::string toString(RegisterExpressionAttributes t);
 

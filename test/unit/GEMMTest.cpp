@@ -7,6 +7,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
@@ -230,10 +231,8 @@ namespace GEMMDriverTest
 
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
             {
-                AssertFatal(gemm.transA == "T", ShowValue(gemm.transA));
-
-                tagTensorScaleA = command->addOperation(
-                    rocRoller::Operations::Tensor(2, DataType::UInt8, oneStridesT));
+                tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
+                    2, DataType::UInt8, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -243,10 +242,8 @@ namespace GEMMDriverTest
 
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
-                AssertFatal(gemm.transB == "N", ShowValue(gemm.transB));
-
-                tagTensorScaleB = command->addOperation(
-                    rocRoller::Operations::Tensor(2, DataType::UInt8, oneStridesN));
+                tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
+                    2, DataType::UInt8, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -614,7 +611,17 @@ namespace GEMMDriverTest
     {
     };
 
-    class GEMMF8F6F4TestGPU : public BaseGEMMContextFixture<>
+    // Params are: A & B type, K tile size, (transA, transB)
+    class GEMMF16TestGPU
+        : public BaseGEMMContextFixture<
+              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
+    {
+    };
+
+    // Params are: A & B type, K tile size, (transA, transB)
+    class GEMMF8F6F4TestGPU
+        : public BaseGEMMContextFixture<
+              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
     {
     };
 
@@ -622,16 +629,23 @@ namespace GEMMDriverTest
     {
     };
 
-    // Params are: A type, B type, K tile size
-    class GEMMMixedF8F6F4TestGPU
-        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType, rocRoller::DataType, int>>
+    // Params are: A type, B type, K tile size, (transA, transB)
+    class MixedGEMMF8F6F4TestGPU
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   rocRoller::DataType,
+                                                   int,
+                                                   std::pair<std::string, std::string>>>
     {
     };
 
-    // Params are: A type, B type, K tile size, Load A scale though LDS, Load B scale through LDS
-    class GEMMMixedScaledTestGPU
-        : public BaseGEMMContextFixture<
-              std::tuple<rocRoller::DataType, rocRoller::DataType, int, bool, bool>>
+    // Params are: A type, B type, K tile size, Load A scale though LDS, Load B scale through LDS, (transA, transB)
+    class ScaledMixedGEMMF8F6F4TestGPU
+        : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
+                                                   rocRoller::DataType,
+                                                   int,
+                                                   bool,
+                                                   bool,
+                                                   std::pair<std::string, std::string>>>
     {
     };
 
@@ -1173,6 +1187,140 @@ namespace GEMMDriverTest
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
+    GEMMProblem setupGEMMF16(uint waveM, uint waveN, uint waveK)
+    {
+        GEMMProblem gemm;
+        gemm.waveM = waveM;
+        gemm.waveN = waveN;
+        gemm.waveK = waveK;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+
+        gemm.transA = "N";
+        gemm.transB = "T";
+        return gemm;
+    }
+
+    void checkGEMMF16(rocRoller::ContextPtr m_context,
+                      std::string           mfma,
+                      uint                  numMFMAs,
+                      uint                  numBufferLoads,
+                      uint                  numDSWrites,
+                      uint                  numDSReads,
+                      uint                  numTrLoads)
+    {
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), numMFMAs);
+        EXPECT_EQ(countSubstring(generatedCode, mfma), numMFMAs);
+
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load"), numBufferLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64_tr_b"), numTrLoads);
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read"), numDSReads + numTrLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
+    }
+
+    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMF16)
+    {
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        uint const waveM = (MFMAK == 32) ? 16 : 32;
+        uint const waveN = (MFMAK == 32) ? 16 : 32;
+        uint const waveK = MFMAK;
+
+        auto problem = setupGEMMF16(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        std::string typeStr{"f16"};
+
+        switch(typeAB)
+        {
+        case DataType::Half:
+            if(waveK == 32)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_16x16x32_f16);
+            }
+            else
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_32x32x16_f16);
+            }
+            basicGEMM<Half, Half, float>(problem);
+            break;
+        case DataType::BFloat16:
+            if(waveK == 32)
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_16x16x32_bf16);
+            }
+            else
+            {
+                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_32x32x16_bf16);
+            }
+            basicGEMM<BFloat16, BFloat16, float>(problem);
+            typeStr = "bf16";
+            break;
+        default:
+            Throw<FatalError>(std::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
+                                          toString(typeAB)));
+        }
+
+        uint const wfs           = problem.wavefrontSize;
+        uint const wgX           = problem.workgroupSizeX;
+        uint const wgY           = problem.workgroupSizeY;
+        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        uint const numWaves      = wgX * wgY / wfs;
+
+        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
+        uint const numMFMAsPerWave      = problem.macK / waveK;
+        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
+
+        uint const elementsPerWavetile = waveM * waveK / wfs;
+        uint const elementBits         = DataTypeInfo::Get(typeAB).elementBits;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+
+        uint const bitsPerWavetileLoad = elementsPerWavetile * elementBits;
+
+        uint const trLoadsPerWave = elementsPerWavetile / elementsPerTrLoad;
+        uint const dsLoadsPerWave = elementsPerWavetile / (bitsPerWavetileLoad / elementBits);
+
+        uint const bitsLoadedForAB
+            = numDWavetilesPerWave * /*A & B*/ 2 * waveM * waveN * elementBits;
+
+        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
+
+        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / bitsPerWavetileLoad / wfs;
+        uint const numDSWrites    = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+
+        uint numTrLoads = 0;
+        uint numDSReads = 0;
+        {
+            if(problem.transA == "T")
+                numDSReads += numWaves * dsLoadsPerWave;
+            if(problem.transB == "N")
+                numDSReads += numWaves * dsLoadsPerWave;
+
+            if(problem.transA == "N")
+                numTrLoads += numWaves * trLoadsPerWave;
+            if(problem.transB == "T")
+                numTrLoads += numWaves * trLoadsPerWave;
+        }
+
+        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
+
+        checkGEMMF16(
+            m_context, mfma, numMFMAs, numBufferLoads, numDSWrites, numDSReads, numTrLoads);
+    }
+
     GEMMProblem setup_GEMMF8_NT()
     {
         GEMMProblem gemm;
@@ -1254,32 +1402,165 @@ namespace GEMMDriverTest
         basicGEMM<BF8, BF8, float, BF8>(gemm);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicGEMMFP8_16x16x128_NT)
+    void checkGEMMF8F6F4(rocRoller::ContextPtr m_context,
+                         std::string           mfma,
+                         std::string           modifiers,
+                         uint                  numMFMAs,
+                         uint                  numBufferLoads,
+                         uint                  numDSWrites,
+                         uint                  numDSReads,
+                         uint                  numTrLoads,
+                         bool const            isF6Type            = false,
+                         uint                  numScaleBufferLoads = 0,
+                         uint                  numScaleDSWrites    = 0,
+                         uint                  numScaleDSLoads     = 0)
+
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_NT(16, 16, 128);
-        basicGEMM<FP8, FP8, float>(gemm);
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "v_mfma"), numMFMAs);
+        EXPECT_EQ(countSubstring(generatedCode, mfma), numMFMAs);
+        EXPECT_EQ(countSubstring(generatedCode, modifiers), numMFMAs);
+
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load"),
+                  numBufferLoads + numScaleBufferLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), numScaleBufferLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites + numScaleDSWrites);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b8"), numScaleDSWrites);
+
+        if(!isF6Type)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64_tr_b"), numTrLoads);
+        }
+        else
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b96_tr_b6"), numTrLoads);
+        }
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read"),
+                  numDSReads + numScaleDSLoads + numTrLoads);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_u8 "), numScaleDSLoads);
+
+        if(!isF6Type)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
+        }
+        else
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads / 2);
+            EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64 "), numDSReads / 2);
+        }
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicGEMMBF8_16x16x128_NT)
+    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_NT(16, 16, 128);
-        basicGEMM<BF8, BF8, float>(gemm);
-    }
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicGEMMFP8_32x32x64_NT)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_NT(32, 32, 64);
-        basicGEMM<FP8, FP8, float>(gemm);
-    }
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
-    TEST_P(GEMMF8F6F4TestGPU, DISABLED_GPU_BasicGEMMBF8_32x32x64_NT)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_NT(32, 32, 64);
-        basicGEMM<BF8, BF8, float>(gemm);
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        // TODO: enable non-TN F6 tests
+        if(elementBits == 6 && (problem.transA != "T" || problem.transB != "N"))
+        {
+            GTEST_SKIP();
+        }
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(problem);
+            modifiers = "cbsz:0b010 blgp:0b010";
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(problem);
+            modifiers = "cbsz:0b011 blgp:0b011";
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+
+        uint const wfs           = problem.wavefrontSize;
+        uint const wgX           = problem.workgroupSizeX;
+        uint const wgY           = problem.workgroupSizeY;
+        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        uint const numWaves      = wgX * wgY / wfs;
+
+        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
+        uint const numMFMAsPerWave      = problem.macK / waveK;
+        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
+
+        uint const elementsPerWavetile = waveM * waveK / wfs;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+
+        uint const trLoadsPerWave
+            = elementsPerWavetile * elementBits / bitsPerTransposeLoad(elementBits);
+        uint const dsLoadsPerWave
+            = elementsPerWavetile * elementBits / (elementBits == 6 ? 96 : 128);
+
+        uint const bitsLoadedForAB
+            = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
+
+        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
+
+        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / 128 / wfs;
+        uint const numDSWrites    = bitsLoadedForAB / 128 / wfs;
+
+        uint numTrLoads = 0;
+        uint numDSReads = 0;
+        { // 2x2 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
+            if(problem.transA == "T")
+                numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;
+            if(problem.transB == "N")
+                numDSReads += /*number of B tiles*/ 4 * numMFMAsPerWave * dsLoadsPerWave;
+
+            if(problem.transA == "N")
+                numTrLoads += /*number of A tiles*/ 1 * numMFMAsPerWave * trLoadsPerWave;
+            if(problem.transB == "T")
+                numTrLoads += /*number of B tiles*/ 4 * numMFMAsPerWave * trLoadsPerWave;
+        }
+
+        bool const isF6 = typeAB == DataType::FP6 || typeAB == DataType::BF6;
+
+        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+
+        checkGEMMF8F6F4(m_context,
+                        mfma,
+                        modifiers,
+                        numMFMAs,
+                        numBufferLoads,
+                        numDSWrites,
+                        numDSReads,
+                        numTrLoads,
+                        isF6);
     }
 
     void check_GEMMF8_TN(rocRoller::ContextPtr m_context)
@@ -1325,220 +1606,126 @@ namespace GEMMDriverTest
         check_GEMMF8_TN(m_context);
     }
 
-    void check_GEMMF8F6F4_TN(rocRoller::ContextPtr m_context,
-                             uint                  numBufferLoads,
-                             uint                  numDSWrites,
-                             uint                  numDSReads,
-                             bool const            isF6Type = false)
-
+    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4)
     {
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
+
+        // TODO: enable non-TN F6 tests
+        if(elementBits == 6 && (problem.transA != "T" || problem.transB != "N"))
         {
-            std::string generatedCode = m_context->instructions()->toString();
-
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load"), numBufferLoads);
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numBufferLoads);
-            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
-
-            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b"), numDSWrites);
-            EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128 "), numDSWrites);
-
-            EXPECT_EQ(countSubstring(generatedCode, "ds_read"), numDSReads);
-            if(!isF6Type)
-            {
-                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
-            }
-            else
-            {
-                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads / 2);
-                EXPECT_EQ(countSubstring(generatedCode, "ds_read_b64 "), numDSReads / 2);
-            }
+            GTEST_SKIP();
         }
-    }
 
-    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
-                           std::string           f8f6f4_inst,
-                           std::string           modifier)
-    {
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        problem.scaleAMode = Operations::ScaleMode::Separate;
+        problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.loadLDSA      = true;
+        problem.loadLDSB      = true;
+        problem.loadLDSScaleA = true;
+        problem.loadLDSScaleB = true;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        switch(typeAB)
         {
-            auto generatedCode = m_context->instructions()->toString();
-
-            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
-            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
-            auto modifier_count = countSubstring(generatedCode, modifier);
-
-            // All mfma instructions should be f8f6f4
-            EXPECT_EQ(mfma_count, f8f6f4_count);
-            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
-            EXPECT_EQ(f8f6f4_count, modifier_count);
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(problem);
+            modifiers = "cbsz:0b010 blgp:0b010";
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(problem);
+            modifiers = "cbsz:0b011 blgp:0b011";
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
         }
-    }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP4_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
-        basicGEMM<FP4, FP4, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b100 blgp:0b100");
-        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 8) / 64, 4, 10);
-    }
+        uint const wfs           = problem.wavefrontSize;
+        uint const wgX           = problem.workgroupSizeX;
+        uint const wgY           = problem.workgroupSizeY;
+        uint const numDWavetiles = problem.macM * problem.macN / (waveM * waveN);
+        uint const numWaves      = wgX * wgY / wfs;
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicBlockScaledGEMMFP8_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm       = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleAMode = Operations::ScaleMode::Separate;
-        gemm.scaleBMode = Operations::ScaleMode::Separate;
+        uint const numDWavetilesPerWave = numDWavetiles / numWaves;
+        uint const numMFMAsPerWave      = problem.macK / waveK;
+        uint const numMFMAs             = numDWavetilesPerWave * numMFMAsPerWave;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+        uint const elementsPerWavetile = waveM * waveK / wfs;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
 
-        basicGEMM<FP8, FP8, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b000 blgp:0b000");
-    }
+        uint const trLoadsPerWave
+            = elementsPerWavetile * elementBits / bitsPerTransposeLoad(elementBits);
+        uint const dsLoadsPerWave
+            = elementsPerWavetile * elementBits / (elementBits == 6 ? 96 : 128);
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicBlockScaledGEMMBF8_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm       = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleAMode = Operations::ScaleMode::Separate;
-        gemm.scaleBMode = Operations::ScaleMode::Separate;
+        uint const bitsLoadedForAB
+            = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+        uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
+        uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        basicGEMM<BF8, BF8, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b001 blgp:0b001");
-    }
+        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / 128 / wfs;
+        uint const numDSWrites    = bitsLoadedForAB / 128 / wfs;
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicBlockScaledGEMMFP6_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm       = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleAMode = Operations::ScaleMode::Separate;
-        gemm.scaleBMode = Operations::ScaleMode::Separate;
+        uint numTrLoads = 0;
+        uint numDSReads = 0;
+        { // 2x2 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
+            if(problem.transA == "T")
+                numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;
+            if(problem.transB == "N")
+                numDSReads += /*number of B tiles*/ 4 * numMFMAsPerWave * dsLoadsPerWave;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+            if(problem.transA == "N")
+                numTrLoads += /*number of A tiles*/ 1 * numMFMAsPerWave * trLoadsPerWave;
+            if(problem.transB == "T")
+                numTrLoads += /*number of B tiles*/ 4 * numMFMAsPerWave * trLoadsPerWave;
+        }
 
-        basicGEMM<FP6, FP6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b010 blgp:0b010");
-    }
+        uint const numScaleBufferLoads = (32 / 8);
+        uint const numScaleDSWrites    = (32 / 8);
+        uint const numScaleDSLoads     = (/*A*/ 1 + /*B*/ 4) * numMFMAsPerWave;
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicBlockScaledGEMMBF6_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm       = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleAMode = Operations::ScaleMode::Separate;
-        gemm.scaleBMode = Operations::ScaleMode::Separate;
+        bool const isF6 = typeAB == DataType::FP6 || typeAB == DataType::BF6;
 
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
+        auto const mfma{std::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
-        basicGEMM<BF6, BF6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b011 blgp:0b011");
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicBlockScaledGEMMFP4_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm       = setup_GEMMF8F6F4_TN(16, 16, 128);
-        gemm.scaleAMode = Operations::ScaleMode::Separate;
-        gemm.scaleBMode = Operations::ScaleMode::Separate;
-
-        gemm.loadLDSA      = true;
-        gemm.loadLDSB      = true;
-        gemm.loadLDSScaleA = true;
-        gemm.loadLDSScaleB = true;
-
-        basicGEMM<FP4, FP4, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_scale_f32_16x16x128_f8f6f4", "cbsz:0b100 blgp:0b100");
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP4_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
-        basicGEMM<FP4, FP4, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b100 blgp:0b100");
-        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 8) / 64, 4, 10);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP6_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
-        basicGEMM<FP6, FP6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b010 blgp:0b010");
-        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP6_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
-        basicGEMM<FP6, FP6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b010 blgp:0b010");
-        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMBF6_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
-        basicGEMM<BF6, BF6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_16x16x128_f8f6f4", "cbsz:0b011 blgp:0b011");
-        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) * 6 / 8 / 4) / 64, 6, 20, true);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMBF6_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
-        basicGEMM<BF6, BF6, float>(gemm);
-        check_mfma_f8f6f4(m_context, "v_mfma_f32_32x32x64_f8f6f4", "cbsz:0b011 blgp:0b011");
-        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) * 6 / 8 / 4) / 64, 6, 20, true);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP8_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
-        basicGEMM<FP8, FP8, float>(gemm);
-        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMBF8_16x16x128_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(16, 16, 128);
-        basicGEMM<BF8, BF8, float>(gemm);
-        check_GEMMF8F6F4_TN(m_context, (16 * 16 + (16 * 128) / 4) / 64, 8, 20);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMFP8_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
-        basicGEMM<FP8, FP8, float>(gemm);
-        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
-    }
-
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMBF8_32x32x64_TN)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4_TN(32, 32, 64);
-        basicGEMM<BF8, BF8, float>(gemm);
-        check_GEMMF8F6F4_TN(m_context, (32 * 32 + (32 * 64) / 4) / 64, 8, 20);
+        checkGEMMF8F6F4(m_context,
+                        mfma,
+                        modifiers,
+                        numMFMAs,
+                        numBufferLoads,
+                        numDSWrites,
+                        numDSReads,
+                        numTrLoads,
+                        isF6,
+                        numScaleBufferLoads,
+                        numScaleDSWrites,
+                        numScaleDSLoads);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)
@@ -1973,20 +2160,49 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMMixedF8F6F4TestGPU, GPU_BasicGEMMMixedF8F6F4)
+    void check_mfma_f8f6f4(rocRoller::ContextPtr m_context,
+                           std::string           f8f6f4_inst,
+                           std::string           modifier)
     {
-        auto [typeA, typeB, MFMAK]
-            = std::get<std::tuple<rocRoller::DataType, rocRoller::DataType, int>>(GetParam());
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasMFMA_fp8))
+        {
+            auto generatedCode = m_context->instructions()->toString();
 
-        int wave_m = (MFMAK == 128) ? 16 : 32;
-        int wave_n = (MFMAK == 128) ? 16 : 32;
-        int wave_k = MFMAK;
+            auto mfma_count     = countSubstring(generatedCode, "v_mfma_");
+            auto f8f6f4_count   = countSubstring(generatedCode, f8f6f4_inst);
+            auto modifier_count = countSubstring(generatedCode, modifier);
 
-        auto problem = setup_GEMMF8F6F4_TN(wave_m, wave_n, wave_k);
+            // All mfma instructions should be f8f6f4
+            EXPECT_EQ(mfma_count, f8f6f4_count);
+            // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
+            EXPECT_EQ(f8f6f4_count, modifier_count);
+        }
+    }
+
+    TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
+    {
+        auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        // TODO: enable non-TN F6 tests
+        auto const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
+        auto const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
+        if((elementBitsA == 6 || elementBitsB == 6)
+           && (problem.transA != "T" || problem.transB != "N"))
+        {
+            GTEST_SKIP();
+        }
 
         basicGEMMMixed(typeA, typeB, problem);
 
-        auto mfma = (MFMAK == 128) ? "v_mfma_f32_16x16x128_f8f6f4" : "v_mfma_f32_32x32x64_f8f6f4";
+        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         std::string modifierA = "defaultModiferA";
         std::string modifierB = "defaultModiferB";
@@ -2020,17 +2236,28 @@ namespace GEMMDriverTest
         check_mfma_f8f6f4(m_context, mfma, modifierA + " " + modifierB);
     }
 
-    TEST_P(GEMMMixedScaledTestGPU, GPU_BlockScaledGEMMMixed)
+    TEST_P(ScaledMixedGEMMF8F6F4TestGPU, GPU_ScaledMixedBasicGEMMF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeA, typeB, MFMAK, loadLDSScaleA, loadLDSScaleB] = std::get<1>(GetParam());
+        auto [typeA, typeB, MFMAK, loadLDSScaleA, loadLDSScaleB, transOp] = std::get<1>(GetParam());
 
-        int wave_m = (MFMAK == 128) ? 16 : 32;
-        int wave_n = (MFMAK == 128) ? 16 : 32;
-        int wave_k = MFMAK;
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
 
-        auto problem = setup_GEMMF8F6F4_TN(wave_m, wave_n, wave_k);
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        // TODO: enable non-TN F6 tests
+        auto const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
+        auto const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
+        if((elementBitsA == 6 || elementBitsB == 6)
+           && (problem.transA != "T" || problem.transB != "N"))
+        {
+            GTEST_SKIP();
+        }
 
         problem.scaleAMode = rocRoller::Operations::ScaleMode::Separate;
         problem.scaleBMode = rocRoller::Operations::ScaleMode::Separate;
@@ -2043,7 +2270,34 @@ namespace GEMMDriverTest
 
     INSTANTIATE_TEST_SUITE_P(GEMMTest, GEMMTestGPU, currentGPUISA());
 
-    INSTANTIATE_TEST_SUITE_P(GEMMF8F6F4Test, GEMMF8F6F4TestGPU, currentGPUISA());
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF16Test,
+        GEMMF16TestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
+                                                 rocRoller::DataType::BFloat16),
+                               ::testing::Values(16, 32),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")))));
+
+    INSTANTIATE_TEST_SUITE_P(
+        GEMMF8F6F4Test,
+        GEMMF8F6F4TestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(64, 128),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")))));
 
     INSTANTIATE_TEST_SUITE_P(GEMMF8Test, GEMMF8TestGPU, currentGPUISA());
 
@@ -2051,35 +2305,45 @@ namespace GEMMDriverTest
 
     INSTANTIATE_TEST_SUITE_P(
         GEMMMixedF8F6F4Test,
-        GEMMMixedF8F6F4TestGPU,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
-                                                                rocRoller::DataType::BF8,
-                                                                rocRoller::DataType::FP6,
-                                                                rocRoller::DataType::BF6,
-                                                                rocRoller::DataType::FP4),
-                                              ::testing::Values(rocRoller::DataType::FP8,
-                                                                rocRoller::DataType::BF8,
-                                                                rocRoller::DataType::FP6,
-                                                                rocRoller::DataType::BF6,
-                                                                rocRoller::DataType::FP4),
-                                              ::testing::Values(64, 128))));
+        MixedGEMMF8F6F4TestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(64, 128),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")))));
 
     INSTANTIATE_TEST_SUITE_P(
-        GEMMMixedScaledTest,
-        GEMMMixedScaledTestGPU,
-        ::testing::Combine(currentGPUISA(),
-                           ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
-                                                                rocRoller::DataType::BF8,
-                                                                rocRoller::DataType::FP6,
-                                                                rocRoller::DataType::BF6,
-                                                                rocRoller::DataType::FP4),
-                                              ::testing::Values(rocRoller::DataType::FP8,
-                                                                rocRoller::DataType::BF8,
-                                                                rocRoller::DataType::FP6,
-                                                                rocRoller::DataType::BF6,
-                                                                rocRoller::DataType::FP4),
-                                              ::testing::Values(64, 128),
-                                              ::testing::Values(false, true),
-                                              ::testing::Values(false, true))));
+        ScaledMixedGEMMTest,
+        ScaledMixedGEMMF8F6F4TestGPU,
+        ::testing::Combine(
+            currentGPUISA(),
+            ::testing::Combine(::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(rocRoller::DataType::FP8,
+                                                 rocRoller::DataType::BF8,
+                                                 rocRoller::DataType::FP6,
+                                                 rocRoller::DataType::BF6,
+                                                 rocRoller::DataType::FP4),
+                               ::testing::Values(64, 128),
+                               ::testing::Values(false, true),
+                               ::testing::Values(false, true),
+                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                                 std::pair<std::string, std::string>("N", "T"),
+                                                 std::pair<std::string, std::string>("T", "N"),
+                                                 std::pair<std::string, std::string>("T", "T")))));
 }

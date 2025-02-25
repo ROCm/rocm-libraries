@@ -44,6 +44,11 @@ namespace rocRoller
             HasMFMA_bf16_16x16x8,
             HasMFMA_bf16_16x16x16_1k,
 
+            HasMFMA_16x16x32_f16,
+            HasMFMA_32x32x16_f16,
+            HasMFMA_16x16x32_bf16,
+            HasMFMA_32x32x16_bf16,
+
             HasAccumOffset,
             HasFlatOffset,
 
@@ -100,6 +105,8 @@ namespace rocRoller
             HasDSReadTransposeB8,
             HasDSReadTransposeB6,
             HasDSReadTransposeB4,
+
+            HasPRNG,
 
             Count,
         };

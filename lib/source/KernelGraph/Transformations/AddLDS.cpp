@@ -261,6 +261,7 @@ namespace rocRoller
 
             VariableType variableType;
             MemoryType   memoryType;
+            bool         isTransposedTile;
 
             bool jammed;
         };
@@ -367,6 +368,9 @@ namespace rocRoller
                 unrollCoordValue = getUnsignedInt(evaluate(setCoord->value));
             }
 
+            auto op               = k.control.get<LoadTiled>(opTag);
+            auto isTransposedTile = op && op->isTransposedTile;
+
             return {userTag,
                     forLoopCoord,
                     unrollCoord,
@@ -374,6 +378,7 @@ namespace rocRoller
                     operation,
                     getVariableType(k, opTag),
                     macroTile.memoryType,
+                    isTransposedTile,
                     isJammed};
         }
 
@@ -716,7 +721,8 @@ namespace rocRoller
 
                 if(m_info[opSpec].load)
                 {
-                    k.control.setElement(opTag, LoadLDSTile(opSpec.variableType));
+                    k.control.setElement(opTag,
+                                         LoadLDSTile(opSpec.variableType, opSpec.isTransposedTile));
                 }
                 else
                 {

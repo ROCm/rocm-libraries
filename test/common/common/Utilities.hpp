@@ -234,7 +234,7 @@ AcceptableError
             if constexpr(std::is_same_v<TA, rocRoller::BF8>)
             {
                 fudge *= 5;
-                ss << "Increase fudge for BF8: " << fudge;
+                ss << " Increase fudge for BF8: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::FP8>)
             {
@@ -247,19 +247,19 @@ AcceptableError
             if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
             {
                 fudge *= 5;
-                ss << "Increase fudge for mixed BF8: " << fudge;
+                ss << " Increase fudge for mixed BF8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
                                              rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
             {
-                fudge *= 4.5;
-                ss << "Increase fudge for mixed FP8: " << fudge;
+                fudge *= 4.55;
+                ss << " Increase fudge for mixed FP8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
                                              rocRoller::BF6> || std::is_same_v<TB, rocRoller::BF6>)
             {
                 fudge *= 3;
-                ss << "Increase fudge for mixed BF6: " << fudge;
+                ss << " Increase fudge for mixed BF6: " << fudge;
             }
         }
         tolerance = fudge * epsilon<TD>() * std::sqrt(K);

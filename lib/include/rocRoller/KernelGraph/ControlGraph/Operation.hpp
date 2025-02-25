@@ -263,9 +263,10 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            LoadTiled(VariableType const varType);
+            LoadTiled(VariableType const varType, bool const isTransposedTile = false);
 
             VariableType varType;
+            bool         isTransposedTile;
 
             std::string name() const;
         };
@@ -304,9 +305,10 @@ namespace rocRoller
         struct LoadLDSTile
         {
             LoadLDSTile();
-            LoadLDSTile(VariableType const varType);
+            LoadLDSTile(VariableType const varType, bool const isTransposedTile = false);
 
             VariableType varType;
+            bool         isTransposedTile;
 
             std::string name() const;
         };

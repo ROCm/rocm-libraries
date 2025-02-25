@@ -264,6 +264,17 @@ namespace rocRoller
         return rv;
     }
 
+    std::vector<float> unpackToFloat(std::vector<Halfx2> const& halfx2)
+    {
+        auto n       = halfx2.size() * 2;
+        auto halfptr = reinterpret_cast<Half const*>(halfx2.data());
+
+        std::vector<float> rv(n);
+        for(auto i = 0; i < n; ++i)
+            rv[i] = float(halfptr[i]);
+        return rv;
+    }
+
     std::vector<float> unpackToFloat(std::vector<BFloat16> const& x)
     {
         auto n = x.size();

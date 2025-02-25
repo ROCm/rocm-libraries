@@ -110,6 +110,7 @@ namespace rocRoller
                 Register::ValuePtr                offset;
                 std::shared_ptr<BufferDescriptor> bufDesc;
                 BufferInstructionOptions          bufOpts;
+                bool                              isTransposedTile;
             };
 
             inline Generator<Instruction> generate(auto&                     dest,
@@ -169,7 +170,8 @@ namespace rocRoller
                                             Register::ValuePtr             vgpr,
                                             Register::ValuePtr             offset,
                                             CoordinateGraph::Transformer&  coords,
-                                            BufferInstructionOptions       bufOpts = {});
+                                            BufferInstructionOptions       bufOpts = {},
+                                            bool isTransposedTile                  = false);
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>

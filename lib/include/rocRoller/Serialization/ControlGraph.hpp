@@ -252,13 +252,6 @@ namespace rocRoller
                      KernelGraph::ControlGraph::LoadSGPR,
                      KernelGraph::ControlGraph::LoadLDSTile>) struct MappingTraits<Op, IO, Context>
         {
-            // If this assertion starts failing, it's likely one of these classes has had a member added.
-            static_assert(
-                std::same_as<
-                    Op,
-                    KernelGraph::ControlGraph::
-                        LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
-
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
             {
@@ -271,6 +264,14 @@ namespace rocRoller
                 if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
+                }
+                if constexpr(
+                    std::same_as<
+                        Op,
+                        KernelGraph::ControlGraph::
+                            LoadTiled> || std::same_as<Op, KernelGraph::ControlGraph::LoadLDSTile>)
+                {
+                    iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
                 }
             }
 
