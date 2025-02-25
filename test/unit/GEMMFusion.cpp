@@ -304,13 +304,14 @@ namespace GEMMDriverTest
             commandArgs.setArgument(
                 tagScalarReluAlpha, ArgumentType::Value, static_cast<T>(reluAlpha));
             // Create scratch space
-            auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
-            auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
             if(gemm.streamK)
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
             }
+            auto scratchSpaceRequired
+                = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());
+            auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
             // Host result
             std::vector<T> h_result(M * N, 0.0);

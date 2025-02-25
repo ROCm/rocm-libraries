@@ -38,6 +38,7 @@
 #include "InstructionValues/Register.hpp"
 #include "Operations/CommandArgument.hpp"
 #include "Utilities/Component.hpp"
+#include "Utilities/Random.hpp"
 
 #include "libdivide.h"
 
@@ -590,6 +591,17 @@ namespace rocRoller
             constexpr bool evaluate(T const& arg) const
             {
                 return !arg;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<RandomNumber> : public UnaryEvaluatorVisitor<RandomNumber>
+        {
+            template <typename T>
+            requires(!std::same_as<bool, T> && std::unsigned_integral<T>) constexpr T
+                evaluate(T const& arg) const
+            {
+                return LFSRRandomNumberGenerator(arg);
             }
         };
 

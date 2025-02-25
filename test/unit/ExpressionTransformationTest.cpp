@@ -248,3 +248,17 @@ TEST_F(ExpressionTransformationTest, LaunchTimeSubExpressions)
 
     EXPECT_EQ(expectedArgs, m_context->kernel()->arguments());
 }
+
+TEST_F(ExpressionTransformationTest, RandomNumberTransformation)
+{
+    // Test replacing random number expression with equivalent expressions
+    // when PRNG instruction is not available
+    auto seed = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+    seed->allocateNow();
+    auto seedExpr = seed->expression();
+
+    auto expr = std::make_shared<Expression::Expression>(Expression::RandomNumber{seedExpr});
+    EXPECT_EQ(Expression::toString(lowerPRNG(expr)),
+              "Conditional(Equal(BitwiseAnd(LogicalShiftR(v0:I, 31j), 1j), 1j), BitwiseXor(197j, "
+              "ShiftL(v0:I, 1j)), ShiftL(v0:I, 1j))");
+}

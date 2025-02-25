@@ -20,27 +20,6 @@ namespace GPUArchitectureGenerator
 {
     const std::string DEFAULT_ASSEMBLER = "/opt/rocm/bin/amdclang";
 
-    const std::vector<rocRoller::GPUArchitectureTarget> SupportedArchitectures = {
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908, {.xnack = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908, {.sramecc = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A, {.sramecc = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941, {.sramecc = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942, {.sramecc = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950, {.xnack = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX950, {.sramecc = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1010},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1011},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012, {.xnack = true}},
-        rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1030},
-    };
-
     // GPUCapability -> {Assembler Query, Assembler Options}
     const std::unordered_map<rocRoller::GPUCapability,
                              std::tuple<std::string, std::string>,
@@ -191,14 +170,17 @@ namespace GPUArchitectureGenerator
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
                                                  {.sramecc = true}},
             }},
-           {rocRoller::GPUCapability::HasWave64, SupportedArchitectures}};
+           {rocRoller::GPUCapability::HasWave64,
+            std::vector<rocRoller::GPUArchitectureTarget>(
+                rocRoller::SupportedArchitectures.begin(),
+                rocRoller::SupportedArchitectures.end())}};
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx908ISAs()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(
-            SupportedArchitectures.begin(),
-            SupportedArchitectures.end(),
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA1GPU(); });
         return retval;
@@ -208,8 +190,8 @@ namespace GPUArchitectureGenerator
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(
-            SupportedArchitectures.begin(),
-            SupportedArchitectures.end(),
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA2GPU(); });
         return retval;
@@ -219,8 +201,8 @@ namespace GPUArchitectureGenerator
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(
-            SupportedArchitectures.begin(),
-            SupportedArchitectures.end(),
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA3GPU(); });
         return retval;
@@ -230,8 +212,8 @@ namespace GPUArchitectureGenerator
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(
-            SupportedArchitectures.begin(),
-            SupportedArchitectures.end(),
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNAGPU(); });
         return retval;
@@ -240,8 +222,8 @@ namespace GPUArchitectureGenerator
     inline std::vector<rocRoller::GPUArchitectureTarget> cdnaISAs_1_2()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(SupportedArchitectures.begin(),
-                     SupportedArchitectures.end(),
+        std::copy_if(rocRoller::SupportedArchitectures.begin(),
+                     rocRoller::SupportedArchitectures.end(),
                      std::back_inserter(retval),
                      [](rocRoller::GPUArchitectureTarget const& x) -> bool {
                          return x.isCDNA1GPU() || x.isCDNA2GPU();
@@ -252,8 +234,8 @@ namespace GPUArchitectureGenerator
     inline std::vector<rocRoller::GPUArchitectureTarget> cdnaISAs_2_3()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(SupportedArchitectures.begin(),
-                     SupportedArchitectures.end(),
+        std::copy_if(rocRoller::SupportedArchitectures.begin(),
+                     rocRoller::SupportedArchitectures.end(),
                      std::back_inserter(retval),
                      [](rocRoller::GPUArchitectureTarget const& x) -> bool {
                          return x.isCDNA2GPU() || x.isCDNA3GPU();
@@ -265,8 +247,8 @@ namespace GPUArchitectureGenerator
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(
-            SupportedArchitectures.begin(),
-            SupportedArchitectures.end(),
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNA35GPU(); });
         return retval;
@@ -698,7 +680,9 @@ namespace GPUArchitectureGenerator
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
                                  std::vector<rocRoller::GPUInstructionInfo>>>
         InstructionInfos = {
-            {SupportedArchitectures,
+            {std::vector<rocRoller::GPUArchitectureTarget>(
+                 rocRoller::SupportedArchitectures.begin(),
+                 rocRoller::SupportedArchitectures.end()),
              {
                  rocRoller::GPUInstructionInfo(
                      "s_endpgm", -1, {rocRoller::GPUWaitQueueType::FinalInstruction}),

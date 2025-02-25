@@ -33,7 +33,9 @@ else
     echo "$_USER    ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
 fi
 
-if [[ -z "${_RENDER_GID}" ]]; then
+if getent group render &>/dev/null; then
+    echo "render already exists, skipping creation."
+elif [[ -z "${_RENDER_GID}" ]]; then
     echo "RENDER GID not passed in, skipping config."
 else
     echo "Configuring render group."

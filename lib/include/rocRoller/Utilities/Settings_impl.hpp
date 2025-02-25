@@ -300,7 +300,7 @@ namespace rocRoller
     inline std::string Settings::help() const
     {
         auto const& options = SettingsOptionBase::instances();
-        std::string prefix  = "Environment Variables\n";
+        std::string prefix  = "Environment variables:\n";
         return std::accumulate(
             options.begin(), options.end(), std::move(prefix), [](auto accum, auto setting) {
                 return std::move(accum) + setting->help() + "\n";

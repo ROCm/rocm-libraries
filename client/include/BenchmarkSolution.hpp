@@ -15,6 +15,11 @@ namespace rocRoller
             int numWarmUp;
             int numOuter;
             int numInner;
+
+            bool check;
+            bool visualize;
+
+            int numWGs;
         };
 
         struct BenchmarkResults
@@ -27,24 +32,6 @@ namespace rocRoller
             bool                checked = false;
             bool                correct = true;
             double              rnorm   = 1.e12;
-        };
-
-        class BenchmarkSolution
-        {
-        public:
-            rocRoller::CommandPtr       getCommand();
-            rocRoller::CommandKernelPtr getKernel();
-            BenchmarkResults            benchmark(RunParameters const& runParams,
-                                                  CommandArguments     runtimeArgs);
-
-            virtual void setContext(ContextPtr context)
-            {
-                m_kernel->setContext(context);
-            }
-
-        protected:
-            rocRoller::CommandPtr                     m_command;
-            std::shared_ptr<rocRoller::CommandKernel> m_kernel;
         };
     }
 }

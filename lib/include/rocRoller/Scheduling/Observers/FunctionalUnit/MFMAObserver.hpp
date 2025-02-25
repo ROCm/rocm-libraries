@@ -37,7 +37,7 @@ namespace rocRoller
             std::weak_ptr<Context> m_context;
         };
 
-        static_assert(CObserver<MFMAObserver>);
+        static_assert(CObserverConst<MFMAObserver>);
 
     }
 }

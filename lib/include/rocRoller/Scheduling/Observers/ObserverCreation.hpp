@@ -30,10 +30,9 @@ namespace rocRoller
         {
         };
 
-        template <class Remaining = PotentialObservers<>, CObserver... Done>
-        std::shared_ptr<Scheduling::IObserver> createObserver_Conditional(ContextPtr const& ctx,
-                                                                          const Remaining&,
-                                                                          const Done&... observers)
+        template <GPUArchitectureTarget Target, CObserver... Done>
+        std::shared_ptr<Scheduling::IObserver> createMetaObserverFiltered(
+            ContextPtr const& ctx, const PotentialObservers<>&, const Done&... observers)
         {
             using MyObserver                         = Scheduling::MetaObserver<Done...>;
             std::tuple<Done...> constructedObservers = {observers...};
@@ -41,26 +40,60 @@ namespace rocRoller
             return std::make_shared<MyObserver>(constructedObservers);
         }
 
-        template <CObserver Current,
+        template <GPUArchitectureTarget Target,
+                  CObserver             Current,
                   CObserver... TypesRemaining,
-                  template <CObserver...>
-                  class Remaining,
                   CObserver... Done>
         std::shared_ptr<Scheduling::IObserver>
-            createObserver_Conditional(ContextPtr const& ctx,
-                                       const Remaining<Current, TypesRemaining...>&,
+            createMetaObserverFiltered(ContextPtr const& ctx,
+                                       const PotentialObservers<Current, TypesRemaining...>&,
                                        const Done&... observers)
         {
+            static_assert(CObserverRuntime<Current> || CObserverConst<Current>);
             PotentialObservers<TypesRemaining...> remaining;
-            if(Current::required(ctx->targetArchitecture().target()))
+
+            if constexpr(CObserverConst<Current>)
             {
-                Current obs(ctx);
-                return createObserver_Conditional(ctx, remaining, observers..., obs);
+                if constexpr(Current::required(Target))
+                {
+                    Current obs(ctx);
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers..., obs);
+                }
+                else
+                {
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers...);
+                }
             }
             else
             {
-                return createObserver_Conditional(ctx, remaining, observers...);
+                if(Current::runtimeRequired())
+                {
+                    Current obs(ctx);
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers..., obs);
+                }
+                else
+                {
+                    return createMetaObserverFiltered<Target>(ctx, remaining, observers...);
+                }
             }
         }
-    };
+
+        template <size_t Idx = 0, CObserver... PotentialTypes>
+        std::shared_ptr<Scheduling::IObserver>
+            createMetaObserver(ContextPtr const&                            ctx,
+                               const PotentialObservers<PotentialTypes...>& potentialObservers)
+        {
+            if constexpr(Idx < SupportedArchitectures.size())
+            {
+                constexpr auto Target = SupportedArchitectures.at(Idx);
+                if(ctx->targetArchitecture().target() == Target)
+                {
+                    return createMetaObserverFiltered<Target>(ctx, potentialObservers);
+                }
+                return createMetaObserver<Idx + 1>(ctx, potentialObservers);
+            }
+            Throw<FatalError>("Unsupported Architecture",
+                              ShowValue(ctx->targetArchitecture().target()));
+        }
+    }
 }

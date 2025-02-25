@@ -1,7 +1,7 @@
 #pragma once
 
+#include <iostream>
 #include <string>
-#include <vector>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -14,7 +14,6 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-
             /**
              * @brief Indicates whether a matrix is supplied in transposed form or not
              */
@@ -61,8 +60,6 @@ namespace rocRoller
              */
             struct SolutionParameters
             {
-                ProblemParameters problemParams;
-
                 // Macro tile size
                 int macM;
                 int macN;
@@ -78,6 +75,17 @@ namespace rocRoller
                 int workgroupSizeX = 64;
                 int workgroupSizeY = 1;
 
+                // Datatype of inputs and outputs
+                std::string typeA;
+                std::string typeB;
+                std::string typeC;
+                std::string typeD;
+                std::string typeAcc;
+
+                TransposeType transA;
+                TransposeType transB;
+
+                // Other options
                 bool loadLDSA  = true;
                 bool loadLDSB  = true;
                 bool storeLDSD = true;
@@ -95,17 +103,23 @@ namespace rocRoller
                 bool        matchMemoryAccess;
 
                 bool streamK        = false;
-                int  numWGs         = 0;
                 bool streamKTwoTile = false;
+
+                std::string version;
 
                 std::string generateKernelName() const;
             };
 
             struct Result
             {
+                ProblemParameters                   problemParams;
                 SolutionParameters                  solutionParams;
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
+
+            std::ostream& operator<<(std::ostream&, TransposeType const&);
+            std::ostream& operator<<(std::ostream&, ProblemParameters const&);
+            std::ostream& operator<<(std::ostream&, SolutionParameters const&);
         }
     }
 }

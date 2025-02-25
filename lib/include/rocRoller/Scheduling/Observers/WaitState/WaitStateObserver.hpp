@@ -19,7 +19,7 @@ namespace rocRoller
         template <class T>
         concept CWaitStateObserver = requires(T obs, Instruction const& inst)
         {
-            requires CObserver<T>;
+            requires CObserverConst<T>;
 
             {
                 /*

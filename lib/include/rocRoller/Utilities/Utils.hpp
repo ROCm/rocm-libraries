@@ -30,6 +30,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <mutex>
 #include <numeric>
@@ -397,6 +398,33 @@ namespace std
         rocRoller::streamJoin(stream, array, ", ");
         return stream;
     }
+
+    template <typename T>
+    struct formatter<std::vector<T>, char>
+    {
+        template <class ParseContext>
+        constexpr ParseContext::iterator parse(ParseContext& ctx)
+        {
+            auto it = ctx.begin();
+            if(it == ctx.end())
+                return it;
+
+            if(it != ctx.end() && *it != '}')
+                throw std::format_error("Invalid format args.");
+
+            return it;
+        }
+
+        template <class FmtContext>
+        FmtContext::iterator format(std::vector<T> v, FmtContext& ctx) const
+        {
+            ostringstream out;
+            out << "[";
+            rocRoller::streamJoin(out, v, " ");
+            out << "]";
+            return std::ranges::copy(std::move(out).str(), ctx.out()).out;
+        }
+    };
 }
 
 #include "Utils_impl.hpp"

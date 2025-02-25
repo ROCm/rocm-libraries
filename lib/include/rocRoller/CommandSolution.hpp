@@ -237,7 +237,7 @@ namespace rocRoller
          *
          * @return size_t
          */
-        size_t scratchSpaceRequired() const;
+        size_t scratchSpaceRequired(RuntimeArguments const& args) const;
 
         /**
          * @brief Returns the hipFunction for the kernel

@@ -62,7 +62,7 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CObserver = requires(T a, Instruction inst, GPUArchitectureTarget const& target)
+        concept CObserver = requires(T a, Instruction inst)
         {
             //> Speculatively predict stalls if this instruction were scheduled now.
             {
@@ -76,10 +76,27 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             //> This is after all observers have had the opportunity to modify the instruction.
             {a.observe(inst)};
+        };
+
+        template <typename T>
+        concept CObserverConst = requires(T a, GPUArchitectureTarget const& target)
+        {
+            requires CObserver<T>;
 
             //> This observer is required in ctx, checking GPUArchitectureTarget if needed.
             {
                 a.required(target)
+                } -> std::convertible_to<bool>;
+        };
+
+        template <typename T>
+        concept CObserverRuntime = requires(T a)
+        {
+            requires CObserver<T>;
+
+            //> This observer is required in ctx, determined at runtime.
+            {
+                a.runtimeRequired()
                 } -> std::convertible_to<bool>;
         };
 
@@ -97,9 +114,7 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             virtual void observe(Instruction const& inst) = 0;
         };
-
     }
-
 }
 
 #include "Scheduling_impl.hpp"

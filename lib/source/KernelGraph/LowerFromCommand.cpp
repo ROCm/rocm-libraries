@@ -17,7 +17,6 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace CoordinateGraph;
         using namespace ControlGraph;
-        using namespace ControlGraph;
 
         /**
          * @brief Promote inputs to an appropriate output.

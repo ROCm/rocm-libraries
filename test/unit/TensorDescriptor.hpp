@@ -232,10 +232,10 @@ namespace rocRoller
     };
 
     template <CCommandArgumentValue T>
-    inline void setCommandTensorArg(rocRoller::CommandArguments&         commandArgs,
-                                    rocRoller::Operations::OperationTag& tag,
-                                    TensorDescriptor&                    desc,
-                                    T                                    value)
+    inline void setCommandTensorArg(rocRoller::CommandArguments&               commandArgs,
+                                    rocRoller::Operations::OperationTag const& tag,
+                                    TensorDescriptor&                          desc,
+                                    T                                          value)
     {
         commandArgs.setArgument(tag, ArgumentType::Value, value);
         commandArgs.setArgument(tag, ArgumentType::Limit, desc.totalLogicalElements());
@@ -251,10 +251,12 @@ namespace rocRoller
 
     inline DataType getDataTypeFromString(std::string const& typeName)
     {
-        if(typeName == "half")
-            return DataType::Half;
-        else if(typeName == "float")
+        if(typeName == "float")
             return DataType::Float;
+        else if(typeName == "half" || typeName == "fp16")
+            return DataType::Half;
+        else if(typeName == "bf16")
+            return DataType::BFloat16;
         else if(typeName == "fp8")
             return DataType::FP8;
         else if(typeName == "bf8")

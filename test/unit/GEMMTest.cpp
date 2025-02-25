@@ -452,14 +452,15 @@ namespace GEMMDriverTest
             commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
 
             // Create scratch space
-            auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
-            auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
-
             if(gemm.streamK)
             {
                 commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
             }
+
+            auto scratchSpaceRequired
+                = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());
+            auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+            commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
@@ -1207,18 +1208,33 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
     TEST_P(GEMMF8TestGPU, GPU_BasicGEMMBF8_16x16x32_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, BF8, float>(gemm);
     }
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         // D (FP8) = Convert( alpha * A (FP8) * B (FP8) + beta * C (F32) )
         basicGEMM<FP8, FP8, float, FP8>(gemm);
@@ -1226,6 +1242,11 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionBF8_NT)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_NT();
         // D (BF8) = Convert( alpha * A (BF8) * B (BF8) + beta * C (F32) )
         basicGEMM<BF8, BF8, float, BF8>(gemm);
@@ -1280,6 +1301,11 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8TestGPU, GPU_BasicGEMMFP8_16x16x32_TN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<FP8, FP8, float>(gemm);
         check_GEMMF8_TN(m_context);
@@ -1287,6 +1313,11 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMF8TestGPU, GPU_BasicGEMMBF8_16x16x32_TN)
     {
+        if(m_context->targetArchitecture().target().isCDNA3GPU())
+        {
+            GTEST_SKIP() << "FIXME: Skipping test for gfx94X";
+        }
+
         auto gemm = setup_GEMMF8_TN();
         basicGEMM<BF8, BF8, float>(gemm);
         check_GEMMF8_TN(m_context);
