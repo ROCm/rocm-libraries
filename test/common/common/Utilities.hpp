@@ -316,44 +316,48 @@ namespace rocRoller
                bool                      transA = false,
                bool                      transB = true);
 
-    void CPUMM(std::vector<__half>&       D,
-               const std::vector<__half>& C,
-               const std::vector<__half>& A,
-               const std::vector<__half>& B,
-               int                        M,
-               int                        N,
-               int                        K,
-               float                      alpha,
-               float                      beta,
-               bool                       transA = false,
-               bool                       transB = true);
-
-    void CPUMM(std::vector<BFloat16>&       D,
-               const std::vector<BFloat16>& C,
-               const std::vector<BFloat16>& A,
-               const std::vector<BFloat16>& B,
-               int                          M,
-               int                          N,
-               int                          K,
-               float                        alpha,
-               float                        beta,
-               bool                         transA = false,
-               bool                         transB = true);
-
-    template <typename TA, typename TB>
-    void CPUMM(std::vector<float>&       D,
-               const std::vector<float>& C,
-               const std::vector<TA>&    A,
-               const std::vector<TB>&    B,
-               int                       M,
-               int                       N,
-               int                       K,
-               float                     alpha,
-               float                     beta,
-               bool                      transA = false,
-               bool                      transB = true)
+    template <typename TA, typename TB, typename TC, typename TD>
+    void CPUMM(std::vector<TD>&       D,
+               const std::vector<TC>& C,
+               const std::vector<TA>& A,
+               const std::vector<TB>& B,
+               int                    M,
+               int                    N,
+               int                    K,
+               float                  alpha,
+               float                  beta,
+               bool                   transA = false,
+               bool                   transB = true)
     {
-        CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
+        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
+        {
+            CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
+        }
+        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
+                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
+        {
+            auto floatD = unpackToFloat(C);
+            CPUMM(floatD,
+                  floatD,
+                  unpackToFloat(A),
+                  unpackToFloat(B),
+                  M,
+                  N,
+                  K,
+                  alpha,
+                  beta,
+                  transA,
+                  transB);
+#pragma omp parallel for
+            for(std::size_t i = 0; i != floatD.size(); ++i)
+            {
+                D[i] = TD(floatD[i]);
+            }
+        }
+        else
+        {
+            Throw<FatalError>("CPUMM invalid types.");
+        }
     }
 
     void ScaledCPUMM(std::vector<float>&         D,
@@ -390,6 +394,31 @@ namespace rocRoller
             auto aConverted = unpackToFloat(A);
             auto bConverted = unpackToFloat(B);
             ScaledCPUMM(D, C, aConverted, bConverted, AX, BX, M, N, K, alpha, beta, transA, transB);
+        }
+        else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
+                          || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
+        {
+            auto aConverted = unpackToFloat(A);
+            auto bConverted = unpackToFloat(B);
+            auto floatD     = unpackToFloat(C);
+            ScaledCPUMM(floatD,
+                        floatD,
+                        aConverted,
+                        bConverted,
+                        AX,
+                        BX,
+                        M,
+                        N,
+                        K,
+                        alpha,
+                        beta,
+                        transA,
+                        transB);
+#pragma omp parallel for
+            for(std::size_t i = 0; i != floatD.size(); ++i)
+            {
+                D[i] = TD(floatD[i]);
+            }
         }
         else
         {

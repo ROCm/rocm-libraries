@@ -100,7 +100,7 @@ namespace rocRoller
         return unpackFP4x8<uint8_t>(f4x8regs.data(), f4x8regs.size());
     }
 
-    void packFP4x8(uint32_t* out, uint8_t const* data, int n)
+    void packFP4x8(uint32_t* out, uint8_t const* data, size_t n)
     {
         AssertFatal(n % 8 == 0, "Number of F4 values must be a multiple of 8.");
         std::memset(out, 0, 4 * n / 8);
@@ -239,7 +239,7 @@ namespace rocRoller
         return unpackF6x16<uint8_t, uint32_t>(f6x16regs.data(), f6x16regs.size());
     }
 
-    void packF6x16(uint32_t* out, uint8_t const* data, int n)
+    void packF6x16(uint32_t* out, uint8_t const* data, size_t n)
     {
         AssertFatal(n % 16 == 0, "Number of F6 values must be a multiple of 16.");
         std::memset(out, 0, 6 * n / 8);
