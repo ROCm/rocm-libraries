@@ -7,8 +7,11 @@ namespace rocRoller
 
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftL>> GetGenerator<Expression::ShiftL>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftL>>
+        GetGenerator<Expression::ShiftL>(Register::ValuePtr dst,
+                                         Register::ValuePtr lhs,
+                                         Register::ValuePtr rhs,
+                                         Expression::ShiftL const&);
 
     // Generator for all register types and datatypes.
     class ShiftLGenerator : public BinaryArithmeticGenerator<Expression::ShiftL>
@@ -44,7 +47,8 @@ namespace rocRoller
         // Method to generate instructions
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr value,
-                                        Register::ValuePtr shiftAmount);
+                                        Register::ValuePtr shiftAmount,
+                                        Expression::ShiftL const&);
 
         static const std::string Name;
     };

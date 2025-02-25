@@ -7,7 +7,9 @@ namespace rocRoller
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Exponential2>>
-        GetGenerator<Expression::Exponential2>(Register::ValuePtr dst, Register::ValuePtr arg);
+        GetGenerator<Expression::Exponential2>(Register::ValuePtr dst,
+                                               Register::ValuePtr arg,
+                                               Expression::Exponential2 const&);
 
     // Templated Generator class based on the return type.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
@@ -44,16 +46,18 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr arg,
+                                        Expression::Exponential2 const&);
 
         static const std::string Name;
     };
 
     template <>
     Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg);
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::Exponential2 const&);
 
     template <>
     Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Half>::generate(
-        Register::ValuePtr dst, Register::ValuePtr arg);
+        Register::ValuePtr dst, Register::ValuePtr arg, Expression::Exponential2 const&);
 }

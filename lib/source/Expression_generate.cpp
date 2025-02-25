@@ -450,6 +450,44 @@ namespace rocRoller
                     co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
+            /*
+             * Generate code for Stochastic Rounding Conversion.
+             *
+             * SR conversion is a binaray expression as it has a value (lhs) to be converted
+             * and a seed (rhs) for stochastic rounding.
+             *
+             */
+            template <typename T>
+            requires(CKernelExecuteTime<T>&& CBinary<T>&& CConversion<T>) Generator<Instruction>
+            operator()(Register::ValuePtr& dest, T const& expr)
+            {
+                // Currently GPU only supports SR conversion of F32 to FP8/BF8
+                static_assert(
+                    std::is_same_v<
+                        T,
+                        SRConvert<DataType::FP8>> || std::is_same_v<T, SRConvert<DataType::BF8>>);
+
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
+
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+
+                // Convert one value at a time
+                dest = resultPlaceholder(resultType(expr), true, results[0]->valueCount());
+
+                // Assume the seed is a single scalar value. Consider allowing a
+                // vector of seeds?
+                AssertFatal(results[1]->valueCount() == 1, "Seed should be a scalar value");
+
+                for(size_t i = 0; i < dest->valueCount(); i++)
+                {
+                    // TODO: the seed should incoporate workitem ID
+                    co_yield generateOp<T>(
+                        dest->element({i}), results[0]->element({i}), results[1]->element({0}));
+                }
+            }
+
             template <typename T>
             requires(CKernelExecuteTime<T>&& CBinary<T> && (CLogical<T> || CComparison<T>))
                 Generator<Instruction>
@@ -590,7 +628,7 @@ namespace rocRoller
                                       ? rhs
                                       : rhs->element({k});
                     co_yield generateOp<Conditional>(
-                        dest->element({k}), cond->element({k}), lhsVal, rhsVal);
+                        dest->element({k}), cond->element({k}), lhsVal, rhsVal, expr);
                 }
             }
 
@@ -643,7 +681,7 @@ namespace rocRoller
 
                 if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
                 {
-                    co_yield generateOp<Operation>(dest, results[0]);
+                    co_yield generateOp<Operation>(dest, results[0], expr);
                 }
                 else
                 {
@@ -661,7 +699,7 @@ namespace rocRoller
                                 Throw<FatalError>("Packing ratio not supported yet.");
 
                             Register::ValuePtr arg = results[0]->element({i});
-                            co_yield generateOp<Operation>(destRegs, arg);
+                            co_yield generateOp<Operation>(destRegs, arg, expr);
                         }
                     }
                     else
@@ -687,7 +725,7 @@ namespace rocRoller
                                 arg = results[0]->element({i});
                             }
 
-                            co_yield generateOp<Operation>(dest->element({i}), arg);
+                            co_yield generateOp<Operation>(dest->element({i}), arg, expr);
                         }
                     }
                 }

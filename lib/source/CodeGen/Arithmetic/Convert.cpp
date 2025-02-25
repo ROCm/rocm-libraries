@@ -27,8 +27,10 @@ namespace rocRoller
 #define DefineSpecializedGetGeneratorConvert(dtype)                                            \
     template <>                                                                                \
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert<DataType::dtype>>>            \
-        GetGenerator<Expression::Convert<DataType::dtype>>(Register::ValuePtr dst,             \
-                                                           Register::ValuePtr arg)             \
+        GetGenerator<Expression::Convert<DataType::dtype>>(                                    \
+            Register::ValuePtr dst,                                                            \
+            Register::ValuePtr arg,                                                            \
+            Expression::Convert<DataType::dtype> const&)                                       \
     {                                                                                          \
         return Component::Get<UnaryArithmeticGenerator<Expression::Convert<DataType::dtype>>>( \
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);     \
@@ -82,8 +84,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Float>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::Float>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::Float> const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);
@@ -129,8 +133,8 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Half>::generate(Register::ValuePtr dest,
-                                                                      Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::Half>::generate(
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Convert<DataType::Half> const&)
     {
         AssertFatal(arg != nullptr);
         // conversion cannot operate on ACCVGPR
@@ -165,8 +169,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Halfx2>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::Halfx2>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::Halfx2> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -184,8 +190,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::BFloat16>::generate(Register::ValuePtr dest,
-                                                                          Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::BFloat16>::generate(
+        Register::ValuePtr dest,
+        Register::ValuePtr arg,
+        Expression::Convert<DataType::BFloat16> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -210,8 +218,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::BFloat16x2>::generate(Register::ValuePtr dest,
-                                                                            Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::BFloat16x2>::generate(
+        Register::ValuePtr dest,
+        Register::ValuePtr arg,
+        Expression::Convert<DataType::BFloat16x2> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -230,8 +240,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::FP8x4>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP8x4>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::FP8x4> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -255,8 +267,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::BF8x4>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::BF8x4>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::BF8x4> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -280,8 +294,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::FP6x16>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP6x16>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::FP6x16> const&)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
@@ -289,8 +305,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::BF6x16>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::BF6x16>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::BF6x16> const&)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
@@ -298,8 +316,8 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::FP8>::generate(Register::ValuePtr dest,
-                                                                     Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::FP8>::generate(
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Convert<DataType::FP8> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -330,8 +348,8 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::BF8>::generate(Register::ValuePtr dest,
-                                                                     Register::ValuePtr arg)
+    Generator<Instruction> ConvertGenerator<DataType::BF8>::generate(
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Convert<DataType::BF8> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -362,8 +380,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::FP4x8>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::FP4x8>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::FP4x8> const&)
     {
         AssertFatal(arg != nullptr);
         auto dataType = getArithDataType(arg);
@@ -371,8 +391,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Int32>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::Int32>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::Int32> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -395,8 +417,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Int64>::generate(Register::ValuePtr dest,
-                                                                       Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::Int64>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr arg,
+                                                    Expression::Convert<DataType::Int64> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -423,8 +447,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::UInt32>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::UInt32>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::UInt32> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -447,8 +473,10 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::UInt64>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::UInt64>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::UInt64> const&)
     {
         AssertFatal(arg != nullptr);
 
@@ -475,10 +503,84 @@ namespace rocRoller
     }
 
     template <>
-    Generator<Instruction> ConvertGenerator<DataType::Double>::generate(Register::ValuePtr dest,
-                                                                        Register::ValuePtr arg)
+    Generator<Instruction>
+        ConvertGenerator<DataType::Double>::generate(Register::ValuePtr dest,
+                                                     Register::ValuePtr arg,
+                                                     Expression::Convert<DataType::Double> const&)
     {
         Throw<FatalError>("Convert to Double not supported");
+    }
+
+    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::FP8);
+    RegisterComponentTemplateSpec(SRConvertGenerator, DataType::BF8);
+
+#define DefineSpecializedGetGeneratorSRConvert(dtype)                                             \
+    template <>                                                                                   \
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::SRConvert<DataType::dtype>>>            \
+        GetGenerator<Expression::SRConvert<DataType::dtype>>(                                     \
+            Register::ValuePtr dst,                                                               \
+            Register::ValuePtr lhs,                                                               \
+            Register::ValuePtr rhs,                                                               \
+            Expression::SRConvert<DataType::dtype> const&)                                        \
+    {                                                                                             \
+        return Component::Get<BinaryArithmeticGenerator<Expression::SRConvert<DataType::dtype>>>( \
+            getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);   \
+    }
+
+    DefineSpecializedGetGeneratorSRConvert(FP8);
+    DefineSpecializedGetGeneratorSRConvert(BF8);
+#undef DefineSpecializedGetSRGeneratorConvert
+
+    template <>
+    Generator<Instruction>
+        SRConvertGenerator<DataType::FP8>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr lhs,
+                                                    Register::ValuePtr rhs,
+                                                    Expression::SRConvert<DataType::FP8> const&)
+    {
+        AssertFatal(lhs != nullptr && rhs != nullptr);
+
+        auto dataType = getArithDataType(lhs);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to FP8");
+            co_yield_(Instruction("v_cvt_sr_fp8_f32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for SR convert to FP8: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction>
+        SRConvertGenerator<DataType::BF8>::generate(Register::ValuePtr dest,
+                                                    Register::ValuePtr lhs,
+                                                    Register::ValuePtr rhs,
+                                                    Expression::SRConvert<DataType::BF8> const&)
+    {
+        AssertFatal(lhs != nullptr && rhs != nullptr);
+
+        auto dataType = getArithDataType(lhs);
+
+        switch(dataType)
+        {
+        case DataType::Float:
+        {
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "Zero out register for converting F32 to BF8");
+            co_yield_(Instruction("v_cvt_sr_bf8_f32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        break;
+        default:
+            Throw<FatalError>("Unsupported datatype for SR convert to BF8: ", ShowValue(dataType));
+        }
     }
 
 }

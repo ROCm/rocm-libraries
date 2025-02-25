@@ -14,6 +14,7 @@ namespace rocRoller
         struct E_Abs;
         struct E_Not;
         struct E_Cvt;
+        struct E_StochasticRoundingCvt;
         struct E_Add;
         struct E_Sub;
         struct E_Mul;
@@ -27,6 +28,7 @@ namespace rocRoller
                                  E_Abs,
                                  E_Not,
                                  E_Cvt,
+                                 E_StochasticRoundingCvt,
                                  E_Add,
                                  E_Sub,
                                  E_Mul,

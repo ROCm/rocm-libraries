@@ -303,3 +303,37 @@ TEST_F(CommandTest, GetRuntimeArguments)
         EXPECT_EQ(runtimeArguments.size_bytes(), 32);
     }
 }
+
+TEST_F(CommandTest, CommandKernelPredicates)
+{
+    auto command = std::make_shared<Command>();
+
+    VariableType intVal{DataType::Int32, PointerType::Value};
+
+    auto valTag  = command->allocateTag();
+    auto val_arg = command->allocateArgument(intVal, valTag, ArgumentType::Value);
+
+    auto val_exp = std::make_shared<Expression::Expression>(val_arg);
+
+    CommandKernel commandKernel(command, "PredicateTestKernel");
+
+    auto p1 = val_exp % Expression::literal(2) == Expression::literal(0);
+    Expression::setComment(p1, "val must be even");
+    auto p2 = val_exp % Expression::literal(5) == Expression::literal(0);
+    Expression::setComment(p2, "val must be divisible by 5");
+
+    commandKernel.addPredicate(p1);
+    commandKernel.addPredicate(p2);
+
+    CommandArguments commandArgs = command->createArguments();
+    for(int i = 1; i < 100; i++)
+    {
+        commandArgs.setArgument(valTag, ArgumentType::Value, i);
+        auto runtimeArguments = commandArgs.runtimeArguments();
+        EXPECT_EQ(commandKernel.matchesPredicates(runtimeArguments), i % 2 == 0 && i % 5 == 0);
+        if(!(i % 2 == 0 && i % 5 == 0))
+        {
+            EXPECT_THROW(commandKernel.launchKernel(runtimeArguments), FatalError);
+        }
+    }
+}

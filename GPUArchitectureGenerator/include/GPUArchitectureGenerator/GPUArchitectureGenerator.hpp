@@ -56,7 +56,8 @@ namespace GPUArchitectureGenerator
                             std::shared_ptr<amdisa::IsaSpec> const&,
                             std::map<std::string, std::string> const&);
 
-    rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction);
+    rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction,
+                                                         const std::string&         name = "");
 }
 
 #include "GPUArchitectureGenerator_impl.hpp"

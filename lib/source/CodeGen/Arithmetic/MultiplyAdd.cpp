@@ -11,7 +11,8 @@ namespace rocRoller
         GetGenerator<Expression::MultiplyAdd>(Register::ValuePtr dst,
                                               Register::ValuePtr a,
                                               Register::ValuePtr x,
-                                              Register::ValuePtr y)
+                                              Register::ValuePtr y,
+                                              Expression::MultiplyAdd const&)
     {
         return Component::Get<TernaryArithmeticGenerator<Expression::MultiplyAdd>>(
             getContextFromValues(dst, a, x, y), Register::Type::Vector, DataType::None);
@@ -20,7 +21,8 @@ namespace rocRoller
     Generator<Instruction> MultiplyAddGenerator::generate(Register::ValuePtr dest,
                                                           Register::ValuePtr a,
                                                           Register::ValuePtr x,
-                                                          Register::ValuePtr y)
+                                                          Register::ValuePtr y,
+                                                          Expression::MultiplyAdd const&)
 
     {
         AssertFatal(a);

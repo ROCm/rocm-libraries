@@ -11,7 +11,8 @@ namespace rocRoller
         GetGenerator<Expression::AddShiftL>(Register::ValuePtr dst,
                                             Register::ValuePtr lhs,
                                             Register::ValuePtr rhs,
-                                            Register::ValuePtr shiftAmount)
+                                            Register::ValuePtr shiftAmount,
+                                            Expression::AddShiftL const&)
     {
         return Component::Get<TernaryArithmeticGenerator<Expression::AddShiftL>>(
             getContextFromValues(dst, lhs, rhs, shiftAmount),
@@ -22,7 +23,8 @@ namespace rocRoller
     Generator<Instruction> AddShiftLGenerator::generate(Register::ValuePtr dest,
                                                         Register::ValuePtr lhs,
                                                         Register::ValuePtr rhs,
-                                                        Register::ValuePtr shiftAmount)
+                                                        Register::ValuePtr shiftAmount,
+                                                        Expression::AddShiftL const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

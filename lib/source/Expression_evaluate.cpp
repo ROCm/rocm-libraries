@@ -434,6 +434,22 @@ namespace rocRoller
             }
         };
 
+        template <DataType T_DataType>
+        struct OperationEvaluatorVisitor<SRConvert<T_DataType>>
+            : public BinaryEvaluatorVisitor<SRConvert<T_DataType>>
+        {
+            using Base       = BinaryEvaluatorVisitor<SRConvert<T_DataType>>;
+            using ResultType = typename EnumTypeInfo<T_DataType>::Type;
+
+            template <CArithmeticType T>
+            requires CCanStaticCastTo<ResultType, T> ResultType evaluate(T const& arg)
+            const
+            {
+                Base::assertNonNullPointer(arg);
+                return static_cast<ResultType>(arg);
+            }
+        };
+
         template <>
         struct OperationEvaluatorVisitor<MagicMultiple>
             : public UnaryEvaluatorVisitor<MagicMultiple>
@@ -725,6 +741,11 @@ namespace rocRoller
                 auto arg       = call(expr.arg);
                 auto evaluator = OperationEvaluatorVisitor<UnaryExp>();
                 return evaluator.call(arg);
+            }
+
+            CommandArgumentValue operator()(BitFieldExtract const& expr)
+            {
+                throw std::runtime_error("BitFieldExtract present in runtime expression.");
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)

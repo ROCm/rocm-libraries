@@ -17,7 +17,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Subtract>>
         GetGenerator<Expression::Subtract>(Register::ValuePtr dst,
                                            Register::ValuePtr lhs,
-                                           Register::ValuePtr rhs)
+                                           Register::ValuePtr rhs,
+                                           Expression::Subtract const&)
     {
         AssertFatal(dst != nullptr, "Null destination");
         // Choose the proper generator, based on the context, register type
@@ -30,7 +31,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Scalar, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -40,7 +44,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Vector, DataType::Int32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -50,7 +57,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -60,7 +70,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Vector, DataType::UInt32>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -70,7 +83,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Scalar, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
         Register::ValuePtr l0, l1, r0, r1;
@@ -90,7 +106,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Vector, DataType::Int64>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
@@ -115,7 +134,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
@@ -125,7 +147,10 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> SubtractGenerator<Register::Type::Vector, DataType::Double>::generate(
-        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+        Register::ValuePtr dest,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::Subtract const&)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

@@ -9,7 +9,8 @@ namespace rocRoller
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalAnd>>
         GetGenerator<Expression::LogicalAnd>(Register::ValuePtr dst,
                                              Register::ValuePtr lhs,
-                                             Register::ValuePtr rhs);
+                                             Register::ValuePtr rhs,
+                                             Expression::LogicalAnd const&);
 
     // Templated Generator class based on the register type and datatype.
     template <Register::Type REGISTER_TYPE, DataType DATATYPE>
@@ -53,8 +54,10 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction>
-            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr lhs,
+                                        Register::ValuePtr rhs,
+                                        Expression::LogicalAnd const&);
 
         static const std::string Name;
     };
@@ -62,8 +65,14 @@ namespace rocRoller
     // Specializations for supported Register Type / DataType combinations
     template <>
     Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool32>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::LogicalAnd const&);
     template <>
     Generator<Instruction> LogicalAndGenerator<Register::Type::Scalar, DataType::Bool64>::generate(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+        Register::ValuePtr dst,
+        Register::ValuePtr lhs,
+        Register::ValuePtr rhs,
+        Expression::LogicalAnd const&);
 }

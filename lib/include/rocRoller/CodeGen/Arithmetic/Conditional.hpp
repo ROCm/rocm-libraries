@@ -11,7 +11,8 @@ namespace rocRoller
         GetGenerator<Expression::Conditional>(Register::ValuePtr dst,
                                               Register::ValuePtr lhs,
                                               Register::ValuePtr r1hs,
-                                              Register::ValuePtr r2hs);
+                                              Register::ValuePtr r2hsw,
+                                              Expression::Conditional const&);
 
     // Generator for all register types and datatypes.
     class ConditionalGenerator : public TernaryArithmeticGenerator<Expression::Conditional>
@@ -48,7 +49,8 @@ namespace rocRoller
         Generator<Instruction> generate(Register::ValuePtr dest,
                                         Register::ValuePtr lhs,
                                         Register::ValuePtr r1hs,
-                                        Register::ValuePtr r2hs);
+                                        Register::ValuePtr r2hs,
+                                        Expression::Conditional const&);
 
         static const std::string Name;
     };

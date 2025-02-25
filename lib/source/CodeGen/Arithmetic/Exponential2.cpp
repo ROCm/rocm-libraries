@@ -8,7 +8,9 @@ namespace rocRoller
 
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Exponential2>>
-        GetGenerator<Expression::Exponential2>(Register::ValuePtr dst, Register::ValuePtr arg)
+        GetGenerator<Expression::Exponential2>(Register::ValuePtr dst,
+                                               Register::ValuePtr arg,
+                                               Expression::Exponential2 const&)
     {
         return Component::Get<UnaryArithmeticGenerator<Expression::Exponential2>>(
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
@@ -16,7 +18,7 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Float>::generate(
-        Register::ValuePtr dest, Register::ValuePtr arg)
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Exponential2 const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);
@@ -26,7 +28,7 @@ namespace rocRoller
 
     template <>
     Generator<Instruction> Exponential2Generator<Register::Type::Vector, DataType::Half>::generate(
-        Register::ValuePtr dest, Register::ValuePtr arg)
+        Register::ValuePtr dest, Register::ValuePtr arg, Expression::Exponential2 const&)
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);

@@ -7,8 +7,11 @@ namespace rocRoller
     RegisterComponent(ShiftLGenerator);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftL>> GetGenerator<Expression::ShiftL>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftL>>
+        GetGenerator<Expression::ShiftL>(Register::ValuePtr dst,
+                                         Register::ValuePtr lhs,
+                                         Register::ValuePtr rhs,
+                                         Expression::ShiftL const&)
     {
         return Component::Get<BinaryArithmeticGenerator<Expression::ShiftL>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
@@ -16,7 +19,8 @@ namespace rocRoller
 
     Generator<Instruction> ShiftLGenerator::generate(Register::ValuePtr dest,
                                                      Register::ValuePtr value,
-                                                     Register::ValuePtr shiftAmount)
+                                                     Register::ValuePtr shiftAmount,
+                                                     Expression::ShiftL const&)
     {
         co_yield describeOpArgs("dest", dest, "value", value, "shiftAmount", shiftAmount);
 

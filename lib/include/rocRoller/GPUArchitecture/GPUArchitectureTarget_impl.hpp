@@ -41,6 +41,10 @@ namespace rocRoller
             return "gfx1012";
         case GPUArchitectureGFX::GFX1030:
             return "gfx1030";
+        case GPUArchitectureGFX::GFX1200:
+            return "gfx1200";
+        case GPUArchitectureGFX::GFX1201:
+            return "gfx1201";
         default:
             return "gfxunknown";
         }
@@ -64,6 +68,9 @@ namespace rocRoller
             return "AMD RDNA 1";
         case GPUArchitectureGFX::GFX1030:
             return "AMD RDNA 2";
+        case GPUArchitectureGFX::GFX1200:
+        case GPUArchitectureGFX::GFX1201:
+            return "AMD RDNA 4";
         default:
             return "unknown";
         }

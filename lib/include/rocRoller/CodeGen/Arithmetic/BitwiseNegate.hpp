@@ -8,7 +8,9 @@ namespace rocRoller
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitwiseNegate>>
-        GetGenerator<Expression::BitwiseNegate>(Register::ValuePtr dst, Register::ValuePtr arg);
+        GetGenerator<Expression::BitwiseNegate>(Register::ValuePtr dst,
+                                                Register::ValuePtr arg,
+                                                Expression::BitwiseNegate const&);
 
     // Templated Generator class based on the return type.
     class BitwiseNegateGenerator : public UnaryArithmeticGenerator<Expression::BitwiseNegate>
@@ -44,7 +46,9 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
+        Generator<Instruction> generate(Register::ValuePtr dst,
+                                        Register::ValuePtr arg,
+                                        Expression::BitwiseNegate const&);
 
         static const std::string Name;
     };

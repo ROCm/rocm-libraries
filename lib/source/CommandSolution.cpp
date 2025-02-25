@@ -347,10 +347,44 @@ namespace rocRoller
         }
     }
 
-    bool CommandKernel::matchesPredicates(/* args */) const
+    void CommandKernel::addPredicate(Expression::ExpressionPtr expression)
     {
-        // TODO: CommandKernel predicates.
-        return true;
+        m_predicates.push_back(expression);
+    }
+
+    bool CommandKernel::matchesPredicates(RuntimeArguments const&   args,
+                                          spdlog::level::level_enum level) const
+    {
+        bool retVal = true;
+        for(auto predicate : m_predicates)
+        {
+            try
+            {
+                if(!std::get<bool>(Expression::evaluate(predicate, args)))
+                {
+                    retVal = false;
+                    std::string comment;
+                    if(!(comment = Expression::getComment(predicate)).empty())
+                    {
+                        Log::log(level, "Predicate mismatch for {}: {}", m_name, comment);
+                    }
+                    else
+                    {
+                        Log::log(level,
+                                 "Predicate {} for {} is false.",
+                                 Expression::toString(predicate),
+                                 m_name);
+                    }
+                }
+            }
+            catch(std::bad_variant_access err)
+            {
+                Throw<FatalError>(
+                    "Predicate ", Expression::toString(predicate), " does not evaluate to a bool");
+            }
+        }
+
+        return retVal;
     }
 
     void CommandKernel::setCommandParameters(CommandParametersPtr commandParams)
@@ -382,6 +416,8 @@ namespace rocRoller
         AssertFatal(m_context, "Unable to launch kernel: CommandKernel must have a Context.");
         AssertFatal(m_context->kernel(),
                     "Unable to launch kernel: Context must have an AssemblyKernel.");
+        AssertFatal(matchesPredicates(args, spdlog::level::err),
+                    "Unable to launch kernel: all CommandKernel predicates must match.");
 
         if(m_launchParameters)
         {

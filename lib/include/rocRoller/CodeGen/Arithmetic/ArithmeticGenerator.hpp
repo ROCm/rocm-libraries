@@ -84,7 +84,8 @@ namespace rocRoller
         {
         }
 
-        virtual Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg) = 0;
+        virtual Generator<Instruction>
+            generate(Register::ValuePtr dst, Register::ValuePtr arg, Operation const& expr) = 0;
 
         using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = UnaryArithmeticGenerator<Operation>;
@@ -111,8 +112,11 @@ namespace rocRoller
         {
         }
 
-        virtual Generator<Instruction>
-            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs) = 0;
+        virtual Generator<Instruction> generate(Register::ValuePtr dst,
+                                                Register::ValuePtr lhs,
+                                                Register::ValuePtr rhs,
+                                                Operation const&   expr)
+            = 0;
 
         using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = BinaryArithmeticGenerator<Operation>;
@@ -142,7 +146,8 @@ namespace rocRoller
         virtual Generator<Instruction> generate(Register::ValuePtr dst,
                                                 Register::ValuePtr arg1,
                                                 Register::ValuePtr arg2,
-                                                Register::ValuePtr arg3)
+                                                Register::ValuePtr arg3,
+                                                Operation const&   expr)
             = 0;
 
         using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
@@ -173,7 +178,8 @@ namespace rocRoller
         virtual Generator<Instruction> generate(Register::ValuePtr dst,
                                                 Register::ValuePtr arg1,
                                                 Register::ValuePtr arg2,
-                                                Register::ValuePtr arg3)
+                                                Register::ValuePtr arg3,
+                                                Operation const&   expr)
             = 0;
 
         using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
@@ -196,41 +202,48 @@ namespace rocRoller
     // Expression and arguments.
 
     template <Expression::CUnary Operation>
-    std::shared_ptr<UnaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,
-                                                                      Register::ValuePtr arg)
+    std::shared_ptr<UnaryArithmeticGenerator<Operation>>
+        GetGenerator(Register::ValuePtr dst, Register::ValuePtr arg, Operation const& expr)
     {
         return nullptr;
     }
 
     template <Expression::CUnary Operation>
-    Generator<Instruction> generateOp(Register::ValuePtr dst, Register::ValuePtr arg)
+    Generator<Instruction> generateOp(Register::ValuePtr dst,
+                                      Register::ValuePtr arg,
+                                      Operation const&   expr = Operation{})
     {
-        auto gen = GetGenerator<Operation>(dst, arg);
+        auto gen = GetGenerator<Operation>(dst, arg, expr);
         AssertFatal(gen != nullptr, "No generator");
-        co_yield gen->generate(dst, arg);
+        co_yield gen->generate(dst, arg, expr);
     }
 
     template <Expression::CBinary Operation>
-    std::shared_ptr<BinaryArithmeticGenerator<Operation>>
-        GetGenerator(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,
+                                                                       Register::ValuePtr lhs,
+                                                                       Register::ValuePtr rhs,
+                                                                       Operation const&   expr)
     {
         return nullptr;
     }
 
     template <Expression::CBinary Operation>
-    Generator<Instruction>
-        generateOp(Register::ValuePtr const dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    Generator<Instruction> generateOp(Register::ValuePtr const dst,
+                                      Register::ValuePtr       lhs,
+                                      Register::ValuePtr       rhs,
+                                      Operation const&         expr = Operation{})
     {
-        auto gen = GetGenerator<Operation>(dst, lhs, rhs);
+        auto gen = GetGenerator<Operation>(dst, lhs, rhs, expr);
         AssertFatal(gen != nullptr, "No generator");
-        co_yield gen->generate(dst, lhs, rhs);
+        co_yield gen->generate(dst, lhs, rhs, expr);
     }
 
     template <Expression::CTernary Operation>
     std::shared_ptr<TernaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,
                                                                         Register::ValuePtr arg1,
                                                                         Register::ValuePtr arg2,
-                                                                        Register::ValuePtr arg3)
+                                                                        Register::ValuePtr arg3,
+                                                                        Operation const&   expr)
     {
         return nullptr;
     }
@@ -239,11 +252,12 @@ namespace rocRoller
     Generator<Instruction> generateOp(Register::ValuePtr dst,
                                       Register::ValuePtr arg1,
                                       Register::ValuePtr arg2,
-                                      Register::ValuePtr arg3)
+                                      Register::ValuePtr arg3,
+                                      Operation const&   expr = Operation{})
     {
-        auto gen = GetGenerator<Operation>(dst, arg1, arg2, arg3);
+        auto gen = GetGenerator<Operation>(dst, arg1, arg2, arg3, expr);
         AssertFatal(gen != nullptr, "No generator");
-        co_yield gen->generate(dst, arg1, arg2, arg3);
+        co_yield gen->generate(dst, arg1, arg2, arg3, expr);
     }
     // --------------------------------------------------
     // Helper functions
@@ -292,6 +306,7 @@ namespace rocRoller
 #include "Add.hpp"
 #include "AddShiftL.hpp"
 #include "ArithmeticShiftR.hpp"
+#include "BitFieldExtract.hpp"
 #include "BitwiseAnd.hpp"
 #include "BitwiseNegate.hpp"
 #include "BitwiseOr.hpp"
