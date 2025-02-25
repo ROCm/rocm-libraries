@@ -60,7 +60,6 @@ namespace rocRoller
         struct ShiftLAdd;
         struct Conditional;
 
-        template <DataType DATATYPE>
         struct Convert;
 
         template <DataType DATATYPE>
@@ -117,26 +116,7 @@ namespace rocRoller
             ScaledMatrixMultiply,
 
             // --- Convert Operations ---
-            Convert<DataType::Half>,
-            Convert<DataType::Halfx2>,
-            Convert<DataType::BFloat16>,
-            Convert<DataType::BFloat16x2>,
-            Convert<DataType::FP8>,
-            Convert<DataType::BF8>,
-            Convert<DataType::FP8x4>,
-            Convert<DataType::BF8x4>,
-            Convert<DataType::FP6x16>,
-            Convert<DataType::BF6x16>,
-            Convert<DataType::FP4x8>,
-            Convert<DataType::Float>,
-            Convert<DataType::Double>,
-            Convert<DataType::Int32>,
-            Convert<DataType::Int64>,
-            Convert<DataType::UInt32>,
-            Convert<DataType::UInt64>,
-            Convert<DataType::Bool>,
-            Convert<DataType::Bool32>,
-            Convert<DataType::Bool64>,
+            Convert,
 
             // --- Stochastic Rounding Convert ---
             SRConvert<DataType::FP8>,

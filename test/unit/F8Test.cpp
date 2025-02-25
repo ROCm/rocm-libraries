@@ -117,7 +117,8 @@ namespace rocRollerTest
                         v_temp, v_a, Expression::BitFieldExtract{{}, F8Type, f8_idx * 8, 8});
 
                     co_yield_(Instruction::Comment("Convert to float"));
-                    co_yield generateOp<Expression::Convert<DataType::Float>>(v_temp, v_temp);
+                    co_yield generateOp<Expression::Convert>(
+                        v_temp, v_temp, Expression::Convert{.destinationType = DataType::Float});
 
                     co_yield context->mem()->storeGlobal(result_ptr,
                                                          v_temp,

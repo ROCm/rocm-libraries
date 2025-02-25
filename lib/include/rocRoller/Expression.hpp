@@ -467,13 +467,20 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
-        template <DataType DATATYPE>
         struct Convert : Unary
         {
-            constexpr static inline auto DestinationType = DATATYPE;
-            constexpr static inline auto Type            = Category::Conversion;
-            constexpr static inline auto EvalTimes       = EvaluationTimes::All();
-            constexpr static inline int  Complexity      = 2;
+            inline Convert& copyParams(const Convert& other)
+            {
+                destinationType = other.destinationType;
+
+                return *this;
+            }
+
+            constexpr static inline auto Type       = Category::Conversion;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 2;
+
+            DataType destinationType = DataType::None;
         };
 
         struct LogicalNot : Unary

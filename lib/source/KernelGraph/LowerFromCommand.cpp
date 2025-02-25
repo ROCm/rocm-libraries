@@ -470,19 +470,19 @@ namespace rocRoller
                                 {
                                 case DataType::Float:
                                     return std::make_shared<Expression::Expression>(
-                                        Expression::Convert<DataType::Float>{dflow[0]});
+                                        Expression::Convert{{.arg{dflow[0]}}, DataType::Float});
                                 case DataType::Half:
                                     return std::make_shared<Expression::Expression>(
-                                        Expression::Convert<DataType::Half>{dflow[0]});
+                                        Expression::Convert{{.arg{dflow[0]}}, DataType::Half});
                                 case DataType::FP8:
                                     return std::make_shared<Expression::Expression>(
-                                        Expression::Convert<DataType::FP8>{dflow[0]});
+                                        Expression::Convert{{.arg{dflow[0]}}, DataType::FP8});
                                 case DataType::BF8:
                                     return std::make_shared<Expression::Expression>(
-                                        Expression::Convert<DataType::BF8>{dflow[0]});
+                                        Expression::Convert{{.arg{dflow[0]}}, DataType::BF8});
                                 case DataType::BFloat16:
                                     return std::make_shared<Expression::Expression>(
-                                        Expression::Convert<DataType::BFloat16>{dflow[0]});
+                                        Expression::Convert{{.arg{dflow[0]}}, DataType::BFloat16});
                                 default:
                                     Throw<FatalError>("T_Execute E_Cvt type not implemented yet.");
                                 }

@@ -205,48 +205,44 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicSign{a});
         }
 
-        template <int idx = 0>
-        inline ExpressionPtr convertCase(DataType dt, ExpressionPtr a)
+        inline static bool convertibleTo(DataType dt)
         {
-            // Template-based recursion "loop" to automatically convert runtime
-            // enumeration to template parameter.  Depends on DataType having a
-            // Count enumeration which will terminate the recursion.
-
-            // This makes it so that if a value is added to the DataType enumeration,
-            // it will automatically be checked here.
-
-            constexpr auto theDT = static_cast<DataType>(idx);
-
-            if(dt == theDT)
-                return convert<theDT>(a);
-
-            if constexpr(idx + 1 < static_cast<int>(DataType::Count))
-                return convertCase<idx + 1>(dt, a);
-
-            Throw<FatalError>("Unsupported datatype conversion: ", ShowValue(dt));
+            return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
+                   || dt == DataType::BFloat16x2 || dt == DataType::FP8 || dt == DataType::BF8
+                   || dt == DataType::FP8x4 || dt == DataType::BF8x4 || dt == DataType::Float
+                   || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
+                   || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
+                   || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
+                   || dt == DataType::Bool32 || dt == DataType::Bool64;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
         {
-            return convertCase(dt, a);
+            // Couldn't use previous impl. of CExpression<T>
+            // (aka. std::constructible_from<Expression, T>) because Convert<DATATYPE>
+            // is not a type anymore. Convert is no longer templated.
+            // Either a runtime-check or other templatized function call is needed
+            // to make sure valid destination types for a convert.
+            // Currently, explicit runtime check is used. (Notice that checking the range
+            // of dt doesn't work because target type of convert is not consecutively
+            // laid in DataType enum.)
+            if(!convertibleTo(dt))
+                Throw<FatalError>("Expression - Unsupported datatype conversion: ", ShowValue(dt));
+
+            return std::make_shared<Expression>(Convert{{.arg{a}}, dt});
         }
 
         inline ExpressionPtr convert(VariableType vt, ExpressionPtr a)
         {
             AssertFatal(!vt.isPointer(), "Convert to pointer type not supported.", ShowValue(vt));
-            return convertCase(vt.dataType, a);
+
+            return convert(vt, a);
         }
 
         template <DataType DATATYPE>
         inline ExpressionPtr convert(ExpressionPtr a)
         {
-            // Check if Convert<DATATYPE> is an alternative of the Expression variant type.
-            // This means this function doesn't need to change if we add a new Convert<>
-            // alternative to the Expression variant type.
-            if constexpr(CExpression<Convert<DATATYPE>>)
-                return std::make_shared<Expression>(Convert<DATATYPE>{a});
-
-            Throw<FatalError>("Conversions to ", DATATYPE, " not yet supported.");
+            return convert(DATATYPE, a);
         }
 
         inline ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width)
@@ -363,26 +359,7 @@ namespace rocRoller
 
         EXPRESSION_INFO(BitFieldExtract);
 
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Half>, "Convert_Half");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Halfx2>, "Convert_Halfx2");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP8>, "Convert_FP8");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF8>, "Convert_BF8");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP8x4>, "Convert_FP8x4");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF8x4>, "Convert_BF8x4");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP6x16>, "Convert_FP6x16");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF6x16>, "Convert_BF6x16");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP4x8>, "Convert_FP4x8");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::BFloat16>, "Convert_BFloat16");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::BFloat16x2>, "Convert_BFloat16x2");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Float>, "Convert_Float");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Double>, "Convert_Double");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Int32>, "Convert_Int32");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Int64>, "Convert_Int64");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::UInt32>, "Convert_UInt32");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::UInt64>, "Convert_UInt64");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool>, "Convert_Bool");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool32>, "Convert_Bool32");
-        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool64>, "Convert_Bool64");
+        EXPRESSION_INFO(Convert);
 
         EXPRESSION_INFO_CUSTOM(SRConvert<DataType::FP8>, "SRConvert_FP8");
         EXPRESSION_INFO_CUSTOM(SRConvert<DataType::BF8>, "SRConvert_BF8");

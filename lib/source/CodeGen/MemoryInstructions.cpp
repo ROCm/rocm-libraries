@@ -166,7 +166,8 @@ namespace rocRoller
         auto unsegmented   = DataTypeInfo::Get(toPack->variableType()).unsegmentedVariableType();
         if(!unsegmented)
         {
-            Throw<FatalError>("Segmented variable type not found for ", ShowValue(variableType));
+            Throw<FatalError>("Segmented variable type not found for ",
+                              ShowValue(toPack->variableType()));
         }
 
         result = Register::Value::Placeholder(toPack->context(),

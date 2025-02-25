@@ -58,7 +58,7 @@ namespace rocRoller
          * specific Operation (Add, subtract, etc).  Does not walk the
          * expression tree.
          */
-        template <typename T>
+        template <typename T, DataType DESTTYPE = DataType::None>
         struct OperationEvaluatorVisitor
         {
         };
@@ -257,10 +257,10 @@ namespace rocRoller
                 } -> CCommandArgumentValue;
         };
 
-        template <CUnary UnaryExpr>
+        template <CUnary UnaryExpr, DataType DESTTYPE = DataType::None>
         struct UnaryEvaluatorVisitor
         {
-            using TheEvaluator = OperationEvaluatorVisitor<UnaryExpr>;
+            using TheEvaluator = OperationEvaluatorVisitor<UnaryExpr, DESTTYPE>;
 
             template <CCommandArgumentValue T>
             void assertNonNullPointer(T const& val) const
@@ -482,28 +482,28 @@ namespace rocRoller
             }
         };
 
-        template <DataType T_DataType>
-        struct OperationEvaluatorVisitor<Convert<T_DataType>>
-            : public UnaryEvaluatorVisitor<Convert<T_DataType>>
+        template <DataType DESTTYPE>
+        struct OperationEvaluatorVisitor<Convert, DESTTYPE>
+            : public UnaryEvaluatorVisitor<Convert, DESTTYPE>
         {
-            using Base       = UnaryEvaluatorVisitor<Convert<T_DataType>>;
-            using ResultType = typename EnumTypeInfo<T_DataType>::Type;
+            using Base    = UnaryEvaluatorVisitor<Convert, DESTTYPE>;
+            using ResType = typename EnumTypeInfo<DESTTYPE>::Type;
 
             template <CArithmeticType T>
-            requires CCanStaticCastTo<ResultType, T> ResultType evaluate(T const& arg)
+            requires CCanStaticCastTo<ResType, T> ResType evaluate(T const& arg)
             const
             {
                 Base::assertNonNullPointer(arg);
-                return static_cast<ResultType>(arg);
+                return static_cast<ResType>(arg);
             }
         };
 
         static_assert(
-            std::same_as<OperationEvaluatorVisitor<Convert<DataType::Double>>::ResultType, double>);
+            std::same_as<OperationEvaluatorVisitor<Convert, DataType::Double>::ResType, double>);
         static_assert(
-            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert<DataType::Double>>, float>);
+            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert, DataType::Double>, float>);
         static_assert(
-            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert<DataType::Double>>, double>);
+            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert, DataType::Double>, double>);
 
         template <>
         struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
@@ -742,6 +742,45 @@ namespace rocRoller
                 auto arg       = call(expr.arg);
                 auto evaluator = OperationEvaluatorVisitor<UnaryExp>();
                 return evaluator.call(arg);
+            }
+
+            CommandArgumentValue operator()(Convert const& expr)
+            {
+#define ConvertCase(dtype)                                                      \
+    case DataType::dtype:                                                       \
+    {                                                                           \
+        auto evaluator = OperationEvaluatorVisitor<Convert, DataType::dtype>(); \
+        return evaluator.call(arg);                                             \
+    }
+
+                auto     arg      = call(expr.arg);
+                DataType destType = expr.destinationType;
+                switch(expr.destinationType)
+                {
+                    // clang-format off
+                    ConvertCase(Half)
+                    ConvertCase(Halfx2)
+                    ConvertCase(FP8)
+                    ConvertCase(BF8)
+                    ConvertCase(FP8x4)
+                    ConvertCase(BF8x4)
+                    ConvertCase(BFloat16)
+                    ConvertCase(BFloat16x2)
+                    ConvertCase(Float)
+                    ConvertCase(Double)
+                    ConvertCase(Int32)
+                    ConvertCase(Int64)
+                    ConvertCase(UInt32)
+                    ConvertCase(UInt64)
+                    ConvertCase(Bool)
+                    ConvertCase(Bool32)
+                    ConvertCase(Bool64)
+                default: // clang-format on
+                          Throw<FatalError>(
+                              "At EvaluateVisitor: No convert operation is supported.",
+                              ShowValue(expr));
+                }
+#undef ConvertCase
             }
 
             CommandArgumentValue operator()(BitFieldExtract const& expr)

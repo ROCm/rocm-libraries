@@ -334,11 +334,8 @@ namespace rocRoller
                 {
                     if(expr.arg)
                     {
-                        auto resultVarType = resultVariableType(expr.arg);
-                        if(Expr::DestinationType == resultVarType)
-                        {
+                        if(resultVariableType(expr) == resultVariableType(expr.arg))
                             return call(expr.arg);
-                        }
                     }
                 }
 

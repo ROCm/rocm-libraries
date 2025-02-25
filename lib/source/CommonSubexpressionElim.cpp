@@ -237,8 +237,7 @@ namespace rocRoller
             {
             }
 
-            template <DataType DATATYPE>
-            ExpressionTree operator()(Convert<DATATYPE> const& expr) const
+            ExpressionTree operator()(Convert const& expr) const
             {
                 auto tree = callUnary(expr);
                 if(tree.empty())
@@ -250,7 +249,7 @@ namespace rocRoller
                 AssertFatal(tree.back().deps.size() == 1);
                 for(auto dep : tree.back().deps)
                 {
-                    if(tree.at(dep).reg->variableType() == DATATYPE)
+                    if(tree.at(dep).reg->variableType() == expr.destinationType)
                     {
                         // Simplify
                         tree.pop_back();

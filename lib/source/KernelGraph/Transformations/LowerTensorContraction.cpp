@@ -191,7 +191,12 @@ namespace rocRoller
             auto matK = sdimY.size;
             auto macK = literal(static_cast<uint>(tileA.sizes[1])); // M x K
 
-            return Expression::convert<DataType::UInt32>(matK / macK);
+            auto toUInt32 = [](ExpressionPtr expr) -> ExpressionPtr {
+                return std::make_shared<Expression::Expression>(
+                    Expression::Convert{{.arg{expr}}, DataType::UInt32});
+            };
+
+            return toUInt32(matK / macK);
         }
 
         /**

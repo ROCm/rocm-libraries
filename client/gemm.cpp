@@ -13,6 +13,7 @@
 #include <rocRoller/Serialization/GPUArchitecture.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
+#include <rocRoller/Utilities/Timer.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 #include <rocRoller/Utilities/Version.hpp>
 
@@ -631,7 +632,7 @@ namespace rocRoller::Client::GEMMClient
         bool        doSaveAsm, doSaveCO;
         std::string saveAsmPath, loadAsmPath;
         std::string saveCOPath, loadCOPath;
-        std::string resultsPath;
+        std::string resultsPath, timersPath;
     };
 
     void writeFile(std::filesystem::path const& filename, std::vector<char> const& x)
@@ -873,6 +874,15 @@ namespace rocRoller::Client::GEMMClient
 
             if(!result.benchmarkResults.correct)
                 return ReturnCodes::CorrectnessFailure;
+        }
+
+        // Dump timers
+        if(!io.timersPath.empty())
+        {
+            std::ofstream dfile;
+            dfile.open(io.timersPath, std::ofstream::out | std::ofstream::trunc);
+            dfile << rocRoller::TimerPool::CSV();
+            dfile.close();
         }
 
         return ReturnCodes::OK;
@@ -1163,6 +1173,8 @@ int main(int argc, const char* argv[])
     app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
     app.add_option("--yaml", io.resultsPath, "Save results to file.");
+
+    app.add_option("--timers", io.timersPath, "Save timers to CSV file.");
 
     //
     // generate sub-command
