@@ -62,7 +62,10 @@ TEST_F(GPUArchitectureTest, ValidateGeneratedDef)
               false);
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
                   {GPUArchitectureGFX::GFX908, {.xnack = false}}, GPUCapability::HasDirectToLds),
-              false);
+              true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  {GPUArchitectureGFX::GFX90A, {.xnack = false}}, GPUCapability::HasDirectToLds),
+              true);
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
                   {GPUArchitectureGFX::GFX908, {.xnack = false}}, GPUCapability::HasAtomicAdd),
               true);

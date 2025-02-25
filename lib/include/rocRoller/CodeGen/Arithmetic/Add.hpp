@@ -86,6 +86,13 @@ namespace rocRoller
                                                                          Expression::Add const&);
     template <>
     Generator<Instruction>
+        AddGenerator<Register::Type::M0, DataType::UInt32>::generate(Register::ValuePtr dst,
+                                                                     Register::ValuePtr lhs,
+                                                                     Register::ValuePtr rhs,
+                                                                     Expression::Add const&);
+
+    template <>
+    Generator<Instruction>
         AddGenerator<Register::Type::Scalar, DataType::Int64>::generate(Register::ValuePtr dst,
                                                                         Register::ValuePtr lhs,
                                                                         Register::ValuePtr rhs,

@@ -50,7 +50,7 @@ namespace rocRoller
         // Catch unhandled copy cases
         else
         {
-            Throw<FatalError>("Unhandled copy case: ",
+            Throw<FatalError>("Unhandled conditional copy case: ",
                               Register::toString(src->regType()),
                               " to ",
                               Register::toString(dest->regType()));
@@ -149,6 +149,12 @@ namespace rocRoller
                         "v_accvgpr_write", {dest->subset({2 * k + 1})}, {right}, {}, comment));
                 }
             }
+        }
+        else if(dest->regType() == Register::Type::M0
+                && (src->regType() == Register::Type::Literal
+                    || src->regType() == Register::Type::Scalar))
+        {
+            co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
         }
         else if(dest->regType() == Register::Type::Vector)
         {

@@ -683,6 +683,92 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
+        MemoryInstructions::bufferLoad2LDS(Register::ValuePtr                addr,
+                                           Register::ValuePtr                data,
+                                           std::shared_ptr<BufferDescriptor> buffDesc,
+                                           BufferInstructionOptions          buffOpts,
+                                           int                               numBytes)
+    {
+        AssertFatal(addr != nullptr);
+        AssertFatal(data != nullptr);
+        AssertFatal(buffOpts.lds);
+
+        // TODO : add support for other memory instruction generator where numBytes == 3 || numBytes % m_wordSize != 0
+        AssertFatal(numBytes > 0
+                        && ((numBytes < m_wordSize && numBytes != 3) || numBytes % m_wordSize == 0),
+                    "Invalid number of bytes",
+                    ShowValue(numBytes),
+                    ShowValue(m_wordSize));
+
+        auto ctx = m_context.lock();
+
+        // copy the lds write address to m0 register
+        auto m0 = ctx->getM0();
+        AssertFatal(addr->regType() == Register::Type::Scalar);
+        co_yield generate(m0, addr->expression(), ctx);
+
+        std::string offsetModifier = "offset: 0", glc = "", slc = "", lds = "lds";
+        if(buffOpts.glc)
+        {
+            glc += "glc";
+        }
+        if(buffOpts.slc)
+        {
+            slc += "slc";
+        }
+
+        auto sgprSrd = buffDesc->allRegisters();
+        auto offset  = 0;
+        auto stride  = 0;
+        do
+        {
+            // the soffset can be constant or sgpr
+            // copy the soffset to read address when offset is greater than max constant (i.e., 64)
+            auto constantOffset = (offset <= 64) ? offset : 0;
+            if(offset > 64)
+            {
+                auto sOffset  = (offset <= 64 + m_wordSize) ? offset : stride;
+                auto readAddr = data;
+                data          = nullptr;
+                co_yield generate(data, readAddr->expression() + Expression::literal(sOffset), ctx);
+            }
+
+            auto        remain = numBytes - offset;
+            std::string opEnd  = "";
+            if(remain < m_wordSize)
+            {
+                if(remain == 1)
+                {
+                    opEnd += "ubyte";
+                    stride = 1;
+                }
+                else if(remain == 2)
+                {
+                    opEnd += "ushort";
+                    stride = 2;
+                }
+            }
+            else
+            {
+                opEnd += "dword";
+                stride = m_wordSize;
+            }
+
+            co_yield_(Instruction("buffer_load_" + opEnd,
+                                  {},
+                                  {data, sgprSrd, Register::Value::Literal(constantOffset)},
+                                  {"offen", offsetModifier, glc, slc, lds},
+                                  "Load value direct to lds"));
+            co_yield generate(m0, m0->expression() + Expression::literal(stride), ctx);
+            offset += stride;
+        } while(offset < numBytes);
+
+        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+            co_yield Instruction::Wait(WaitCount::Zero(
+                "DEBUG: Wait after direct buffer load to lds", ctx->targetArchitecture()));
+    }
+
+    inline Generator<Instruction>
         MemoryInstructions::storeBuffer(Register::ValuePtr                data,
                                         Register::ValuePtr                addr,
                                         int                               offset,

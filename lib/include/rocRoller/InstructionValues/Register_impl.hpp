@@ -80,6 +80,7 @@ namespace rocRoller
         {
             switch(t)
             {
+            case Type::M0:
             case Type::SCC:
             case Type::VCC:
             case Type::VCC_LO:
@@ -101,6 +102,9 @@ namespace rocRoller
                 return lhs;
             if(!IsRegister(lhs) && IsRegister(rhs))
                 return rhs;
+            if((lhs == Type::M0 && rhs == Type::Literal)
+               || (lhs == Type::Literal && rhs == Type::M0))
+                return Type::M0;
 
             if(!IsRegister(lhs) && !IsRegister(rhs))
             {
@@ -138,6 +142,8 @@ namespace rocRoller
                 return "LDS";
             case Type::Count:
                 return "Count";
+            case Type::M0:
+                return "M0";
             case Type::SCC:
                 return "SCC";
             case Type::VCC:
@@ -487,6 +493,9 @@ namespace rocRoller
         {
             switch(m_regType)
             {
+            case Type::M0:
+                os << "m0";
+                return;
             case Type::SCC:
                 os << "scc";
                 return;
@@ -586,6 +595,7 @@ namespace rocRoller
             case Type::Label:
                 os << m_label;
                 return;
+            case Type::M0:
             case Type::SCC:
             case Type::VCC:
             case Type::VCC_LO:

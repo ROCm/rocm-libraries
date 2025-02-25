@@ -18,6 +18,7 @@ namespace rocRoller
             LocalData,
             Label,
             SCC,
+            M0,
             VCC,
             VCC_LO,
             VCC_HI,

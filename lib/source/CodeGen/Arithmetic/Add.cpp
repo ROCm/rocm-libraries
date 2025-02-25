@@ -6,6 +6,7 @@ namespace rocRoller
     // Register supported components
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::Int32);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Int32);
+    RegisterComponentTemplateSpec(AddGenerator, Register::Type::M0, DataType::UInt32);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::UInt32);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::UInt32);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::Int64);
@@ -84,6 +85,21 @@ namespace rocRoller
         co_yield swapIfRHSLiteral(lhs, rhs);
 
         co_yield_(Instruction("v_add_u32", {dest}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction>
+        AddGenerator<Register::Type::M0, DataType::UInt32>::generate(Register::ValuePtr dest,
+                                                                     Register::ValuePtr lhs,
+                                                                     Register::ValuePtr rhs,
+                                                                     Expression::Add const&)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield swapIfRHSLiteral(lhs, rhs);
+
+        co_yield_(Instruction("s_add_u32", {dest}, {lhs, rhs}, {}, ""));
     }
 
     template <>

@@ -70,6 +70,7 @@ namespace rocRoller
 
         std::shared_ptr<Register::Allocator> allocator(Register::Type registerType);
 
+        Register::ValuePtr getM0();
         Register::ValuePtr getVCC();
         Register::ValuePtr getVCC_LO();
         Register::ValuePtr getVCC_HI();
