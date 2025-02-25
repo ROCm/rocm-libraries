@@ -464,6 +464,12 @@ namespace rocRoller
 
             struct ExpressionHasNoneDTVisitor
             {
+                bool operator()(ScaledMatrixMultiply const& expr) const
+                {
+                    return call(expr.matA) || call(expr.matB) || call(expr.matC)
+                           || call(expr.scaleA) || call(expr.scaleB);
+                }
+
                 template <CTernary Expr>
                 bool operator()(Expr const& expr) const
                 {
@@ -770,19 +776,29 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
-                auto [waveA_tag, waveA] = m_graph->getDimension<WaveTile>(
-                    tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
-                auto [waveBTag, waveB] = m_graph->getDimension<WaveTile>(
-                    tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
+                auto getWaveTile = [&](NaryArgument arg) {
+                    auto [waveTag, wave] = m_graph->getDimension<WaveTile>(
+                        tag, Connections::typeArgument<WaveTile>(arg));
+                    auto [macTag, mac] = m_graph->getDimension<MacroTile>(
+                        tag, Connections::typeArgument<MacroTile>(arg));
 
-                auto [macATag, macA] = m_graph->getDimension<MacroTile>(
-                    tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-                auto [macBTag, macB] = m_graph->getDimension<MacroTile>(
-                    tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+                    wave.vgpr = m_context->registerTagManager()->getRegister(macTag);
 
-                AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
+                    return std::make_shared<WaveTile>(wave);
+                };
 
-                uint numElements = waveA.sizes[0] * waveB.sizes[1];
+                auto waveA = getWaveTile(NaryArgument::LHS);
+                auto waveB = getWaveTile(NaryArgument::RHS);
+
+                AssertFatal(
+                    mult.scaleA == mult.scaleB, ShowValue(mult.scaleA), ShowValue(mult.scaleB));
+                AssertFatal(mult.scaleA == Operations::ScaleMode::None
+                                || mult.scaleA == Operations::ScaleMode::Separate,
+                            ShowValue(mult.scaleA));
+
+                bool scaled = mult.scaleA != Operations::ScaleMode::None;
+
+                uint numElements = waveA->sizes[0] * waveB->sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
                 uint numAGPR     = numElements / wfs;
 
@@ -797,18 +813,30 @@ namespace rocRoller
                     Register::AllocationOptions{.contiguousChunkWidth
                                                 = Register::FULLY_CONTIGUOUS});
 
-                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
-                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
+                auto A = std::make_shared<Expression::Expression>(waveA);
+                auto B = std::make_shared<Expression::Expression>(waveB);
 
-                auto A
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
-                auto B
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
+                Expression::ExpressionPtr expr;
 
-                auto matMul = std::make_shared<Expression::Expression>(
-                    Expression::MatrixMultiply(A, B, D->expression()));
+                if(!scaled)
+                {
+                    // If no scales provided, we use regular matrix multiplication
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::MatrixMultiply(A, B, D->expression()));
+                }
+                else
+                {
+                    auto waveScaleA = getWaveTile(NaryArgument::LHS_SCALE);
+                    auto waveScaleB = getWaveTile(NaryArgument::RHS_SCALE);
 
-                co_yield Expression::generate(D, matMul, m_context);
+                    auto scaleA = std::make_shared<Expression::Expression>(waveScaleA);
+                    auto scaleB = std::make_shared<Expression::Expression>(waveScaleB);
+
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::ScaledMatrixMultiply(A, B, D->expression(), scaleA, scaleB));
+                }
+
+                co_yield Expression::generate(D, expr, m_context);
             }
 
             Generator<Instruction> operator()(int tag, NOP const&, Transformer coords)

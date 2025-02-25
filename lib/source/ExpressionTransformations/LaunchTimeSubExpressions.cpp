@@ -95,6 +95,26 @@ namespace rocRoller
                 return maybeLaunchEval(std::make_shared<Expression>(expr), ignoreComplexity);
             }
 
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr)
+            {
+                {
+                    auto launchResult = maybeLaunchEval(expr);
+                    if(launchResult)
+                        return launchResult;
+                }
+
+                {
+                    ScaledMatrixMultiply cpy = expr;
+                    cpy.matA                 = call(expr.matA);
+                    cpy.matB                 = call(expr.matB);
+                    cpy.matC                 = call(expr.matC);
+                    cpy.scaleA               = call(expr.scaleA);
+                    cpy.scaleB               = call(expr.scaleB);
+
+                    return std::make_shared<Expression>(cpy);
+                }
+            }
+
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {

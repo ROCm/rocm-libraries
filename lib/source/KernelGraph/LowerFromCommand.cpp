@@ -7,6 +7,7 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/BlockScale.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 namespace rocRoller
@@ -101,7 +102,7 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Linear const& tload)
             {
-                auto tensor  = m_command->getOperation<Operations::Tensor>(tload.getTensorTag());
+                auto tensor  = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
                 auto sizes   = tensor.sizes();
                 auto strides = tensor.strides();
 
@@ -156,7 +157,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Scalar");
 
-                auto scalar = m_command->getOperation<Operations::Scalar>(tload.getScalarTag());
+                auto scalar = m_command->getOperation<Operations::Scalar>(tload.getSrcTag());
                 auto user
                     = m_graph.coordinates.addElement(User(tload.getTag(), scalar.data()->name()));
                 auto vgpr = m_graph.coordinates.addElement(VGPR(tload.getTag()));
@@ -206,7 +207,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getTensorTag());
+                auto tensor = m_command->getOperation<Operations::Tensor>(tload.getSrcTag());
 
                 auto const sizes          = tensor.sizes();
                 auto const strides        = tensor.strides();
@@ -275,7 +276,7 @@ namespace rocRoller
                             "Unknown command tag",
                             ShowValue(tstore.getSrcTag()));
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
+                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getDstTag());
 
                 std::vector<int> dims;
                 auto             strides = tensor.strides();
@@ -320,7 +321,7 @@ namespace rocRoller
                             "Unknown command tag",
                             ShowValue(tstore.getSrcTag()));
 
-                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getTensorTag());
+                auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getDstTag());
 
                 std::vector<int> dims;
                 auto const       strides        = tensor.strides();
@@ -556,44 +557,109 @@ namespace rocRoller
             /**
              * @brief Translate `T_Mul` to `TensorContraction`.
              *
-             * Macro tiles in the coorindate graph are connected with
+             * Macro tiles in the coordinate graph are connected with
              * a `DataFlow` edge.
              */
             void operator()(Operations::T_Mul const& mul)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Mul");
 
-                auto A = m_dim.at(mul.a);
-                auto B = m_dim.at(mul.b);
                 auto D = m_graph.coordinates.addElement(MacroTile());
-                m_dim.insert_or_assign(mul.getTag(), D);
 
-                m_graph.coordinates.addElement(DataFlow(), {A, B}, {D});
+                m_dim[mul.getTag()] = D;
+
+                auto aSource = m_command->findTag(mul.a);
+                auto bSource = m_command->findTag(mul.b);
+
+                auto getBlockParams = rocRoller::overloaded{
+                    [&](auto const& op) {
+                        return std::make_tuple(Operations::ScaleMode::None, std::vector<size_t>());
+                    },
+                    [&](Operations::BlockScale const& op) {
+                        return std::make_tuple(op.scaleMode(), op.strides());
+                    }};
+
+                TensorContraction contraction({1}, {0});
+                std::tie(contraction.scaleModeA, contraction.scaleStridesA)
+                    = std::visit(getBlockParams, *aSource);
+                std::tie(contraction.scaleModeB, contraction.scaleStridesB)
+                    = std::visit(getBlockParams, *bSource);
 
                 // contraction dims are {1} and {0}, which is matrix multiplication
-                auto TC = m_graph.control.addElement(TensorContraction({1}, {0}));
-                m_op.insert_or_assign(mul.getTag(), TC);
-
-                auto loadA = m_op.at(mul.a);
-                auto loadB = m_op.at(mul.b);
-
-                m_graph.control.addElement(Sequence(), {loadA}, {TC});
-                m_graph.control.addElement(Sequence(), {loadB}, {TC});
-
+                auto TC            = m_graph.control.addElement(contraction);
+                m_op[mul.getTag()] = TC;
                 m_graph.mapper.connect(TC, D, NaryArgument::DEST);
-                m_graph.mapper.connect(TC, A, NaryArgument::LHS);
-                m_graph.mapper.connect(TC, B, NaryArgument::RHS);
 
-#ifndef NDEBUG
-                auto parents = m_graph.control.parentNodes(TC).to<std::vector>();
-                AssertFatal(parents.size() == 2, "T_MUL requires 2 inputs.");
-                for(auto const& parent : parents)
-                {
-                    auto node = m_graph.control.getNode(parent);
-                    AssertFatal(std::holds_alternative<LoadTiled>(node),
-                                "T_MUL inputs must be tiled.");
-                }
-#endif
+                std::vector<int> sourceDims;
+
+                auto connectBlockScale = [&](Operations::BlockScale const& op,
+                                             NaryArgument                  valueArg,
+                                             NaryArgument                  scaleArg) {
+                    auto mode = op.scaleMode();
+                    AssertFatal(mode == Operations::ScaleMode::Separate, ShowValue(mode));
+
+                    auto X      = m_dim.at(op.data());
+                    auto XScale = m_dim.at(*op.scale());
+
+                    auto loadX      = m_op.at(op.data());
+                    auto loadXScale = m_op.at(*op.scale());
+
+                    m_graph.control.addElement(Sequence(), {loadX}, {TC});
+                    m_graph.control.addElement(Sequence(), {loadXScale}, {TC});
+
+                    m_graph.mapper.connect(TC, X, valueArg);
+                    m_graph.mapper.connect(TC, XScale, scaleArg);
+
+                    sourceDims.insert(sourceDims.end(), {X, XScale});
+                };
+
+                // Handle A, either T_Load_Tiled or BlockScale
+                std::visit(
+                    rocRoller::overloaded{
+                        [&](auto const& op, auto, auto) { Throw<FatalError>("Can't go here!"); },
+
+                        [&](Operations::T_Load_Tiled const& op, NaryArgument valueArg, auto) {
+                            // This is difficult to make common with the B version since it needs to directly access mul.a or mul.b.
+                            auto A     = m_dim.at(mul.a);
+                            auto loadA = m_op.at(mul.a);
+
+                            sourceDims.push_back(A);
+
+                            m_graph.control.addElement(Sequence(), {loadA}, {TC});
+
+                            m_graph.mapper.connect(TC, A, valueArg);
+                        },
+                        connectBlockScale},
+                    *aSource,
+                    singleVariant(NaryArgument::LHS),
+                    singleVariant(NaryArgument::LHS_SCALE));
+
+                std::visit(
+                    rocRoller::overloaded{
+                        [&](auto const& op, auto, auto) { Throw<FatalError>("Can't go here!"); },
+
+                        [&](Operations::T_Load_Tiled const& op, NaryArgument valueArg, auto) {
+                            auto B     = m_dim.at(mul.b);
+                            auto loadB = m_op.at(mul.b);
+
+                            sourceDims.push_back(B);
+
+                            m_graph.control.addElement(Sequence(), {loadB}, {TC});
+
+                            m_graph.mapper.connect(TC, B, valueArg);
+                        },
+                        connectBlockScale},
+                    *bSource,
+                    singleVariant(NaryArgument::RHS),
+                    singleVariant(NaryArgument::RHS_SCALE));
+
+                m_graph.coordinates.addElement(DataFlow(), sourceDims, std::vector{D});
+            }
+
+            void operator()(Operations::BlockScale const& t)
+            {
+                AssertFatal(t.scaleMode() == Operations::ScaleMode::Separate,
+                            "Only Separate mode is supported for now.");
             }
 
             void operator()(Operations::Literal const& literal)
@@ -605,6 +671,9 @@ namespace rocRoller
             }
 
             void operator()(Operations::Nop const& x) {}
+
+            void operator()(Operations::Tensor const& t) {}
+            void operator()(Operations::Scalar const& t) {}
 
             KernelGraph call(CommandPtr command)
             {

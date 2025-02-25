@@ -99,14 +99,22 @@ namespace rocRoller
             return getValue<FP8>(args);
         case DataType::BF8:
             return getValue<BF8>(args);
+        case DataType::FP6:
+            return getValue<FP6>(args);
+        case DataType::BF6:
+            return getValue<BF6>(args);
+        case DataType::FP4:
+            return getValue<FP4>(args);
         case DataType::Int32:
             return getValue<int32_t>(args);
         case DataType::Int64:
             return getValue<int64_t>(args);
         case DataType::BFloat16:
             return getValue<BFloat16>(args);
-        // case DataType::Int8:
-        //     return getValue<int8_t>(args);
+        case DataType::UInt8:
+            return getValue<uint8_t>(args);
+        case DataType::Int8:
+            return getValue<int8_t>(args);
         case DataType::Raw32:
             return getValue<uint32_t>(args);
         case DataType::UInt32:

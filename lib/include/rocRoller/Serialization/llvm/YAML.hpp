@@ -333,7 +333,10 @@ namespace llvm
                                      rocRoller::Half,
                                      rocRoller::BFloat16,
                                      rocRoller::FP8,
-                                     rocRoller::BF8>) struct ScalarTraits<T>
+                                     rocRoller::BF8,
+                                     rocRoller::FP6,
+                                     rocRoller::BF6,
+                                     rocRoller::FP4>) struct ScalarTraits<T>
         {
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {

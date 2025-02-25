@@ -319,6 +319,7 @@ namespace rocRoller
         EXPRESSION_INFO(Add);
         EXPRESSION_INFO(Subtract);
         EXPRESSION_INFO(MatrixMultiply);
+        EXPRESSION_INFO(ScaledMatrixMultiply);
         EXPRESSION_INFO(Multiply);
         EXPRESSION_INFO(MultiplyAdd);
         EXPRESSION_INFO(MultiplyHigh);
@@ -368,6 +369,9 @@ namespace rocRoller
         EXPRESSION_INFO(Convert<DataType::BF8>);
         EXPRESSION_INFO(Convert<DataType::FP8x4>);
         EXPRESSION_INFO(Convert<DataType::BF8x4>);
+        EXPRESSION_INFO(Convert<DataType::FP6x16>);
+        EXPRESSION_INFO(Convert<DataType::BF6x16>);
+        EXPRESSION_INFO(Convert<DataType::FP4x8>);
         EXPRESSION_INFO(Convert<DataType::BFloat16>);
         EXPRESSION_INFO(Convert<DataType::BFloat16x2>);
         EXPRESSION_INFO(Convert<DataType::Float>);
@@ -437,6 +441,16 @@ namespace rocRoller
                 return {EvaluationTime::KernelExecute};
             }
 
+            EvaluationTimes operator()(ScaledMatrixMultiply const& expr) const
+            {
+                auto matA   = call(expr.matA);
+                auto matB   = call(expr.matB);
+                auto matC   = call(expr.matC);
+                auto scaleA = call(expr.scaleA);
+                auto scaleB = call(expr.scaleB);
+
+                return matA & matB & matC & scaleA & scaleB & ScaledMatrixMultiply::EvalTimes;
+            }
             template <CTernary Expr>
             EvaluationTimes operator()(Expr const& expr) const
             {

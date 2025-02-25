@@ -10,6 +10,7 @@
 #include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
@@ -262,9 +263,10 @@ namespace rocRoller
         struct LoadTiled
         {
             LoadTiled();
-            LoadTiled(VariableType const varType);
+            LoadTiled(VariableType const varType, bool const isTransposedTile = false);
 
             VariableType varType;
+            bool         isTransposedTile;
 
             std::string name() const;
         };
@@ -303,9 +305,10 @@ namespace rocRoller
         struct LoadLDSTile
         {
             LoadLDSTile();
-            LoadLDSTile(VariableType const varType);
+            LoadLDSTile(VariableType const varType, bool const isTransposedTile = false);
 
             VariableType varType;
+            bool         isTransposedTile;
 
             std::string name() const;
         };
@@ -313,7 +316,16 @@ namespace rocRoller
         /**
          * Multiply - Multiply two MacroTiles
          */
-        RR_EMPTY_STRUCT_WITH_NAME(Multiply);
+        struct Multiply
+        {
+            Multiply();
+            Multiply(Operations::ScaleMode scaleA, Operations::ScaleMode scaleB);
+
+            Operations::ScaleMode scaleA;
+            Operations::ScaleMode scaleB;
+
+            std::string name() const;
+        };
 
         /**
          * NOP - Do nothing.
@@ -383,7 +395,11 @@ namespace rocRoller
             TensorContraction(std::vector<int> const& aContractedDimensions,
                               std::vector<int> const& bContractedDimensions);
 
-            std::vector<int> aDims, bDims; // contracted dimensions
+            std::vector<int>      aDims, bDims; // contracted dimensions
+            Operations::ScaleMode scaleModeA = Operations::ScaleMode::None;
+            Operations::ScaleMode scaleModeB = Operations::ScaleMode::None;
+            std::vector<size_t>   scaleStridesA;
+            std::vector<size_t>   scaleStridesB;
 
             std::string name() const;
         };

@@ -10,6 +10,7 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -44,7 +45,7 @@ namespace rocRoller
          * between `min` and `max`.
          */
         template <typename T, typename R>
-        std::vector<T> vector(uint nx, R min, R max);
+        std::vector<typename UnsegmentedTypeOf<T>::type> vector(uint nx, R min, R max);
 
         template <std::integral T>
         T next(T min, T max);

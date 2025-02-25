@@ -181,8 +181,8 @@ namespace rocRoller::Client::GEMMClient
 {
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
-        validate(std::vector<A> const&                                   h_A,
-                 std::vector<B> const&                                   h_B,
+        validate(std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
+                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
                  std::vector<C> const&                                   h_C,
                  std::vector<D> const&                                   h_D,
                  rocRoller::Client::GEMMClient::ProblemParameters const& problemParams,
@@ -233,10 +233,24 @@ namespace rocRoller::Client::GEMMClient
 
         // Host Data
         std::cout << "Generating input data..." << std::endl;
+
+        TensorDescriptor descA(getDataTypeFromString(problemParams.typeA),
+                               {static_cast<unsigned long>(problemParams.m),
+                                static_cast<unsigned long>(problemParams.k)},
+                               problemParams.transA == TransposeType::T ? "T" : "N");
+        TensorDescriptor descB(getDataTypeFromString(problemParams.typeB),
+                               {static_cast<unsigned long>(problemParams.k),
+                                static_cast<unsigned long>(problemParams.n)},
+                               problemParams.transB == TransposeType::T ? "T" : "N");
+        TensorDescriptor descC(getDataTypeFromString(problemParams.typeC),
+                               {static_cast<unsigned long>(problemParams.m),
+                                static_cast<unsigned long>(problemParams.n)},
+                               "N");
+
         auto           seed = 31415u;
-        std::vector<A> h_A  = DGenVector<A>(problemParams.m, problemParams.k, -1.0, 1.0, seed + 1);
-        std::vector<B> h_B  = DGenVector<B>(problemParams.k, problemParams.n, -1.0, 1.0, seed + 2);
-        std::vector<C> h_C  = DGenVector<C>(problemParams.m, problemParams.n, -1.0, 1.0, seed + 3);
+        auto           h_A  = DGenVector<A>(descA, -1.0, 1.0, seed + 1);
+        auto           h_B  = DGenVector<B>(descB, -1.0, 1.0, seed + 2);
+        std::vector<C> h_C  = DGenVector<C>(descC, -1.0, 1.0, seed + 3);
         std::vector<D> h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
 
         auto d_A = make_shared_device(h_A);
@@ -345,6 +359,80 @@ namespace rocRoller::Client::GEMMClient
         }
 
         return result;
+    }
+
+    // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+    template <typename A, typename C, typename D>
+    Client::BenchmarkResults GEMMMixed(std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm,
+                                       Client::GEMMClient::SolutionParameters const&     solution,
+                                       Client::GEMMClient::ProblemParameters const&      problem,
+                                       Client::RunParameters const&                      run,
+                                       std::string            loadAssemblyFile,
+                                       GPUArchitecture const& arch,
+                                       auto                   typeB)
+    {
+        if(typeB == "fp8")
+        {
+            return GEMM<A, FP8, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+        }
+        else if(typeB == "bf8")
+        {
+            return GEMM<A, BF8, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+        }
+        else if(typeB == "fp6")
+        {
+            return GEMM<A, FP6, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+        }
+        else if(typeB == "bf6")
+        {
+            return GEMM<A, BF6, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+        }
+        else if(typeB == "fp4")
+        {
+            return GEMM<A, FP4, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+        }
+        else
+            Throw<FatalError>("Invalid type for Mixed GEMM.");
+    }
+
+    // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+    template <typename C, typename D>
+    Client::BenchmarkResults GEMMMixed(std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm,
+                                       Client::GEMMClient::SolutionParameters const&     solution,
+                                       Client::GEMMClient::ProblemParameters const&      problem,
+                                       Client::RunParameters const&                      run,
+                                       std::string            loadAssemblyFile,
+                                       GPUArchitecture const& arch,
+                                       auto                   typeA,
+                                       auto                   typeB)
+    {
+        if(typeA == "fp8")
+        {
+            return GEMMMixed<FP8, C, D>(
+                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+        }
+        else if(typeA == "bf8")
+        {
+            return GEMMMixed<BF8, C, D>(
+                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+        }
+        else if(typeA == "fp6")
+        {
+            return GEMMMixed<FP6, C, D>(
+                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+        }
+        else if(typeA == "bf6")
+        {
+            return GEMMMixed<BF6, C, D>(
+                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+        }
+        else if(typeA == "fp4")
+        {
+            return GEMMMixed<FP4, C, D>(
+                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+        }
+        else
+            Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
     /*
@@ -546,6 +634,11 @@ namespace rocRoller::Client::GEMMClient
                 run.numInner  = 1;
             }
 
+            auto isF8F6F4 = [](auto dtype) {
+                return (dtype == "fp8" || dtype == "bf8" || dtype == "fp6" || dtype == "bf6"
+                        || dtype == "fp4");
+            };
+
             Client::GEMMClient::Result result;
 
             result.problemParams              = problem;
@@ -587,6 +680,36 @@ namespace rocRoller::Client::GEMMClient
             {
                 result.benchmarkResults = GEMM<BF8, BF8, float, float>(
                     gemm, solution, problem, run, loadAssemblyFile, arch);
+            }
+            else if(problem.typeA == "fp6" && problem.typeB == "fp6" && problem.typeC == "float"
+                    && problem.typeD == "float")
+            {
+                result.benchmarkResults = GEMM<FP6, FP6, float, float>(
+                    gemm, solution, problem, run, loadAssemblyFile, arch);
+            }
+            else if(problem.typeA == "bf6" && problem.typeB == "bf6" && problem.typeC == "float"
+                    && problem.typeD == "float")
+            {
+                result.benchmarkResults = GEMM<BF6, BF6, float, float>(
+                    gemm, solution, problem, run, loadAssemblyFile, arch);
+            }
+            else if(problem.typeA == "fp4" && problem.typeB == "fp4" && problem.typeC == "float"
+                    && problem.typeD == "float")
+            {
+                result.benchmarkResults = GEMM<FP4, FP4, float, float>(
+                    gemm, solution, problem, run, loadAssemblyFile, arch);
+            }
+            else if((problem.typeA != problem.typeB) && isF8F6F4(problem.typeA)
+                    && isF8F6F4(problem.typeB))
+            {
+                result.benchmarkResults = GEMMMixed<float, float>(gemm,
+                                                                  solution,
+                                                                  problem,
+                                                                  run,
+                                                                  loadAssemblyFile,
+                                                                  arch,
+                                                                  problem.typeA,
+                                                                  problem.typeB);
             }
             else
             {
@@ -701,10 +824,12 @@ int main(int argc, const char* argv[])
     app.option_defaults()->ignore_case()->group("Type parameters");
     app.add_option("--type_A",
                    types.typeA,
-                   "Datatype of A matrix [float | half | bf16 | fp8 | bf8].  Default: float.");
+                   "Datatype of A matrix [float | half | bf16 | fp8 | bf8 | fp6 | bf6 | fp4].  "
+                   "Default: float.");
     app.add_option("--type_B",
                    types.typeB,
-                   "Datatype of B matrix [float | half | bf16 | fp8 | bf8].  Default: float.");
+                   "Datatype of B matrix [float | half | bf16 | fp8 | bf8 | fp6 | bf6 | fp4].  "
+                   "Default: float.");
     app.add_option(
         "--type_C", types.typeC, "Datatype of C matrix [float | half | bf16].  Default: float.");
     app.add_option(
@@ -934,7 +1059,8 @@ int main(int argc, const char* argv[])
     io.doSave = saveOption->count() > 0;
 
     // Set default MFMA sizes
-    if(solution.typeA == "float" && solution.typeB == "float")
+    if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
+       && problem.typeD == "float")
     {
         if(solution.waveM == -1)
             solution.waveM = 32;

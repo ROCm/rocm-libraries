@@ -37,10 +37,14 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/Costs/Cost.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/DataTypes_F8_Utils.cpp
+  ${CMAKE_SOURCE_DIR}/lib/source/DataTypes_F6_Utils.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/DataTypes_BF16_Utils.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/Error.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/Logging.cpp
   ${CMAKE_SOURCE_DIR}/lib/source/Scheduler.cpp
+  ${CMAKE_SOURCE_DIR}/lib/source/Utilities/Settings.cpp
+  ${CMAKE_SOURCE_DIR}/lib/source/Timer.cpp
+
   ${ROCROLLER_DEFAULT_ARCHITECTURE_CPP_FILE}
   ${isa_spec_manager_SOURCES}
 )

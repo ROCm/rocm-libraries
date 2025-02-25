@@ -39,6 +39,7 @@ namespace rocRoller
         void GetCurrentDevices(std::vector<GPUArchitecture>&, int&);
 
         std::vector<GPUArchitectureTarget> getAllSupportedISAs();
+        std::vector<GPUArchitectureTarget> getCDNAISAs();
         std::vector<GPUArchitectureTarget> getMFMASupportedISAs();
 
         std::map<GPUArchitectureTarget, GPUArchitecture> LoadLibrary();

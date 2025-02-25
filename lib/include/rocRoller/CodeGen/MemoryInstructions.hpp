@@ -239,6 +239,24 @@ namespace rocRoller
                                          bool               high    = false);
 
         /**
+         * @brief Generate the instructions required to perform a transpose load from LDS.
+         *
+         *
+         * @param dest The register to store the transpose-loaded data in.
+         * @param addr  The register containing the address to transpose load the data from.
+         * @param offset Offset to be added to addr.
+         * @param numBytes The number of bytes to load.
+         * @param elementBits number of bits of variable type to load.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         */
+        Generator<Instruction> transposeLoadLocal(Register::ValuePtr dest,
+                                                  Register::ValuePtr addr,
+                                                  int                offset,
+                                                  int                numBytes,
+                                                  uint               elementBits,
+                                                  std::string const  comment = "");
+
+        /**
          * @brief Generate the instructions required to perform an LDS store.
          *
          *
@@ -326,6 +344,7 @@ namespace rocRoller
 
         int chooseWidth(int numWords, const std::vector<int>& potentialWidths, int maxWidth) const;
         std::string            genOffsetModifier(int) const;
+        Generator<Instruction> addLargerOffset2Addr(int&, Register::ValuePtr&, std::string);
         Generator<Instruction> genLocalAddr(Register::ValuePtr& addr) const;
         Generator<Instruction> packForStore(Register::ValuePtr& result,
                                             Register::ValuePtr  toPack) const;

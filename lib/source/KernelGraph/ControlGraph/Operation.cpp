@@ -60,8 +60,9 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadTiled::LoadTiled() = default;
-    LoadTiled::LoadTiled(rocRoller::VariableType const varType)
+    LoadTiled::LoadTiled(rocRoller::VariableType const varType, bool const isTransposedTile)
         : varType(varType)
+        , isTransposedTile(isTransposedTile)
     {
     }
 
@@ -81,8 +82,9 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     LoadLDSTile::LoadLDSTile() = default;
-    LoadLDSTile::LoadLDSTile(VariableType const varType)
+    LoadLDSTile::LoadLDSTile(VariableType const varType, bool const isTransposedTile)
         : varType(varType)
+        , isTransposedTile(isTransposedTile)
     {
     }
 
@@ -114,6 +116,18 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
     }
 
+    Multiply::Multiply()
+        : scaleA(Operations::ScaleMode::None)
+        , scaleB(Operations::ScaleMode::None)
+    {
+    }
+
+    Multiply::Multiply(Operations::ScaleMode scaleA_, Operations::ScaleMode scaleB_)
+        : scaleA(scaleA_)
+        , scaleB(scaleB_)
+    {
+    }
+
     RR_CLASS_NAME_IMPL(SetCoordinate);
     RR_CLASS_NAME_IMPL(ConditionalOp);
     RR_CLASS_NAME_IMPL(AssertOp);
@@ -127,6 +141,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     RR_CLASS_NAME_IMPL(LoadVGPR);
     RR_CLASS_NAME_IMPL(LoadSGPR);
     RR_CLASS_NAME_IMPL(LoadLDSTile);
+    RR_CLASS_NAME_IMPL(Multiply);
     RR_CLASS_NAME_IMPL(StoreTiled);
     RR_CLASS_NAME_IMPL(StoreSGPR);
     RR_CLASS_NAME_IMPL(StoreLDSTile);

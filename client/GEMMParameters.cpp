@@ -35,7 +35,8 @@ namespace rocRoller
                 }
 
                 rv << "_MI";
-                rocRoller::streamJoin(rv, std::vector{waveM, waveN, waveK, waveB}, "x");
+                rocRoller::streamJoin(
+                    rv, std::vector{waveM, waveN, waveK, (waveB < 0 ? -waveB : waveB)}, "x");
 
                 rv << "_" << scheduler;
 

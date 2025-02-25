@@ -13,7 +13,9 @@ set(rocroller_src
  source/CommonSubexpressionElim.cpp
  source/Context.cpp
  source/DataTypes.cpp
+ source/DataTypes_Utils.cpp
  source/DataTypes_F8_Utils.cpp
+ source/DataTypes_F6_Utils.cpp
  source/DataTypes_BF16_Utils.cpp
  source/Error.cpp
  source/ExecutableKernel.cpp
@@ -84,6 +86,7 @@ set(rocroller_src
  source/CodeGen/Arithmetic/MultiplyAdd.cpp
  source/CodeGen/Arithmetic/MultiplyHigh.cpp
  source/CodeGen/Arithmetic/Negate.cpp
+ source/CodeGen/Arithmetic/ScaledMatrixMultiply.cpp
  source/CodeGen/Arithmetic/ShiftL.cpp
  source/CodeGen/Arithmetic/ShiftLAdd.cpp
  source/CodeGen/Arithmetic/Subtract.cpp
@@ -127,6 +130,7 @@ set(rocroller_src
  source/KernelGraph/Transformations/AddConvert.cpp
  source/KernelGraph/Transformations/AddDeallocate.cpp
  source/KernelGraph/Transformations/AddLDS.cpp
+ source/KernelGraph/Transformations/AddF6LDSPadding.cpp
  source/KernelGraph/Transformations/AddStreamK.cpp
  source/KernelGraph/Transformations/CleanArguments.cpp
  source/KernelGraph/Transformations/CleanLoops.cpp
@@ -172,9 +176,13 @@ set(rocroller_src
  source/Observers/XDLWrite90a.cpp
  source/Observers/MFMAObserver.cpp
 
- source/Operations/Operation.cpp
- source/Operations/TensorScalar.cpp
  source/Operations/BlockScale.cpp
+ source/Operations/Operation.cpp
+ source/Operations/T_LoadStore.cpp
+ source/Operations/TensorScalar.cpp
+
+ source/Utilities/Settings.cpp
+
 
  source/Schedulers/CooperativeScheduler.cpp
  source/Schedulers/PriorityScheduler.cpp
@@ -214,6 +222,7 @@ target_link_options(rocroller PUBLIC ${EXTRA_LINK_OPTIONS})
 #target_compile_options(rocroller PUBLIC -fconcepts-diagnostics-depth=2)
 target_include_directories(rocroller PUBLIC
                            include
+                           include/rocRoller
                            )
 
 # Using SYSTEM include paths for third party libraries speeds up cppcheck a lot
