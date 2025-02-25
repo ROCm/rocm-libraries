@@ -51,6 +51,19 @@ namespace rocRoller
                                                   CoordinateGraph::Transformer     coords);
 
             /**
+             * @brief Generate instructions needed to load a tile from global memory direct to lds
+             *
+             * @param tag The tag of the node in the control graph
+             * @param load The node in the control graph
+             * @param coords Known coordinates
+             * @return Generator<Instruction>
+             */
+            Generator<Instruction>
+                genLoadTileDirect2LDS(int                                     tag,
+                                      ControlGraph::LoadTileDirect2LDS const& load,
+                                      CoordinateGraph::Transformer            coords);
+
+            /**
              * @brief Generate instructions needed to store a tile to global memory
              *
              * @param tag The tag of the node in the control graph
@@ -123,7 +136,8 @@ namespace rocRoller
             Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,
                                                         int                          tag,
-                                                        bool                         preserveOffset);
+                                                        bool                         preserveOffset,
+                                                        bool                         direct2LDS = false);
 
             /**
              * @brief Generate stride (in bytes).
@@ -179,6 +193,12 @@ namespace rocRoller
             Generator<Instruction> moveTileColStrideOne(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileRuntimeStrides(LoadStoreTileInfo& info);
+            template <MemoryInstructions::MemoryDirection Dir>
+            Generator<Instruction> moveTileDirect2LDS(LoadStoreTileInfo& info,
+                                                      int                numBytes,
+                                                      bool               setM0,
+                                                      Register::ValuePtr readOffset,
+                                                      Register::ValuePtr readAddr);
             Generator<Instruction> loadTileLiteralStridesPack(LoadStoreTileInfo& info);
             Generator<Instruction> loadTileRuntimeStridesPack(LoadStoreTileInfo& info);
 
@@ -198,6 +218,10 @@ namespace rocRoller
             Generator<Instruction> loadMacroTileWAVECIACCUM(int                            tag,
                                                             ControlGraph::LoadTiled const& load,
                                                             CoordinateGraph::Transformer   coords);
+            Generator<Instruction>
+                loadMacroTileDirect2LDS(int                                     tag,
+                                        ControlGraph::LoadTileDirect2LDS const& load,
+                                        CoordinateGraph::Transformer            coords);
 
             // Store Tile Helpers
             Generator<Instruction> storeMacroTileLDS(int                               tag,

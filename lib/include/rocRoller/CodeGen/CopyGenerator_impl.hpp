@@ -64,10 +64,10 @@ namespace rocRoller
         auto context = m_context.lock();
         // Check for invalid copies
         if(dest->regType() == Register::Type::Scalar
-           && (src->regType() == Register::Type::Vector
-               || src->regType() == Register::Type::Accumulator))
+           && src->regType() == Register::Type::Accumulator)
         {
-            Throw<FatalError>("Can not copy vector register into scalar register");
+
+            Throw<FatalError>("Can not copy accumulator register into scalar register");
         }
 
         if(src->sameAs(dest))
@@ -267,6 +267,13 @@ namespace rocRoller
             {
                 co_yield_(Instruction("s_mov_b32", {dest}, {src}, {}, comment));
             }
+        }
+        // Vector -> Scalar
+        else if(dest->regType() == Register::Type::Scalar
+                && src->regType() == Register::Type::Vector)
+        {
+
+            co_yield_(Instruction("v_readfirstlane_b32", {dest}, {src}, {}, comment));
         }
         // Catch unhandled copy cases
         else

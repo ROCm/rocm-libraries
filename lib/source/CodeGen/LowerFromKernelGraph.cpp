@@ -881,6 +881,16 @@ namespace rocRoller
                 co_yield m_loadStoreTileGenerator.genStoreLDSTile(tag, store, coords);
             }
 
+            Generator<Instruction>
+                operator()(int tag, LoadTileDirect2LDS const& load, Transformer coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadTileDirect2LDS({})", tag);
+                co_yield Instruction::Comment("GEN: LoadTileDirect2LDS");
+
+                co_yield m_loadStoreTileGenerator.genLoadTileDirect2LDS(tag, load, coords);
+            }
+
             Generator<Instruction> operator()(int tag, StoreVGPR const& store, Transformer coords)
             {
                 co_yield Instruction::Comment("GEN: StoreVGPR");

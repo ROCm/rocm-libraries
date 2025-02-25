@@ -69,10 +69,11 @@ namespace CopyGeneratorTest
         auto i32minustwo = Register::Value::Literal(i32);
         auto i64minustwo = Register::Value::Literal(i64);
 
-        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(i32sr, i32vr)); }, FatalError);
         EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(ir, i32vr)); }, FatalError);
         EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(literal, i32vr)); },
                      FatalError);
+
+        m_context->schedule(m_context->copier()->copy(i32sr, i32vr));
 
         m_context->schedule(m_context->copier()->copy(i32sr, i32sr));
         m_context->schedule(m_context->copier()->copy(i32sr, literal));
@@ -102,6 +103,7 @@ namespace CopyGeneratorTest
         m_context->schedule(m_context->copier()->copy(i32vr, m_context->getSCC()));
 
         std::string expectedOutput = R"(
+            v_readfirstlane_b32 s0, v0
             // s_mov_b32 s0, s0         Omitted due to same registers
             s_mov_b32 s0, 20
             // v_mov_b32 v0, v0         Omitted due to same registers

@@ -1478,8 +1478,57 @@ namespace MemoryInstructionsTest
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
             bufInstOpts.lds  = true;
 
-            co_yield m_context->mem()->bufferLoad2LDS(
-                s_offset, vgprSerial, bufDesc, bufInstOpts, N);
+            auto      remain       = N;
+            auto      bytesPerMove = 0;
+            const int wordSize     = 4;
+
+            auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
+            auto m0                 = m_context->getM0();
+
+            do
+            {
+                if(bytesPerMove == 0)
+                {
+                    co_yield generate(m0, s_offset->expression(), m_context);
+                }
+                else
+                {
+                    // set LDS write base address
+                    co_yield generate(m0,
+                                      m0->expression()
+                                          + Expression::literal(bytesPerMove * wordgroupSizeTotal),
+                                      m_context);
+                    // set global read address
+                    co_yield generate(vgprSerial,
+                                      vgprSerial->expression() + Expression::literal(bytesPerMove),
+                                      m_context);
+                }
+
+                auto maxWidth = (m_context->targetArchitecture().HasCapability(
+                                    GPUCapability::HasWiderDirectToLds))
+                                    ? 4
+                                    : 1;
+                if(remain <= maxWidth * wordSize)
+                {
+                    if(remain == 1 || remain == 2 || remain == 4 || remain == 12 || remain == 16)
+                    {
+                        bytesPerMove = remain;
+                    }
+                    else
+                    {
+                        bytesPerMove = wordSize;
+                    }
+                }
+                else
+                {
+                    bytesPerMove = maxWidth * wordSize;
+                }
+                co_yield m_context->mem()->barrier();
+                co_yield m_context->mem()->bufferLoad2LDS(
+                    vgprSerial, bufDesc, bufInstOpts, bytesPerMove);
+                remain -= bytesPerMove;
+            } while(remain > 0);
+
             co_yield m_context->mem()->barrier();
             co_yield m_context->mem()->loadLocal(v_ptr, v_lds, 0, N);
 

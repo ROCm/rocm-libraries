@@ -97,6 +97,8 @@ set(
   unit/KernelTest.cpp
   unit/LDSTest.cpp
   unit/LabelTest.cpp
+  unit/LDSTest.cpp
+  unit/LDSTileCopyTest.cpp
   unit/LockTest.cpp
   unit/LowerExponentialTest.cpp
   unit/MFMAHazardObserverTest.cpp

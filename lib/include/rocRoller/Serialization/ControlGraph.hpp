@@ -270,6 +270,7 @@ namespace rocRoller
                      KernelGraph::ControlGraph::LoadTiled,
                      KernelGraph::ControlGraph::LoadVGPR,
                      KernelGraph::ControlGraph::LoadSGPR,
+                     KernelGraph::ControlGraph::LoadTileDirect2LDS,
                      KernelGraph::ControlGraph::LoadLDSTile>) struct MappingTraits<Op, IO, Context>
         {
             using iot = IOTraits<IO>;

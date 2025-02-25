@@ -477,11 +477,20 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(StoreLDSTile const& op, int tag)
     {
-        auto dst = m_graph.mapper.get<MacroTile>(tag);
-        auto lds = m_graph.mapper.get<LDS>(tag);
-        trackRegister(tag, dst, ReadWrite::READ);
+        auto source = m_graph.mapper.get<MacroTile>(tag);
+        auto lds    = m_graph.mapper.get<LDS>(tag);
+        trackRegister(tag, source, ReadWrite::READ);
         trackRegister(tag, lds, ReadWrite::WRITE);
-        trackConnections(tag, {dst, lds}, ReadWrite::READ);
+        trackConnections(tag, {source, lds}, ReadWrite::READ);
+    }
+
+    void ControlFlowRWTracer::operator()(LoadTileDirect2LDS const& op, int tag)
+    {
+        auto source = m_graph.mapper.get<MacroTile>(tag);
+        auto dst    = m_graph.mapper.get<LDS>(tag);
+        trackRegister(tag, source, ReadWrite::READ);
+        trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {source, dst}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)

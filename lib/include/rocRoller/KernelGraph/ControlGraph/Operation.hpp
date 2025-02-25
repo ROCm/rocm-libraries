@@ -311,6 +311,16 @@ namespace rocRoller
             std::string name() const;
         };
 
+        struct LoadTileDirect2LDS
+        {
+            LoadTileDirect2LDS();
+            LoadTileDirect2LDS(VariableType const varType);
+
+            VariableType varType;
+
+            std::string name() const;
+        };
+
         /**
          * Multiply - Multiply two MacroTiles
          */

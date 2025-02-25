@@ -118,6 +118,7 @@ namespace rocRoller
             using BaseDimension::BaseDimension;
 
             User(std::string const& name);
+            User(std::string const& name, Expression::ExpressionPtr size);
             User(Operations::OperationTag commandTag, std::string const& name);
             User(Operations::OperationTag  commandTag,
                  std::string const&        name,

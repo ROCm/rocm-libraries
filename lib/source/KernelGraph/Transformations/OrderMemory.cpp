@@ -20,6 +20,8 @@ namespace rocRoller
                 ambiguousNodes.insert(pair);
             for(auto pair : graph.control.ambiguousNodes<CG::StoreLDSTile>())
                 ambiguousNodes.insert(pair);
+            for(auto pair : graph.control.ambiguousNodes<CG::LoadTileDirect2LDS>())
+                ambiguousNodes.insert(pair);
             for(auto pair : graph.control.ambiguousNodes<CG::LoadLinear>())
                 ambiguousNodes.insert(pair);
             for(auto pair : graph.control.ambiguousNodes<CG::StoreLinear>())
