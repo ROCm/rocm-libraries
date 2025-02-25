@@ -197,13 +197,14 @@ set(
   catch/CommandTest.cpp
   catch/CustomAssertionTest.cpp
   catch/CustomMatcherTest.cpp
+  catch/ExpressionContainsSubExpressionTest.cpp
   catch/ExpressionIdenticalTest.cpp
   catch/ExpressionSerializationTest.cpp
   catch/ExpressionTest.cpp
   catch/ExpressionToStringTest.cpp
   catch/ExpressionTransformationTest.cpp
-  catch/ExpressionContainsSubExpressionTest.cpp
   catch/FastArithmeticTest.cpp
+  catch/IdentifyParallelDimensionsTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp
   catch/RandomNumberExpressionTest.cpp

@@ -75,15 +75,18 @@ namespace rocRoller
             auto                topForLoopCoord = kgraph.mapper.get<ForLoop>(forLoop);
             ControlFlowRWTracer tracer(kgraph, forLoop);
             auto                readwrite = tracer.coordinatesReadWrite();
+
             // Coordinates that are read/write in loop body
             std::unordered_set<int> coordinates;
             for(auto m : readwrite)
                 coordinates.insert(m.coordinate);
+
             // Coordinates with loop-carried-dependencies; true by
             // default.
             std::unordered_set<int> loopCarriedDependencies;
             for(auto m : readwrite)
                 loopCarriedDependencies.insert(m.coordinate);
+
             // Now we want to determine which coordinates don't have
             // loop carried dependencies...
             //
@@ -99,6 +102,7 @@ namespace rocRoller
             for(auto coordinate : coordinates)
             {
                 std::optional<int> writeOperation;
+
                 // Is coordinate RAW?
                 //
                 // RAW finite state machine moves through:
@@ -131,6 +135,7 @@ namespace rocRoller
                 if(raw != RAW::READ)
                     continue;
                 AssertFatal(writeOperation);
+
                 // Does the coordinate transform for the write
                 // operation contain the loop iteration?
                 auto [required, path] = findAllRequiredCoordinates(*writeOperation, kgraph);
@@ -140,11 +145,13 @@ namespace rocRoller
                     loopCarriedDependencies.erase(coordinate);
                     continue;
                 }
+
                 auto forLoopCoords = filterCoordinates<ForLoop>(required, kgraph);
                 for(auto forLoopCoord : forLoopCoords)
                     if(forLoopCoord == topForLoopCoord)
                         loopCarriedDependencies.erase(coordinate);
             }
+
             // For the loop-carried-depencies, find the write operation.
             for(auto coordinate : loopCarriedDependencies)
             {
@@ -158,6 +165,7 @@ namespace rocRoller
             }
             return result;
         }
+
         /**
          * @brief Make operations sequential.
          *
@@ -193,11 +201,13 @@ namespace rocRoller
                                          {sequentialOperations[i + 1].front()});
             }
         }
+
         UnrollLoops::UnrollLoops(CommandParametersPtr params, ContextPtr context)
             : m_params(params)
             , m_context(context)
         {
         }
+
         void UnrollLoops::unrollLoop(KernelGraph& graph, int tag)
         {
             if(m_unrolledLoopOps.count(tag) > 0)
@@ -205,7 +215,9 @@ namespace rocRoller
                 Log::debug("  Unrolled loop {} already, skipping.", tag);
                 return;
             }
+
             m_unrolledLoopOps.insert(tag);
+
             auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::vector>();
             {
                 // Unroll contained loops first.
@@ -219,20 +231,28 @@ namespace rocRoller
                     }
                 }
             }
+
             auto unrollAmount = getUnrollAmount(graph, tag, m_params);
+
             Log::debug("  Unrolling loop {}, amount {}", tag, unrollAmount);
+
             if(unrollAmount <= 1)
                 return;
+
             auto forLoopDimension = graph.mapper.get<ForLoop>(tag);
             AssertFatal(forLoopDimension >= 0,
                         "Unable to find ForLoop dimension for " + std::to_string(tag));
+
             int unrollDimension = createUnrollDimension(graph, forLoopDimension, unrollAmount);
+
             {
                 auto tailLoop = createTailLoop(graph, tag, unrollAmount, unrollDimension);
                 if(tailLoop)
                     m_unrolledLoopOps.insert(*tailLoop);
             }
+
             std::map<int, std::vector<int>> loopCarriedDependencies;
+
             // TODO: Iron out storage node duplication
             //
             // If we aren't doing the KLoop: some assumptions made
@@ -245,6 +265,7 @@ namespace rocRoller
             //
             // To disable loop-carried analysis, just leave the
             // dependencies as an empty list...
+
             std::unordered_set<int> dontDuplicate;
             if(getForLoopName(graph, tag) != rocRoller::KLOOP)
             {
@@ -258,6 +279,7 @@ namespace rocRoller
                     dontDuplicate.insert(coord);
                 }
             }
+
             // ------------------------------
             // Change the loop increment calculation
             // Multiply the increment amount by the unroll amount
@@ -271,6 +293,7 @@ namespace rocRoller
             auto newAddExpr            = lhs + (rhs * Expression::literal(unrollAmount));
             loopIncrementOp.expression = newAddExpr;
             graph.control.setElement(*loopIncrement, loopIncrementOp);
+
             // ------------------------------
             // Add a setCoordinate node in between the original ForLoopOp and the loop bodies
             // Delete edges between original ForLoopOp and original loop body
@@ -282,6 +305,7 @@ namespace rocRoller
                     graph.control.deleteElement(child);
                 }
             }
+
             // Function for adding a SetCoordinate nodes around all load and
             // store operations. Only adds a SetCoordinate node if the coordinate is needed
             // by the load/store operation.
@@ -313,12 +337,13 @@ namespace rocRoller
                 }
                 return rv;
             };
-            std::vector<std::vector<int>> duplicatedBodies;
+
             // ------------------------------
             // Create duplicates of the loop body and populate the sequentialOperations
             // data structure. sequentialOperations is a map that uses a coordinate with
             // a loop carried dependency as a key and contains a vector of vectors
             // with every control node that uses that coordinate in each new body of the loop.
+            std::vector<std::vector<int>>                duplicatedBodies;
             std::map<int, std::vector<std::vector<int>>> sequentialOperations;
             for(unsigned int i = 0; i < unrollAmount; i++)
             {
@@ -350,6 +375,7 @@ namespace rocRoller
                 }
                 unrollReindexer->control = {};
             }
+
             // Connect the duplicated bodies to the loop, adding SetCoordinate nodes
             // as needed.
             std::set<int> previousLoads;
@@ -373,6 +399,7 @@ namespace rocRoller
                 previousLoads  = currentLoads;
                 previousStores = currentStores;
             }
+
             // If there are any loop carried dependencies, add Sequence nodes
             // between the control nodes with dependencies.
             for(auto [coord, allControls] : sequentialOperations)
@@ -380,6 +407,7 @@ namespace rocRoller
                 makeSequential(graph, allControls);
             }
         }
+
         // ---------------------------------
         // Add Unroll dimension to the coordinates graph and return it.
         int UnrollLoops::createUnrollDimension(KernelGraph& graph,
@@ -423,6 +451,7 @@ namespace rocRoller
                 return unrollDimension;
             }
         }
+
         /**
          * If needed/appropriate, create a tail loop. Will return the node ID of
          * the tail loop, if created, otherwise `nullopt`.
@@ -487,9 +516,11 @@ namespace rocRoller
                            KLOOP);
                 return std::nullopt;
             }
+
             auto loopOp                   = graph.control.getNode<ForLoopOp>(loop);
             auto [loopVariable, loopSize] = split<Expression::LessThan>(loopOp.condition);
             auto isTranslateTime = evaluationTimes(loopSize)[Expression::EvaluationTime::Translate];
+
             if(isTranslateTime)
             {
                 auto vis = rocRoller::overloaded{
@@ -506,6 +537,7 @@ namespace rocRoller
                     return std::nullopt;
                 }
             }
+
             {
                 auto containingForLoops = graph.control.nodesContaining(loop).filter(
                     graph.control.isElemType<ForLoopOp>());
@@ -521,14 +553,18 @@ namespace rocRoller
                     }
                 }
             }
+
             auto loopSizeType        = resultVariableType(loopSize);
             auto amount              = Expression::literal(unrollAmount, loopSizeType);
             auto loopSizeRoundedDown = (loopSize / amount) * amount;
+
             Log::debug("Adding tail loop for {}.  Size {} -> {}",
                        loop,
                        toString(loopSize),
                        toString(loopSizeRoundedDown));
+
             auto tailLoop = cloneForLoop(graph, loop);
+
             // Set original loop to end at a multiple of the unroll amount.
             {
                 auto newCondition = loopVariable < loopSizeRoundedDown;
@@ -536,6 +572,7 @@ namespace rocRoller
                 loopOp.condition = newCondition;
                 graph.control.setElement(loop, loopOp);
             }
+
             // Modify the init of the tail loop to start at the remainder.
             {
                 auto init = graph.control.getOutputNodeIndices<Initialize>(tailLoop).only();
@@ -552,6 +589,7 @@ namespace rocRoller
                 initOp.expression = loopSizeRoundedDown;
                 graph.control.setElement(*init, initOp);
             }
+
             // Duplicate the body of the original for loop into the tail.
             {
                 auto loopBodies = graph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
@@ -584,6 +622,7 @@ namespace rocRoller
 
             return tailLoop;
         }
+
         void UnrollLoops::commit(KernelGraph& kgraph)
         {
             for(const auto node :
@@ -597,6 +636,7 @@ namespace rocRoller
                 }
             }
         }
+
         KernelGraph UnrollLoops::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::unrollLoops");

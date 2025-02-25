@@ -96,6 +96,17 @@ namespace rocRoller
         return std::variant<T>(std::move(value));
     }
 
+    /**
+     * Returns a copy of `sets`, with any sets that have elements in common
+     * merged together.
+     *
+     * Postconditions:
+     * - Union of return value sets is the same as the union of the input sets.
+     * - No two sets in return value have any common elements.
+     * - mergeSets(mergeSets(x)) == mergeSets(x) for any x.
+     */
+    std::vector<std::set<int>> mergeSets(std::vector<std::set<int>> sets);
+
     inline std::string toString(int x)
     {
         return std::to_string(x);
@@ -387,7 +398,9 @@ namespace std
     template <typename T>
     inline std::ostream& operator<<(std::ostream& stream, std::set<T> const& array)
     {
+        stream << "{";
         rocRoller::streamJoin(stream, array, ", ");
+        stream << "}";
         return stream;
     }
 

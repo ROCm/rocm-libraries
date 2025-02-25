@@ -1022,20 +1022,39 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        template <typename T, Direction Dir>
+        requires(std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getConnectedNodeIndices(int const dst)
+        const
+        {
+            auto edgePredicate = [](Edge const& edge) { return std::holds_alternative<T>(edge); };
+            co_yield getConnectedNodeIndices<Dir>(dst, edgePredicate);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir, std::predicate<Edge const&> Predicate>
+        Generator<int>
+            Hypergraph<Node, Edge, Hyper>::getConnectedNodeIndices(int const dst,
+                                                                   Predicate edgePredicate) const
+        {
+            AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
+
+            for(int const elem : getNeighbours<Dir>(dst))
+            {
+                if(edgePredicate(std::get<Edge>(getElement(elem))))
+                {
+                    co_yield getNeighbours<Dir>(elem);
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         template <typename T>
         requires(std::constructible_from<Edge, T>)
             Generator<int> Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(int const dst)
         const
         {
-            AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
-
-            for(int const elem : getNeighbours<Direction::Upstream>(dst))
-            {
-                if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
-                {
-                    co_yield getNeighbours<Direction::Upstream>(elem);
-                }
-            }
+            co_yield getConnectedNodeIndices<T, Direction::Upstream>(dst);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -1044,15 +1063,7 @@ namespace rocRoller
             Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(int const dst,
                                                                Predicate edgePredicate) const
         {
-            AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
-
-            for(int const elem : getNeighbours<Direction::Upstream>(dst))
-            {
-                if(edgePredicate(std::get<Edge>(getElement(elem))))
-                {
-                    co_yield getNeighbours<Direction::Upstream>(elem);
-                }
-            }
+            co_yield getConnectedNodeIndices<Direction::Upstream>(dst, edgePredicate);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -1061,15 +1072,7 @@ namespace rocRoller
             Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(int const src)
         const
         {
-            AssertFatal(getElementType(src) == ElementType::Node, "Require a node handle");
-
-            for(int const elem : getNeighbours<Direction::Downstream>(src))
-            {
-                if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
-                {
-                    co_yield getNeighbours<Direction::Downstream>(elem);
-                }
-            }
+            co_yield getConnectedNodeIndices<T, Direction::Downstream>(src);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -1078,15 +1081,7 @@ namespace rocRoller
             Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(int const src,
                                                                 Predicate edgePredicate) const
         {
-            AssertFatal(getElementType(src) == ElementType::Node, "Require a node handle");
-
-            for(int const elem : getNeighbours<Direction::Downstream>(src))
-            {
-                if(edgePredicate(std::get<Edge>(getElement(elem))))
-                {
-                    co_yield getNeighbours<Direction::Downstream>(elem);
-                }
-            }
+            co_yield getConnectedNodeIndices<Direction::Downstream>(src, edgePredicate);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -1128,6 +1123,25 @@ namespace rocRoller
                                         Hypergraph<Node, Edge, Hyper> const& graph)
         {
             return stream << graph.toDOT();
+        }
+
+        template <Graph::Direction Dir, typename Node, typename Edge, bool Hyper>
+        Generator<int> reachableNodes(Graph::Hypergraph<Node, Edge, Hyper> const& graph,
+                                      int                                         start,
+                                      auto                                        nodePredicate,
+                                      auto                                        edgePredicate,
+                                      auto                                        destNodePredicate)
+        {
+            for(int nextNode : graph.template getConnectedNodeIndices<Dir>(start, edgePredicate))
+            {
+                auto const& node = graph.getNode(nextNode);
+                if(destNodePredicate(node))
+                    co_yield nextNode;
+
+                if(nodePredicate(node))
+                    co_yield reachableNodes<Dir>(
+                        graph, nextNode, nodePredicate, edgePredicate, destNodePredicate);
+            }
         }
 
     }
