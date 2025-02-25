@@ -1280,10 +1280,10 @@ public:
     executor(int    argc,
              char*  argv[],
              size_t default_bytes,
-             size_t default_batch_iterations  = 10,
-             size_t default_warmup_iterations = 5,
-             bool   default_cold              = true,
-             int    default_trials            = -1)
+             size_t default_batch_iterations,
+             size_t default_warmup_iterations,
+             bool   default_cold   = true,
+             int    default_trials = -1)
     {
         cli::Parser parser(argc, argv);
 

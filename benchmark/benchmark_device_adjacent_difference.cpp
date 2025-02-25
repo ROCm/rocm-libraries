@@ -55,7 +55,7 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB);
+    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
     using custom_float2  = common::custom_type<float, float>;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,6 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
-
-// Google Benchmark
-#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -44,10 +39,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
-#endif
 
 template<typename Benchmark,
          unsigned int BlockSize,
@@ -246,13 +237,14 @@ template<typename Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
     -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial>::value
                         && !std::is_same<Benchmark, subtract_right_partial>::value>
 {
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+    const auto& stream = state.stream;
+
     // Calculate the number of elements N
     size_t N = bytes / sizeof(T);
 
@@ -272,41 +264,15 @@ auto run_benchmark(benchmark::State&   state,
     HIP_CHECK(
         hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    state.run(gbench_state,
+              [&]
+              {
+                  kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input, d_output, Trials);
+                  HIP_CHECK(hipGetLastError());
+              });
 
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                           dim3(num_blocks),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_output,
-                           Trials);
-        HIP_CHECK(hipGetLastError());
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));
@@ -318,13 +284,14 @@ template<typename Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
     -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial>::value
                         || std::is_same<Benchmark, subtract_right_partial>::value>
 {
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+    const auto& stream = state.stream;
+
     // Calculate the number of elements N
     size_t N = bytes / sizeof(T);
 
@@ -358,42 +325,18 @@ auto run_benchmark(benchmark::State&   state,
                         tile_sizes.size() * sizeof(tile_sizes[0]),
                         hipMemcpyHostToDevice));
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    state.run(gbench_state,
+              [&]
+              {
+                  kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input,
+                                                                         d_tile_sizes,
+                                                                         d_output,
+                                                                         Trials);
+                  HIP_CHECK(hipGetLastError());
+              });
 
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-                           dim3(num_blocks),
-                           dim3(BlockSize),
-                           0,
-                           stream,
-                           d_input,
-                           d_tile_sizes,
-                           d_output,
-                           Trials);
-        HIP_CHECK(hipGetLastError());
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_tile_sizes));
@@ -401,110 +344,54 @@ auto run_benchmark(benchmark::State&   state,
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                         \
-    benchmark::RegisterBenchmark(                                                       \
+    executor.queue_fn(                                                                  \
         bench_naming::format_name("{lvl:block,algo:adjacent_difference,subalgo:" + name \
                                   + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT        \
                                     ",with_tile:" #WITH_TILE "}}")                      \
             .c_str(),                                                                   \
-        run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                                \
-        bytes,                                                                          \
-        seed,                                                                           \
-        stream)
+        run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>);
 
-#define BENCHMARK_TYPE(type, block, with_tile)                                                    \
-    CREATE_BENCHMARK(type, block, 1, with_tile), CREATE_BENCHMARK(type, block, 3, with_tile),     \
-        CREATE_BENCHMARK(type, block, 4, with_tile), CREATE_BENCHMARK(type, block, 8, with_tile), \
-        CREATE_BENCHMARK(type, block, 16, with_tile), CREATE_BENCHMARK(type, block, 32, with_tile)
+#define BENCHMARK_TYPE(type, block, with_tile)   \
+    CREATE_BENCHMARK(type, block, 1, with_tile)  \
+    CREATE_BENCHMARK(type, block, 3, with_tile)  \
+    CREATE_BENCHMARK(type, block, 4, with_tile)  \
+    CREATE_BENCHMARK(type, block, 8, with_tile)  \
+    CREATE_BENCHMARK(type, block, 16, with_tile) \
+    CREATE_BENCHMARK(type, block, 32, with_tile)
 
 template<typename Benchmark>
-void add_benchmarks(const std::string&                            name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        bytes,
-                    const managed_seed&                           seed,
-                    hipStream_t                                   stream)
+void add_benchmarks(const std::string& name, benchmark_utils::executor& executor)
 {
-    std::vector<benchmark::internal::Benchmark*> bs
-        = {BENCHMARK_TYPE(int, 256, false),
-           BENCHMARK_TYPE(float, 256, false),
-           BENCHMARK_TYPE(int8_t, 256, false),
-           BENCHMARK_TYPE(rocprim::half, 256, false),
-           BENCHMARK_TYPE(long long, 256, false),
-           BENCHMARK_TYPE(double, 256, false),
-           BENCHMARK_TYPE(rocprim::int128_t, 256, false),
-           BENCHMARK_TYPE(rocprim::uint128_t, 256, false)};
+    BENCHMARK_TYPE(int, 256, false)
+    BENCHMARK_TYPE(float, 256, false)
+    BENCHMARK_TYPE(int8_t, 256, false)
+    BENCHMARK_TYPE(rocprim::half, 256, false)
+    BENCHMARK_TYPE(long long, 256, false)
+    BENCHMARK_TYPE(double, 256, false)
+    BENCHMARK_TYPE(rocprim::int128_t, 256, false)
+    BENCHMARK_TYPE(rocprim::uint128_t, 256, false)
 
     if(!std::is_same<Benchmark, subtract_right_partial>::value)
     {
-        bs.insert(bs.end(),
-                  {BENCHMARK_TYPE(int, 256, true),
-                   BENCHMARK_TYPE(float, 256, true),
-                   BENCHMARK_TYPE(int8_t, 256, true),
-                   BENCHMARK_TYPE(rocprim::half, 256, true),
-                   BENCHMARK_TYPE(long long, 256, true),
-                   BENCHMARK_TYPE(double, 256, true),
-                   BENCHMARK_TYPE(rocprim::int128_t, 256, true),
-                   BENCHMARK_TYPE(rocprim::uint128_t, 256, true)});
+        BENCHMARK_TYPE(int, 256, true)
+        BENCHMARK_TYPE(float, 256, true)
+        BENCHMARK_TYPE(int8_t, 256, true)
+        BENCHMARK_TYPE(rocprim::half, 256, true)
+        BENCHMARK_TYPE(long long, 256, true)
+        BENCHMARK_TYPE(double, 256, true)
+        BENCHMARK_TYPE(rocprim::int128_t, 256, true)
+        BENCHMARK_TYPE(rocprim::uint128_t, 256, true)
     }
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    add_benchmarks<subtract_left>("subtract_left", executor);
+    add_benchmarks<subtract_right>("subtract_right", executor);
+    add_benchmarks<subtract_left_partial>("subtract_left_partial", executor);
+    add_benchmarks<subtract_right_partial>("subtract_right_partial", executor);
 
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<subtract_left>("subtract_left", benchmarks, bytes, seed, stream);
-    add_benchmarks<subtract_right>("subtract_right", benchmarks, bytes, seed, stream);
-    add_benchmarks<subtract_left_partial>("subtract_left_partial", benchmarks, bytes, seed, stream);
-    add_benchmarks<subtract_right_partial>("subtract_right_partial",
-                                           benchmarks,
-                                           bytes,
-                                           seed,
-                                           stream);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }

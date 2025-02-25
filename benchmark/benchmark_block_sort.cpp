@@ -53,9 +53,8 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB);
+    benchmark_utils::executor executor(argc, argv, 512 * benchmark_utils::MiB, 10, 0);
 
-#ifndef BENCHMARK_CONFIG_TUNING
     // Block sizes as large as possible are most relevant
     CREATE_BENCHMARK(float, rocprim::empty_type, 256)
     CREATE_BENCHMARK(double, rocprim::empty_type, 256)
@@ -73,7 +72,6 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(uint8_t, uint32_t, 512)
     CREATE_BENCHMARK(int64_t, rocprim::int128_t, 512)
     CREATE_BENCHMARK(uint64_t, rocprim::uint128_t, 512)
-#endif
 
     executor.run();
 }
