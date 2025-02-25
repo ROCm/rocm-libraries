@@ -21,9 +21,9 @@
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
+#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest
@@ -83,7 +83,7 @@ namespace GEMMDriverTest
             }
             else if(gemm.streamK)
             {
-                numWorkgroupX = gemm.numCUs;
+                numWorkgroupX = gemm.numWGs;
                 numWorkgroupY = 1;
             }
             else
@@ -208,6 +208,7 @@ namespace GEMMDriverTest
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
             params->fuseLoops                     = gemm.fuseLoops;
+            params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
             params->unrollK                       = gemm.unrollK;
             params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
@@ -234,8 +235,6 @@ namespace GEMMDriverTest
                     numWorkgroupY == 1,
                     "Current scratch space implementation assumes that the kernel is launched "
                     "with numWorkgroupY == 1");
-
-                params->numScratchTiles = std::min(gemm.numCUs, numWorkgroupX * numWorkgroupY);
 
                 params->loopOverOutputTilesDimensions = {0, 1};
                 params->streamK                       = true;
@@ -285,10 +284,6 @@ namespace GEMMDriverTest
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
 
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel.setLaunchParameters(launch);
-
             CommandArguments commandArgs = command->createArguments();
 
             setCommandTensorArg(commandArgs, tagTensorA, descA, deviceA.get());
@@ -309,7 +304,7 @@ namespace GEMMDriverTest
             // Create scratch space
             if(gemm.streamK)
             {
-                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numCUs);
+                commandArgs.setArgument(command->getNextTag(), ArgumentType::Value, gemm.numWGs);
             }
             auto scratchSpaceRequired
                 = commandKernel.scratchSpaceRequired(commandArgs.runtimeArguments());

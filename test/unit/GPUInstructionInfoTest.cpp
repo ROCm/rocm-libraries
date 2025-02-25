@@ -25,7 +25,7 @@ TEST_F(GPUInstructionInfoTest, BasicTest)
     EXPECT_EQ(Test.getWaitQueues()[1], GPUWaitQueueType::VMQueue);
     EXPECT_EQ(Test.getWaitCount(), 0);
     EXPECT_EQ(Test.getLatency(), 16);
-    EXPECT_EQ(Test.maxLiteralValue(), 8192);
+    EXPECT_EQ(Test.maxOffsetValue(), 8192);
 }
 
 TEST_F(GPUInstructionInfoTest, BasicTestLatency)

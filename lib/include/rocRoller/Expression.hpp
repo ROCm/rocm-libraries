@@ -736,6 +736,9 @@ namespace rocRoller
         std::string name(ExpressionPtr const& expr);
         std::string name(Expression const& expr);
 
+        std::string argumentName(ExpressionPtr const& expr);
+        std::string argumentName(Expression const& expr);
+
         // EvaluationTime max(EvaluationTime lhs, EvaluationTime rhs);
 
         EvaluationTimes evaluationTimes(ExpressionPtr const& expr);

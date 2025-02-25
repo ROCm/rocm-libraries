@@ -141,19 +141,28 @@ amdhsa.version:
  - 1
  - 2
 amdhsa.kernels:
- - .name: hello_world
-   .symbol: hello_world.kd
-   .kernarg_segment_size: 0
-   .group_segment_fixed_size: 0
-   .private_segment_fixed_size: 0
-   .kernarg_segment_align: 8
-   .wavefront_size: 32
-   .sgpr_count: 0
-   .vgpr_count: 0
-   .agpr_count: 0
-   .max_flat_workgroup_size: 1
-   .workgroup_size: [ 1, 1, 1 ]
-   .args: []
+  - .name: hello_world
+    .symbol: hello_world.kd
+    .kernarg_segment_size: 0
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .sgpr_count: 0
+    .vgpr_count: 0
+    .agpr_count: 0
+    .max_flat_workgroup_size: 1
+    .kernel_dimensions: 3
+    .workgroup_size: [1, 1, 1]
+    .wavefront_size: 32
+    .workitem_count: [{is-null: true}, {is-null: true}, {is-null: true}]
+    .dynamic_sharedmemory_bytes:
+      is-null: true
+    .args:
+      []
+    .kernel_graph:
+      is-null: true
+    .command:
+      is-null: true
 ...
 .end_amdgpu_metadata
         )";
@@ -188,23 +197,34 @@ amdhsa.version:
     - 1
     - 2
 amdhsa.kernels:
-    - .name: hello_world
-      .symbol: hello_world.kd
-      .kernarg_segment_size: 4
-      .group_segment_fixed_size: 0
-      .private_segment_fixed_size: 0
-      .kernarg_segment_align: 8
-      .wavefront_size: 32
-      .sgpr_count: 1
-      .vgpr_count: 2
-      .agpr_count: 0
-      .max_flat_workgroup_size: 256
-      .workgroup_size: [ 16, 8, 2 ]
-      .args:
-          - .name: foo
-            .size: 4
-            .offset: 0
-            .value_kind: by_value
+  - .name: hello_world
+    .symbol: hello_world.kd
+    .kernarg_segment_size: 4
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .sgpr_count: 1
+    .vgpr_count: 2
+    .agpr_count: 0
+    .max_flat_workgroup_size: 256
+    .kernel_dimensions: 3
+    .workgroup_size: [16, 8, 2]
+    .wavefront_size: 32
+    .workitem_count: [{is-null: true}, {is-null: true}, {is-null: true}]
+    .dynamic_sharedmemory_bytes:
+      is-null: true
+    .args:
+      - .name: foo
+        .size: 4
+        .offset: 0
+        .expression:
+          is-null: true
+        .variableType: {dataType: Float, pointerType: Value}
+        .value_kind: by_value
+    .kernel_graph:
+      is-null: true
+    .command:
+      is-null: true
 ...
 .end_amdgpu_metadata)";
 
@@ -248,7 +268,7 @@ amdhsa.kernels:
 
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());
@@ -380,7 +400,7 @@ amdhsa.kernels:
 
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
+            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());

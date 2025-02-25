@@ -12,6 +12,7 @@
 #include <rocRoller/Serialization/GPUArchitecture.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 #include <rocRoller/Utilities/Version.hpp>
 
 #include <common/Utilities.hpp>
@@ -20,7 +21,6 @@
 #include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"
 #include "include/StreamKGEMMSolution.hpp"
-#include "include/TensileGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
 
@@ -28,15 +28,13 @@ using namespace rocRoller;
 
 const std::string clientName = "GEMMv00";
 
-namespace rocRoller::Client::GEMMClient
+enum ReturnCodes : int
 {
-    struct GEMMSolutionBlob
-    {
-        GPUArchitectureTarget architecture;
-        SolutionParameters    solution;
-        std::string           assembly;
-    };
-}
+    OK                         = 0,
+    GenerateFailure            = 1,
+    CorrectnessFailure         = 2,
+    SolutionNotSupportedOnArch = 3
+};
 
 template <typename IO>
 struct rocRoller::Serialization::
@@ -116,6 +114,8 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
 
     static void mapping(IO& io, Client::GEMMClient::SolutionParameters& params)
     {
+        iot::mapRequired(io, "architecture", params.architecture);
+
         iot::mapRequired(io, "mac_m", params.macM);
         iot::mapRequired(io, "mac_n", params.macN);
         iot::mapRequired(io, "mac_k", params.macK);
@@ -148,7 +148,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "streamK", params.streamK);
         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
 
-        iot::mapRequired(io, "version", params.version);
+        iot::mapOptional(io, "version", params.version);
     }
 
     static void mapping(IO& io, Client::GEMMClient::SolutionParameters& params, EmptyContext& ctx)
@@ -157,28 +157,10 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
     }
 };
 
-template <typename IO>
-struct rocRoller::Serialization::
-    MappingTraits<Client::GEMMClient::GEMMSolutionBlob, IO, rocRoller::Serialization::EmptyContext>
-{
-    static const bool flow = false;
-    using iot              = IOTraits<IO>;
-
-    static void mapping(IO& io, Client::GEMMClient::GEMMSolutionBlob& soln)
-    {
-        iot::mapRequired(io, "architecture", soln.architecture);
-        iot::mapRequired(io, "solution", soln.solution);
-        iot::mapRequired(io, "assembly", soln.assembly);
-    }
-
-    static void mapping(IO& io, Client::GEMMClient::GEMMSolutionBlob& soln, EmptyContext& ctx)
-    {
-        mapping(io, soln);
-    }
-};
-
 namespace rocRoller::Client::GEMMClient
 {
+    using GEMMSolutionPtr = std::shared_ptr<Client::GEMMClient::GEMMSolution>;
+
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
         validate(std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
@@ -221,12 +203,12 @@ namespace rocRoller::Client::GEMMClient
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename B, typename C, typename D>
-    Client::BenchmarkResults GEMM(std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm,
-                                  Client::GEMMClient::SolutionParameters const&     solutionParams,
-                                  Client::GEMMClient::ProblemParameters const&      problemParams,
-                                  Client::RunParameters const&                      runParams,
-                                  std::string            loadAssemblyFile,
-                                  GPUArchitecture const& arch)
+    Client::BenchmarkResults GEMM(CommandPtr               command,
+                                  CommandKernelPtr         commandKernel,
+                                  GEMMSolutionPtr          gemm,
+                                  ProblemParameters const& problemParams,
+                                  RunParameters const&     runParams,
+                                  GPUArchitecture const&   arch)
     {
         using namespace rocRoller::Client;
         using namespace rocRoller::Client::GEMMClient;
@@ -259,12 +241,10 @@ namespace rocRoller::Client::GEMMClient
         auto d_D = make_shared_device(h_D);
 
         std::cout << "Generating lauch parameters and runtime arguments..." << std::endl;
-        auto commandKernel = gemm->commandKernel();
-        auto launchParams  = gemm->makeLaunchParameters(problemParams, solutionParams, runParams);
 
         commandKernel->loadKernel();
-        commandKernel->setLaunchParameters(launchParams);
-        auto commandArgs = gemm->commandArguments(problemParams, runParams);
+
+        auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
         commandArgs.setArgument(aTag, ArgumentType::Value, (A*)d_A.get());
@@ -272,14 +252,7 @@ namespace rocRoller::Client::GEMMClient
         commandArgs.setArgument(cTag, ArgumentType::Value, (C*)d_C.get());
         commandArgs.setArgument(dTag, ArgumentType::Value, (D*)d_D.get());
 
-        if(!loadAssemblyFile.empty())
-        {
-            std::cout << "Loading kernel from: " << loadAssemblyFile << std::endl;
-            commandKernel->loadKernelFromAssembly(loadAssemblyFile,
-                                                  solutionParams.generateKernelName());
-        }
-
-        gemm->validateRunParameters(solutionParams, problemParams, runParams, commandKernel);
+        gemm->validateRunParameters(command, problemParams, runParams, commandKernel);
 
         auto runtimeArgs = commandArgs.runtimeArguments();
 
@@ -293,13 +266,10 @@ namespace rocRoller::Client::GEMMClient
 
         if(runParams.visualize)
         {
-            Client::visualize(gemm->command(), *commandKernel, commandArgs);
+            Client::visualize(command, *commandKernel, commandArgs);
         }
 
         std::cout << std::endl;
-        std::cout << "Solution:" << std::endl;
-        std::cout << solutionParams << std::endl;
-
         std::cout << "Problem:" << std::endl;
         std::cout << problemParams << std::endl;
 
@@ -363,33 +333,33 @@ namespace rocRoller::Client::GEMMClient
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm,
-                                       Client::GEMMClient::SolutionParameters const&     solution,
-                                       Client::GEMMClient::ProblemParameters const&      problem,
-                                       Client::RunParameters const&                      run,
-                                       std::string            loadAssemblyFile,
-                                       GPUArchitecture const& arch,
-                                       auto                   typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
+                                       CommandKernelPtr         commandKernel,
+                                       GEMMSolutionPtr          gemm,
+                                       ProblemParameters const& problemParams,
+                                       RunParameters const&     runParams,
+                                       GPUArchitecture const&   arch,
+                                       auto                     typeB)
     {
         if(typeB == "fp8")
         {
-            return GEMM<A, FP8, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+            return GEMM<A, FP8, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
         }
         else if(typeB == "bf8")
         {
-            return GEMM<A, BF8, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+            return GEMM<A, BF8, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
         }
         else if(typeB == "fp6")
         {
-            return GEMM<A, FP6, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+            return GEMM<A, FP6, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
         }
         else if(typeB == "bf6")
         {
-            return GEMM<A, BF6, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+            return GEMM<A, BF6, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
         }
         else if(typeB == "fp4")
         {
-            return GEMM<A, FP4, C, D>(gemm, solution, problem, run, loadAssemblyFile, arch);
+            return GEMM<A, FP4, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
@@ -397,39 +367,39 @@ namespace rocRoller::Client::GEMMClient
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm,
-                                       Client::GEMMClient::SolutionParameters const&     solution,
-                                       Client::GEMMClient::ProblemParameters const&      problem,
-                                       Client::RunParameters const&                      run,
-                                       std::string            loadAssemblyFile,
-                                       GPUArchitecture const& arch,
-                                       auto                   typeA,
-                                       auto                   typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
+                                       CommandKernelPtr         commandKernel,
+                                       GEMMSolutionPtr          gemm,
+                                       ProblemParameters const& problemParams,
+                                       RunParameters const&     runParams,
+                                       GPUArchitecture const&   arch,
+                                       auto                     typeA,
+                                       auto                     typeB)
     {
         if(typeA == "fp8")
         {
             return GEMMMixed<FP8, C, D>(
-                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
         }
         else if(typeA == "bf8")
         {
             return GEMMMixed<BF8, C, D>(
-                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
         }
         else if(typeA == "fp6")
         {
             return GEMMMixed<FP6, C, D>(
-                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
         }
         else if(typeA == "bf6")
         {
             return GEMMMixed<BF6, C, D>(
-                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
         }
         else if(typeA == "fp4")
         {
             return GEMMMixed<FP4, C, D>(
-                gemm, solution, problem, run, loadAssemblyFile, arch, typeB);
+                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
@@ -441,27 +411,14 @@ namespace rocRoller::Client::GEMMClient
      * The kind of GEMMSolution returned is based on the parameters in
      * solutionParams.
      */
-    std::shared_ptr<Client::GEMMClient::GEMMSolution>
-        generateGEMMSolution(rocRoller::ContextPtr                         context,
-                             Client::GEMMClient::SolutionParameters const& solutionParams)
+    std::pair<GEMMSolutionPtr, int> createGEMMSolution(rocRoller::ContextPtr     context,
+                                                       SolutionParameters const& solution)
     {
-        std::shared_ptr<Client::GEMMClient::GEMMSolution> gemmSolution;
+        GEMMSolutionPtr gemmSolution;
 
         auto arch = context->targetArchitecture().target();
 
-        if(solutionParams.scheduler == "TENSILE_ASM")
-        {
-            if(arch.isCDNA2GPU())
-            {
-                gemmSolution = std::make_shared<Client::GEMMClient::TensileGEMMSolution>(context);
-            }
-            else
-            {
-                std::cout << "Not running TENSILE_ASM for " << arch.toString() << std::endl;
-                return nullptr;
-            }
-        }
-        else if(solutionParams.streamK)
+        if(solution.streamK)
         {
             if(context->targetArchitecture().HasCapability(GPUCapability::ArchAccUnifiedRegs))
             {
@@ -470,7 +427,7 @@ namespace rocRoller::Client::GEMMClient
             else
             {
                 std::cout << "Not running StreamK for " << arch.toString() << std::endl;
-                return nullptr;
+                return {nullptr, ReturnCodes::SolutionNotSupportedOnArch};
             }
         }
         else
@@ -480,14 +437,9 @@ namespace rocRoller::Client::GEMMClient
 
         AssertFatal(gemmSolution, "No solution!");
 
-        gemmSolution->generateSolution(solutionParams);
-
-        return gemmSolution;
+        return {gemmSolution, ReturnCodes::OK};
     }
 
-    /*
-     * Dispatch
-     */
     struct ArchitectureParameters
     {
         GPUArchitectureTarget target;
@@ -507,13 +459,22 @@ namespace rocRoller::Client::GEMMClient
 
     struct IOParameters
     {
-        bool        doSave;
-        std::string savePath, loadPath, resultsPath;
+        bool        doSaveAsm, doSaveCO;
+        std::string saveAsmPath, loadAsmPath;
+        std::string saveCOPath, loadCOPath;
+        std::string resultsPath;
     };
+
+    void writeFile(std::filesystem::path const& filename, std::vector<char> const& x)
+    {
+        std::ofstream file(filename, std::ios::out | std::ios::binary);
+        std::copy(x.cbegin(), x.cend(), std::ostream_iterator<unsigned char>(file));
+    }
 
     int RunGEMMCLI(bool                   doGenerate,
                    bool                   doValidate,
                    bool                   doBenchmark,
+                   bool                   doInfo,
                    ArchitectureParameters architecture,
                    SolutionParameters     solution,
                    ProblemParameters      problem,
@@ -521,41 +482,51 @@ namespace rocRoller::Client::GEMMClient
                    RunParameters          run,
                    IOParameters           io)
     {
-        std::shared_ptr<Client::GEMMClient::GEMMSolution> gemm;
+        GEMMSolutionPtr  gemm;
+        CommandPtr       command;
+        CommandKernelPtr commandKernel;
 
-        // Changing settings has to go before creating the context :(
-        if(io.doSave)
+        if(doInfo)
         {
-            if(io.savePath.empty())
-                io.savePath = solution.generateKernelName() + ".s";
+            std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
+            auto yaml = readMetaDataFromCodeObject(io.loadCOPath);
+            std::cout << yaml << std::endl;
 
-            std::filesystem::path assemblyPath{io.savePath};
-            assemblyPath.replace_extension(".s");
+            auto kernelFromYAML = AssemblyKernels::fromYAML(yaml).kernels[0];
+            std::cout << *kernelFromYAML.command() << std::endl;
 
-            Settings::getInstance()->set(Settings::SaveAssembly, true);
-            Settings::getInstance()->set(Settings::AssemblyFile, std::string(assemblyPath));
+            return ReturnCodes::OK;
         }
 
         // Changing settings has to go before creating the context :(
-        std::string loadAssemblyFile;
-        if(!io.loadPath.empty())
+        if(io.doSaveAsm)
         {
-            auto soln
-                = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::GEMMSolutionBlob>(
-                    io.loadPath);
-            solution            = soln.solution;
-            architecture.target = soln.architecture;
-            loadAssemblyFile    = soln.assembly;
+            if(io.saveAsmPath.empty())
+                io.saveAsmPath = solution.generateKernelName() + ".s";
+
+            Settings::getInstance()->set(Settings::SaveAssembly, true);
+            Settings::getInstance()->set(Settings::AssemblyFile, std::string(io.saveAsmPath));
+        }
+
+        // When loading from .s or .co, currently need to load
+        // solution from a .yaml file.
+        if(!io.loadAsmPath.empty())
+        {
+            auto yamlPath = std::filesystem::path{io.loadAsmPath};
+            yamlPath.replace_extension(".yaml");
+
+            solution            = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
+            architecture.target = solution.architecture;
             if(solution.version != rocRoller::Version::Git())
             {
                 std::cout << "Warning: this version of rocRoller (" << rocRoller::Version::Git()
-                          << ") differs from the one that generated " << io.loadPath << std::endl;
+                          << ") differs from the one that generated the kernel." << std::endl;
             }
         }
 
         auto arch = GPUArchitectureLibrary::getInstance()->GetArch(architecture.target);
 
-        if(solution.scheduler != "" && solution.scheduler != "TENSILE_ASM")
+        if(solution.scheduler != "")
         {
             auto schedulerValue = fromString<Scheduling::SchedulerProcedure>(solution.scheduler);
             Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
@@ -563,8 +534,6 @@ namespace rocRoller::Client::GEMMClient
 
         auto context = Context::ForTarget(arch, solution.generateKernelName());
 
-        // If no subcommands were given, default behaviour is: generate
-        // and benchmark.
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
         {
@@ -595,32 +564,98 @@ namespace rocRoller::Client::GEMMClient
 
             std::cout << "Generating: " << solution.generateKernelName() << "..." << std::endl;
 
-            gemm = generateGEMMSolution(context, solution);
+            int reason;
+            std::tie(gemm, reason) = createGEMMSolution(context, solution);
+            if(!gemm)
+                return reason;
+            command       = gemm->makeCommand(solution);
+            commandKernel = gemm->generateCommandKernel(command, solution);
 
-            if(gemm && !io.savePath.empty())
+            std::string basePath;
+            if(io.doSaveAsm)
+                basePath = io.saveAsmPath;
+            if(io.doSaveCO)
+                basePath = io.saveCOPath;
+
+            if(io.doSaveAsm || io.doSaveCO)
             {
-                std::filesystem::path assemblyPath{io.savePath};
+                // When saveing ASM, also need code-object so that
+                // Command (ie, workgroup size, argument mapping etc)
+                // can be de-serialized later.
+
+                auto codeObject = commandKernel->assembleKernel();
+
+                std::filesystem::path codeObjectPath{basePath};
+                codeObjectPath.replace_extension(".co");
+
+                std::filesystem::path yamlPath{basePath};
+                yamlPath.replace_extension(".yaml");
+                if(!std::filesystem::exists(yamlPath))
+                {
+                    std::ofstream file(yamlPath);
+                    Serialization::writeYAML(file, solution);
+                    std::cout << "Wrote: " << yamlPath.string() << std::endl;
+                }
+
+                writeFile(codeObjectPath, codeObject);
+                std::cout << "Wrote: " << codeObjectPath.string() << std::endl;
+            }
+
+            if(io.doSaveAsm)
+            {
+                std::filesystem::path assemblyPath{basePath};
                 assemblyPath.replace_extension(".s");
 
-                std::filesystem::path yamlPath{io.savePath};
-                yamlPath.replace_extension(".yaml");
-
-                std::ofstream file(yamlPath);
-                Serialization::writeYAML(file,
-                                         rocRoller::Client::GEMMClient::GEMMSolutionBlob{
-                                             architecture.target, solution, assemblyPath});
-
+                // We don't explicitly write here (the code-gen does),
+                // but we still emit a message here.
                 std::cout << "Wrote: " << assemblyPath.string() << std::endl;
-                std::cout << "Wrote: " << yamlPath.string() << std::endl;
             }
         }
         else
         {
-            gemm = generateGEMMSolution(context, solution);
+            int reason;
+            std::tie(gemm, reason) = createGEMMSolution(context, solution);
+
+            command = gemm->makeCommand(solution);
+
+            if(!io.loadAsmPath.empty())
+            {
+                // When loading ASM, we also load code-object so that
+                // Command (ie, workgroup size, argument mapping etc)
+                // can be de-serialized.
+                std::filesystem::path codeObjectPath{io.loadAsmPath};
+                codeObjectPath.replace_extension(".co");
+
+                std::cout << "Loading kernel meta-data from: " << codeObjectPath.string()
+                          << std::endl;
+                commandKernel = std::make_shared<CommandKernel>();
+                commandKernel->setContext(context);
+                auto kernel = commandKernel->loadKernelFromCodeObject(
+                    codeObjectPath, solution.generateKernelName());
+                command = kernel->command();
+
+                std::cout << "Loading kernel from: " << io.loadAsmPath << std::endl;
+                commandKernel
+                    = std::make_shared<CommandKernel>(command, solution.generateKernelName());
+                commandKernel->setContext(context);
+                commandKernel->loadKernelFromAssembly(io.loadAsmPath,
+                                                      solution.generateKernelName());
+            }
+            else if(!io.loadCOPath.empty())
+            {
+                std::cout << "Loading kernel from: " << io.loadCOPath << std::endl;
+
+                commandKernel = std::make_shared<CommandKernel>();
+                commandKernel->setContext(context);
+                auto kernel = commandKernel->loadKernelFromCodeObject(
+                    io.loadCOPath, solution.generateKernelName());
+
+                command = kernel->command();
+            }
         }
 
-        if(!gemm)
-            return 0;
+        if(!gemm || !command || !commandKernel)
+            return ReturnCodes::GenerateFailure;
 
         if(doValidate || doBenchmark)
         {
@@ -649,67 +684,61 @@ namespace rocRoller::Client::GEMMClient
                && types.typeD == "float")
             {
                 result.benchmarkResults = GEMM<float, float, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(types.typeA == "half" && types.typeB == "half" && types.typeC == "half"
                     && types.typeD == "half")
             {
                 result.benchmarkResults = GEMM<Half, Half, Half, Half>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(types.typeA == "bf16" && types.typeB == "bf16" && types.typeC == "float"
                     && types.typeD == "float")
             {
                 result.benchmarkResults = GEMM<BFloat16, BFloat16, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(types.typeA == "bf16" && types.typeB == "bf16" && types.typeC == "bf16"
                     && types.typeD == "bf16")
             {
                 result.benchmarkResults = GEMM<BFloat16, BFloat16, BFloat16, BFloat16>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(types.typeA == "fp8" && types.typeB == "fp8" && types.typeC == "float"
                     && types.typeD == "float")
             {
                 result.benchmarkResults = GEMM<FP8, FP8, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(types.typeA == "bf8" && types.typeB == "bf8" && types.typeC == "float"
                     && types.typeD == "float")
             {
                 result.benchmarkResults = GEMM<BF8, BF8, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(problem.typeA == "fp6" && problem.typeB == "fp6" && problem.typeC == "float"
                     && problem.typeD == "float")
             {
                 result.benchmarkResults = GEMM<FP6, FP6, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(problem.typeA == "bf6" && problem.typeB == "bf6" && problem.typeC == "float"
                     && problem.typeD == "float")
             {
                 result.benchmarkResults = GEMM<BF6, BF6, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if(problem.typeA == "fp4" && problem.typeB == "fp4" && problem.typeC == "float"
                     && problem.typeD == "float")
             {
                 result.benchmarkResults = GEMM<FP4, FP4, float, float>(
-                    gemm, solution, problem, run, loadAssemblyFile, arch);
+                    command, commandKernel, gemm, problem, run, arch);
             }
             else if((problem.typeA != problem.typeB) && isF8F6F4(problem.typeA)
                     && isF8F6F4(problem.typeB))
             {
-                result.benchmarkResults = GEMMMixed<float, float>(gemm,
-                                                                  solution,
-                                                                  problem,
-                                                                  run,
-                                                                  loadAssemblyFile,
-                                                                  arch,
-                                                                  problem.typeA,
-                                                                  problem.typeB);
+                result.benchmarkResults = GEMMMixed<float, float>(
+                    command, commandKernel, gemm, problem, run, arch, problem.typeA, problem.typeB);
             }
             else
             {
@@ -723,10 +752,10 @@ namespace rocRoller::Client::GEMMClient
             }
 
             if(!result.benchmarkResults.correct)
-                return 1;
+                return ReturnCodes::CorrectnessFailure;
         }
 
-        return 0;
+        return ReturnCodes::OK;
     }
 }
 
@@ -800,7 +829,15 @@ int main(int argc, const char* argv[])
         .numWGs    = 0,
     };
 
-    rocRoller::Client::GEMMClient::IOParameters io;
+    rocRoller::Client::GEMMClient::IOParameters io{
+        .doSaveAsm   = false,
+        .doSaveCO    = false,
+        .saveAsmPath = "",
+        .loadAsmPath = "",
+        .saveCOPath  = "",
+        .loadCOPath  = "",
+        .resultsPath = "",
+    };
 
     //
     // Architecture
@@ -859,21 +896,21 @@ int main(int argc, const char* argv[])
     app.add_option("--mac_m", solution.macM, "(Macro) Tile size M.");
     app.add_option("--mac_n", solution.macN, "(Macro) Tile size N.");
     app.add_option("--mac_k", solution.macK, "(Macro) Tile size K.");
-    app.add_option("--wave_m", solution.waveM, "(MFMA) Tile size M.");
-    app.add_option("--wave_n", solution.waveN, "(MFMA) Tile size N.");
-    app.add_option("--wave_k", solution.waveK, "(MFMA) Tile size K.");
-    app.add_option("--wave_b", solution.waveB, "(MFMA) Tile size K.");
+    app.add_option("--wave_m", solution.waveM, "(MI) Tile size M.");
+    app.add_option("--wave_n", solution.waveN, "(MI) Tile size N.");
+    app.add_option("--wave_k", solution.waveK, "(MI) Tile size K.");
+    app.add_option("--wave_b", solution.waveB, "(MI) Tile size K.");
 
     app.add_option(
-        "--mfma",
+        "--mi",
         [&solution](auto res) -> bool {
-            auto mfma = res[0];
-            if(!mfma.empty())
+            auto mi = res[0];
+            if(!mi.empty())
             {
                 bool fail = false;
                 try
                 {
-                    std::istringstream iss(mfma);
+                    std::istringstream iss(mi);
                     std::string        token;
 
                     iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit
@@ -900,19 +937,19 @@ int main(int argc, const char* argv[])
                         || (solution.waveB < 1);
                 if(fail)
                 {
-                    std::cout << "Invalid format for MFMA instruction." << std::endl;
+                    std::cout << "Invalid format for MI instruction." << std::endl;
                     std::cout << std::endl;
-                    std::cout << "The MFMA argument should be formatted like:" << std::endl;
+                    std::cout << "The MI argument should be formatted like:" << std::endl;
                     std::cout << std::endl;
-                    std::cout << "    --mfma=MxNxKxB" << std::endl;
+                    std::cout << "    --mi=MxNxKxB" << std::endl;
                     std::cout << std::endl;
-                    std::cout << "For example: --mfma=32x32x2x1" << std::endl;
+                    std::cout << "For example: --mi=32x32x2x1" << std::endl;
                 }
                 return !fail;
             }
             return false;
         },
-        "MFMA instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
+        "MI instruction to use.  Default 32x32x2x1 for floats, 32x32x8x1 for halfs.");
 
     app.add_option(
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
@@ -958,6 +995,10 @@ int main(int argc, const char* argv[])
 
     app.option_defaults()->ignore_case()->group("Client options and shortcuts");
 
+    bool noCheckResult = false;
+
+    std::string loadPath, examplePath;
+
     app.add_flag(
         "--hgemm",
         [&types](auto res) -> bool {
@@ -974,31 +1015,72 @@ int main(int argc, const char* argv[])
     app.add_flag(
         "--visualize", run.visualize, "Dump out volumes describing memory access patterns.");
 
-    bool noCheckResult = false;
     app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
     app.add_option("--yaml", io.resultsPath, "Save results to file.");
 
+    //
+    // generate sub-command
+    //
+
+    std::string loadConfigPath;
+
     auto generate = app.add_subcommand("generate", "Generate a GEMM solution.")->fallthrough();
+
+    auto asmOption = generate->add_option("--asm", io.saveAsmPath, "Save yaml+assembly to files.")
+                         ->expected(0, 1);
+    auto coOption
+        = generate->add_option("--co", io.saveCOPath, "Save code-object to file.")->expected(0, 1);
+    generate
+        ->add_option(
+            "--config", loadConfigPath, "Load solution generation parameters from YAML file.")
+        ->expected(1, 1);
+
+    //
+    // validate sub-command
+    //
+
     auto validate
         = app.add_subcommand("validate",
                              "Run and validate a GEMM solution (only runs the solution once).")
               ->fallthrough();
+
+    validate->add_option(
+        "--load", loadPath, "Load solution from code-object (.co) or assembly (.s) file.");
+
+    //
+    // benchmark sub-command
+    //
+
     auto benchmark
         = app.add_subcommand("benchmark",
                              "Benchmark a GEMM solution (may run the solution many times).")
               ->fallthrough();
 
-    auto saveOption
-        = generate->add_option("--save", io.savePath, "Save assembly to file.")->expected(0, 1);
-    validate->add_option("--load", io.loadPath, "Load solution from assembly file.");
-    benchmark->add_option("--load", io.loadPath, "Load solution from assembly file.");
+    benchmark->add_option(
+        "--load", loadPath, "Load solution from code-object (.co) or assembly (.s) file.");
+
+    //
+    // info sub-command
+    //
+
+    auto info = app.add_subcommand("info", "Dump info about a GEMM solution.")->fallthrough();
+
+    info->add_option("load", loadPath, "Load solution from code-object (.co).")->required();
+
+    //
+    // example sub-command
+    //
+    auto example = app.add_subcommand("example", "Save example generation parameters to YAML file.")
+                       ->fallthrough();
+
+    example->add_option("save", examplePath, "Example config path.")->required();
+
+    //
+    // Parse and update/validate problem definition
+    //
 
     CLI11_PARSE(app, argc, argv);
-
-    //
-    // Update/validate problem definition
-    //
 
     if(architectureName.empty())
         architecture.target
@@ -1006,33 +1088,69 @@ int main(int argc, const char* argv[])
     else
         architecture.target = GPUArchitectureTarget::fromString(architectureName);
 
-    if(!io.loadPath.empty())
-    {
-        auto soln = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::GEMMSolutionBlob>(
-            io.loadPath);
+    solution.architecture = architecture.target;
 
-        if((types.typeA != soln.solution.typeA) || (types.typeB != soln.solution.typeB)
-           || (types.typeC != soln.solution.typeC) || (types.typeD != soln.solution.typeD)
-           || (types.typeAcc != soln.solution.typeAcc))
+    if(!loadConfigPath.empty())
+    {
+        // THIS OVERWRITES COMMAND LINE OPTIONS
+        solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
+            loadConfigPath);
+
+        if(solution.architecture.gfx == GPUArchitectureGFX::UNKNOWN)
+            solution.architecture = architecture.target;
+    }
+
+    if(!loadPath.empty())
+    {
+        auto path = std::filesystem::path(loadPath);
+        if(path.extension() == ".s" || path.extension() == ".yaml")
+        {
+            io.loadAsmPath = path.string();
+        }
+        else if(path.extension() == ".co")
+        {
+            io.loadCOPath = path.string();
+        }
+        else
+        {
+            Throw<FatalError>("Extension not supported.  Can not load solution from ", loadPath);
+        }
+    }
+
+    if(!io.loadAsmPath.empty() || !io.loadCOPath.empty())
+    {
+        std::filesystem::path yamlPath;
+        if(!io.loadAsmPath.empty())
+            yamlPath = std::filesystem::path{io.loadAsmPath};
+        if(!io.loadCOPath.empty())
+            yamlPath = std::filesystem::path{io.loadCOPath};
+        yamlPath.replace_extension(".yaml");
+
+        solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
+            yamlPath);
+
+        if((types.typeA != solution.typeA) || (types.typeB != solution.typeB)
+           || (types.typeC != solution.typeC) || (types.typeD != solution.typeD)
+           || (types.typeAcc != solution.typeAcc))
         {
             std::cout << "NOTE: Types from command line have been superceded by types from "
                          "solution."
                       << std::endl;
         }
-        if((types.transA != soln.solution.transA) || (types.transB != soln.solution.transB))
+        if((types.transA != solution.transA) || (types.transB != solution.transB))
         {
             std::cout << "NOTE: Transposes from command line have been superceded by transposes "
                          "from solution."
                       << std::endl;
         }
 
-        types.typeA   = soln.solution.typeA;
-        types.typeB   = soln.solution.typeB;
-        types.typeC   = soln.solution.typeC;
-        types.typeD   = soln.solution.typeD;
-        types.typeAcc = soln.solution.typeAcc;
-        types.transA  = soln.solution.transA;
-        types.transB  = soln.solution.transB;
+        types.typeA   = solution.typeA;
+        types.typeB   = solution.typeB;
+        types.typeC   = solution.typeC;
+        types.typeD   = solution.typeD;
+        types.typeAcc = solution.typeAcc;
+        types.transA  = solution.transA;
+        types.transB  = solution.transB;
     }
 
     // Currently, we only support F32 accumulation
@@ -1056,9 +1174,10 @@ int main(int argc, const char* argv[])
 
     run.check = !noCheckResult;
 
-    io.doSave = saveOption->count() > 0;
+    io.doSaveAsm = asmOption->count() > 0;
+    io.doSaveCO  = coOption->count() > 0;
 
-    // Set default MFMA sizes
+    // Set default MI sizes
     if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
        && problem.typeD == "float")
     {
@@ -1109,15 +1228,31 @@ int main(int argc, const char* argv[])
     //
     // Run!
     //
+    if(example->parsed())
+    {
+        std::ofstream file(examplePath);
+        Serialization::writeYAML(file, solution);
+        return 0;
+    }
 
     // If no subcommands were given, default behaviour is: generate
     // and benchmark.
-    bool generateAndBenchmark = !generate->parsed() && !validate->parsed() && !benchmark->parsed();
+    bool generateAndBenchmark
+        = !generate->parsed() && !validate->parsed() && !benchmark->parsed() && !info->parsed();
 
     bool doGenerate  = generateAndBenchmark || generate->parsed();
     bool doValidate  = validate->parsed();
     bool doBenchmark = generateAndBenchmark || benchmark->parsed();
+    bool doInfo      = info->parsed();
 
-    return rocRoller::Client::GEMMClient::RunGEMMCLI(
-        doGenerate, doValidate, doBenchmark, architecture, solution, problem, types, run, io);
+    return rocRoller::Client::GEMMClient::RunGEMMCLI(doGenerate,
+                                                     doValidate,
+                                                     doBenchmark,
+                                                     doInfo,
+                                                     architecture,
+                                                     solution,
+                                                     problem,
+                                                     types,
+                                                     run,
+                                                     io);
 }

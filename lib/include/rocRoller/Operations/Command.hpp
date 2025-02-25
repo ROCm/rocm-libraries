@@ -95,7 +95,15 @@ namespace rocRoller
 
         CommandArguments createArguments() const;
 
+        static std::string toYAML(Command const&);
+        static Command     fromYAML(std::string const& str);
+
+        bool operator==(Command const& rhs) const;
+
     private:
+        template <typename T1, typename T2, typename T3>
+        friend struct rocRoller::Serialization::MappingTraits;
+
         /// Does this command need to synchronize before continuing the calling CPU thread?
         bool m_sync = false;
 

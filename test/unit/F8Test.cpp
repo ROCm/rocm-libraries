@@ -107,7 +107,7 @@ namespace rocRollerTest
 
             for(int i = 0; i < N; i++)
             {
-                co_yield context->mem()->loadFlat(v_a, a_ptr, i * bpi, bpi);
+                co_yield context->mem()->loadGlobal(v_a, a_ptr, i * bpi, bpi);
 
                 // Bitmask each F8 of F8x4, convert to float, then store
                 for(int f8_idx = 0; f8_idx < numF8PerElement; f8_idx++)
@@ -119,11 +119,11 @@ namespace rocRollerTest
                     co_yield_(Instruction::Comment("Convert to float"));
                     co_yield generateOp<Expression::Convert<DataType::Float>>(v_temp, v_temp);
 
-                    co_yield context->mem()->storeFlat(result_ptr,
-                                                       v_temp,
-                                                       (i * numF8PerElement + f8_idx) * bpo,
-                                                       bpo,
-                                                       "Store to result");
+                    co_yield context->mem()->storeGlobal(result_ptr,
+                                                         v_temp,
+                                                         (i * numF8PerElement + f8_idx) * bpo,
+                                                         bpo,
+                                                         "Store to result");
                 }
             }
         };

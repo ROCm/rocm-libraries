@@ -105,6 +105,12 @@ namespace rocRoller
             int addElement(T&& element);
 
             /**
+             * Adds each element to the graph and returns a tuple of int.
+             */
+            template <typename T, typename... Ts>
+            auto addElements(T&& element, Ts&&... rest);
+
+            /**
              * @brief Set (overwrite) existing element.
              *
              * Asserts that the index exists already.
@@ -311,6 +317,20 @@ namespace rocRoller
             const;
 
             /**
+             * @brief Yields indices of nodes immediately connected to `dst` through Edges of type T, in direction Dir.
+             */
+            template <typename T, Direction Dir>
+            requires(std::constructible_from<Edge, T>) Generator<int> getConnectedNodeIndices(
+                int const dst)
+            const;
+
+            /**
+             * @brief Yields indices of nodes immediately connected to `dst` through Edges that satisfy the edgePredicate, in direction Dir.
+             */
+            template <Direction Dir, std::predicate<Edge const&> Predicate>
+            Generator<int> getConnectedNodeIndices(int const dst, Predicate edgePredicate) const;
+
+            /**
              * @brief Yields indices of nodes that immediately preceed `dst` where the Edges are of type T.
              */
             template <typename T>
@@ -400,6 +420,26 @@ namespace rocRoller
         {
             return std::visit([](auto const& v) { return toString(v); }, el);
         }
+
+        /**
+         * Yields nodes connected to start:
+         *
+         * - In direction `Dir`
+         * - Connected to `start` by edges satisfying `edgePredicate` and nodes satisfying `nodePredicate`
+         * - The nodes that are yielded must satisfy destNodePredicate.
+         *
+         * @param graph A graph
+         * @param start The starting node
+         * @param nodePredicate Only traverse nodes that satisfy this predicate.
+         * @param edgePredicate Only traverse edges that satisfy this predicate.
+         * @param destNodePredicate Only yield nodes that satisfy this predicate.
+         */
+        template <Graph::Direction Dir, typename Node, typename Edge, bool Hyper>
+        Generator<int> reachableNodes(Graph::Hypergraph<Node, Edge, Hyper> const& graph,
+                                      int                                         start,
+                                      auto                                        nodePredicate,
+                                      auto                                        edgePredicate,
+                                      auto destNodePredicate);
 
     }
 }

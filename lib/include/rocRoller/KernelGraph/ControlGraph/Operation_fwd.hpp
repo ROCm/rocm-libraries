@@ -22,6 +22,7 @@ namespace rocRoller
         struct LoadTiled;
         struct Multiply;
         struct NOP;
+        struct Block;
         struct Scope;
         struct SetCoordinate;
         struct StoreLDSTile;
@@ -32,6 +33,7 @@ namespace rocRoller
         struct TensorContraction;
         struct UnrollOp;
         struct WaitZero;
+        struct SeedPRNG;
 
         using Operation = std::variant<Assign,
                                        Barrier,
@@ -49,6 +51,7 @@ namespace rocRoller
                                        LoadSGPR,
                                        Multiply,
                                        NOP,
+                                       Block,
                                        Scope,
                                        SetCoordinate,
                                        StoreLDSTile,
@@ -58,7 +61,8 @@ namespace rocRoller
                                        StoreSGPR,
                                        TensorContraction,
                                        UnrollOp,
-                                       WaitZero>;
+                                       WaitZero,
+                                       SeedPRNG>;
 
         template <typename T>
         concept COperation = std::constructible_from<Operation, T>;

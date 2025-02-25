@@ -1,6 +1,6 @@
 #include "SimpleFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TensorDescriptor.hpp"
+#include "common/TensorDescriptor.hpp"
 #include <rocRoller/Operations/Command.hpp>
 
 using namespace rocRoller;

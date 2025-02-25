@@ -6,8 +6,10 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Utilities/Version.hpp>
 
 #include "Base.hpp"
+#include "Command.hpp"
 #include "Containers.hpp"
 #include "Enum.hpp"
 #include "Expression.hpp"
@@ -25,14 +27,14 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernelArgument& arg)
             {
-                AssertFatal(iot::outputting(io));
-
                 iot::mapRequired(io, ".name", arg.name);
                 iot::mapRequired(io, ".size", arg.size);
                 iot::mapRequired(io, ".offset", arg.offset);
 
-                std::string valueKind = "by_value";
+                iot::mapOptional(io, ".expression", arg.expression);
+                iot::mapOptional(io, ".variableType", arg.variableType);
 
+                std::string valueKind = "by_value";
                 if(arg.variableType.isGlobalPointer())
                 {
                     valueKind = "global_buffer";
@@ -43,9 +45,6 @@ namespace rocRoller
                 }
 
                 iot::mapRequired(io, ".value_kind", valueKind);
-
-                if(arg.expression != nullptr || !iot::outputting(io))
-                    iot::mapOptional(io, ".expression", arg.expression);
             }
 
             static void mapping(IO& io, AssemblyKernelArgument& arg, EmptyContext& ctx)
@@ -62,37 +61,81 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernel& kern)
             {
-                AssertFatal(iot::outputting(io));
+                iot::mapRequired(io, ".name", kern.m_kernelName);
 
-                std::string name = kern.kernelName();
-                iot::mapRequired(io, ".name", name);
-
-                std::string symbol = name + ".kd";
+                //
+                // Serialized but not de-serialized
+                //
+                std::string symbol = kern.kernelName() + ".kd";
                 iot::mapRequired(io, ".symbol", symbol);
 
-                iot::mapRequired(io, ".kernarg_segment_size", kern.kernarg_segment_size());
-                iot::mapRequired(io, ".group_segment_fixed_size", kern.group_segment_fixed_size());
-                iot::mapRequired(
-                    io, ".private_segment_fixed_size", kern.private_segment_fixed_size());
-                iot::mapRequired(io, ".kernarg_segment_align", kern.kernarg_segment_align());
-                iot::mapRequired(io, ".wavefront_size", kern.wavefront_size());
-                iot::mapRequired(io, ".sgpr_count", kern.sgpr_count());
-                iot::mapRequired(io, ".vgpr_count", kern.vgpr_count());
-                iot::mapRequired(io, ".agpr_count", kern.agpr_count());
-                iot::mapRequired(io, ".max_flat_workgroup_size", kern.max_flat_workgroup_size());
+                int kernarg_segment_size;
+                int group_segment_fixed_size;
+                int private_segment_fixed_size;
+                int kernarg_segment_align;
+                int sgpr_count;
+                int vgpr_count;
+                int agpr_count;
+                int max_flat_workgroup_size;
 
-                iot::mapRequired(io, ".args", kern.arguments());
-
-                iot::mapRequired(io, ".workgroup_size", kern.workgroupSize());
-                // TODO: only do this for appropriate logging levels
-                auto graph = kern.kernel_graph();
-                if(graph)
+                if(iot::outputting(io))
                 {
-                    // Include both DOT and new serialization for now.
-                    iot::mapRequired(io, ".kernel_graph", *graph);
-                    auto dot = graph->toDOT();
-                    iot::mapRequired(io, ".kernel_graph_dot", dot);
+                    kernarg_segment_size       = kern.kernarg_segment_size();
+                    group_segment_fixed_size   = kern.group_segment_fixed_size();
+                    private_segment_fixed_size = kern.private_segment_fixed_size();
+                    kernarg_segment_align      = kern.kernarg_segment_align();
+                    sgpr_count                 = kern.sgpr_count();
+                    vgpr_count                 = kern.vgpr_count();
+                    agpr_count                 = kern.agpr_count();
+                    max_flat_workgroup_size    = kern.max_flat_workgroup_size();
                 }
+
+                iot::mapRequired(io, ".kernarg_segment_size", kernarg_segment_size);
+                iot::mapRequired(io, ".group_segment_fixed_size", group_segment_fixed_size);
+                iot::mapRequired(io, ".private_segment_fixed_size", private_segment_fixed_size);
+                iot::mapRequired(io, ".kernarg_segment_align", kernarg_segment_align);
+                iot::mapRequired(io, ".sgpr_count", sgpr_count);
+                iot::mapRequired(io, ".vgpr_count", vgpr_count);
+                iot::mapRequired(io, ".agpr_count", agpr_count);
+                iot::mapRequired(io, ".max_flat_workgroup_size", max_flat_workgroup_size);
+
+                //
+                // Serialized and de-serialized
+                //
+                iot::mapRequired(io, ".kernel_dimensions", kern.m_kernelDimensions);
+                iot::mapRequired(io, ".workgroup_size", kern.m_workgroupSize);
+                iot::mapRequired(io, ".wavefront_size", kern.m_wavefrontSize);
+                iot::mapRequired(io, ".workitem_count", kern.m_workitemCount);
+                iot::mapRequired(io, ".dynamic_sharedmemory_bytes", kern.m_dynamicSharedMemBytes);
+
+                iot::mapRequired(io, ".args", kern.m_arguments);
+
+                //
+                // Meta info
+                //
+                if(iot::outputting(io))
+                {
+                    KernelGraph::KernelGraphPtr graph = nullptr;
+                    // TODO: only do this for appropriate logging levels
+                    if(kern.m_kernelGraph)
+                    {
+                        graph = kern.m_kernelGraph;
+                    }
+                    iot::mapRequired(io, ".kernel_graph", graph);
+
+                    if(graph)
+                    {
+                        // Include both DOT and new serialization for now.
+                        auto dot = graph->toDOT();
+                        iot::mapOptional(io, ".kernel_graph_dot", dot);
+                    }
+                }
+                else
+                {
+                    iot::mapRequired(io, ".kernel_graph", kern.m_kernelGraph);
+                }
+
+                iot::mapRequired(io, ".command", kern.m_command);
             }
 
             static void mapping(IO& io, AssemblyKernel& kern, EmptyContext& ctx)
@@ -109,8 +152,8 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernels& kern)
             {
-                AssertFatal(iot::outputting(io));
-                iot::mapRequired(io, "amdhsa.version", kern.hsa_version());
+                auto hsa_version = kern.hsa_version();
+                iot::mapRequired(io, "amdhsa.version", hsa_version);
                 iot::mapRequired(io, "amdhsa.kernels", kern.kernels);
             }
 

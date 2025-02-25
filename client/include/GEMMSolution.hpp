@@ -21,18 +21,17 @@ namespace rocRoller
                 {
                 }
 
-                virtual CommandPtr           makeCommand(SolutionParameters const&)           = 0;
-                virtual CommandParametersPtr makeCommandParameters(SolutionParameters const&) = 0;
-                virtual CommandLaunchParametersPtr makeLaunchParameters(ProblemParameters const&,
-                                                                        SolutionParameters const&,
-                                                                        RunParameters const&)
+                virtual CommandPtr makeCommand(SolutionParameters const&) = 0;
+
+                virtual CommandParametersPtr makeCommandParameters(CommandPtr,
+                                                                   SolutionParameters const&)
                     = 0;
 
-                virtual CommandArguments commandArguments(ProblemParameters const& problemParams,
+                virtual CommandArguments commandArguments(CommandPtr,
+                                                          ProblemParameters const& problemParams,
                                                           RunParameters const& runParams) const = 0;
 
-                virtual void setPredicates(CommandKernelPtr          commandKernel,
-                                           SolutionParameters const& solutionParams)
+                virtual void setPredicates(CommandPtr, CommandKernelPtr, SolutionParameters const&)
                 {
                 }
 
@@ -41,25 +40,28 @@ namespace rocRoller
                     return {};
                 }
 
-                virtual void generateSolution(SolutionParameters const& solutionParams)
+                virtual CommandKernelPtr
+                    generateCommandKernel(CommandPtr                command,
+                                          SolutionParameters const& solutionParams)
                 {
-                    this->m_command       = this->makeCommand(solutionParams);
-                    this->m_commandKernel = std::make_shared<CommandKernel>(
-                        this->m_command, solutionParams.generateKernelName());
-                    this->m_commandKernel->setContext(m_context);
-                    this->m_commandKernel->setCommandParameters(
-                        this->makeCommandParameters(solutionParams));
-                    this->setPredicates(this->m_commandKernel, solutionParams);
-                    this->m_commandKernel->generateKernel();
+                    auto commandKernel = std::make_shared<CommandKernel>(
+                        command, solutionParams.generateKernelName());
+                    commandKernel->setContext(m_context);
+                    commandKernel->setCommandParameters(
+                        this->makeCommandParameters(command, solutionParams));
+                    this->setPredicates(command, commandKernel, solutionParams);
+                    commandKernel->generateKernel();
+                    return commandKernel;
                 }
 
-                virtual void validateRunParameters(SolutionParameters const& solutionParams,
-                                                   ProblemParameters const&  problemParams,
-                                                   RunParameters const&      runParams,
-                                                   CommandKernelPtr          commandKernel)
+                virtual void validateRunParameters(CommandPtr               command,
+                                                   ProblemParameters const& problemParams,
+                                                   RunParameters const&     runParams,
+                                                   CommandKernelPtr         commandKernel)
                 {
-                    auto args = this->commandArguments(problemParams, runParams).runtimeArguments();
-                    AssertFatal(this->m_commandKernel->matchesPredicates(args, spdlog::level::err),
+                    auto args = this->commandArguments(command, problemParams, runParams)
+                                    .runtimeArguments();
+                    AssertFatal(commandKernel->matchesPredicates(args, spdlog::level::err),
                                 "Invalid run parameters: all predicates must match.");
                 }
 
@@ -74,20 +76,8 @@ namespace rocRoller
                     return this->m_context;
                 }
 
-                CommandPtr command() const
-                {
-                    return this->m_command;
-                }
-
-                CommandKernelPtr commandKernel() const
-                {
-                    return this->m_commandKernel;
-                }
-
             protected:
-                ContextPtr       m_context;
-                CommandPtr       m_command;
-                CommandKernelPtr m_commandKernel;
+                ContextPtr m_context;
             };
         }
     }

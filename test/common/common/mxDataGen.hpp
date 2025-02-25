@@ -1,4 +1,5 @@
-#include "../../unit/TensorDescriptor.hpp"
+#include "TensorDescriptor.hpp"
+
 #include <DataGenerator.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 
@@ -91,11 +92,11 @@ namespace rocRoller
     template <typename rrDT>
     std::vector<typename UnsegmentedTypeOf<rrDT>::type>
         getRandomVector(const DGen::DataGenerator<typename rrDT2DGenDT<rrDT>::type>& dgen,
-                        bool hasScale = false)
+                        bool                                                         hasScale)
     {
-        std::vector<uint8_t> dataByte = dgen.getDataBytes();
-
         using UDT = typename UnsegmentedTypeOf<rrDT>::type;
+
+        std::vector<uint8_t> dataByte = dgen.getDataBytes();
 
         if constexpr(std::is_same_v<rrDT,
                                     FP6> || std::is_same_v<rrDT, BF6> || std::is_same_v<rrDT, FP4>)

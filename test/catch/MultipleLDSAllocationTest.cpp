@@ -119,11 +119,11 @@ namespace multipleLDSAllocTest
                         Register::AllocationOptions::FullyContiguous());
                     co_yield v_ptr->allocate();
                     const auto offset = i * m_numBytes1;
-                    co_yield m_context->mem()->loadFlat(v_ptr, v_a, offset, m_numBytes1);
+                    co_yield m_context->mem()->loadGlobal(v_ptr, v_a, offset, m_numBytes1);
                     co_yield m_context->mem()->storeLocal(lds1_offset, v_ptr, offset, m_numBytes1);
                     co_yield m_context->mem()->barrier();
                     co_yield m_context->mem()->loadLocal(v_ptr, lds1_offset, offset, m_numBytes1);
-                    co_yield m_context->mem()->storeFlat(v_result, v_ptr, offset, m_numBytes1);
+                    co_yield m_context->mem()->storeGlobal(v_result, v_ptr, offset, m_numBytes1);
                 }
                 auto usedLDS = m_numBytes1 * m_numLoads1;
 
@@ -137,11 +137,12 @@ namespace multipleLDSAllocTest
                         Register::AllocationOptions::FullyContiguous());
                     co_yield v_ptr->allocate();
                     const auto offset = i * m_numBytes2;
-                    co_yield m_context->mem()->loadFlat(v_ptr, v_a, usedLDS + offset, m_numBytes2);
+                    co_yield m_context->mem()->loadGlobal(
+                        v_ptr, v_a, usedLDS + offset, m_numBytes2);
                     co_yield m_context->mem()->storeLocal(lds2_offset, v_ptr, offset, m_numBytes2);
                     co_yield m_context->mem()->barrier();
                     co_yield m_context->mem()->loadLocal(v_ptr, lds2_offset, offset, m_numBytes2);
-                    co_yield m_context->mem()->storeFlat(
+                    co_yield m_context->mem()->storeGlobal(
                         v_result, v_ptr, usedLDS + offset, m_numBytes2);
                 }
                 usedLDS += m_numBytes2 * m_numLoads2;
@@ -156,11 +157,12 @@ namespace multipleLDSAllocTest
                         Register::AllocationOptions::FullyContiguous());
                     co_yield v_ptr->allocate();
                     const auto offset = i * m_numBytes3;
-                    co_yield m_context->mem()->loadFlat(v_ptr, v_a, usedLDS + offset, m_numBytes3);
+                    co_yield m_context->mem()->loadGlobal(
+                        v_ptr, v_a, usedLDS + offset, m_numBytes3);
                     co_yield m_context->mem()->storeLocal(lds3_offset, v_ptr, offset, m_numBytes3);
                     co_yield m_context->mem()->barrier();
                     co_yield m_context->mem()->loadLocal(v_ptr, lds3_offset, offset, m_numBytes3);
-                    co_yield m_context->mem()->storeFlat(
+                    co_yield m_context->mem()->storeGlobal(
                         v_result, v_ptr, usedLDS + offset, m_numBytes3);
                 }
             };

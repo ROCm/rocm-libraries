@@ -194,26 +194,31 @@ set(
 
   catch/BinaryExpressionTest.cpp
   catch/CommandArgumentValueTest.cpp
+  catch/CommandTest.cpp
   catch/CustomAssertionTest.cpp
   catch/CustomMatcherTest.cpp
+  catch/ExpressionContainsSubExpressionTest.cpp
   catch/ExpressionIdenticalTest.cpp
   catch/ExpressionSerializationTest.cpp
   catch/ExpressionTest.cpp
   catch/ExpressionToStringTest.cpp
   catch/ExpressionTransformationTest.cpp
-  catch/ExpressionContainsSubExpressionTest.cpp
   catch/FastArithmeticTest.cpp
+  catch/IdentifyParallelDimensionsTest.cpp
   catch/KernelArgumentsTest.cpp
   catch/KernelGraphConstraintsTest.cpp
+  catch/RandomNumberExpressionTest.cpp
   catch/LargerLDSTest.cpp
   catch/MultipleLDSAllocationTest.cpp
   catch/ScalarExpressionTest.cpp
+  catch/SettingsTest.cpp
   catch/TernaryExpressionTest.cpp
   catch/TestContextTest.cpp
+  catch/UnrollLoopsTest.cpp
   catch/UtilsTest.cpp
-  catch/RandomNumberExpressionTest.cpp
-  catch/SettingsTest.cpp
+  catch/RandomNumberGenerationTest.cpp
   catch/mxDataGeneratorTest.cpp
+  catch/GlobalLoadStoreTest.cpp
   catch/HazardObserverTest.cpp
 )
 
@@ -337,7 +342,7 @@ if (NOT CODE_ANALYSIS)
   # Add script linting
   add_test(NAME PythonLint
            COMMAND flake8
-           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/scripts)
   set_tests_properties(PythonLint
                        PROPERTIES
                         ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}"

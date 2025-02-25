@@ -7,6 +7,9 @@
 
 namespace rocRoller
 {
+    std::string   toString(ArgumentType);
+    std::ostream& operator<<(std::ostream&, ArgumentType);
+
     class CommandArguments
     {
     public:

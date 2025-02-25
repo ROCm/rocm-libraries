@@ -81,16 +81,16 @@ namespace rocRollerTest
         }
 
         /*
-         * flat_load into FP4x8 to GPU, flat_store to CPU
+         * global_load into FP4x8 to GPU, global_store to CPU
          */
-        void genFP4x8FlatLoadAndStore(int num_fp4)
+        void genFP4x8GlobalLoadAndStore(int num_fp4)
         {
             AssertFatal(num_fp4 % numFP4PerElement == 0,
                         "Number of FP4 values must be multiple times of 8");
             int  N = num_fp4 / numValuesPerByte;
             auto k = m_context->kernel();
 
-            k->setKernelName("FlatLoadAndStoreFP4x8");
+            k->setKernelName("GlobalLoadAndStoreFP4x8");
             k->setKernelDimensions(1);
 
             k->addArgument({"result",
@@ -136,8 +136,8 @@ namespace rocRollerTest
 
                 co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
 
-                co_yield m_context->mem()->loadFlat(v_a, v_ptr, 0, N);
-                co_yield m_context->mem()->storeFlat(v_result, v_a, 0, N);
+                co_yield m_context->mem()->loadGlobal(v_a, v_ptr, 0, N);
+                co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, N);
             };
 
             m_context->schedule(kb());
@@ -335,24 +335,24 @@ namespace rocRollerTest
 
         auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
 
-        int numFlatLoad   = 0;
-        int numFlatLoadx1 = 0;
+        int numBufferLoad   = 0;
+        int numBufferLoadx1 = 0;
         for(auto const& instruction : instructions)
         {
             if(instruction.starts_with("buffer_load"))
-                numFlatLoad++;
+                numBufferLoad++;
             if(instruction.starts_with("buffer_load_dword "))
-                numFlatLoadx1++;
+                numBufferLoadx1++;
         }
-        EXPECT_EQ(numFlatLoad, 1);
-        EXPECT_EQ(numFlatLoadx1, 1);
+        EXPECT_EQ(numBufferLoad, 1);
+        EXPECT_EQ(numBufferLoadx1, 1);
     }
 
-    TEST_P(FP4MemoryInstructionTest, GPU_FP4x8FlatLoadAndStore)
+    TEST_P(FP4MemoryInstructionTest, GPU_FP4x8GlobalLoadAndStore)
     {
 
         int num_fp4 = 8;
-        genFP4x8FlatLoadAndStore(num_fp4);
+        genFP4x8GlobalLoadAndStore(num_fp4);
         std::vector<char> assembledKernel = m_context->instructions()->assemble();
         EXPECT_GT(assembledKernel.size(), 0);
 
@@ -363,17 +363,17 @@ namespace rocRollerTest
 
         auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
 
-        int numFlatLoad   = 0;
-        int numFlatLoadx1 = 0;
+        int numGlobalLoad   = 0;
+        int numGlobalLoadx1 = 0;
         for(auto const& instruction : instructions)
         {
-            if(instruction.starts_with("flat_load"))
-                numFlatLoad++;
-            if(instruction.starts_with("flat_load_dword "))
-                numFlatLoadx1++;
+            if(instruction.starts_with("global_load"))
+                numGlobalLoad++;
+            if(instruction.starts_with("global_load_dword "))
+                numGlobalLoadx1++;
         }
-        EXPECT_EQ(numFlatLoad, 1);
-        EXPECT_EQ(numFlatLoadx1, 1);
+        EXPECT_EQ(numGlobalLoad, 1);
+        EXPECT_EQ(numGlobalLoadx1, 1);
     }
 
     INSTANTIATE_TEST_SUITE_P(FP4MemoryInstructionTest,

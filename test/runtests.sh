@@ -1,11 +1,55 @@
-#!/bin/bash -x
+#!/bin/bash
 
-# bash runtests.sh
+ROCROLLER_BUILD_DIR="$PWD/build"
+RUN_CLIENT_TESTS=n
+SUITE="small"
+while getopts "ct:b:" opt; do
+    case "${opt}" in
+    b)  ROCROLLER_BUILD_DIR="${OPTARG}"
+        ;;
+    c)  RUN_CLIENT_TESTS=y
+        ;;
+    t)
+        SUITE="${OPTARG,,}"
+        ;;
+    [?])
+        echo >&2 "Usage: $0 [-t option] [-c]
+             option: {f16 | f8f6f4 | f8 | f6 | f4 | mixed | scaled | transpose | small | full}
+             -b: path to RR build directory [Default: \"$ROCROLLER_BUILD_DIR\"]
+             -c: enables client tests.
+                 Default: always enabled with small & full, disabled otherwise."
+        exit 1
+        ;;
+    esac
+done
+
+# So that rrperf can find the our binaries
+export ROCROLLER_BUILD_DIR
 
 # Path to the rocRollerTests executable
-RRTESTS=$(realpath build/rocRollerTests)
+RRTESTS=$(realpath ${ROCROLLER_BUILD_DIR}/bin/rocRollerTests)
+if [[ $? -ne 0 ]]; then
+  echo "ERROR: could not find rocRollerTests in $ROCROLLER_BUILD_DIR/bin directory."
+  echo "WARN: you can specify a custom build path by passing -b <RR build path>."
+  exit 1
+fi
+
+RRTESTSCATCH=$(realpath ${ROCROLLER_BUILD_DIR}/bin/rocRollerTests_catch)
+if [[ $? -ne 0 ]]; then
+  echo "ERROR: could not find rocRollerTests_catch in $ROCROLLER_BUILD_DIR/bin directory."
+  echo "WARN: you can specify a custom build path by passing -b <RR build path>."
+  exit 1
+fi
+
 # Path to the rrperf script
 RRPERF=$(realpath scripts/rrperf)
+if [[ $? -ne 0 ]]; then
+  echo "ERROR: could not find rrperf in $PWD/scripts directory."
+  echo "WARN: make sure you are running from the root of a RR work directory."
+  exit 1
+fi
+
+set -x
 
 # Tests for gfx950
 F16TESTS=("*GPU_MatrixMultiplyMacroTileF16*"
@@ -52,8 +96,21 @@ TRANSPOSETESTS=(
 "*B16Transpose32x16GPUTest"
 )
 
+MEMORYTESTS=(
+"*MemoryInstructionsTest*"
+"*GPU_BufferLoad2LDSTest*"
+"*GlobalMemoryInstructionsTest*"
+"*MemoryInstructionsLDSTest*"
+)
+
 SKIPTESTS=("*BasicGEMMFP16Prefetch3*"
 "*VectorAddBenchmark*"
+)
+
+RRCATCHTESTS=("[lds][gpu]"
+"[largerLDS][gpu]"
+"[global-load-store][gpu]"
+"[prng][gpu]"
 )
 
 RRPERF_F16TESTS=("f16gemm_16x16x32_fp16_NN"
@@ -106,27 +163,11 @@ RRPERF_TRANSPOSETESTS=()
 
 RRPERF_TESTS_LIST=()
 RRTESTS_LIST=()
-RUN_CLIENT_TESTS=n
-SUITE="small"
-while getopts "ct:" opt; do
-    case "${opt}" in
-    c)  RUN_CLIENT_TESTS=y
-        ;;
-    t)
-        SUITE="${OPTARG,,}"
-        ;;
-    [?])
-        echo >&2 "Usage: $0 [-t option] [-c]
-             option: {f16 | f8f6f4 | f8 | f6 | f4 | mixed | scaled | transpose | small | full}
-             -c: enables client tests.
-                 Default: always enabled with small & full, disabled otherwise."
-        exit 1
-        ;;
-    esac
-done
-
+# For now just include all listed catch tests.
+# Update this in the future as we migrate tests from google tests.
+RRCATCHTESTS_LIST="${RRCATCHTESTS[@]}"
 case "${SUITE}" in
-  "f16" | "f8f6f4" | "f8" | "f6" | "f4" | "mixed" | "scaled" | "transpose")
+  "f16" | "f8f6f4" | "f8" | "f6" | "f4" | "mixed" | "scaled" | "transpose" | "memory")
       RRTESTS_VARNAME="${SUITE^^}TESTS"
       RRPERF_TESTS_VARNAME="RRPERF_${SUITE^^}TESTS"
       read -r -a RRTESTS_LIST <<<"$(eval echo "\${${RRTESTS_VARNAME}[@]}")"
@@ -147,6 +188,7 @@ case "${SUITE}" in
                "${F4TESTS[@]}"        \
                "${SCALEDTESTS[@]}"    \
                "${MIXEDTESTS[@]}"     \
+               "${MEMORYTESTS[@]}"    \
                "${TRANSPOSETESTS[@]}" ; do
           RRTESTS_LIST+=("$t")
       done
@@ -165,10 +207,15 @@ esac
 
 # remove duplicates
 RRTESTS_LIST=($(echo "${RRTESTS_LIST[@]}" | tr " " "\n" | sort -u | tr "\n" " "))
+RRCATCHTESTS_LIST=($(echo "${RRCATCHTESTS_LIST[@]}" | tr " " "\n" | sort -u | tr "\n" " "))
 RRPERF_TESTS_LIST=($(echo "${RRPERF_TESTS_LIST[@]}" | tr " " "\n" | sort -u | tr "\n" " "))
 
 for testName in "${RRTESTS_LIST[@]}"; do
     $RRTESTS --gtest_filter="$testName"
+done
+
+for testName in "${RRCATCHTESTS_LIST[@]}"; do
+    $RRTESTSCATCH "$testName"
 done
 
 for testName in "${RRPERF_TESTS_LIST[@]}"; do

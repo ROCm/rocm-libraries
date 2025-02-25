@@ -165,12 +165,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5)Invalid, DataFlowTag(10)Invalid)Invalid(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5)NA, DataFlowTag(10)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13)Invalid)Invalid(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13)NA)NA(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13)Invalid, DataFlowTag(15)Invalid)Invalid(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13)NA, DataFlowTag(15)NA)NA(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl14"[label="StoreLinear(14)"];
@@ -272,12 +272,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)Invalid, DataFlowTag(10)Invalid)Invalid(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)NA, DataFlowTag(10)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13)Invalid)Invalid(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13)NA)NA(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13)Invalid, DataFlowTag(15)Invalid)Invalid(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13)NA, DataFlowTag(15)NA)NA(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl14"[label="StoreLinear(14)"];
@@ -330,14 +330,14 @@ namespace KernelGraphTest
         "coord14"[label="User{CommandArgument(Tensor_8_extent)I64}(14)"];
         "coord15"[label="Join(15)",shape=box];
         "coord16"[label="VGPR{NA}(16)"];
-        "coord17"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(17)"];
-        "coord18"[label="Workitem{0, 32:U32}(18)"];
+        "coord17"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_0_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(17)"];
+        "coord18"[label="Workitem{0, 64:U32}(18)"];
         "coord19"[label="Tile(19)",shape=box];
         "coord20"[label="Forget(20)",shape=box];
         "coord21"[label="DataFlow(21)",shape=box];
         "coord22"[label="VGPR{NA}(22)"];
-        "coord23"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(23)"];
-        "coord24"[label="Workitem{0, 32:U32}(24)"];
+        "coord23"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_2_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(23)"];
+        "coord24"[label="Workitem{0, 64:U32}(24)"];
         "coord25"[label="Tile(25)",shape=box];
         "coord26"[label="Forget(26)",shape=box];
         "coord27"[label="DataFlow(27)",shape=box];
@@ -347,8 +347,8 @@ namespace KernelGraphTest
         "coord31"[label="DataFlow(31)",shape=box];
         "coord32"[label="VGPR{NA}(32)"];
         "coord33"[label="DataFlow(33)",shape=box];
-        "coord34"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(34)"];
-        "coord35"[label="Workitem{0, 32:U32}(35)"];
+        "coord34"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_8_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
+        "coord35"[label="Workitem{0, 64:U32}(35)"];
         "coord36"[label="Inherit(36)",shape=box];
         "coord37"[label="Flatten(37)",shape=box];
         "coord38"[label="DataFlow(38)",shape=box];
@@ -442,12 +442,12 @@ namespace KernelGraphTest
         "cntrl3"[label="Body(3)",shape=box];
         "cntrl4"[label="LoadVGPR(4)"];
         "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="Assign VGPR Add(DataFlowTag(16)Invalid, DataFlowTag(22)Invalid)Invalid(6)"];
+        "cntrl6"[label="Assign VGPR Add(DataFlowTag(16)NA, DataFlowTag(22)NA)NA(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="Assign VGPR Negate(DataFlowTag(28)Invalid)Invalid(9)"];
+        "cntrl9"[label="Assign VGPR Negate(DataFlowTag(28)NA)NA(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
-        "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(28)Invalid, DataFlowTag(30)Invalid)Invalid(11)"];
+        "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(28)NA, DataFlowTag(30)NA)NA(11)"];
         "cntrl12"[label="Sequence(12)",shape=box];
         "cntrl13"[label="Sequence(13)",shape=box];
         "cntrl14"[label="StoreVGPR(14)"];
@@ -497,8 +497,8 @@ namespace KernelGraphTest
         "coord4"[label="Split(4)",shape=box];
         "coord5"[label="Linear{CommandArgument(Tensor_0_size_0)I64}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
-        "coord7"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(7)"];
-        "coord8"[label="Workitem{0, 32:U32}(8)"];
+        "coord7"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_0_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(7)"];
+        "coord8"[label="Workitem{0, 64:U32}(8)"];
         "coord9"[label="Tile(9)",shape=box];
         "coord10"[label="Linear{16:I}(10)"];
         "coord11"[label="ForLoop{16:I}(11)"];
@@ -510,8 +510,8 @@ namespace KernelGraphTest
         "coord17"[label="Split(17)",shape=box];
         "coord18"[label="Linear{CommandArgument(Tensor_2_size_0)I64}(18)"];
         "coord19"[label="Flatten(19)",shape=box];
-        "coord20"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(20)"];
-        "coord21"[label="Workitem{0, 32:U32}(21)"];
+        "coord20"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_2_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(20)"];
+        "coord21"[label="Workitem{0, 64:U32}(21)"];
         "coord22"[label="Tile(22)",shape=box];
         "coord23"[label="ForLoop{16:I}(23)"];
         "coord24"[label="DataFlow(24)",shape=box];
@@ -524,8 +524,8 @@ namespace KernelGraphTest
         "coord31"[label="DataFlow(31)",shape=box];
         "coord32"[label="VGPR{NA}(32)"];
         "coord33"[label="DataFlow(33)",shape=box];
-        "coord34"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0:U32}(34)"];
-        "coord35"[label="Workitem{0, 32:U32}(35)"];
+        "coord34"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_8_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
+        "coord35"[label="Workitem{0, 64:U32}(35)"];
         "coord36"[label="Inherit(36)",shape=box];
         "coord37"[label="ForLoop{16:I}(37)"];
         "coord38"[label="DataFlow(38)",shape=box];
@@ -644,12 +644,12 @@ namespace KernelGraphTest
         "cntrl9"[label="Body(9)",shape=box];
         "cntrl10"[label="LoadVGPR(10)"];
         "cntrl11"[label="Body(11)",shape=box];
-        "cntrl12"[label="Assign VGPR Add(DataFlowTag(13)Invalid, DataFlowTag(25)Invalid)Invalid(12)"];
+        "cntrl12"[label="Assign VGPR Add(DataFlowTag(13)NA, DataFlowTag(25)NA)NA(12)"];
         "cntrl13"[label="Sequence(13)",shape=box];
         "cntrl14"[label="Sequence(14)",shape=box];
-        "cntrl15"[label="Assign VGPR Negate(DataFlowTag(28)Invalid)Invalid(15)"];
+        "cntrl15"[label="Assign VGPR Negate(DataFlowTag(28)NA)NA(15)"];
         "cntrl16"[label="Sequence(16)",shape=box];
-        "cntrl17"[label="Assign VGPR Multiply(DataFlowTag(28)Invalid, DataFlowTag(30)Invalid)Invalid(17)"];
+        "cntrl17"[label="Assign VGPR Multiply(DataFlowTag(28)NA, DataFlowTag(30)NA)NA(17)"];
         "cntrl18"[label="Sequence(18)",shape=box];
         "cntrl19"[label="Sequence(19)",shape=box];
         "cntrl20"[label="StoreVGPR(20)"];
@@ -755,12 +755,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadVGPR(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(2)Invalid, DataFlowTag(5)Invalid)Invalid(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(2)NA, DataFlowTag(5)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7)Invalid)Invalid(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7)NA)NA(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(7)Invalid, DataFlowTag(9)Invalid)Invalid(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(7)NA, DataFlowTag(9)NA)NA(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl1" -> "cntrl3"
@@ -1303,13 +1303,13 @@ namespace KernelGraphTest
         "cntrl3"[label="Body(3)",shape=box];
         "cntrl4"[label="LoadTiled(4)"];
         "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)Invalid, DataFlowTag(4)Invalid)Invalid(6)"];
+        "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)NA, DataFlowTag(4)NA)NA(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="Assign VGPR Add(DataFlowTag(11)Invalid, DataFlowTag(11)Invalid)Invalid(9)"];
+        "cntrl9"[label="Assign VGPR Add(DataFlowTag(11)NA, DataFlowTag(11)NA)NA(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl11"[label="Sequence(11)",shape=box];
-        "cntrl12"[label="Assign VGPR Add(DataFlowTag(15)Invalid, DataFlowTag(17)Invalid)Invalid(12)"];
+        "cntrl12"[label="Assign VGPR Add(DataFlowTag(15)NA, DataFlowTag(17)NA)NA(12)"];
         "cntrl13"[label="Sequence(13)",shape=box];
         "cntrl14"[label="Sequence(14)",shape=box];
         "cntrl15"[label="StoreTiled(15)"];
@@ -1386,13 +1386,13 @@ namespace KernelGraphTest
             {block_id, thread_id}, {user0}, {block0, thread0}, nullptr);
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "Multiply(Add(Multiply(2:I, 32:U32)U32, 33:I)U32, "
-                  "CommandArgument(Tensor_0_stride_0)I64)I64");
+                  "{Split: Multiply({Tile: Add(Multiply(2:I, 64:U32)U32, 33:I)U32}, "
+                  "CommandArgument(Tensor_0_stride_0)I64)I64}");
 
         exprs = kgraph1.coordinates.reverse(
             {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "Multiply(97:U32, Tensor_0_stride_0_1:I64)I64");
+        EXPECT_EQ(sexpr, "{Split: Multiply(161:U32, Tensor_0_stride_0_0:I64)I64}");
     }
 
 #if 0

@@ -115,6 +115,7 @@ def unit():
     )
     yield mkGEMM(default, fp32)
     yield mkGEMM(default, fp16)
+    yield from tail_loop_reproducer()
 
 
 def sgemm():
@@ -320,6 +321,23 @@ def visualizer():
     )
 
 
+def tail_loop_reproducer():
+    yield mkGEMM(
+        M=64,
+        N=128,
+        K=8,
+        trans_A="T",
+        trans_B="N",
+        wave_m=32,
+        wave_n=32,
+        wave_k=2,
+        wave_b=1,
+        mac_m=64,
+        mac_n=64,
+        mac_k=8,
+    )
+
+
 def guidepost_1():
     yield mkGEMM(
         HGEMM_7680x8448x8448,
@@ -361,48 +379,6 @@ def hgemm_no_store_LDS():
             prefetchInFlight=2,
             prefetchLDSFactor=0,
         )
-
-
-def tensile_asm_guidepost_1():
-    yield mkGEMM(
-        M=7680,
-        N=8448,
-        K=8448,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        visualize=False,
-        scheduler="TENSILE_ASM",
-        prefetch=True,
-        prefetchInFlight=2,
-        prefetchLDSFactor=2,
-        **fp16,
-    )
-
-
-def tensile_asm_guidepost_2():
-    yield mkGEMM(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        trans_A="N",
-        trans_B="T",
-        visualize=False,
-        scheduler="TENSILE_ASM",
-        prefetch=True,
-        prefetchInFlight=2,
-        prefetchLDSFactor=2,
-        **fp16,
-    )
 
 
 def tensile_guidepost():
@@ -536,8 +512,6 @@ def scalar_is_zero():
 def tensile_benchmarks():
     yield from tensile_guidepost()
     yield from tensile_sgemm_guidepost()
-    yield from tensile_asm_guidepost_1()
-    yield from tensile_asm_guidepost_2()
 
 
 def codegen():
@@ -1300,8 +1274,6 @@ def all_gfx942():
 def hgemm_guideposts():
     yield from guidepost_1()
     yield from guidepost_2()
-    yield from tensile_asm_guidepost_1()
-    yield from tensile_asm_guidepost_2()
 
 
 def priority_problems():

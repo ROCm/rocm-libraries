@@ -34,7 +34,6 @@ namespace rocRoller
         std::tuple<int, std::string> execute(std::string const& command);
         void                         executeChecked(std::string const& command);
 
-        std::vector<char> readFile(std::string const& filename);
-        std::string       makeTempFolder();
+        std::string makeTempFolder();
     };
 }

@@ -21,4 +21,9 @@ namespace rocRoller
     {
         return Serialization::toYAML(m_arguments);
     }
+
+    AssemblyKernels AssemblyKernels::fromYAML(std::string const& str)
+    {
+        return Serialization::fromYAML<AssemblyKernels>(str);
+    }
 }

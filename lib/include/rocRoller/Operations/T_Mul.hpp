@@ -4,10 +4,12 @@
 
 #pragma once
 
-#include "Operation.hpp"
-
 #include <memory>
 #include <unordered_set>
+
+#include "Operation.hpp"
+
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {
@@ -23,6 +25,11 @@ namespace rocRoller
             std::string                      toString() const;
 
             OperationTag a, b;
+
+            bool operator==(T_Mul const&) const;
+
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
         };
 
     }

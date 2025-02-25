@@ -18,6 +18,7 @@ namespace rocRoller
             if(toString(val) == str)
                 return val;
         }
-        Throw<FatalError>("Invalid fromString", typeid(T).name(), ": ", str);
+        Throw<FatalError>(
+            "Invalid fromString: type name: ", typeid(T).name(), ", string input: ", str);
     }
 }

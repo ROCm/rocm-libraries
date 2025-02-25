@@ -17,7 +17,6 @@ namespace rocRoller
 {
     namespace Serialization
     {
-        static_assert(CNamedVariant<CommandArgumentValue>);
         template <typename IO, typename Context>
         struct MappingTraits<Expression::ExpressionPtr, IO, Context>
             : public SharedPointerMappingTraits<Expression::ExpressionPtr, IO, Context, true>
@@ -113,6 +112,7 @@ namespace rocRoller
             }
         };
 
+        static_assert(CNamedVariant<CommandArgumentValue>);
         template <typename IO, typename Context>
         struct MappingTraits<CommandArgumentValue, IO, Context>
             : public DefaultVariantMappingTraits<CommandArgumentValue, IO, Context>
@@ -191,6 +191,12 @@ namespace rocRoller
                 iot::mapRequired(io, "name", name);
                 iot::mapRequired(io, "variableType", variableType);
                 iot::mapRequired(io, "direction", direction);
+
+                if(!iot::outputting(io))
+                {
+                    val = std::make_shared<CommandArgument>(
+                        nullptr, variableType, offset, direction, name);
+                }
             }
 
             static void mapping(IO& io, CommandArgumentPtr& val)
@@ -271,7 +277,8 @@ namespace rocRoller
 
             static void mapping(IO& io, AssemblyKernelArgumentPtr& val, Context& ctx)
             {
-                AssertFatal(iot::outputting(io));
+                if(!iot::outputting(io))
+                    val = std::make_shared<AssemblyKernelArgument>();
 
                 iot::mapRequired(io, "name", val->name);
                 iot::mapRequired(io, "variableType", val->variableType);

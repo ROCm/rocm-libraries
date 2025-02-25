@@ -206,8 +206,8 @@ namespace TransposeLoadsTest
                 co_yield generateOp<Expression::Add>(vLDSPtr, vLDSBasePtr, vLinearWorkitemOffset);
             }
 
-            co_yield m_context->mem()->loadFlat(vA0, vAPtr, /*offset*/ 0, bytesPerTrLoad);
-            co_yield m_context->mem()->loadFlat(vA1, vAPtr, bytesPerTrLoad, bytesPerTrLoad);
+            co_yield m_context->mem()->loadGlobal(vA0, vAPtr, /*offset*/ 0, bytesPerTrLoad);
+            co_yield m_context->mem()->loadGlobal(vA1, vAPtr, bytesPerTrLoad, bytesPerTrLoad);
             co_yield m_context->mem()->storeLocal(vLDSPtr, vA0, /*offset*/ 0, bytesPerTrLoad);
             co_yield m_context->mem()->storeLocal(
                 vLDSPtr, vA1, bytesPerTrLoad + extraLdsBytes, bytesPerTrLoad);
@@ -215,7 +215,7 @@ namespace TransposeLoadsTest
 
             co_yield generateOp<Expression::Multiply>(vLinearWordOffset, vWorkitemX, vBytesPerWord);
             co_yield generateOp<Expression::Add>(vTrLoadIdxAddr, vTrLoadIdxAddr, vLinearWordOffset);
-            co_yield m_context->mem()->loadFlat(
+            co_yield m_context->mem()->loadGlobal(
                 vTransposeWorkitemIdx, vTrLoadIdxAddr, /*offset*/ 0, bytesPerWord);
             if constexpr(elementBits == 6)
             {
@@ -257,15 +257,15 @@ namespace TransposeLoadsTest
                 co_yield m_context->copier()->copy(vA0, vA0T);
                 co_yield m_context->copier()->copy(vA1, vA1T);
 
-                co_yield m_context->mem()->storeFlat(vResultPtr,
-                                                     vA0,
-                                                     /*offset*/ 0,
-                                                     bytesPerTrLoad);
-                co_yield m_context->mem()->storeFlat(vResultPtr,
-                                                     vA1,
-                                                     /*offset*/ numWorkitemsPerWave
-                                                         * bytesPerTrLoad,
-                                                     bytesPerTrLoad);
+                co_yield m_context->mem()->storeGlobal(vResultPtr,
+                                                       vA0,
+                                                       /*offset*/ 0,
+                                                       bytesPerTrLoad);
+                co_yield m_context->mem()->storeGlobal(vResultPtr,
+                                                       vA1,
+                                                       /*offset*/ numWorkitemsPerWave
+                                                           * bytesPerTrLoad,
+                                                       bytesPerTrLoad);
             }
             else
             {
@@ -274,16 +274,16 @@ namespace TransposeLoadsTest
                 const uint regCount = bitsPerTransposeLoad(elementBits) / 32;
                 for(uint regIdx = 0; regIdx < regCount; regIdx++)
                 {
-                    co_yield m_context->mem()->storeFlat(vResultPtr,
-                                                         vA0T->subset({regIdx}),
-                                                         /*offset*/ regIdx * numWorkitemsPerWave
-                                                             * bytesPerWord,
-                                                         bytesPerWord);
-                    co_yield m_context->mem()->storeFlat(vResultPtr,
-                                                         vA1T->subset({regIdx}),
-                                                         /*offset*/ (regCount + regIdx)
-                                                             * numWorkitemsPerWave * bytesPerWord,
-                                                         bytesPerWord);
+                    co_yield m_context->mem()->storeGlobal(vResultPtr,
+                                                           vA0T->subset({regIdx}),
+                                                           /*offset*/ regIdx * numWorkitemsPerWave
+                                                               * bytesPerWord,
+                                                           bytesPerWord);
+                    co_yield m_context->mem()->storeGlobal(vResultPtr,
+                                                           vA1T->subset({regIdx}),
+                                                           /*offset*/ (regCount + regIdx)
+                                                               * numWorkitemsPerWave * bytesPerWord,
+                                                           bytesPerWord);
                 }
             }
         };
@@ -436,14 +436,14 @@ namespace TransposeLoadsTest
         std::string    mnemonic        = transposeLoadMnemonic(elementBits);
 
         // FIXME: waiting for std::format :(
-        std::string flatLoadDWordX{"flat_load_dwordx" + std::to_string(dwordX) + " "};
+        std::string globalLoadDWordX{"global_load_dwordx" + std::to_string(dwordX) + " "};
         std::string dsWriteBX{"ds_write_b" + std::to_string(dsReadWriteBits) + " "};
 
         std::string code = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(code, mnemonic), 2);
-        EXPECT_EQ(countSubstring(code, "flat_load_dword"), 3);
-        EXPECT_EQ(countSubstring(code, flatLoadDWordX), 2);
+        EXPECT_EQ(countSubstring(code, "global_load_dword"), 3);
+        EXPECT_EQ(countSubstring(code, globalLoadDWordX), 2);
 
         EXPECT_EQ(countSubstring(code, "ds_write_b"), 2);
         EXPECT_EQ(countSubstring(code, dsWriteBX), 2);

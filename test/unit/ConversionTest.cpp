@@ -8,9 +8,10 @@
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+
 #include <common/GEMMProblem.hpp>
+#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 
@@ -194,15 +195,11 @@ namespace rocRollerTest
         params->setDimensionInfo(tagLoadB, macTileB);
         params->setDimensionInfo(tagLoadC, macTileC);
 
-        auto launch = std::make_shared<CommandLaunchParameters>();
-        launch->setManualWorkitemCount({NX, NY, NZ});
-
         CommandKernel commandKernel(command, "MatrixMultiplyABC");
         commandKernel.setContext(m_context);
         commandKernel.setCommandParameters(params);
         commandKernel.generateKernel();
 
-        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<TypeD> gpu_D(M * N);
@@ -305,15 +302,11 @@ namespace rocRollerTest
         params->setDimensionInfo(tagLoadA, macTileA);
         params->setDimensionInfo(tagLoadB, macTileB);
 
-        auto launch = std::make_shared<CommandLaunchParameters>();
-        launch->setManualWorkitemCount({NX, NY, NZ});
-
         CommandKernel commandKernel(command, "MatrixMultiply");
         commandKernel.setContext(m_context);
         commandKernel.setCommandParameters(params);
         commandKernel.generateKernel();
 
-        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<TypeD> gpu_D(M * N, 0.f);
@@ -404,15 +397,11 @@ namespace rocRollerTest
             cs.ny / cs.threadTileN); // number of work items y
         auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
 
-        auto launch = std::make_shared<CommandLaunchParameters>();
-        launch->setManualWorkitemCount({NX, NY, NZ});
-
         CommandKernel commandKernel(command, "convertAndAdd");
         commandKernel.setContext(m_context);
         commandKernel.setCommandParameters(params);
         commandKernel.generateKernel();
 
-        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<DestType> gpuResult(a.size());
@@ -503,15 +492,11 @@ namespace rocRollerTest
         // TODO Fix MemoryType promotion (LDS)
         params->setDimensionInfo(tagCvtA, macTileVGPR);
 
-        auto launch = std::make_shared<CommandLaunchParameters>();
-        launch->setManualWorkitemCount({NX, NY, NZ});
-
         CommandKernel commandKernel(command, "DirectConvert");
         commandKernel.setContext(m_context);
         commandKernel.setCommandParameters(params);
         commandKernel.generateKernel();
 
-        commandKernel.setLaunchParameters(launch);
         commandKernel.launchKernel(commandArgs.runtimeArguments());
 
         std::vector<DestType> gpuResult(srcData.size());

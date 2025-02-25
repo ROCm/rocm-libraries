@@ -20,8 +20,8 @@
 
 #include "GPUContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
+#include <common/TensorDescriptor.hpp>
 #include <common/mxDataGen.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 
@@ -270,10 +270,6 @@ namespace MatrixMultiplyTest
             commandKernel->setContext(m_context);
             commandKernel->setCommandParameters(params);
             commandKernel->generateKernel();
-
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel->setLaunchParameters(launch);
 
             if(isLocalDevice())
             {
@@ -550,15 +546,11 @@ namespace MatrixMultiplyTest
             params->transposeMemoryAccess[LayoutType::MATRIX_A] = transA;
             params->transposeMemoryAccess[LayoutType::MATRIX_B] = transB;
 
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-
             CommandKernel commandKernel(command, "MatrixMultiplyAB");
             commandKernel.setContext(m_context);
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
 
-            commandKernel.setLaunchParameters(launch);
             if(isLocalDevice())
             {
                 commandKernel.launchKernel(commandArgs.runtimeArguments());
@@ -682,10 +674,6 @@ namespace MatrixMultiplyTest
             commandKernel.setContext(m_context);
             commandKernel.setCommandParameters(params);
             commandKernel.generateKernel();
-
-            auto launch = std::make_shared<CommandLaunchParameters>();
-            launch->setManualWorkitemCount({NX, NY, NZ});
-            commandKernel.setLaunchParameters(launch);
 
             if(isLocalDevice())
             {

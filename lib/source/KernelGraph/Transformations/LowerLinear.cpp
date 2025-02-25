@@ -98,16 +98,16 @@ namespace rocRoller
                 auto linear          = reindexer.coordinates.at(original_linear);
                 auto vgpr            = graph.coordinates.addElement(VGPR());
 
-                auto wg   = Workgroup();
-                wg.stride = workgroupSize()[0];
-                wg.size   = workgroupCountX();
-                auto wi   = Workitem(0, wavefrontSize());
+                auto one            = Expression::literal(1u);
+                auto workgroupSizeX = workgroupSize()[0];
+                auto numTilesX = (graph.coordinates.get<User>(user)->size + workgroupSizeX - one)
+                                 / workgroupSizeX;
 
-                auto wg_tag = graph.coordinates.addElement(wg);
-                auto wi_tag = graph.coordinates.addElement(wi);
+                auto workgroup = graph.coordinates.addElement(Workgroup(0, numTilesX));
+                auto workitem  = graph.coordinates.addElement(Workitem(0, workgroupSizeX));
 
-                graph.coordinates.addElement(Tile(), {linear}, {wg_tag, wi_tag});
-                graph.coordinates.addElement(Forget(), {wg_tag, wi_tag}, {vgpr});
+                graph.coordinates.addElement(Tile(), {linear}, {workgroup, workitem});
+                graph.coordinates.addElement(Forget(), {workgroup, workitem}, {vgpr});
                 graph.coordinates.addElement(DataFlow(), {user}, {vgpr});
 
                 auto parent = reindexer.control.at(*original.control.parentNodes(tag).begin());
@@ -150,16 +150,15 @@ namespace rocRoller
                                        Graph::Direction::Upstream)
                                    .begin();
 
-                auto wg   = Workgroup();
-                wg.stride = workgroupSize()[0];
-                wg.size   = workgroupCountX();
-                auto wi   = Workitem(0, wavefrontSize());
+                auto one            = Expression::literal(1u);
+                auto workgroupSizeX = workgroupSize()[0];
+                auto numTilesX = (graph.coordinates.get<User>(user)->size + workgroupSizeX - one)
+                                 / workgroupSizeX;
+                auto workgroup = graph.coordinates.addElement(Workgroup(0, numTilesX));
+                auto workitem  = graph.coordinates.addElement(Workitem(0, workgroupSizeX));
 
-                auto wg_tag = graph.coordinates.addElement(wg);
-                auto wi_tag = graph.coordinates.addElement(wi);
-
-                graph.coordinates.addElement(Inherit(), {vgpr}, {wg_tag, wi_tag});
-                graph.coordinates.addElement(Flatten(), {wg_tag, wi_tag}, {linear});
+                graph.coordinates.addElement(Inherit(), {vgpr}, {workgroup, workitem});
+                graph.coordinates.addElement(Flatten(), {workgroup, workitem}, {linear});
                 graph.coordinates.addElement(DataFlow(), {vgpr}, {user});
 
                 auto parent = reindexer.control.at(*original.control.parentNodes(tag).begin());

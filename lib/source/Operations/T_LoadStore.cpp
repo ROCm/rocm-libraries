@@ -31,6 +31,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        bool T_Load_Linear::operator==(T_Load_Linear const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag;
+        }
+
         T_Load_Scalar::T_Load_Scalar(OperationTag src)
             : BaseOperation()
             , m_srcTag(src)
@@ -56,6 +61,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        bool T_Load_Scalar::operator==(T_Load_Scalar const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_scalarTag == rhs.m_scalarTag;
+        }
+
         T_Load_Tiled::T_Load_Tiled(OperationTag src)
             : BaseOperation()
             , m_srcTag(src)
@@ -79,6 +89,11 @@ namespace rocRoller
         std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val)
         {
             return stream << val.toString();
+        }
+
+        bool T_Load_Tiled::operator==(T_Load_Tiled const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_tensorTag == rhs.m_tensorTag;
         }
 
         T_Store_Linear::T_Store_Linear(OperationTag source, OperationTag dest)
@@ -112,6 +127,11 @@ namespace rocRoller
             return stream << val.toString();
         }
 
+        bool T_Store_Linear::operator==(T_Store_Linear const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_dstTag == rhs.m_dstTag && m_srcTag == rhs.m_srcTag;
+        }
+
         T_Store_Tiled::T_Store_Tiled(OperationTag source, OperationTag dest)
             : BaseOperation()
             , m_srcTag(source)
@@ -141,6 +161,11 @@ namespace rocRoller
         std::ostream& operator<<(std::ostream& stream, T_Store_Tiled const& val)
         {
             return stream << val.toString();
+        }
+
+        bool T_Store_Tiled::operator==(T_Store_Tiled const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_dstTag == rhs.m_dstTag && m_srcTag == rhs.m_srcTag;
         }
     }
 }

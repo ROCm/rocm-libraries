@@ -1,0 +1,90 @@
+#include <llvm/BinaryFormat/AMDGPUMetadataVerifier.h>
+#include <llvm/BinaryFormat/MsgPackDocument.h>
+#include <llvm/Object/ELF.h>
+#include <llvm/Object/ELFObjectFile.h>
+#include <llvm/Object/ObjectFile.h>
+#include <llvm/Support/AMDGPUMetadata.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/raw_ostream.h>
+
+#include <rocRoller/Utilities/Error.hpp>
+
+using namespace llvm;
+using namespace llvm::object;
+
+using namespace rocRoller;
+
+std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
+{
+    auto maybeBuffer = MemoryBuffer::getFile(fileName);
+    if(!maybeBuffer)
+    {
+        Throw<FatalError>("Error reading file: ", maybeBuffer.getError().message());
+    }
+
+    auto maybeELFObject = ObjectFile::createELFObjectFile(maybeBuffer->get()->getMemBufferRef());
+    if(!maybeELFObject)
+    {
+        Throw<FatalError>("Error creating ELF object file: ", toString(maybeELFObject.takeError()));
+    }
+
+    auto elf64LE = dyn_cast<ELF64LEObjectFile>(maybeELFObject->get());
+    if(!elf64LE)
+    {
+        Throw<FatalError>("Not an ELF file: ", fileName);
+    }
+    auto elf = elf64LE->getELFFile();
+
+    std::string yaml;
+
+    auto maybeSections = elf.sections();
+    if(!maybeSections)
+    {
+        Throw<FatalError>("Can not read ELF sections.");
+    }
+
+    auto sections = *maybeSections;
+    for(const auto& section : sections)
+    {
+        if(section.sh_type != ELF::SHT_NOTE)
+            continue;
+
+        auto err = llvm::Error::success();
+        for(auto note : elf.notes(section, err))
+        {
+            if(note.getName() != "AMDGPU")
+                continue;
+
+            auto type = note.getType();
+            if(type != ELF::NT_AMDGPU_METADATA)
+                continue;
+
+#if LLVM_VERSION_MAJOR >= 18
+            // See https://llvm.org/docs/AMDGPUUsage.html#note-records for note re: alignment
+            auto desc = note.getDesc(4);
+#else
+            auto desc = note.getDesc();
+#endif
+            auto msg = StringRef(reinterpret_cast<const char*>(desc.data()), desc.size());
+
+            msgpack::Document meta;
+            if(!meta.readFromBlob(msg, false))
+                continue;
+
+            AMDGPU::HSAMD::V3::MetadataVerifier Verifier(true);
+            if(!Verifier.verify(meta.getRoot()))
+            {
+                Throw<FatalError>("Invalid AMDGPU::HSAMD metadata");
+            }
+
+            raw_string_ostream os(yaml);
+            meta.toYAML(os);
+
+            // Currently we're only looking at the first note...
+            break;
+        }
+    }
+
+    return yaml;
+}

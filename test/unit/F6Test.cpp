@@ -150,15 +150,15 @@ namespace rocRollerTest
         }
 
         /**
-         * Packs F6 to F6x16 on CPU, flat_load that into F6x16 to GPU,
-         * flat_store to CPU
+         * Packs F6 to F6x16 on CPU, global_load that into F6x16 to GPU,
+         * global_store to CPU
          */
-        void genF6x16FlatLoadAndStore(int num_f6, DataType F6x16Type)
+        void genF6x16GlobalLoadAndStore(int num_f6, DataType F6x16Type)
         {
             int  N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
             auto k = m_context->kernel();
 
-            k->setKernelName("FlatLoadAndStoreF6x16");
+            k->setKernelName("GlobalLoadAndStoreF6x16");
             k->setKernelDimensions(1);
 
             auto command = std::make_shared<Command>();
@@ -216,8 +216,8 @@ namespace rocRollerTest
 
                 co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
 
-                co_yield m_context->mem()->loadFlat(v_a, v_ptr, 0, N);
-                co_yield m_context->mem()->storeFlat(v_result, v_a, 0, N);
+                co_yield m_context->mem()->loadGlobal(v_a, v_ptr, 0, N);
+                co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, N);
             };
 
             m_context->schedule(kb());
@@ -225,7 +225,7 @@ namespace rocRollerTest
             m_context->schedule(k->amdgpu_metadata());
         }
 
-        void executeF6x16LoadAndStore(int num_f6, DataType F6x16Type, int isFlat)
+        void executeF6x16LoadAndStore(int num_f6, DataType F6x16Type, int isGlobal)
         {
             std::vector<uint8_t> data(num_f6);
             for(uint32_t i = 0; i < num_f6; i++)
@@ -237,8 +237,8 @@ namespace rocRollerTest
 
             std::vector<uint32_t> result(f6x16_data.size());
 
-            if(isFlat)
-                genF6x16FlatLoadAndStore(num_f6, F6x16Type);
+            if(isGlobal)
+                genF6x16GlobalLoadAndStore(num_f6, F6x16Type);
             else
                 genF6x16BufferLoadAndStore(num_f6, F6x16Type);
 
@@ -380,7 +380,7 @@ namespace rocRollerTest
         }
     }
 
-    TEST_P(F6Test, GPU_F6x16FlatLoadAndStore)
+    TEST_P(F6Test, GPU_F6x16GlobalLoadAndStore)
     {
         int  num_f6    = 16;
         auto F6x16Type = std::get<rocRoller::DataType>(GetParam()) == DataType::FP6
@@ -393,24 +393,24 @@ namespace rocRollerTest
         }
         else
         {
-            genF6x16FlatLoadAndStore(num_f6, F6x16Type);
+            genF6x16GlobalLoadAndStore(num_f6, F6x16Type);
             auto assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
 
         auto instructions = NormalizedSourceLines(m_context->instructions()->toString(), false);
 
-        int numFlatLoad   = 0;
-        int numFlatLoadx3 = 0;
+        int numGlobalLoad   = 0;
+        int numGlobalLoadx3 = 0;
         for(auto const& instruction : instructions)
         {
-            if(instruction.starts_with("flat_load"))
-                numFlatLoad++;
-            if(instruction.starts_with("flat_load_dwordx3"))
-                numFlatLoadx3++;
+            if(instruction.starts_with("global_load"))
+                numGlobalLoad++;
+            if(instruction.starts_with("global_load_dwordx3"))
+                numGlobalLoadx3++;
         }
-        EXPECT_EQ(numFlatLoad, 1);
-        EXPECT_EQ(numFlatLoadx3, 1);
+        EXPECT_EQ(numGlobalLoad, 1);
+        EXPECT_EQ(numGlobalLoadx3, 1);
     }
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)

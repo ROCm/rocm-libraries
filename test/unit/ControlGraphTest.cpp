@@ -479,37 +479,52 @@ namespace rocRollerTest
         int topSet2 = kg.control.addElement(SetCoordinate{five});
 
         int notTopSet1 = kg.control.addElement(SetCoordinate{four});
-        int notTopSet2 = kg.control.addElement(SetCoordinate{five});
+        int topSet3    = kg.control.addElement(SetCoordinate{five});
 
         int load1 = kg.control.addElement(LoadLDSTile{DataType::Float});
         int load2 = kg.control.addElement(LoadLDSTile{DataType::Float});
+        int load3 = kg.control.addElement(LoadLDSTile{DataType::Float});
 
         kg.control.addElement(Body{}, {topSet1}, {load1});
 
         EXPECT_THROW(getTopSetCoordinate(kg, load1), FatalError);
         EXPECT_THROW(getSetCoordinateForDim(kg, 1, load1), FatalError);
+        EXPECT_THROW(getUnrollValueForOp(kg, 1, load1), FatalError);
 
         kg.mapper.connect<CT::Unroll>(topSet1, 1);
         EXPECT_EQ(topSet1, getTopSetCoordinate(kg, load1));
+
         EXPECT_THROW(getSetCoordinateForDim(kg, 2, load1), FatalError);
+        EXPECT_THROW(getUnrollValueForOp(kg, 2, load1), FatalError);
+
         EXPECT_EQ(topSet1, getSetCoordinateForDim(kg, 1, load1));
+        EXPECT_EQ(5, getUnrollValueForOp(kg, 1, load1));
 
-        kg.control.addElement(Body{}, {topSet2}, {notTopSet1});
-        kg.control.addElement(Body{}, {notTopSet1}, {notTopSet2});
-        kg.control.addElement(Body{}, {notTopSet2}, {load2});
+        auto loop = kg.control.addElement(ForLoopOp{});
 
-        EXPECT_THROW(getTopSetCoordinate(kg, load2), FatalError);
+        kg.control.chain<Body>(topSet2, notTopSet1, loop, topSet3, load3);
+        kg.control.chain<Body>(notTopSet1, load2);
+
+        EXPECT_THROW(getTopSetCoordinate(kg, load3), FatalError);
 
         kg.mapper.connect<CT::Unroll>(topSet2, 2);
         kg.mapper.connect<CT::Unroll>(notTopSet1, 1);
-        kg.mapper.connect<CT::Unroll>(notTopSet2, 3);
-        EXPECT_EQ(topSet2, getTopSetCoordinate(kg, load2));
+        kg.mapper.connect<CT::Unroll>(topSet3, 3);
+        EXPECT_EQ(topSet2, getTopSetCoordinate(kg, load2)) << load2 << std::endl << kg.toDOT(true);
+        EXPECT_EQ(topSet3, getTopSetCoordinate(kg, load3)) << load3 << std::endl << kg.toDOT(true);
 
-        EXPECT_THROW(getSetCoordinateForDim(kg, 5, load2), FatalError);
-        EXPECT_EQ(topSet2, getSetCoordinateForDim(kg, 2, load2));
-        EXPECT_EQ(notTopSet1, getSetCoordinateForDim(kg, 1, load2));
-        EXPECT_EQ(notTopSet2, getSetCoordinateForDim(kg, 3, load2));
+        EXPECT_THROW(getSetCoordinateForDim(kg, 5, load3), FatalError);
+        EXPECT_EQ(topSet2, getSetCoordinateForDim(kg, 2, load3));
+        EXPECT_EQ(notTopSet1, getSetCoordinateForDim(kg, 1, load3));
+        EXPECT_EQ(topSet3, getSetCoordinateForDim(kg, 3, load3));
 
-        EXPECT_EQ((std::set{topSet1, topSet2}), getTopSetCoordinates(kg, {load1, load2}));
+        EXPECT_THROW(getUnrollValueForOp(kg, 5, load3), FatalError);
+        EXPECT_EQ(5, getUnrollValueForOp(kg, 2, load3));
+        EXPECT_EQ(4, getUnrollValueForOp(kg, 1, load3));
+        EXPECT_EQ(5, getUnrollValueForOp(kg, 3, load3));
+
+        EXPECT_EQ((std::set{topSet1, topSet3}), getTopSetCoordinates(kg, {load1, load3}));
+        EXPECT_EQ((std::set{topSet1, topSet2, topSet3}),
+                  getTopSetCoordinates(kg, {load1, load2, load3}));
     }
 }

@@ -66,6 +66,12 @@ namespace rocRoller
             return m_strides;
         }
 
+        bool BlockScale::operator==(BlockScale const& rhs) const
+        {
+            return m_tag == rhs.m_tag && m_data == rhs.m_data && m_scale == rhs.m_scale
+                   && m_strides == rhs.m_strides;
+        }
+
         std::string toString(ScaleMode const& mode)
         {
             switch(mode)

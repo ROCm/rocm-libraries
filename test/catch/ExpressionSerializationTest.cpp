@@ -73,10 +73,7 @@ namespace ExpressionTest
 
             CHECK(Expression::toString(deserialized) == Expression::toString(expr));
             CHECK(Expression::identical(deserialized, expr));
-        }
 
-        SECTION("Unserializable expressions")
-        {
             SECTION("Kernel arg")
             {
                 auto kernelArg                   = std::make_shared<AssemblyKernelArgument>();
@@ -87,9 +84,22 @@ namespace ExpressionTest
                 kernelArg->size                  = 5;
 
                 auto expr = b >> std::make_shared<Expression::Expression>(kernelArg);
-                CHECK_THROWS(Expression::fromYAML(Expression::toYAML(expr)));
-            }
 
+                auto yamlText = Expression::toYAML(expr);
+                INFO(yamlText);
+
+                CHECK(yamlText != "");
+
+                auto deserialized = Expression::fromYAML(yamlText);
+                REQUIRE(deserialized.get() != nullptr);
+
+                CHECK(Expression::toString(deserialized) == Expression::toString(expr));
+                CHECK(Expression::identical(deserialized, expr));
+            }
+        }
+
+        SECTION("Unserializable expressions")
+        {
             SECTION("WaveTile")
             {
                 auto waveTile = std::make_shared<KernelGraph::CoordinateGraph::WaveTile>();

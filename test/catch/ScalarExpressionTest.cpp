@@ -76,7 +76,7 @@ namespace ExpressionTest
                 auto v_c = s_c->placeholder(Register::Type::Vector, {});
                 co_yield m_context->copier()->copy(v_c, s_c, "Copy result");
 
-                co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
+                co_yield m_context->mem()->storeGlobal(v_result, v_c, 0, 4);
             };
 
             m_context->schedule(kb());

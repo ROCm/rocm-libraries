@@ -26,7 +26,7 @@ namespace rocRoller
 
         enum MemoryKind
         {
-            Flat,
+            Global,
             Scalar,
             Local,
             Buffer
@@ -157,7 +157,7 @@ namespace rocRoller
                                             std::string const  comment = "");
 
         /**
-         * @brief Generate the instructions required to perform a flat load.
+         * @brief Generate the instructions required to perform a global load.
          *
          *
          * @param dest The register to store the loaded data in.
@@ -166,14 +166,14 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadFlat(Register::ValuePtr dest,
-                                        Register::ValuePtr addr,
-                                        int                offset,
-                                        int                numBytes,
-                                        bool               high = false);
+        Generator<Instruction> loadGlobal(Register::ValuePtr dest,
+                                          Register::ValuePtr addr,
+                                          int                offset,
+                                          int                numBytes,
+                                          bool               high = false);
 
         /**
-         * @brief Generate the instructions required to perform a flat store.
+         * @brief Generate the instructions required to perform a global store.
          *
          *
          * @param addr The register containing the address to store the data.
@@ -182,11 +182,11 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> storeFlat(Register::ValuePtr addr,
-                                         Register::ValuePtr data,
-                                         int                offset,
-                                         int                numBytes,
-                                         bool               high = false);
+        Generator<Instruction> storeGlobal(Register::ValuePtr addr,
+                                           Register::ValuePtr data,
+                                           int                offset,
+                                           int                numBytes,
+                                           bool               high = false);
 
         /**
          * @brief Generate the instructions required to load scalar data into a register from memory.
@@ -337,6 +337,18 @@ namespace rocRoller
          */
         Generator<Instruction> barrier();
 
+        /**
+         * @brief Add the offset to a new register if the offset is greater than maxOffset allowed by the
+         *        instruction.
+         *
+         *
+         * @param offset Offset to be added to addr.
+         * @param addr The register containing the address to store the data.
+         * @param inst The instruction to be queried for maxOffset
+         */
+        Generator<Instruction>
+            addLargerOffset2Addr(int& offset, Register::ValuePtr& addr, std::string inst);
+
     private:
         const int m_wordSize = 4; // in bytes
 
@@ -344,7 +356,6 @@ namespace rocRoller
 
         int chooseWidth(int numWords, const std::vector<int>& potentialWidths, int maxWidth) const;
         std::string            genOffsetModifier(int) const;
-        Generator<Instruction> addLargerOffset2Addr(int&, Register::ValuePtr&, std::string);
         Generator<Instruction> genLocalAddr(Register::ValuePtr& addr) const;
         Generator<Instruction> packForStore(Register::ValuePtr& result,
                                             Register::ValuePtr  toPack) const;

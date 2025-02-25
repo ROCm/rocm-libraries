@@ -193,7 +193,6 @@ namespace rocRoller
             void fuseLoops(KernelGraph& graph, int tag)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops({})", tag);
-                auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
                 auto dontWalkPastForLoop = [&](int tag) -> bool {
                     for(auto neighbour : graph.control.getNeighbours(tag, GD::Downstream))
@@ -208,6 +207,7 @@ namespace rocRoller
 
                 // Find all of the paths from the top of one of a body to a
                 // ForLoopOp.
+                auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 std::vector<std::vector<int>> paths;
                 for(auto const& body : bodies)
                 {

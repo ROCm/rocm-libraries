@@ -28,6 +28,8 @@ namespace rocRoller
 
         /**
          * @brief Create a range-based for loop.
+         *
+         * returns {dimension, operation}
          */
         std::pair<int, int> rangeFor(KernelGraph&              graph,
                                      Expression::ExpressionPtr size,
@@ -242,7 +244,8 @@ namespace rocRoller
         std::set<int> getTopSetCoordinates(KernelGraph& graph, std::vector<int> loads);
 
         /**
-         * @brief Get the SetCoordinate object upstream from load that sets the coordinate for the dimension dim.
+         * @brief Get the SetCoordinate object upstream from load that sets the
+         * coordinate for the dimension dim.
          *
          * @param graph
          * @param dim
@@ -250,6 +253,12 @@ namespace rocRoller
          * @return int
          */
         int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load);
+
+        /**
+         * Gets the unroll coordinate value that is set by a SetCoordinate node upstream
+         * from the operation op, for the dimension unrollDim.
+         */
+        unsigned int getUnrollValueForOp(KernelGraph const& graph, int unrollDim, int op);
 
         /**
          * @brief Create duplicates of all of the nodes downstream of the provided

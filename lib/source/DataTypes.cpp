@@ -130,7 +130,8 @@ namespace rocRoller
             return "Bool32";
         case DataType::Bool64:
             return "Bool64";
-
+        case DataType::None:
+            return "None";
         case DataType::Count:;
         }
         return "Invalid";
@@ -204,6 +205,8 @@ namespace rocRoller
             return "BL32";
         case DataType::Bool64:
             return "BL64";
+        case DataType::None:
+            return "NA";
 
         case DataType::Count:;
         }
@@ -230,6 +233,8 @@ namespace rocRoller
             return "JAMMED_WAVE_LDS";
         case MemoryType::Literal:
             return "Literal";
+        case MemoryType::None:
+            return "None";
 
         case MemoryType::Count:;
         }
@@ -248,6 +253,8 @@ namespace rocRoller
             return "MATRIX_B";
         case LayoutType::MATRIX_ACCUMULATOR:
             return "MATRIX_ACCUMULATOR";
+        case LayoutType::None:
+            return "None";
 
         case LayoutType::Count:;
         }

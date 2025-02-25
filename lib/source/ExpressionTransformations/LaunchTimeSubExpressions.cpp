@@ -50,7 +50,7 @@ namespace rocRoller
                 auto kernel  = m_context->kernel();
                 auto varType = resultVariableType(expr);
 
-                auto argName = kernel->uniqueArgName(name(expr));
+                auto argName = kernel->uniqueArgName(argumentName(expr));
 
                 Log::debug("LTSE: Adding arg {}: varType {}, expr {}",
                            argName,

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+shopt -s globstar
 
 # Expects rocRoller tests to have been built with `-DCODE_COVERAGE=ON -DBUILD_SHARED_LIBS=OFF`
 
@@ -125,6 +126,7 @@ else
 
     /opt/rocm/lib/llvm/bin/llvm-cov show \
         --format=text \
+        --use-color=false \
         --Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt \
         --instr-profile=${profdata_file} \
         --object ${build_path}/bin/rocRollerTests \
@@ -133,8 +135,9 @@ else
         --ignore-filename-regex=${ignore_patterns} \
         --output-dir=${code_cov_path}/code_cov_${gpu}_text
 
-    mv ${code_cov_path}/code_cov_${gpu}_text/coverage/*/*/*/*/*/*/lib \
-        ${code_cov_path}/code_cov_${gpu}_text/lib
+    mkdir ${code_cov_path}/code_cov_${gpu}_text/lib
+    mv ${code_cov_path}/code_cov_${gpu}_text/coverage/**/lib/* \
+        ${code_cov_path}/code_cov_${gpu}_text/lib/
     rm -rf ${code_cov_path}/code_cov_${gpu}_text/coverage
 
     # zip the text report for archiving.
@@ -154,16 +157,19 @@ else
         help
         exit 1
     fi
-    set -ex
+    set -x
     #========Create Code Coverage Summary:========
 
+    set +e # Don't error out if the url fails to download.
     cd ${build_path}
     wget  -O ./archive.zip ${masterURL}
     rm -rf ./archive
     unzip archive.zip
-    if [ -f archive/*/*/*/code_cov_${gpu}.report ] && [ -f archive/*/*/*/code_cov_${gpu}.zip ]; then
+    set -e
 
-        mv archive/*/*/*/code_cov_${gpu}.report ./code_cov_${gpu}_master.report
+    if [ -f archive/**/code_cov_${gpu}.report ] && [ -f archive/**/code_cov_${gpu}.zip ]; then
+
+        mv archive/**/code_cov_${gpu}.report ./code_cov_${gpu}_master.report
 
         results=$(tail -n 1 ./code_cov_${gpu}.report | tr -s ' ' | cut -d' ' -f 2-)
         #Get the report artifact from the master branch named ./code_cov_${gpu}_master.report
@@ -216,20 +222,23 @@ else
 
         #========Create Code Coverage Diff:========
 
-        mv archive/*/*/*/code_cov_${gpu}.zip ./code_cov_${gpu}_master_text.zip
+        mv archive/**/code_cov_${gpu}.zip ./code_cov_${gpu}_master_text.zip
         rm -rf ./code_cov_${gpu}_master_text
         unzip ./code_cov_${gpu}_master_text.zip -d ./code_cov_${gpu}_master_text
 
-        #Cleanup the txt report for diff.
+        tmpdir=$(mktemp -d)
+        #Cleanup copies of the txt report for diff. Keep the originals intact.
         if [ -d ./code_cov_${gpu}_text ]; then
-            find ./code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
+            cp -r ./code_cov_${gpu}_text ${tmpdir}/code_cov_${gpu}_text
+            find ${tmpdir}/code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
         fi
         if [ -d ./code_cov_${gpu}_master_text/code_cov_${gpu}_text ]; then
-            find ./code_cov_${gpu}_master_text/code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
+            cp -r ./code_cov_${gpu}_master_text ${tmpdir}/code_cov_${gpu}_master_text
+            find ${tmpdir}/code_cov_${gpu}_master_text/code_cov_${gpu}_text -name "*.txt" -type f | xargs sed -i -f ../scripts/comparable_cov_report.sed
         fi
 
         #Don't exit when there is a diff. And make the file non-empty if there isn't.
-        (diff -dur ./code_cov_${gpu}_master_text/code_cov_${gpu}_text ./code_cov_${gpu}_text && echo "No diff") > ./code_cov_${gpu}.diff || true
+        (diff -dur --color=never ${tmpdir}/code_cov_${gpu}_master_text/code_cov_${gpu}_text ${tmpdir}/code_cov_${gpu}_text && echo "No diff") > ./code_cov_${gpu}.diff || true
         wc -l ./code_cov_${gpu}.diff
 
         if [ -s ./code_cov_${gpu}.diff ]; then

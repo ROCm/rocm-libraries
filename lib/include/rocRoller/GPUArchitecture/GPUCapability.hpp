@@ -51,7 +51,7 @@ namespace rocRoller
             HasMFMA_32x32x16_bf16,
 
             HasAccumOffset,
-            HasFlatOffset,
+            HasGlobalOffset,
 
             v_mac_f16,
 

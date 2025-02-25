@@ -4,6 +4,8 @@
 
 #include "Base.hpp"
 
+#include <rocRoller/Expression.hpp>
+
 namespace rocRoller
 {
     namespace Serialization
@@ -89,12 +91,6 @@ namespace rocRoller
             using AlternativeFn  = std::function<T(void)>;
             using AlternativeMap = std::map<std::string, AlternativeFn>;
 
-            template <typename U>
-            static T defaultConstruct()
-            {
-                return U();
-            }
-
             static constexpr AlternativeMap GetAlternatives()
             {
                 AlternativeMap rv;
@@ -108,8 +104,8 @@ namespace rocRoller
             static constexpr auto GetAlternative()
             {
                 using AltType = std::variant_alternative_t<AltIdx, T>;
-                auto typeName = name(defaultConstruct<AltType>());
-                return std::make_pair(typeName, defaultConstruct<AltType>);
+                auto typeName = name(DefaultConstruct<T, AltType>::call());
+                return std::make_pair(typeName, DefaultConstruct<T, AltType>::call);
             }
 
             template <int AltIdx = 0>

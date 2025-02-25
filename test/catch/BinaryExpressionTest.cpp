@@ -92,7 +92,7 @@ namespace ExpressionTest
                 Register::ValuePtr v_c;
                 co_yield Expression::generate(v_c, expr, m_context);
 
-                co_yield m_context->mem()->storeFlat(
+                co_yield m_context->mem()->storeGlobal(
                     v_result, v_c, 0, DataTypeInfo::Get(m_resultType).elementBytes);
             };
 

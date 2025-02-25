@@ -7,6 +7,7 @@
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 
 #include "ControlEdge.hpp"
+#include "ControlGraph_fwd.hpp"
 #include "Operation.hpp"
 
 namespace rocRoller

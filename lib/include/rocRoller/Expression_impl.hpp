@@ -363,33 +363,33 @@ namespace rocRoller
 
         EXPRESSION_INFO(BitFieldExtract);
 
-        EXPRESSION_INFO(Convert<DataType::Half>);
-        EXPRESSION_INFO(Convert<DataType::Halfx2>);
-        EXPRESSION_INFO(Convert<DataType::FP8>);
-        EXPRESSION_INFO(Convert<DataType::BF8>);
-        EXPRESSION_INFO(Convert<DataType::FP8x4>);
-        EXPRESSION_INFO(Convert<DataType::BF8x4>);
-        EXPRESSION_INFO(Convert<DataType::FP6x16>);
-        EXPRESSION_INFO(Convert<DataType::BF6x16>);
-        EXPRESSION_INFO(Convert<DataType::FP4x8>);
-        EXPRESSION_INFO(Convert<DataType::BFloat16>);
-        EXPRESSION_INFO(Convert<DataType::BFloat16x2>);
-        EXPRESSION_INFO(Convert<DataType::Float>);
-        EXPRESSION_INFO(Convert<DataType::Double>);
-        EXPRESSION_INFO(Convert<DataType::Int32>);
-        EXPRESSION_INFO(Convert<DataType::Int64>);
-        EXPRESSION_INFO(Convert<DataType::UInt32>);
-        EXPRESSION_INFO(Convert<DataType::UInt64>);
-        EXPRESSION_INFO(Convert<DataType::Bool>);
-        EXPRESSION_INFO(Convert<DataType::Bool32>);
-        EXPRESSION_INFO(Convert<DataType::Bool64>);
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Half>, "Convert_Half");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Halfx2>, "Convert_Halfx2");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP8>, "Convert_FP8");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF8>, "Convert_BF8");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP8x4>, "Convert_FP8x4");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF8x4>, "Convert_BF8x4");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP6x16>, "Convert_FP6x16");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::BF6x16>, "Convert_BF6x16");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::FP4x8>, "Convert_FP4x8");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::BFloat16>, "Convert_BFloat16");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::BFloat16x2>, "Convert_BFloat16x2");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Float>, "Convert_Float");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Double>, "Convert_Double");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Int32>, "Convert_Int32");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Int64>, "Convert_Int64");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::UInt32>, "Convert_UInt32");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::UInt64>, "Convert_UInt64");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool>, "Convert_Bool");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool32>, "Convert_Bool32");
+        EXPRESSION_INFO_CUSTOM(Convert<DataType::Bool64>, "Convert_Bool64");
 
-        EXPRESSION_INFO(SRConvert<DataType::FP8>);
-        EXPRESSION_INFO(SRConvert<DataType::BF8>);
+        EXPRESSION_INFO_CUSTOM(SRConvert<DataType::FP8>, "SRConvert_FP8");
+        EXPRESSION_INFO_CUSTOM(SRConvert<DataType::BF8>, "SRConvert_BF8");
 
-        EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "Register Value");
-        EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "Command Argument");
-        EXPRESSION_INFO_CUSTOM(CommandArgumentValue, "Literal Value");
+        EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "RegisterValue");
+        EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "CommandArgument");
+        EXPRESSION_INFO_CUSTOM(CommandArgumentValue, "LiteralValue");
         EXPRESSION_INFO_CUSTOM(AssemblyKernelArgumentPtr, "Kernel Argument");
         EXPRESSION_INFO_CUSTOM(WaveTilePtr, "WaveTile");
 
@@ -398,6 +398,35 @@ namespace rocRoller
 #undef EXPRESSION_INFO
 #undef EXPRESSION_INFO_CUSTOM
         struct ExpressionNameVisitor
+        {
+            template <CExpression Expr>
+            std::string operator()(Expr const& expr) const
+            {
+                return ExpressionInfo<Expr>::name();
+            }
+
+            std::string call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+
+            std::string call(ExpressionPtr const& expr) const
+            {
+                return call(*expr);
+            }
+        };
+
+        inline std::string name(ExpressionPtr const& expr)
+        {
+            return ExpressionNameVisitor().call(expr);
+        }
+
+        inline std::string name(Expression const& expr)
+        {
+            return ExpressionNameVisitor().call(expr);
+        }
+
+        struct ExpressionArgumentNameVisitor
         {
             template <CExpression Expr>
             std::string operator()(Expr const& expr) const
@@ -424,14 +453,14 @@ namespace rocRoller
             }
         };
 
-        inline std::string name(ExpressionPtr const& expr)
+        inline std::string argumentName(ExpressionPtr const& expr)
         {
-            return ExpressionNameVisitor().call(expr);
+            return ExpressionArgumentNameVisitor().call(expr);
         }
 
-        inline std::string name(Expression const& expr)
+        inline std::string argumentName(Expression const& expr)
         {
-            return ExpressionNameVisitor().call(expr);
+            return ExpressionArgumentNameVisitor().call(expr);
         }
 
         struct ExpressionEvaluationTimesVisitor

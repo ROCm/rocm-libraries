@@ -405,7 +405,7 @@ namespace rocRoller
                     Expression::DataFlowTag{tag, Register::Type::Scalar, numTilesVarType});
             };
 
-            auto workgroup = graph.coordinates.addElement(Workgroup(0, one));
+            auto workgroup = graph.coordinates.addElement(Workgroup(0));
             graph.coordinates.addElement(PassThrough(), {workgroup}, {flagsScratchTag});
 
             // Store tile
@@ -522,7 +522,7 @@ namespace rocRoller
             auto one  = Expression::literal(1u);
             auto zero = Expression::literal(0u);
 
-            auto workgroup = graph.coordinates.addElement(Workgroup(0, one));
+            auto workgroup = graph.coordinates.addElement(Workgroup(0));
 
             // Read tile
             auto receiveTileTag
@@ -1270,7 +1270,7 @@ namespace rocRoller
             //   2. Is a literal (for testing)
 
             argInfo.numWGs = k->addArgument(
-                {"numWGs", numWGsDT, DataDirection::ReadOnly, convert(numWGsDT, numWGs)});
+                {rocRoller::NUMWGS, numWGsDT, DataDirection::ReadOnly, convert(numWGsDT, numWGs)});
 
             // Fill number-of-tiles using MacroTileNumber sizes
             // from load operations (store operations are missing

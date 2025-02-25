@@ -5,6 +5,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -12,9 +13,8 @@
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "GPUContextFixture.hpp"
-#include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
-#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <common/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 
@@ -95,15 +95,15 @@ namespace TileTransposeAddTest
         CommandArguments commandArgs = command->createArguments();
 
         TensorDescriptor descA(DataType::Int32,
-                               {size_t(nx), size_t(ny)},
+                               {size_t(transpose.a ? ny : nx), size_t(transpose.a ? nx : ny)},
                                {(size_t)((ny * !transpose.a) + transpose.a),
                                 (size_t)((nx * transpose.a) + !transpose.a)});
         TensorDescriptor descB(DataType::Int32,
-                               {size_t(nx), size_t(ny)},
+                               {size_t(transpose.b ? ny : nx), size_t(transpose.b ? nx : ny)},
                                {(size_t)((ny * !transpose.b) + transpose.b),
                                 (size_t)((nx * transpose.b) + !transpose.b)});
         TensorDescriptor descC(DataType::Int32,
-                               {size_t(nx), size_t(ny)},
+                               {size_t(transpose.c ? ny : nx), size_t(transpose.c ? nx : ny)},
                                {(size_t)((ny * !transpose.c) + transpose.c),
                                 (size_t)((nx * transpose.c) + !transpose.c)});
 
@@ -139,7 +139,7 @@ namespace TileTransposeAddTest
         {
             for(size_t j = 0; j < ny; ++j)
             {
-                auto idx = [i, j, nx, ny](bool t) { return t ? (j * nx + i) : (i * ny) + j; };
+                auto idx = [i, j, nx, ny](bool t) { return t ? (j * nx + i) : (i * ny + j); };
                 x[idx(transpose.c)] = a[idx(transpose.a)] + a[idx(transpose.a)]
                                       + b[idx(transpose.b)] + b[idx(transpose.b)];
             }

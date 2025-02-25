@@ -185,6 +185,11 @@ namespace rocRoller
         m_scope = scope;
     }
 
+    void Context::setKernel(AssemblyKernelPtr assemblyKernel)
+    {
+        m_kernel = assemblyKernel;
+    }
+
     Expression::ExpressionPtr Context::getScratchAmount() const
     {
         return m_scratchAllocator;

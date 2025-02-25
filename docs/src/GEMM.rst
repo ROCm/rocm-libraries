@@ -19,6 +19,11 @@ The GEMM client can do a few different things::
 These phases can be run individually, or together, in one invocation
 of the gemm client.
 
+Different GEMM kernels can be generated.  These are parameterized by
+"solution parameters".  During kernel generation, the solution
+parameters can be specified on the command line or in a configuration
+file (YAML).
+
 Quick start
 -----------
 
@@ -28,16 +33,37 @@ by OpenBLAS)::
 
     ./bin/client/gemm --mac_m=128 --mac_n=128 --m 4096 --n 4096 --k 32 generate validate
 
+Generating an example configuration
+-----------------------------------
+
+To generate a solution configuration file and save it::
+
+    ./bin/client/gemm example getting-started.yaml
+
+The `getting-started.yaml` file now contains some tuneable parameters
+that can be used to generate different GEMM kernels.
+
 Generating a solution
 ---------------------
 
-To generate a solution and save it::
+The `generate` subcommand of the GEMM client can be used to generate a
+GEMM kernel and save it.
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --save sgemm-current.yaml
+To generate a solution, compile, and save it to a code-object::
+
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --co sgemm-current.co
 
 The architecture can also be specified::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --save hgemm-gfx90a.yaml
+    ./bin/client/gemm --mac_m=128 --mac_n=128 --hgemm generate --arch gfx90a --co hgemm-gfx90a.co
+
+You can also save the assembly if you'd like to modify it::
+
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --asm sgemm-current.s
+
+If you have a configuration YAML file and want to generate a code-object for gfx90a::
+
+    ./bin/client/gemm generate --config sgemm.yaml --arch gfx90a --co sgemm.co
 
 Generating a solution and validating it
 ---------------------------------------
@@ -51,9 +77,9 @@ Generating a solution, modifying it, and validating it
 
 To hack assembly manually::
 
-    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --save my-sgemm.yaml
+    ./bin/client/gemm --mac_m=128 --mac_n=128 generate --asm my-sgemm.s
     emacs my-sgemm.s
-    ./bin/client/gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.yaml
+    ./bin/client/gemm --m 4096 --n 4096 --k 128 validate --load my-sgemm.s
 
 Note that in the _generate_ invocation, the problem size does not need
 to be specified.  Only _solution_ and and _type_ parameters are

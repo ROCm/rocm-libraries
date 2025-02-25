@@ -60,6 +60,8 @@ namespace rocRoller
              */
             struct SolutionParameters
             {
+                GPUArchitectureTarget architecture;
+
                 // Macro tile size
                 int macM;
                 int macN;

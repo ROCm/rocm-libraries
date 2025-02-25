@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2023 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,21 @@ namespace rocRoller
         {
         };
 #endif
+
+        /**
+         * Override this struct for a type to use a custom constructor.
+         *
+         * Useful for Variant and SharedPointer is the types default
+         * contructor has been explicitly deleted.
+         */
+        template <typename T, typename U>
+        struct DefaultConstruct
+        {
+            static T call()
+            {
+                return U();
+            }
+        };
 
         /**
          * Override this struct for a type to use a custom string serialization.
@@ -273,7 +288,7 @@ namespace rocRoller
 
                 if(!isNull && !iot::outputting(io))
                 {
-                    p = std::make_shared<Element>();
+                    p = std::make_shared<Element>(DefaultConstruct<Element, Element>::call());
                 }
 
                 AssertFatal(Nullable || p != nullptr);

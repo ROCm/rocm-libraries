@@ -1,7 +1,8 @@
 
-#include <rocRoller/CommandSolution.hpp>
+#include <algorithm>
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -226,6 +227,8 @@ namespace rocRoller
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
 
+        transforms.push_back(std::make_shared<KernelGraph::IdentifyParallelDimensions>());
+
         transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
             !m_commandParameters->allowAmbiguousMemoryNodes));
         transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_commandParameters));
@@ -244,20 +247,23 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         if(m_commandParameters->streamK)
         {
-            // XXX move this
-            auto numCUsArg  = m_command->allocateArgument(DataType::UInt32,
-                                                         m_command->getNextTag(),
-                                                         ArgumentType::Value,
-                                                         DataDirection::ReadOnly,
-                                                         "numCUs");
-            auto numCUsExpr = std::make_shared<Expression::Expression>(numCUsArg);
+            Expression::ExpressionPtr numWGsExpr;
+            {
+                auto arguments = m_command->getArguments();
+                auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
+                    return x->name() == rocRoller::NUMWGS;
+                });
+                AssertFatal(it != arguments.cend(),
+                            "Can not find numWGs Command argument required for StreamK kernels.");
+                numWGsExpr = std::make_shared<Expression::Expression>(*it);
+            }
 
             transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
                 m_commandParameters->loopOverOutputTilesDimensions,
                 rocRoller::XLOOP,
                 rocRoller::KLOOP,
                 m_commandParameters->streamKTwoTile,
-                numCUsExpr,
+                numWGsExpr,
                 m_commandParameters,
                 m_context));
         }
@@ -283,12 +289,14 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
+        transforms.push_back(std::make_shared<KernelGraph::AddPRNG>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
+        transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
 
         for(auto& t : transforms)
         {
@@ -313,15 +321,16 @@ namespace rocRoller
         TIMER(t, "CommandKernel::generateKernelSource");
         m_context->kernel()->setKernelGraphMeta(
             std::make_shared<KernelGraph::KernelGraph>(m_kernelGraph));
+        m_context->kernel()->setCommandMeta(m_command);
 
         m_context->schedule(kernelInstructions());
     }
 
-    void CommandKernel::assembleKernel()
+    std::vector<char> CommandKernel::assembleKernel()
     {
         TIMER(t, "CommandKernel::assembleKernel");
 
-        m_context->instructions()->assemble();
+        return m_context->instructions()->assemble();
     }
 
     void CommandKernel::loadKernel()
@@ -398,6 +407,10 @@ namespace rocRoller
         return m_commandParameters;
     }
 
+    //
+    // 2024-11-05: This is only used in a few tests.  Please see the
+    // note in Command::createWorkItemCount.
+    //
     void CommandKernel::setLaunchParameters(CommandLaunchParametersPtr launch)
     {
         m_launchParameters = launch;
@@ -425,12 +438,6 @@ namespace rocRoller
             if(m_launchParameters->getManualWorkitemCount())
                 m_context->kernel()->setWorkitemCount(
                     *m_launchParameters->getManualWorkitemCount());
-            else
-                m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
-        }
-        else if(m_command)
-        {
-            m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
         }
 
         auto kargs = getKernelArguments(args);
@@ -450,6 +457,24 @@ namespace rocRoller
         m_executableKernel = std::make_shared<ExecutableKernel>();
         m_executableKernel->loadKernelFromFile(
             fileName, kernelName, m_context->targetArchitecture().target());
+    }
+
+    AssemblyKernelPtr CommandKernel::loadKernelFromCodeObject(const std::string& fileName,
+                                                              const std::string& kernelName)
+    {
+        AssertFatal(m_context);
+
+        m_executableKernel = std::make_shared<ExecutableKernel>();
+        m_executableKernel->loadKernelFromCodeObjectFile(
+            fileName, kernelName, m_context->targetArchitecture().target());
+
+        auto yaml   = readMetaDataFromCodeObject(fileName);
+        auto kernel = AssemblyKernels::fromYAML(yaml).kernels[0];
+
+        // XXX Instead of adding `setKernel`, should the context load from a code object?
+        auto kernelPtr = std::make_shared<AssemblyKernel>(kernel);
+        m_context->setKernel(kernelPtr);
+        return kernelPtr;
     }
 
     ContextPtr CommandKernel::getContext()

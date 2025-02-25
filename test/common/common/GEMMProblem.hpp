@@ -28,7 +28,7 @@ struct GEMMProblem
     uint workgroupSizeX = 2 * wavefrontSize;
     uint workgroupSizeY = 2;
 
-    uint numCUs = 0;
+    uint numWGs = 0;
 
     std::string transA = "N";
     std::string transB = "T";
@@ -41,6 +41,7 @@ struct GEMMProblem
     bool storeLDSD = true;
 
     bool fuseLoops                 = true;
+    bool tailLoops                 = true;
     bool allowAmbiguousMemoryNodes = false;
     bool betaInFma                 = true;
     bool literalStrides            = true;

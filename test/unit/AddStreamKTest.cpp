@@ -312,7 +312,7 @@ namespace AddStreamKTest
     //
     // Input is an M * N * K length array of floating point values.
     //
-    // Result will be: a numCU length array.  The n'th WG will sum
+    // Result will be: a numWG length array.  The n'th WG will sum
     // the input values in it's local tile-space and store the result
     // in the n'th entry of the output array.
     TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKLoad)

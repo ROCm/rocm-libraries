@@ -96,6 +96,17 @@ namespace rocRoller
         return std::variant<T>(std::move(value));
     }
 
+    /**
+     * Returns a copy of `sets`, with any sets that have elements in common
+     * merged together.
+     *
+     * Postconditions:
+     * - Union of return value sets is the same as the union of the input sets.
+     * - No two sets in return value have any common elements.
+     * - mergeSets(mergeSets(x)) == mergeSets(x) for any x.
+     */
+    std::vector<std::set<int>> mergeSets(std::vector<std::set<int>> sets);
+
     inline std::string toString(int x)
     {
         return std::to_string(x);
@@ -176,18 +187,6 @@ namespace rocRoller
         }
     }
 
-    template <typename T>
-    inline std::ostream& stream_write(std::ostream& stream, T const& val)
-    {
-        return stream << val;
-    }
-
-    template <typename T, typename... Ts>
-    inline std::ostream& stream_write(std::ostream& stream, T const& val, Ts const&... vals)
-    {
-        return stream_write(stream << val, vals...);
-    }
-
     template <typename... Ts>
     inline std::string concatenate_join(std::string const& sep, Ts const&... vals)
     {
@@ -203,7 +202,7 @@ namespace rocRoller
     {
         std::ostringstream msg;
         msg.setf(std::ios::showpoint);
-        stream_write(msg, vals...);
+        ((msg << (vals)), ...);
 
         return msg.str();
     }
@@ -217,7 +216,7 @@ namespace rocRoller
     template <bool T_Enable, typename... Ts>
     inline std::string concatenate_if(Ts const&... vals)
     {
-        if(!T_Enable)
+        if constexpr(!T_Enable)
             return "";
 
         return concatenate(vals...);
@@ -370,6 +369,10 @@ namespace rocRoller
         return name(obj);
     }
 
+    std::vector<char> readFile(std::string const&);
+
+    std::string readMetaDataFromCodeObject(std::string const& fileName);
+
     /**
      * @}
      */
@@ -395,7 +398,9 @@ namespace std
     template <typename T>
     inline std::ostream& operator<<(std::ostream& stream, std::set<T> const& array)
     {
+        stream << "{";
         rocRoller::streamJoin(stream, array, ", ");
+        stream << "}";
         return stream;
     }
 

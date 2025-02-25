@@ -2,6 +2,8 @@
 
 #include "Operation.hpp"
 
+#include <rocRoller/Serialization/Base_fwd.hpp>
+
 namespace rocRoller
 {
     namespace Operations
@@ -15,7 +17,13 @@ namespace rocRoller
             OperationTag getSrcTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Linear const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
+            OperationTag m_tensorTag;
             OperationTag m_srcTag;
         };
 
@@ -30,7 +38,13 @@ namespace rocRoller
             OperationTag getSrcTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Scalar const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
+            OperationTag m_scalarTag;
             OperationTag m_srcTag;
         };
 
@@ -45,7 +59,13 @@ namespace rocRoller
             OperationTag getSrcTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Load_Tiled const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
+            OperationTag m_tensorTag;
             OperationTag m_srcTag;
         };
 
@@ -53,6 +73,9 @@ namespace rocRoller
 
         class T_Store_Linear : public BaseOperation
         {
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
         public:
             T_Store_Linear() = delete;
             T_Store_Linear(OperationTag source, OperationTag tensor);
@@ -60,6 +83,8 @@ namespace rocRoller
             OperationTag getSrcTag() const;
             OperationTag getDstTag() const;
             std::string  toString() const;
+
+            bool operator==(T_Store_Linear const& rhs) const;
 
         private:
             OperationTag m_srcTag;
@@ -78,7 +103,12 @@ namespace rocRoller
             OperationTag getDstTag() const;
             std::string  toString() const;
 
+            bool operator==(T_Store_Tiled const& rhs) const;
+
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             OperationTag m_srcTag;
             OperationTag m_dstTag;
         };

@@ -88,6 +88,23 @@ namespace rocRoller
         loadKernel(machineCode, target, kernelName);
     }
 
+    void ExecutableKernel::loadKernelFromCodeObjectFile(std::string const&           fileName,
+                                                        std::string const&           kernelName,
+                                                        const GPUArchitectureTarget& target)
+    {
+        Log::debug("ExecutableKernel::loadKernelFromCodeObjectFile: fileName {} kernelName {}",
+                   fileName,
+                   kernelName);
+
+        auto kernelObject = readFile(fileName);
+
+        HIP_CHECK(hipModuleLoadData(&(m_hipData->hipModule), kernelObject.data()));
+        HIP_CHECK(
+            hipModuleGetFunction(&(m_hipData->function), m_hipData->hipModule, kernelName.c_str()));
+        m_kernelLoaded = true;
+        m_kernelName   = kernelName;
+    }
+
     void ExecutableKernel::executeKernel(const KernelArguments&  args,
                                          const KernelInvocation& invocation)
     {

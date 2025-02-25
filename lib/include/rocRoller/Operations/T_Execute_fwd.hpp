@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <variant>
 
 namespace rocRoller
@@ -12,6 +13,7 @@ namespace rocRoller
         struct E_Ternary;
         struct E_Neg;
         struct E_Abs;
+        struct E_RandomNumber;
         struct E_Not;
         struct E_Cvt;
         struct E_StochasticRoundingCvt;
@@ -27,6 +29,7 @@ namespace rocRoller
         using XOp = std::variant<E_Neg,
                                  E_Abs,
                                  E_Not,
+                                 E_RandomNumber,
                                  E_Cvt,
                                  E_StochasticRoundingCvt,
                                  E_Add,
@@ -44,5 +47,10 @@ namespace rocRoller
             requires std::constructible_from<XOp, T>;
             requires !std::same_as<XOp, T>;
         };
+
+        std::string name(XOp const&);
+
+        template <CXOp T>
+        std::string name();
     }
 }

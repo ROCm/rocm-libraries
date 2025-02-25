@@ -44,6 +44,7 @@ namespace rocRoller
                 auto result = indexes[0];
                 for(uint d = 1; d < srcs.size(); ++d)
                     result = result * getSize(srcs[d]) + indexes[d];
+                setComment(result, "Flatten");
                 return {result};
             }
 
@@ -53,6 +54,7 @@ namespace rocRoller
                 auto result = indexes[0] * getStride(srcs[0]);
                 for(uint d = 1; d < srcs.size(); ++d)
                     result = result + indexes[d] * getStride(srcs[d]);
+                setComment(result, "Join");
                 return {result};
             }
 
@@ -76,6 +78,7 @@ namespace rocRoller
                 if(offset != nullptr)
                     result = result + offset;
 
+                setComment(result, "Sunder");
                 return {result};
             }
 
@@ -92,6 +95,11 @@ namespace rocRoller
                     input     = input / size;
                 }
                 rv[0] = input;
+
+                for(int i = 0; i < rv.size(); i++)
+                {
+                    setComment(rv[i], concatenate("Tile[", i, "]"));
+                }
 
                 return rv;
             }
@@ -143,6 +151,12 @@ namespace rocRoller
                     input     = input / size;
                 }
                 rv[0] = input;
+
+                for(int i = 0; i < rv.size(); i++)
+                {
+                    setComment(rv[i], concatenate("Flatten[", i, "]"));
+                }
+
                 return rv;
             }
 
@@ -152,6 +166,8 @@ namespace rocRoller
                 auto result = indexes[0] * getStride(dsts[0]);
                 for(uint d = 1; d < dsts.size(); ++d)
                     result = result + indexes[d] * getStride(dsts[d]);
+
+                setComment(result, "Split");
                 return {result};
             }
 
@@ -175,6 +191,7 @@ namespace rocRoller
                 if(offset != nullptr)
                     result = result + offset;
 
+                setComment(result, "Sunder");
                 return {result};
             }
 
@@ -183,6 +200,7 @@ namespace rocRoller
                 auto result = indexes[0];
                 for(uint d = 1; d < dsts.size(); ++d)
                     result = result * getSize(dsts[d]) + indexes[d];
+                setComment(result, "Tile");
                 return {result};
             }
 
@@ -269,6 +287,7 @@ namespace rocRoller
                     delta = delta + getDelta(srcTags[d]) * strides[d];
                 }
                 deltas.emplace(dstTags[0], delta);
+                setComment(index, "DFlatten");
                 return {index};
             }
 
@@ -287,6 +306,7 @@ namespace rocRoller
                     delta = delta + getDelta(srcTags[d]) * getStride(srcs[d]);
                 }
                 deltas.emplace(dstTags[0], delta);
+                setComment(index, "DJoin");
                 return {index};
             }
 
@@ -314,6 +334,7 @@ namespace rocRoller
 
                 auto delta = getDelta(srcTags[index]);
                 deltas.emplace(dstTags[0], delta);
+                setComment(result, "DSunder");
                 return {result};
             }
 
@@ -334,6 +355,9 @@ namespace rocRoller
                 }
                 deltas.emplace(dstTags[0], delta);
                 rv[0] = input;
+
+                for(int i = 0; i < rv.size(); i++)
+                    setComment(rv[i], concatenate("DTile[", i, "]"));
                 return rv;
             }
 
@@ -392,6 +416,7 @@ namespace rocRoller
                     delta = delta + getDelta(dstTags[d]) * getStride(dsts[d]);
                 }
                 deltas.emplace(srcTags[0], delta);
+                setComment(index, "DSplit");
                 return {index};
             }
 
@@ -419,6 +444,7 @@ namespace rocRoller
 
                 auto delta = getDelta(dstTags[index]);
                 deltas.emplace(srcTags[0], delta);
+                setComment(result, "DSunder");
                 return {result};
             }
 
@@ -437,6 +463,7 @@ namespace rocRoller
                     delta = delta * getSize(dsts[d]) + getDelta(dstTags[d]);
                 }
                 deltas.emplace(srcTags[0], delta);
+                setComment(index, "DTile");
                 return {index};
             }
 
@@ -461,6 +488,8 @@ namespace rocRoller
                 }
                 deltas.emplace(srcTags[0], delta);
                 rv[0] = input;
+                for(int i = 0; i < rv.size(); i++)
+                    setComment(rv[i], concatenate("DFlatten[", i, "]"));
                 return rv;
             }
 

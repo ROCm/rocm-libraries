@@ -114,8 +114,8 @@ namespace rocRoller
         Bool, //< Single bit boolean (SCC)
         Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32).
         Bool64, //< Sixty-four booleans packed into 64bits.  Usually the result of a vector-comparison (VCC; On Wave64 VCC is a single Bool64).
-        Count,
-        None = Count //< Represents: any, unknown/unspecified, or a deferred type.
+        None, //< Represents: any, unknown/unspecified, or a deferred type.
+        Count
     };
 
     std::string   toString(DataType d);
@@ -150,9 +150,8 @@ namespace rocRoller
         WAVE_LDS,
         JAMMED_WAVE_LDS,
         Literal,
-
-        Count,
-        None = Count
+        None,
+        Count
     };
 
     std::string toString(MemoryType m);
@@ -166,9 +165,8 @@ namespace rocRoller
         MATRIX_A,
         MATRIX_B,
         MATRIX_ACCUMULATOR,
-
-        Count,
-        None = Count
+        None,
+        Count
     };
 
     std::string   toString(LayoutType l);

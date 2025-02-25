@@ -16,6 +16,7 @@ namespace rocRoller
     const std::string KLOOP = "KLoop";
 
     const std::string SCRATCH = "SCRATCH";
+    const std::string NUMWGS  = "numWGs";
 
     struct KernelOptions
     {

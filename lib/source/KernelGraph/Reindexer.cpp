@@ -191,6 +191,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(LoadSGPR);
             MAKE_OPERATION_VISITOR(Multiply);
             MAKE_OPERATION_VISITOR(NOP);
+            MAKE_OPERATION_VISITOR(Block);
             MAKE_OPERATION_VISITOR(Scope);
             MAKE_OPERATION_VISITOR(StoreLDSTile);
             MAKE_OPERATION_VISITOR(StoreLinear);
@@ -200,6 +201,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(WaitZero);
+            MAKE_OPERATION_VISITOR(SeedPRNG);
 
             void reindex(KernelGraph& graph, int tag)
             {

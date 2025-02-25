@@ -49,6 +49,14 @@ namespace rocRoller
             return retval;
         }
 
+        ExpressionPtr tileCeilDivide(ExpressionPtr sdSize, auto tileSize)
+        {
+            auto tileSizeExpr = literal(static_cast<uint>(tileSize));
+            auto one          = literal(1u);
+
+            return (sdSize + tileSizeExpr - one) / tileSizeExpr;
+        }
+
         /**
          * Note that load/store generator uses ElementNumber
          * coordinates like this:
@@ -92,10 +100,11 @@ namespace rocRoller
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
             auto sdimY     = sdim[1];
-            auto numTilesX = graph.coordinates.get<SubDimension>(sdim[0])->size
-                             / literal(static_cast<uint>(macTile.sizes[0]));
-            auto numTilesY = graph.coordinates.get<SubDimension>(sdim[1])->size
-                             / literal(static_cast<uint>(macTile.sizes[1]));
+            auto numTilesX = tileCeilDivide(graph.coordinates.get<SubDimension>(sdim[0])->size,
+                                            macTile.sizes[0]);
+
+            auto numTilesY = tileCeilDivide(graph.coordinates.get<SubDimension>(sdim[1])->size,
+                                            macTile.sizes[1]);
 
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));

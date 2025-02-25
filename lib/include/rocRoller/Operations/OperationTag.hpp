@@ -50,8 +50,7 @@ namespace rocRoller
             // Postfix increment operator
             OperationTag operator++(int);
 
-            bool operator<(OperationTag const&) const;
-            bool operator==(OperationTag const&) const;
+            auto operator<=>(OperationTag const&) const = default;
 
             bool uninitialized() const;
         };

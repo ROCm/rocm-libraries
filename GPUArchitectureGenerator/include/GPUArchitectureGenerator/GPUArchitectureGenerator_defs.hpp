@@ -73,8 +73,8 @@ namespace GPUArchitectureGenerator
               "4\n.end_amdhsa_kernel",
               ""}},
 
-            {rocRoller::GPUCapability::HasFlatOffset,
-             {"flat_store_dword v[8:9], v5 offset:16", ""}},
+            {rocRoller::GPUCapability::HasGlobalOffset,
+             {"global_store_dword v[8:9], v5 off offset:-16", ""}},
 
             {rocRoller::GPUCapability::v_mac_f16, {"v_mac_f16 v47, v36, v34", ""}},
 
@@ -691,7 +691,7 @@ namespace GPUArchitectureGenerator
               },
               0,
               {rocRoller::GPUWaitQueueType::VMQueue},
-              (1 << 13) - 1}},
+              (1 << 12) - 1}}, // the offset is a `signed` 13-bit  (i.e., -4096..4095)
     };
 
     // Tuple mapping a <Vector of GPUInstructionInfo> to a <Vector of GPUArchitectureTarget>
