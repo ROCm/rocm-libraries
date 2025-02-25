@@ -754,6 +754,11 @@ namespace rocRoller
                 throw std::runtime_error("Matrix multiply present in runtime expression.");
             }
 
+            CommandArgumentValue operator()(ScaledMatrixMultiply const& expr)
+            {
+                throw std::runtime_error("Scaled Matrix multiply present in runtime expression.");
+            }
+
             CommandArgumentValue operator()(Register::ValuePtr const& expr)
             {
                 if(expr->regType() == Register::Type::Literal)

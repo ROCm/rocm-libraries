@@ -11,6 +11,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
@@ -761,11 +762,6 @@ namespace rocRoller
                 lhs  = atile.vgpr;
                 r1hs = btile.vgpr;
 
-                AssertFatal(lhs->variableType() == r1hs->variableType(),
-                            "Input types must match ",
-                            ShowValue(lhs->variableType()),
-                            ShowValue(r1hs->variableType()));
-
                 AssertFatal(!lhs->variableType().isPointer(),
                             "Input must not be a pointer. ",
                             ShowValue(lhs->variableType()));
@@ -785,11 +781,72 @@ namespace rocRoller
                         Register::AllocationOptions::FullyContiguous());
                 }
 
-                auto mm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
-                    m_context, accType, lhs->variableType().dataType);
+                auto mm
+                    = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(m_context);
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
                 co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
+            }
+
+            Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
+            {
+
+                AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.matA)
+                                && std::holds_alternative<WaveTilePtr>(*expr.matB),
+                            "Expression MatrixMultiply requires WaveTiles");
+
+                auto const atile = *std::get<WaveTilePtr>(*expr.matA);
+                auto const btile = *std::get<WaveTilePtr>(*expr.matB);
+                AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
+                AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
+                AssertFatal(atile.sizes[1] == btile.sizes[0],
+                            "MatrixMultiply WaveTile size mismatch.",
+                            ShowValue(atile.sizes[1]),
+                            ShowValue(btile.sizes[0]));
+
+                auto M  = atile.sizes[0];
+                auto N  = btile.sizes[1];
+                auto K  = atile.sizes[1];
+                auto rA = atile.vgpr;
+                auto rB = btile.vgpr;
+
+                auto getRegister = rocRoller::overloaded{
+                    [&](WaveTilePtr const& tile) -> Register::ValuePtr { return tile->vgpr; },
+                    [&](Register::ValuePtr const& reg) -> Register::ValuePtr { return reg; },
+                    [&](auto const& other) -> Register::ValuePtr {
+                        Throw<FatalError>("Invalid scale expression type: ",
+                                          typeName<decltype(other)>());
+                        return nullptr;
+                    }};
+
+                auto rScaleA = std::visit(getRegister, *expr.scaleA);
+                auto rScaleB = std::visit(getRegister, *expr.scaleB);
+
+                AssertFatal(!rA->variableType().isPointer(),
+                            "Input must not be a pointer. ",
+                            ShowValue(rA->variableType()));
+
+                // accumulator is either f32, f64, or i32
+                DataType accType = expr.accumulationPrecision;
+
+                if(dest == nullptr)
+                {
+                    auto const accRegCount = M * N / m_context->kernel()->wavefront_size();
+
+                    dest = Register::Value::Placeholder(
+                        m_context,
+                        Register::Type::Accumulator,
+                        accType,
+                        accRegCount,
+                        Register::AllocationOptions::FullyContiguous());
+                }
+
+                auto smm = Component::Get<rocRoller::InstructionGenerators::ScaledMatrixMultiply>(
+                    m_context, accType, rA->variableType().dataType);
+
+                auto rC = std::get<Register::ValuePtr>(*expr.matC);
+
+                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
@@ -951,8 +1008,9 @@ namespace rocRoller
                 destStr = dest->toString();
             co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
 
-            // Replace RandomNumber expression with expressions that implement the PRNG algorithm.
-            expr = lowerPRNG(expr);
+            // Replace RandomNumber expression with expressions that implement the PRNG algorithm
+            // if PRNG instruction is unavailable
+            expr = lowerPRNG(expr, context);
 
             {
                 auto fast = FastArithmetic(context);

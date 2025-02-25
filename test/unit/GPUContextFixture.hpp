@@ -26,6 +26,21 @@ inline auto supportedISAValues()
 }
 
 /**
+ * Returns a (googletest) Generator that will yield every CDNA GPU ISA supported by rocRoller.
+ *
+ * Useful if you want to parameterize a test with combinations of each ISA with other
+ * parameters. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          ::testing::Combine(CDNAISAValues(),
+ *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+ */
+inline auto CDNAISAValues()
+{
+    return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getInstance()->getCDNAISAs());
+}
+
+/**
  * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller, that
  * has MFMA instructions.
  *
@@ -78,6 +93,19 @@ inline auto currentGPUISA()
 inline auto supportedISATuples()
 {
     return ::testing::Combine(supportedISAValues());
+}
+
+/**
+ * Returns a (googletest) Generator that will yield a single-item tuple for CDNA GPU ISA supported by rocRoller.
+ *
+ * Useful if you want to parameterize a test with only each supported ISA. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          CDNAISATuples());
+ */
+inline auto CDNAISATuples()
+{
+    return ::testing::Combine(CDNAISAValues());
 }
 
 /**

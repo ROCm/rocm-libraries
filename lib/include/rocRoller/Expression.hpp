@@ -360,6 +360,31 @@ namespace rocRoller
             constexpr static inline int             Complexity = 20;
         };
 
+        struct ScaledMatrixMultiply
+        {
+            ExpressionPtr matA, matB, matC, scaleA, scaleB;
+            DataType      accumulationPrecision = DataType::Float;
+            std::string   comment               = "";
+
+            ScaledMatrixMultiply() = default;
+            ScaledMatrixMultiply(ExpressionPtr a,
+                                 ExpressionPtr b,
+                                 ExpressionPtr c,
+                                 ExpressionPtr sA,
+                                 ExpressionPtr sB)
+                : matA(a)
+                , matB(b)
+                , matC(c)
+                , scaleA(sA)
+                , scaleB(sB)
+            {
+            }
+
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline int             Complexity = 20;
+        };
+
         /**
          * Represents DEST = LHS ? R1HS : R2HS.
          * Utilizes cselect
@@ -762,6 +787,8 @@ namespace rocRoller
 
         std::string getComment(ExpressionPtr const& expr);
         std::string getComment(Expression const& expr);
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments);
+        std::string getComment(Expression const& expr, bool includeRegisterComments);
 
         /**
          * Copies any comments from src into dst.  If dst is not of a type that allows

@@ -35,6 +35,11 @@ namespace rocRoller
                 return checkRegister(m_context.lock()->getExec()).value_or(0);
             }
 
+            if(GPUInstructionInfo::isVPermlane(inst.getOpCode()))
+            {
+                return checkRegister(m_context.lock()->getExec()).value_or(0);
+            }
+
             // Check if VALU reads EXEC as constant
             if(GPUInstructionInfo::isVALU(inst.getOpCode()))
             {

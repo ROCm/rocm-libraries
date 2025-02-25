@@ -39,6 +39,17 @@ namespace rocRoller
                 return std::make_shared<Expression>(cpy);
             }
 
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                ScaledMatrixMultiply cpy = expr;
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
+                return std::make_shared<Expression>(cpy);
+            }
+
             ExpressionPtr operator()(Add const& expr) const
             {
                 auto lhs = call(expr.lhs);
