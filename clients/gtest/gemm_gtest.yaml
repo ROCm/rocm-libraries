@@ -2377,6 +2377,12 @@ Definitions:
     - { M:   191, N:   193, K:   194, lda:   195, ldb:   196, ldc:   198, ldd:   191 }
     - { M:   500, N:   501, K:   502, lda:   503, ldb:   604, ldc:   550, ldd:   500 }
 
+  - &gemm_ex_gemv_size_range
+    - { scan: [ 1024..4096..1024 ], M: *c_scan_value, N: 1, K: 2048, lda: 8192, ldb: 4096, ldc: *c_scan_value, ldd: *c_scan_value } # non-transpose B
+    - { scan: [ 1024..4096..1024 ], M: *c_scan_value, N: 1, K: 2048, lda: 8192, ldb: 2, ldc: *c_scan_value, ldd: *c_scan_value } # transpose B
+    - { scan: [ 1024..4096..1024 ], M: 1, N: *c_scan_value, K: 2048, lda: 2, ldb: 8192, ldc: 2, ldd: 2 }
+    - { scan: [ 1024..4096..1024 ], M: 1, N: *c_scan_value, K: 2048, lda: 4096, ldb: 8192, ldc: 4096, ldd: 4096 }
+
   - &ldd_transA_transB_range
     - { transA: N, transB: N }
     - { transA: N, transB: T }
@@ -2475,6 +2481,14 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range_small
   api: INTERNAL
+
+- name: gemm_ex_gemv
+  category: pre_checkin
+  function:
+    - gemm_ex: *nonint8_real_precisions
+  matrix_size: *gemm_ex_gemv_size_range
+  transA_transB: *transA_transB_range
+  alpha_beta: *alpha_beta_range_small
 
 - name: gemm_small
   category: quick

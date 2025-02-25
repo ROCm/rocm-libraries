@@ -287,6 +287,14 @@ rocblas_status
                           rocblas_gemm_algo algo           = rocblas_gemm_algo_standard,
                           int32_t           solution_index = 0);
 
+template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
+rocblas_status
+    getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
+                        rocblas_tensile_get_solution_option                          option,
+                        rocblas_int*                                                 list_array,
+                        rocblas_int*                                                 list_size,
+                        rocblas_int                                                  arrayIdx);
+
 template <typename TiA,
           typename To,
           typename Tc,

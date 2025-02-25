@@ -19,7 +19,7 @@ Tests:
   lda: 250
   ldb: 250
   ldc: 250
-  ldd: 250 
+  ldd: 250
   alpha_beta: { alpha:  1, beta:  1 }
   transA_transB: *transA_transB_range
   precision : *real_precisions
@@ -33,7 +33,7 @@ Tests:
   lda: 250
   ldb: 250
   ldc: 250
-  ldd: 250  
+  ldd: 250
   alpha_beta: { alpha:  1, beta:  1 }
   transA_transB: *transA_transB_range
   precision : *complex_precisions
@@ -53,4 +53,23 @@ Tests:
   transA_transB: *transA_transB_range
   precision : *single_double_precisions
   batch_count: [ 1, 3 ]
+
+- name: gemm_ex_gemv_get_solutions
+  category: pre_checkin
+  function:
+    - gemm_ex_get_solutions: *real_precisions
+    - gemm_batched_ex_get_solutions: *real_precisions
+    - gemm_strided_batched_ex_get_solutions: *real_precisions
+  precision: *real_precisions
+  M: [1, 256, 1024]
+  N: [1, 256, 1024]
+  K: 256
+  lda: [1, 1024]
+  ldb: [1, 1024]
+  ldc: [1, 1024]
+  ldd: [1, 1024]
+  alpha_beta: { alpha: 1, beta: 1 }
+  transA_transB: *transA_transB_range
+  outofplace: [false, true]
+
 ...

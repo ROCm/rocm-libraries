@@ -560,23 +560,21 @@ rocblas_status
         return rocblas_status_invalid_pointer;
     }
 
+    hipblasLtHandle_t& handle     = *(prob.handle->getHipblasLtHandle());
+    rocblas_int        added_sols = 0;
+
     constexpr bool is_complex = rocblas_is_complex<TiA> || rocblas_is_complex<Tc>;
+    rocblas_status status     = rocblas_status_success;
 
     if(is_complex)
     {
         // TODO: revisit with any hipblaslt support changes, or with query of hipblaslt for support
-
         if(list_array == nullptr)
         {
             *list_size = 0;
         }
-
-        return rocblas_status_success;
     }
-
-    hipblasLtHandle_t& handle = *(prob.handle->getHipblasLtHandle());
-
-    if(option == MATCHES_TYPE)
+    else if(option == MATCHES_TYPE)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
         std::vector<hipblasOperation_t> ops = {HIPBLAS_OP_N, HIPBLAS_OP_T, HIPBLAS_OP_C};
@@ -619,12 +617,11 @@ rocblas_status
         }
         else
         {
-            rocblas_int i  = 0;
-            auto        it = heuristicIndexes.begin();
-            while(i < *list_size && it != heuristicIndexes.end())
+            auto it = heuristicIndexes.begin();
+            while(added_sols < *list_size && it != heuristicIndexes.end())
             {
-                list_array[i] = *it;
-                ++i;
+                list_array[added_sols] = *it;
+                ++added_sols;
                 ++it;
             }
         }
@@ -660,17 +657,16 @@ rocblas_status
         size_t retSize   = heuristicResults.size();
         size_t iter_size = list_array == nullptr ? retSize : *list_size;
 
-        rocblas_int i  = 0;
-        auto        it = heuristicResults.begin();
-        size_t      tmpWorkspaceSize;
-        while(i < iter_size && it != heuristicResults.end())
+        auto   it = heuristicResults.begin();
+        size_t tmpWorkspaceSize;
+        while(added_sols < iter_size && it != heuristicResults.end())
         {
             if(gemm->isAlgoSupported(it->algo, tmpWorkspaceSize) == HIPBLAS_STATUS_SUCCESS)
             {
                 if(list_array != nullptr)
                 {
-                    list_array[i] = hipblaslt_ext::getIndexFromAlgo(it->algo) + 1;
-                    ++i;
+                    list_array[added_sols] = hipblaslt_ext::getIndexFromAlgo(it->algo) + 1;
+                    ++added_sols;
                 }
             }
             else
@@ -684,13 +680,20 @@ rocblas_status
         {
             *list_size = retSize;
         }
-
-        return rocblas_status_success;
     }
     else
     {
         return rocblas_status_invalid_value;
     }
+
+    // inject rocblas source-code gemv if applicable
+    rocblas_status rocblasSolStatus
+        = getRocblasSolutions(prob, option, list_array, list_size, added_sols);
+
+    if(rocblasSolStatus != rocblas_status_continue)
+        return rocblasSolStatus;
+
+    return status;
 }
 
 /******************************************************************************

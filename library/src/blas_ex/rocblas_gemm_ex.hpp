@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,8 @@
 #include "../blas3/rocblas_gemm.hpp"
 #include "handle.hpp"
 #include "logging.hpp"
+
+#define GEMM_EX_GEMV_SOLUTION_IDX -9
 
 template <typename T>
 rocblas_status rocblas_copy_alpha_beta_to_host_if_on_device(rocblas_handle   handle,
@@ -63,6 +65,109 @@ rocblas_status rocblas_copy_alpha_beta_to_host_if_on_device(rocblas_handle   han
         return rocblas_status_not_implemented;
     }
 }
+
+template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
+constexpr bool rocblas_is_gemv_supported_types()
+{
+    using Tex = rocblas_type_from_ptr_t<TScal, false>;
+    using Ti  = rocblas_type_from_ptr_t<TiConstPtr, BATCHED>;
+    using Toc = rocblas_type_from_ptr_t<ToConstPtr, BATCHED>;
+    using Tod = rocblas_type_from_ptr_t<ToPtr, BATCHED>;
+    constexpr bool is_sgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_dgemv
+        = std::is_same_v<
+              Tex,
+              double> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_cgemv
+        = std::is_same_v<
+              Tex,
+              rocblas_float_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_zgemv
+        = std::is_same_v<
+              Tex,
+              rocblas_double_complex> && std::is_same_v<Tex, Ti> && std::is_same_v<Ti, Toc> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_hshgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, rocblas_half> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_hssgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_half> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_tstgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, rocblas_bfloat16> && std::is_same_v<Toc, Tod>;
+    constexpr bool is_tssgemv
+        = std::is_same_v<
+              Tex,
+              float> && std::is_same_v<Ti, rocblas_bfloat16> && std::is_same_v<Toc, float> && std::is_same_v<Toc, Tod>;
+
+    return is_sgemv || is_dgemv || is_cgemv || is_zgemv || is_hshgemv || is_hssgemv || is_tstgemv
+           || is_tssgemv;
+}
+
+/*
+ * Assuming valid types, this function will return whether or not our gemv source kernels
+ * are valid for the gemm use case given the parameters.
+ */
+static inline bool rocblas_can_use_gemv_in_gemm(rocblas_operation trans_a,
+                                                rocblas_operation trans_b,
+                                                rocblas_int       m,
+                                                rocblas_int       n,
+                                                rocblas_int       k,
+                                                void*             c,
+                                                rocblas_stride    offset_c,
+                                                rocblas_int       ldc,
+                                                rocblas_stride    stride_c,
+                                                void*             d,
+                                                rocblas_stride    offset_d,
+                                                rocblas_int       ldd,
+                                                rocblas_stride    stride_d)
+{
+    // Can only use gemv in the case where m == 1 || n == 1
+    if((m == 1 || n == 1) && k != 0)
+    {
+        // These are constraints on whether or not our gemv kernels can support this configuration. Need in-place, can't support CONJ in some cases
+        bool gemv_constraints
+            = (c == d && ldc == ldd && stride_c == stride_d && offset_c == offset_d)
+              && !(n == 1 && trans_b == rocblas_operation_conjugate_transpose)
+              && !(m == 1
+                   && (trans_b == rocblas_operation_conjugate_transpose
+                       || trans_a == rocblas_operation_conjugate_transpose));
+
+        // Here, we aren't concerned about performance, just if we /can/ use gemv kernels or not
+        return gemv_constraints;
+    }
+
+    return false;
+}
+
+/*
+ * This function will return whether or not we /want/ to use gemv kernels for the given gemm
+ * problem. This will determine if gemv kernels are valid, and use heuristics of some sort
+ * to determine whether or not these kernels are desired.
+ */
+template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
+bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
+                              rocblas_operation trans_a,
+                              rocblas_operation trans_b,
+                              rocblas_int       m,
+                              rocblas_int       n,
+                              rocblas_int       k,
+                              rocblas_int       lda,
+                              rocblas_int       ldb,
+                              ToConstPtr        c,
+                              rocblas_stride    offset_c,
+                              rocblas_int       ldc,
+                              rocblas_stride    stride_c,
+                              ToPtr             d,
+                              rocblas_stride    offset_d,
+                              rocblas_int       ldd,
+                              rocblas_stride    stride_d);
 
 template <bool BATCHED>
 rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
