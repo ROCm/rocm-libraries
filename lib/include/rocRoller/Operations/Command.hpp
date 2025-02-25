@@ -9,7 +9,6 @@
 
 #include "CommandArgument_fwd.hpp"
 #include "CommandArguments.hpp"
-#include "CommandArguments_fwd.hpp"
 #include "OperationTag.hpp"
 #include "Operations_fwd.hpp"
 
