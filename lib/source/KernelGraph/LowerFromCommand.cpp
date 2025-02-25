@@ -17,7 +17,6 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace CoordinateGraph;
         using namespace ControlGraph;
-        using namespace ControlGraph;
 
         /**
          * @brief Promote inputs to an appropriate output.
@@ -551,16 +550,29 @@ namespace rocRoller
 
                 m_dim[mul.getTag()] = D;
 
-                // contraction dims are {1} and {0}, which is matrix multiplication
-                auto TC            = m_graph.control.addElement(TensorContraction({1}, {0}));
-                m_op[mul.getTag()] = TC;
+                auto aSource = m_command->findTag(mul.a);
+                auto bSource = m_command->findTag(mul.b);
 
+                auto getBlockParams = rocRoller::overloaded{
+                    [&](auto const& op) {
+                        return std::make_tuple(Operations::ScaleMode::None, std::vector<size_t>());
+                    },
+                    [&](Operations::BlockScale const& op) {
+                        return std::make_tuple(op.scaleMode(), op.strides());
+                    }};
+
+                TensorContraction contraction({1}, {0});
+                std::tie(contraction.scaleModeA, contraction.scaleStridesA)
+                    = std::visit(getBlockParams, *aSource);
+                std::tie(contraction.scaleModeB, contraction.scaleStridesB)
+                    = std::visit(getBlockParams, *bSource);
+
+                // contraction dims are {1} and {0}, which is matrix multiplication
+                auto TC            = m_graph.control.addElement(contraction);
+                m_op[mul.getTag()] = TC;
                 m_graph.mapper.connect(TC, D, NaryArgument::DEST);
 
                 std::vector<int> sourceDims;
-
-                auto aSource = m_command->findTag(mul.a);
-                auto bSource = m_command->findTag(mul.b);
 
                 auto connectBlockScale = [&](Operations::BlockScale const& op,
                                              NaryArgument                  valueArg,

@@ -35,59 +35,38 @@ namespace rocRoller
     {
         std::shared_ptr<Scheduling::IObserver> createObserver(ContextPtr const& ctx)
         {
-            using AlwaysObservers = MetaObserver<AllocatingObserver, WaitcntObserver, MFMAObserver>;
-            using Gfx908Observers = MetaObserver<ACCVGPRReadWrite,
-                                                 ACCVGPRWriteWrite,
-                                                 CMPXWriteExec,
-                                                 VALUWrite,
-                                                 VALUWriteSGPRVMEM,
-                                                 VALUWriteVCCVDIVFMAS,
-                                                 XDLReadSrcC908,
-                                                 XDLWrite908>;
-            using Gfx90aObservers = MetaObserver<CMPXWriteExec,
-                                                 DGEMM4x4x4Write,
-                                                 DGEMM16x16x4Write,
-                                                 DLWrite,
-                                                 VALUWrite,
-                                                 VALUWriteSGPRVMEM,
-                                                 VALUWriteVCCVDIVFMAS,
-                                                 XDLReadSrcC90a,
-                                                 XDLWrite90a>;
-            using Gfx94xObservers = MetaObserver<CMPXWriteExec,
-                                                 DGEMM4x4x4Write,
-                                                 DGEMM16x16x4Write,
-                                                 DLWrite,
-                                                 OPSEL94x,
-                                                 VALUWrite,
-                                                 VALUWriteReadlane94x,
-                                                 VALUWriteSGPRVMEM,
-                                                 VALUWriteVCCVDIVFMAS,
-                                                 VALUTransWrite94x,
-                                                 VALUWriteSGPRVCC94x,
-                                                 VCMPXWrite94x,
-                                                 XDLReadSrcC94x,
-                                                 XDLWrite94x>;
-            using FileObservers   = MetaObserver<FileWritingObserver>;
-            using AnalysisObservers = MetaObserver<RegisterLivenessObserver>;
-            using ErrorObservers    = MetaObserver<SupportedInstructionObserver>;
-
-            static_assert(CObserver<AlwaysObservers>);
-            static_assert(CObserver<Gfx908Observers>);
-            static_assert(CObserver<Gfx90aObservers>);
-            static_assert(CObserver<Gfx94xObservers>);
-            static_assert(CObserver<FileObservers>);
-            static_assert(CObserver<AnalysisObservers>);
-            static_assert(CObserver<ErrorObservers>);
-
-            PotentialObservers<FileObservers,
-                               AnalysisObservers,
-                               ErrorObservers,
-                               AlwaysObservers,
-                               Gfx908Observers,
-                               Gfx90aObservers,
-                               Gfx94xObservers>
+            PotentialObservers< // Always present
+                AllocatingObserver,
+                WaitcntObserver,
+                MFMAObserver,
+                // Hazard Observers
+                ACCVGPRReadWrite,
+                ACCVGPRWriteWrite,
+                CMPXWriteExec,
+                DGEMM4x4x4Write,
+                DGEMM16x16x4Write,
+                DLWrite,
+                OPSEL94x,
+                VALUTransWrite94x,
+                VALUWrite,
+                VALUWriteReadlane94x,
+                VALUWriteSGPRVCC94x,
+                VALUWriteSGPRVMEM,
+                VALUWriteVCCVDIVFMAS,
+                VCMPXWrite94x,
+                XDLReadSrcC908,
+                XDLReadSrcC90a,
+                XDLReadSrcC94x,
+                XDLWrite908,
+                XDLWrite90a,
+                XDLWrite94x,
+                // Other Observers
+                FileWritingObserver,
+                RegisterLivenessObserver,
+                SupportedInstructionObserver>
                 potentialObservers;
-            return createObserver_Conditional(ctx, potentialObservers);
+
+            return createMetaObserver(ctx, potentialObservers);
         }
     };
 }

@@ -110,5 +110,14 @@ namespace rocRoller
         private:
             ContextPtr m_context;
         };
+
+        /**
+         * @brief Transform RandomNumber expression into a set of expressions that
+         *        implement the PRNG algorithm when PRNG instruction is unavailable.
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr lowerPRNG(ExpressionPtr exp);
     }
 }

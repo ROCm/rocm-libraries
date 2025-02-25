@@ -25,6 +25,7 @@ j* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  *******************************************************************************/
 
 #include <cmath>
+#include <cstdint>
 #include <rocRoller/DataTypes/DataTypes_Half.hpp>
 
 #ifndef __BYTE_ORDER__

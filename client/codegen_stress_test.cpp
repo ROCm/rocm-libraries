@@ -9,7 +9,7 @@
 
 #include "../../test/unit/Utilities.hpp"
 
-#include "include/Parser.hpp"
+#include <CLI/CLI.hpp>
 
 using namespace rocRoller;
 
@@ -222,29 +222,27 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
 
 int main(int argc, const char* argv[])
 {
-    ParseOptions po("CodeGen Driver: Stress test instruction generation.");
-
-    po.addArg("inst_count", Arg({"inst_count"}, "Number of instructions to generate."));
-    po.addArg("instructions", Arg({"instructions"}, "Label of instructions to use."));
-    po.addArg("num_warmup", Arg({"num_warmup"}, "Number of warm-up runs."));
-    po.addArg("num_runs", Arg({"num_runs"}, "Number of timed runs."));
-    po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
-
-    po.parse_args(argc, argv);
-
+    std::string    filename;
     CodeGenProblem prob;
-    prob.name         = "CodeGenv00";
-    prob.instCount    = po.get("inst_count", 40000);
-    prob.instructions = po.get("instructions", std::string{"simple_mfma"});
 
-    prob.numWarmUp = po.get("num_warmup", 2);
-    prob.numRuns   = po.get("num_runs", 10);
+    prob.name         = "CodeGenv00";
+    prob.instCount    = 40000;
+    prob.instructions = "simple_mfma";
+    prob.numWarmUp    = 2;
+    prob.numRuns      = 10;
+
+    CLI::App app{"CodeGen Driver: Stress test instruction generation."};
+    app.option_defaults()->ignore_case();
+    app.add_option("--inst_count", prob.instCount, "Number of instructions to generate.");
+    app.add_option("--instructions", prob.instructions, "Label of instructions to use.");
+    app.add_option("--num_warmup", prob.numWarmUp, "Number of warm-up runs.");
+    app.add_option("--num_runs", prob.numRuns, "Number of timed runs.");
+    app.add_option("--yaml", filename, "Results.");
+    CLI11_PARSE(app, argc, argv);
 
     CodeGenResult result(prob);
-
     result = CodeGen(prob);
 
-    std::string filename = po.get("yaml", std::string());
     if(!filename.empty())
     {
         std::ofstream file(filename);

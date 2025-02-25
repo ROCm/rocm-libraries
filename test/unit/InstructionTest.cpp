@@ -314,3 +314,22 @@ TEST_F(InstructionTest, ReadsSpecial)
         EXPECT_FALSE(inst.readsSpecialRegisters());
     }
 }
+
+TEST_F(InstructionTest, InoutInstructions)
+{
+    auto v0
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
+    auto v1
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
+    v0->allocateNow();
+    v1->allocateNow();
+    auto inst = Instruction::InoutInstruction("v_swap_b32", {v0, v1}, {}, "swap");
+
+    EXPECT_EQ("v_swap_b32 v0, v1 // swap\n", inst.toString(LogLevel::Verbose));
+    EXPECT_TRUE(inst.hasRegisters());
+    EXPECT_EQ(inst.getSrcs()[0], v0);
+    EXPECT_EQ(inst.getSrcs()[1], v1);
+    EXPECT_EQ(inst.getSrcs()[2], nullptr);
+    EXPECT_EQ(inst.getDsts()[0], v0);
+    EXPECT_EQ(inst.getDsts()[1], v1);
+}

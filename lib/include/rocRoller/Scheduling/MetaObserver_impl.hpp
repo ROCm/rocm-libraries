@@ -118,34 +118,5 @@ namespace rocRoller
         {
             std::apply([&inst](auto&&... args) { Detail::Observe(inst, args...); }, m_tuple);
         }
-
-        namespace Detail
-        {
-            template <CObserver T, CObserver... Rest>
-            constexpr bool
-                Required(GPUArchitectureTarget const& target, T const& obs, Rest const&... rest)
-            {
-                auto rv = obs.required(target);
-                if constexpr(sizeof...(rest) > 0)
-                {
-                    rv &= Required(target, rest...);
-                }
-                return rv;
-            }
-        }
-
-        template <>
-        constexpr inline bool MetaObserver<>::required(GPUArchitectureTarget const& target)
-        {
-            return true;
-        }
-
-        template <CObserver... Types>
-        constexpr inline bool MetaObserver<Types...>::required(GPUArchitectureTarget const& target)
-        {
-            auto tup = Tup();
-            return std::apply(
-                [&target](auto&&... args) { return Detail::Required(target, args...); }, tup);
-        }
     }
 }

@@ -52,6 +52,8 @@ namespace rocRoller
         struct MagicSign;
         struct Negate;
 
+        struct RandomNumber;
+
         struct AddShiftL;
         struct ShiftLAdd;
         struct Conditional;
@@ -94,6 +96,7 @@ namespace rocRoller
             LogicalNot,
             Exponential2,
             Exponential,
+            RandomNumber,
 
             // --- Ternary Operations ---
             AddShiftL,

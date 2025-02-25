@@ -14,8 +14,7 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-            template <typename A, typename B, typename C, typename D>
-            class TensileGEMMSolution : public GEMMSolution<A, B, C, D>
+            class TensileGEMMSolution : public GEMMSolution
             {
                 Operations::OperationTag m_tagD, m_tagA, m_tagB, m_tagC;
                 Operations::OperationTag m_offsetDTag, m_offsetATag, m_offsetBTag, m_offsetCTag;
@@ -27,58 +26,20 @@ namespace rocRoller
                     m_magicNumberWgmRemainder1Tag, m_paddingTag;
 
             public:
-                TensileGEMMSolution(SolutionParameters const& solutionParams);
+                using GEMMSolution::GEMMSolution;
 
-                Result benchmark(Client::RunParameters const& runParams,
-                                 bool                         checkResult,
-                                 bool                         doVisualize,
-                                 std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
-                                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
-                                 std::vector<C> const&                                   h_C,
-                                 std::vector<D>&                                         h_D)
+                virtual ABCDTags getABCDTags() const override
                 {
-                    Result result;
-                    result.solutionParams = m_solutionParams;
-
-                    auto d_A = make_shared_device(h_A);
-                    auto d_B = make_shared_device(h_B);
-                    auto d_C = make_shared_device(h_C);
-                    auto d_D = make_shared_device(h_D);
-
-                    auto runtimeArgs = makeArgs(d_A, d_B, d_C, d_D);
-
-                    if(doVisualize)
-                    {
-                        Client::visualize(this->m_command, *(this->m_kernel), runtimeArgs);
-                    }
-
-                    result.benchmarkResults
-                        = GEMMSolution<A, B, C, D>::benchmark(runParams, runtimeArgs);
-
-                    if(checkResult)
-                    {
-                        AssertFatal(
-                            hipMemcpy(h_D.data(),
-                                      d_D.get(),
-                                      this->m_problemParams.m * this->m_problemParams.n * sizeof(D),
-                                      hipMemcpyDeviceToHost)
-                            == (hipError_t)HIP_SUCCESS);
-
-                        result.benchmarkResults.checked = true;
-
-                        auto [correct, rnorm]           = this->validate(h_A, h_B, h_C, h_D);
-                        result.benchmarkResults.correct = correct;
-                        result.benchmarkResults.rnorm   = rnorm;
-                    }
-
-                    return result;
+                    return {m_tagA, m_tagB, m_tagC, m_tagD};
                 }
 
-            private:
-                SolutionParameters m_solutionParams;
-                ContextPtr         m_context;
+                virtual CommandParametersPtr
+                    makeCommandParameters(SolutionParameters const&) override
+                {
+                    Throw<FatalError>("Don't call me.");
+                }
 
-                CommandPtr makeCommand()
+                virtual CommandPtr makeCommand(SolutionParameters const&) override
                 {
                     auto command = std::make_shared<Command>();
 
@@ -208,7 +169,7 @@ namespace rocRoller
                         = std::make_shared<Expression::Expression>(MagicNumberWgmRemainder1_arg);
                     auto padding_exp = std::make_shared<Expression::Expression>(padding_arg);
 
-                    auto k = m_context->kernel();
+                    auto k = context()->kernel();
 
                     k->setKernelName("Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1");
                     k->setKernelDimensions(3);
@@ -350,57 +311,63 @@ namespace rocRoller
                                     DataDirection::ReadOnly,
                                     padding_exp});
 
-                    auto workItem0 = std::make_shared<Expression::Expression>(60 * 256u);
-                    auto workItem1 = std::make_shared<Expression::Expression>(33);
-                    auto zero      = std::make_shared<Expression::Expression>(0u);
-                    auto one       = std::make_shared<Expression::Expression>(1u);
-
                     k->setWorkgroupSize({256, 1, 1});
-                    k->setWorkitemCount({workItem0, workItem1, one});
 
                     return command;
                 }
 
-                CommandKernel makeKernel()
+                virtual CommandLaunchParametersPtr
+                    makeLaunchParameters(ProblemParameters const&,
+                                         SolutionParameters const&,
+                                         RunParameters const&) override
+
                 {
-                    CommandKernel commandKernel;
-                    commandKernel.setContext(m_context);
-                    commandKernel.loadKernelFromAssembly(
-                        "tensile_asm/Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1.s",
-                        "Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1");
-                    return commandKernel;
+                    auto launch = std::make_shared<CommandLaunchParameters>();
+
+                    // launch params
+                    auto workItem0 = std::make_shared<Expression::Expression>(60 * 256u);
+                    auto workItem1 = std::make_shared<Expression::Expression>(33);
+                    auto one       = std::make_shared<Expression::Expression>(1u);
+
+                    launch->setManualWorkitemCount({workItem0, workItem1, one});
+
+                    return launch;
                 }
 
-                CommandArguments makeArgs(std::shared_ptr<typename UnsegmentedTypeOf<A>::type> m_dA,
-                                          std::shared_ptr<typename UnsegmentedTypeOf<B>::type> m_dB,
-                                          std::shared_ptr<C>                                   m_dC,
-                                          std::shared_ptr<D>                                   m_dD)
+                virtual void generateSolution(SolutionParameters const& solutionParams) override
                 {
-                    CommandArguments commandArgs = this->m_command->createArguments();
+                    this->m_command       = this->makeCommand(solutionParams);
+                    this->m_commandKernel = std::make_shared<CommandKernel>(
+                        this->m_command, solutionParams.generateKernelName());
+                    this->m_commandKernel->setContext(m_context);
+                    this->m_commandKernel->loadKernelFromAssembly(
+                        "tensile_asm/Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1.s",
+                        "Cijk_Ailk_Bjlk_HHS_BH_MT128x256x16_MI32x32x8x1_SE_K1");
 
-                    unsigned const M = m_solutionParams.problemParams.m;
-                    unsigned const N = m_solutionParams.problemParams.n;
-                    unsigned const K = m_solutionParams.problemParams.k;
+                    // Don't call generateKernel: this client injects instructions directly.
+                }
+
+                virtual CommandArguments
+                    commandArguments(ProblemParameters const& problemParams,
+                                     RunParameters const&     runParams) const override
+                {
+                    CommandArguments commandArgs = command()->createArguments();
+
+                    unsigned const M = problemParams.m;
+                    unsigned const N = problemParams.n;
+                    unsigned const K = problemParams.k;
 
                     TensorDescriptor descC(
-                        getDataTypeFromString(m_solutionParams.problemParams.typeC),
-                        M * N,
-                        {M, M * K});
-                    setCommandTensorArg(commandArgs, m_tagC, descC, m_dC.get());
+                        getDataTypeFromString(problemParams.typeC), M * N, {M, M * K});
+                    setCommandTensorArg(commandArgs, m_tagC, descC, (float*)nullptr);
 
                     TensorDescriptor descA(
-                        getDataTypeFromString(m_solutionParams.problemParams.typeA),
-                        M * K,
-                        {M, M * K});
-                    setCommandTensorArg(commandArgs, m_tagA, descA, (A*)m_dA.get());
+                        getDataTypeFromString(problemParams.typeA), M * K, {M, M * K});
+                    setCommandTensorArg(commandArgs, m_tagA, descA, (float*)nullptr);
 
                     TensorDescriptor descB(
-                        getDataTypeFromString(m_solutionParams.problemParams.typeB),
-                        K * N,
-                        {N, N * K});
-                    setCommandTensorArg(commandArgs, m_tagB, descB, (B*)m_dB.get());
-
-                    commandArgs.setArgument(m_tagD, ArgumentType::Value, m_dD.get());
+                        getDataTypeFromString(problemParams.typeB), K * N, {N, N * K});
+                    setCommandTensorArg(commandArgs, m_tagB, descB, (float*)nullptr);
 
                     commandArgs.setArgument(
                         m_offsetDTag, ArgumentType::Value, (unsigned long long)0);
@@ -411,31 +378,23 @@ namespace rocRoller
                     commandArgs.setArgument(
                         m_offsetBTag, ArgumentType::Value, (unsigned long long)0);
 
-                    commandArgs.setArgument(
-                        m_alphaTag, ArgumentType::Value, m_solutionParams.problemParams.alpha);
-                    commandArgs.setArgument(
-                        m_betaTag, ArgumentType::Value, m_solutionParams.problemParams.beta);
+                    commandArgs.setArgument(m_alphaTag, ArgumentType::Value, problemParams.alpha);
+                    commandArgs.setArgument(m_betaTag, ArgumentType::Value, problemParams.beta);
 
-                    commandArgs.setArgument(m_tagD,
-                                            ArgumentType::Stride,
-                                            0,
-                                            (unsigned int)m_solutionParams.problemParams.m);
+                    commandArgs.setArgument(
+                        m_tagD, ArgumentType::Stride, 0, (unsigned int)problemParams.m);
                     commandArgs.setArgument(m_tagD,
                                             ArgumentType::Stride,
                                             1,
-                                            (unsigned int)m_solutionParams.problemParams.m
-                                                * m_solutionParams.problemParams.k);
+                                            (unsigned int)problemParams.m * problemParams.k);
 
-                    commandArgs.setArgument(m_sizesFree0Tag,
-                                            ArgumentType::Size,
-                                            (unsigned int)m_solutionParams.problemParams.m);
-                    commandArgs.setArgument(m_sizesFree1Tag,
-                                            ArgumentType::Size,
-                                            (unsigned int)m_solutionParams.problemParams.n);
+                    commandArgs.setArgument(
+                        m_sizesFree0Tag, ArgumentType::Size, (unsigned int)problemParams.m);
+                    commandArgs.setArgument(
+                        m_sizesFree1Tag, ArgumentType::Size, (unsigned int)problemParams.n);
                     commandArgs.setArgument(m_sizesFree2Tag, ArgumentType::Size, 1);
-                    commandArgs.setArgument(m_sizesSum0Tag,
-                                            ArgumentType::Size,
-                                            (unsigned int)m_solutionParams.problemParams.k);
+                    commandArgs.setArgument(
+                        m_sizesSum0Tag, ArgumentType::Size, (unsigned int)problemParams.k);
 
                     commandArgs.setArgument(m_origStaggerUIterTag, ArgumentType::Value, 0);
 

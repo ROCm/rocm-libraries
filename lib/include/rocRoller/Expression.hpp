@@ -465,6 +465,13 @@ namespace rocRoller
             constexpr static inline int             Complexity = 2;
         };
 
+        struct RandomNumber : Unary
+        {
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
+        };
+
         /**
          * @brief Register value from the coordinate graph.
          *
@@ -708,6 +715,8 @@ namespace rocRoller
 
         std::string getComment(ExpressionPtr const& expr);
         std::string getComment(Expression const& expr);
+        std::string getComment(ExpressionPtr const& expr, bool includeRegisterComments);
+        std::string getComment(Expression const& expr, bool includeRegisterComments);
 
         /**
          * Copies any comments from src into dst.  If dst is not of a type that allows

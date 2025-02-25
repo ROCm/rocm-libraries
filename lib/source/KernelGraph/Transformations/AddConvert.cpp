@@ -1,6 +1,9 @@
+
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -24,9 +27,9 @@ namespace rocRoller
 
             struct SharedParents
             {
-                // Map from an operation to it's parent and argument type
+                // Map from an operation to its parent and argument type
                 std::map<int, std::pair<int, NaryArgument>> sharedParent;
-                // Map from a parent to it's edge type
+                // Map from a parent to its edge type
                 std::map<int, ControlEdge> edgeType;
             };
 
@@ -57,54 +60,62 @@ namespace rocRoller
 
             for(auto [opTag, arg] : m_multiplyArgs[coord])
             {
-                int selectedTag = 0;
+                auto meetsCriteriaBefore = [&](int node) {
+                    auto const& elem = graph.control.getElement(node);
 
-                auto parentNodes
-                    = graph.control.getInputNodeIndices<Sequence>(opTag).to<std::vector>();
-
-                for(auto const& parent : parentNodes)
-                {
-                    // Look for loads of coord
-                    if(isOperation<LoadTiled>(graph.control.getElement(parent))
-                       || isOperation<LoadLDSTile>(graph.control.getElement(parent))
-                       || isOperation<SetCoordinate>(graph.control.getElement(parent)))
+                    if(isOperation<LoadTiled>(elem) || isOperation<LoadLDSTile>(elem)
+                       || isOperation<SetCoordinate>(elem))
                     {
-                        if(m_loadMap[parent] == coord)
+                        if(m_loadMap[node] == coord)
                         {
-                            selectedTag = parent;
-                            break;
+                            return true;
                         }
                     }
-                    // Sometimes Multiply could be connected to a NOP (Due to prefetching)
-                    else if(isOperation<NOP>(graph.control.getElement(parent)))
+                    else if(isOperation<NOP>(elem))
                     {
-                        selectedTag = parent;
+                        // Sometimes Multiply could be connected to a NOP (Due to prefetching)
+                        return true;
                     }
-                }
 
-                if(selectedTag)
-                    rv.edgeType[selectedTag] = Sequence();
-                else
+                    return false;
+                };
+
+                auto antecedents
+                    = graph.control.nodesBefore(opTag).filter(meetsCriteriaBefore).to<std::set>();
+
+                auto isForLoop = [&](int node) {
+                    return isOperation<ForLoopOp>(graph.control.getElement(node));
+                };
+
+                auto parents
+                    = graph.control.nodesContaining(opTag).filter(isForLoop).to<std::set>();
+
+                std::vector<int> candidates{antecedents.begin(), antecedents.end()};
+                candidates.insert(candidates.end(), parents.begin(), parents.end());
+
+                auto nodeOrderCompare = [&](int nodeA, int nodeB) {
+                    auto order = graph.control.compareNodes(nodeA, nodeB);
+                    // Return true if nodeA should appear before nodeB.
+                    return order == NodeOrdering::LeftFirst
+                           || order == NodeOrdering::RightInBodyOfLeft;
+                };
+
+                std::sort(candidates.begin(), candidates.end(), nodeOrderCompare);
+
+                if(candidates.size() >= 1)
                 {
-                    auto parentNodes
-                        = graph.control.getInputNodeIndices<Body>(opTag).to<std::vector>();
-
-                    for(auto const& parent : parentNodes)
+                    auto node              = candidates.back();
+                    rv.sharedParent[opTag] = {node, arg};
+                    if(antecedents.contains(node))
                     {
-                        // Sometimes Multiply could be connected to a ForLoop (Due to prefetching)
-                        if(isOperation<ForLoopOp>(graph.control.getElement(parent)))
-                        {
-                            selectedTag = parent;
-                        }
+                        rv.edgeType[node] = Sequence();
                     }
-
-                    if(selectedTag)
-                        rv.edgeType[selectedTag] = Body();
+                    else
+                    {
+                        rv.edgeType[node] = Body();
+                    }
+                    continue;
                 }
-
-                AssertFatal(selectedTag > 0, "No valid parent found.");
-
-                rv.sharedParent[opTag] = {selectedTag, arg};
             }
 
             return rv;
@@ -114,25 +125,49 @@ namespace rocRoller
         {
             // Populate data structures with information about multiplies
             // and loads
-            for(const auto node : graph.control.depthFirstVisit(*graph.control.roots().begin()))
-            {
-                if(isOperation<Multiply>(graph.control.getElement(node)))
-                {
-                    auto [macATag, macA] = graph.getDimension<MacroTile>(
-                        node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-                    auto [macBTag, macB] = graph.getDimension<MacroTile>(
-                        node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+            auto root = graph.control.roots().only();
+            AssertFatal(root.has_value());
 
-                    m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS});
-                    m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
-                }
-                else if(isOperation<LoadTiled>(graph.control.getElement(node))
-                        || isOperation<LoadLDSTile>(graph.control.getElement(node)))
-                {
-                    m_loadMap[getTopSetCoordinate(graph, node)] = graph.mapper.get<MacroTile>(node);
-                    m_storageDataType[graph.mapper.get<MacroTile>(node)]
-                        = getDataType(std::get<Operation>(graph.control.getElement(node)));
-                }
+            auto allNodes = graph.control.depthFirstVisit(*root).filter(
+                graph.control.isElemType<Operation>());
+
+            for(const auto node : allNodes)
+            {
+                auto visitor = rocRoller::overloaded{
+                    [&](Multiply op) {
+                        auto [macATag, macA] = graph.getDimension<MacroTile>(
+                            node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                        m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS});
+
+                        if(op.scaleA == Operations::ScaleMode::Separate)
+                        {
+                            auto [macATag, macA] = graph.getDimension<MacroTile>(
+                                node,
+                                Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+                            m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS_SCALE});
+                        }
+
+                        auto [macBTag, macB] = graph.getDimension<MacroTile>(
+                            node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+                        m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
+
+                        if(op.scaleB == Operations::ScaleMode::Separate)
+                        {
+                            auto [macBTag, macB] = graph.getDimension<MacroTile>(
+                                node,
+                                Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+                            m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS_SCALE});
+                        }
+                    },
+                    [&](CIsAnyOf<LoadTiled, LoadLDSTile> auto op) {
+                        m_loadMap[getTopSetCoordinate(graph, node)]
+                            = graph.mapper.get<MacroTile>(node);
+                        m_storageDataType[graph.mapper.get<MacroTile>(node)]
+                            = getDataType(std::get<Operation>(graph.control.getElement(node)));
+                    },
+                    [&](auto op) {}};
+
+                std::visit(visitor, graph.control.getNode(node));
             }
 
             for(auto& [storage, multiplies] : m_multiplyArgs)

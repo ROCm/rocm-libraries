@@ -160,3 +160,72 @@ auto HasDeviceScalar(Matcher matcher)
 {
     return CustomDeviceScalarMatcher{std::move(matcher)};
 }
+
+template <typename Value>
+struct DeviceVectorMatcher : Catch::Matchers::MatcherGenericBase
+{
+    DeviceVectorMatcher(std::vector<Value> const& values)
+        : m_values(values)
+    {
+    }
+
+    template <typename D_Value>
+    bool match(D_Value const* d_ptr) const
+    {
+        std::vector<D_Value> h_values(m_values.size());
+
+        HipSuccessMatcher hipMatcher;
+
+        if(!hipMatcher.match(hipMemcpy(
+               h_values.data(), d_ptr, sizeof(D_Value) * h_values.size(), hipMemcpyDefault)))
+        {
+            m_message += hipMatcher.describe();
+        }
+
+        if(h_values != m_values)
+        {
+            for(size_t i = 0; i < h_values.size(); i++)
+            {
+                if(h_values[i] not_eq m_values[i])
+                {
+                    m_message += rocRoller::concatenate("Index: ",
+                                                        i,
+                                                        " (Device value: ",
+                                                        h_values[i],
+                                                        ")\nExpected Value: ",
+                                                        m_values[i]);
+                }
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    template <typename D_Value>
+    bool match(std::shared_ptr<D_Value> const& d_ptr) const
+    {
+        return match(d_ptr.get());
+    }
+
+    std::string describe() const override
+    {
+        if(m_message.empty())
+            return "";
+        return "Vector: " + m_message;
+    }
+
+private:
+    std::vector<Value>  m_values;
+    mutable std::string m_message;
+};
+
+/**
+ * Checks that the values from a device pointer (or `shared_ptr`) which when copied to
+ * the host equal `m_values` in DeviceVectorMatcher.
+ */
+template <typename Value>
+auto HasDeviceVectorEqualTo(std::vector<Value> const& values)
+{
+    return DeviceVectorMatcher<Value>{values};
+}

@@ -217,7 +217,7 @@ namespace GPUArchitectureGenerator
 
         auto specMap = LoadSpecs(xmlDir);
 
-        for(auto const& isaVersion : SupportedArchitectures)
+        for(auto const& isaVersion : rocRoller::SupportedArchitectures)
         {
             std::shared_ptr<amdisa::IsaSpec>           spec;
             std::map<std::string, amdisa::Instruction> alias_lookup;

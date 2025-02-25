@@ -33,6 +33,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/Utilities/Logging.hpp>
+
 namespace rocRoller
 {
 

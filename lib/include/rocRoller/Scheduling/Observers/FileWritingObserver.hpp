@@ -54,7 +54,7 @@ namespace rocRoller
                 m_assemblyFile.flush();
             }
 
-            static bool required(GPUArchitectureTarget const& target)
+            static bool runtimeRequired()
             {
                 return Settings::getInstance()->get(Settings::SaveAssembly);
             }
@@ -64,6 +64,6 @@ namespace rocRoller
             std::ofstream          m_assemblyFile;
         };
 
-        static_assert(CObserver<FileWritingObserver>);
+        static_assert(CObserverRuntime<FileWritingObserver>);
     }
 }

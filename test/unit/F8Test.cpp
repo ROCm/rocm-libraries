@@ -153,7 +153,7 @@ namespace rocRollerTest
         F8Problem prob;
         genF8x4LoadToFloatStore(context, prob, a.size(), F8Type);
         CommandKernel commandKernel;
-        commandKernel.setContext(Context::ForDefaultHipDevice("F8x4"));
+        commandKernel.setContext(context);
         commandKernel.generateKernel();
 
         auto d_a      = make_shared_device(a);
@@ -568,4 +568,21 @@ namespace rocRollerTest
         checkSpecialValues<rocRoller::FP8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
         checkSpecialValues<rocRoller::BF8, F8Mode::OCP>(f32_inf.val, f32_nan.val, f32_zero.val);
     }
+
+    TEST_F(CPUF8Test, ConvertScales)
+    {
+        float prevValue = 0;
+        for(int i = 0; i < 256; i++)
+        {
+            uint8_t scale    = i;
+            auto    curValue = rocRoller::scaleToFloat(scale);
+            if(prevValue != 0)
+                EXPECT_EQ(curValue, prevValue * 2.0f);
+            auto convertBack = rocRoller::floatToScale(curValue);
+            EXPECT_EQ(scale, convertBack);
+
+            prevValue = curValue;
+        }
+    }
+
 }

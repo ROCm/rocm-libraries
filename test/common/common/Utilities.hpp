@@ -40,10 +40,10 @@ std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = {})
     return std::shared_ptr<T>(ptr, hipFree);
 }
 
-template <typename T>
-std::shared_ptr<T> make_shared_device(const std::vector<T>& init, size_t padding = 0)
+template <typename T, typename U>
+std::shared_ptr<T> make_shared_device(std::vector<U> const& init, size_t padding = 0)
 {
-    std::size_t size   = init.size() * sizeof(T);
+    std::size_t size   = init.size() * sizeof(U);
     T*          ptr    = nullptr;
     auto        result = hipMalloc(&ptr, size + padding);
     if(result != hipSuccess)
@@ -58,6 +58,12 @@ std::shared_ptr<T> make_shared_device(const std::vector<T>& init, size_t padding
     }
 
     return std::shared_ptr<T>(ptr, hipFree);
+}
+
+auto make_shared_device(std::ranges::range auto const& init, size_t padding = 0)
+{
+    using T = std::remove_cvref_t<decltype(init.front())>;
+    return make_shared_device<T, T>(init, padding);
 }
 
 template <typename T>
@@ -311,6 +317,52 @@ namespace rocRoller
     {
         CPUMM(D, C, unpackToFloat(A), unpackToFloat(B), M, N, K, alpha, beta, transA, transB);
     }
+
+    void ScaledCPUMM(std::vector<float>&         D,
+                     const std::vector<float>&   C,
+                     const std::vector<float>&   floatA,
+                     const std::vector<float>&   floatB,
+                     const std::vector<uint8_t>& AX,
+                     const std::vector<uint8_t>& BX,
+                     int                         M,
+                     int                         N,
+                     int                         K,
+                     float                       alpha,
+                     float                       beta,
+                     bool                        transA,
+                     bool                        transB);
+
+    template <typename TA, typename TB, typename TC, typename TD>
+    void ScaledCPUMM(std::vector<TD>&            D,
+                     const std::vector<TC>&      C,
+                     const std::vector<TA>&      A,
+                     const std::vector<TB>&      B,
+                     const std::vector<uint8_t>& AX,
+                     const std::vector<uint8_t>& BX,
+                     int                         M,
+                     int                         N,
+                     int                         K,
+                     float                       alpha,
+                     float                       beta,
+                     bool                        transA,
+                     bool                        transB)
+    {
+        if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
+        {
+            auto aConverted = unpackToFloat(A);
+            auto bConverted = unpackToFloat(B);
+            ScaledCPUMM(D, C, aConverted, bConverted, AX, BX, M, N, K, alpha, beta, transA, transB);
+        }
+        else
+        {
+            auto dataTypeC = TypeInfo<TC>::Var.dataType;
+            auto dataTypeD = TypeInfo<TD>::Var.dataType;
+
+            Throw<FatalError>("ScaledCPUMM only supported for float, not ",
+                              ShowValue(dataTypeC),
+                              ShowValue(dataTypeD));
+        }
+    }
 }
 
 /*
@@ -400,15 +452,8 @@ namespace rocRoller
     }
 
     template <typename F6x16>
-    requires(
-        std::is_same_v<
-            F6x16,
-            FP6x16> || std::is_same_v<F6x16, BF6x16>) inline void SetIdentityMatrix(std::
-                                                                                        vector<
-                                                                                            F6x16>&
-                                                                                            mat,
-                                                                                    size_t  cols,
-                                                                                    size_t  rows)
+    requires(CIsAnyOf<F6x16, FP6x16, BF6x16>) //
+        inline void SetIdentityMatrix(std::vector<F6x16>& mat, size_t cols, size_t rows)
     {
         std::fill(mat.begin(), mat.end(), F6x16()); // zero out the matrix
 
@@ -418,19 +463,23 @@ namespace rocRoller
         // clang-format off
         auto constexpr patterns = [] {
         if constexpr (std::is_same_v<F6x16, FP6x16>)
+        {
             return std::to_array<uint8_t> ({  //  Bit pattern of FP6 identity matrix:
                 0b00100000,                   //    001000 000000 000000 000000 000000
                 0b10000000,                   //    000000 001000 000000 000000 000000
                 0b00000010,                   //    000000 000000 001000 000000 000000
                 0b00001000,                   //    000000 000000 000000 001000 000000
             });                               //    000000 000000 000000 000000 001000 (repeat 1st row)
+        }
         else
+        {
             return std::to_array<uint8_t> ({  //  Bit pattern of BF6 identity matrix:
                 0b00110000,                   //    001100 000000 000000 000000 000000
                 0b11000000,                   //    000000 001100 000000 000000 000000
                 0b00000011,                   //    000000 000000 001100 000000 000000
                 0b00001100,                   //    000000 000000 000000 001100 000000
              });                              //    000000 000000 000000 000000 001100 (repeat 1st row)
+        }
         }();
         // clang-format on
         std::array constexpr shift = {0, 1, 0, 0};

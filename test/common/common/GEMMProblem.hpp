@@ -1,5 +1,6 @@
 #pragma once
 
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <string>
 
 struct GEMMProblem
@@ -57,6 +58,9 @@ struct GEMMProblem
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    uint8_t scaleA = 127;
-    uint8_t scaleB = 127;
+    bool loadLDSScaleA = false;
+    bool loadLDSScaleB = false;
+
+    rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
+    rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
 };

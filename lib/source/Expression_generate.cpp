@@ -749,8 +749,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, ScaledMatrixMultiply expr)
             {
-                Register::ValuePtr rA, rB, rC, rScaleA, rScaleB;
-                int                M, N, K;
 
                 AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.matA)
                                 && std::holds_alternative<WaveTilePtr>(*expr.matB),
@@ -765,11 +763,23 @@ namespace rocRoller
                             ShowValue(atile.sizes[1]),
                             ShowValue(btile.sizes[0]));
 
-                M  = atile.sizes[0];
-                N  = btile.sizes[1];
-                K  = atile.sizes[1];
-                rA = atile.vgpr;
-                rB = btile.vgpr;
+                auto M  = atile.sizes[0];
+                auto N  = btile.sizes[1];
+                auto K  = atile.sizes[1];
+                auto rA = atile.vgpr;
+                auto rB = btile.vgpr;
+
+                auto getRegister = rocRoller::overloaded{
+                    [&](WaveTilePtr const& tile) -> Register::ValuePtr { return tile->vgpr; },
+                    [&](Register::ValuePtr const& reg) -> Register::ValuePtr { return reg; },
+                    [&](auto const& other) -> Register::ValuePtr {
+                        Throw<FatalError>("Invalid scale expression type: ",
+                                          typeid(decltype(other)).name());
+                        return nullptr;
+                    }};
+
+                auto rScaleA = std::visit(getRegister, *expr.scaleA);
+                auto rScaleB = std::visit(getRegister, *expr.scaleB);
 
                 AssertFatal(!rA->variableType().isPointer(),
                             "Input must not be a pointer. ",
@@ -793,9 +803,8 @@ namespace rocRoller
                 auto smm = Component::Get<rocRoller::InstructionGenerators::ScaledMatrixMultiply>(
                     m_context, accType, rA->variableType().dataType);
 
-                rC      = std::get<Register::ValuePtr>(*expr.matC);
-                rScaleA = std::get<Register::ValuePtr>(*expr.scaleA);
-                rScaleB = std::get<Register::ValuePtr>(*expr.scaleB);
+                auto rC = std::get<Register::ValuePtr>(*expr.matC);
+
                 co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K);
             }
 
@@ -957,6 +966,9 @@ namespace rocRoller
             if(dest)
                 destStr = dest->toString();
             co_yield Instruction::Comment("Generate " + toString(expr) + " into " + destStr);
+
+            // Replace RandomNumber expression with expressions that implement the PRNG algorithm.
+            expr = lowerPRNG(expr);
 
             {
                 auto fast = FastArithmetic(context);

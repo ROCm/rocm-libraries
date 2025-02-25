@@ -1,0 +1,13 @@
+
+#include <rocRoller/Utilities/Version.hpp>
+
+namespace rocRoller
+{
+    namespace Version
+    {
+        std::string Git()
+        {
+            return "@ROCROLLER_GIT_HASH@";
+        }
+    }
+}

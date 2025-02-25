@@ -143,7 +143,7 @@ namespace rocRoller
             void assertLabelConsistency();
         };
 
-        static_assert(CObserver<WaitcntObserver>);
+        static_assert(CObserverConst<WaitcntObserver>);
     }
 }
 

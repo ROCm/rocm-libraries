@@ -3,6 +3,7 @@
 
 #include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
+#include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -92,16 +93,15 @@ namespace rocRoller
                         "Invalid matrix D data type",
                         ShowValue(dest->variableType()));
 
-            auto        typeA    = matA->variableType().dataType;
-            auto        typeB    = matB->variableType().dataType;
-            std::string cbsz     = "cbsz:" + Arithmetic::getModifier(typeA); // Matrix A type
-            std::string blgp     = "blgp:" + Arithmetic::getModifier(typeB); // Matrix B type
-            std::string modifier = concatenate(cbsz, " ", blgp);
+            auto        typeA = matA->variableType().dataType;
+            auto        typeB = matB->variableType().dataType;
+            std::string cbsz  = "cbsz:" + Arithmetic::getModifier(typeA); // Matrix A type
+            std::string blgp  = "blgp:" + Arithmetic::getModifier(typeB); // Matrix B type
 
             auto mfma = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
 
             co_yield_(
-                Instruction(mfma, {dest}, {matA, matB, matC, scaleA, scaleB}, {modifier}, ""));
+                Instruction(mfma, {dest}, {matA, matB, matC, scaleA, scaleB}, {cbsz, blgp}, ""));
         }
     }
 }
