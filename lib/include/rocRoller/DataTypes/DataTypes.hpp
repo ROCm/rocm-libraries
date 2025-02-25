@@ -148,6 +148,7 @@ namespace rocRoller
         WAVE,
         WAVE_LDS,
         JAMMED_WAVE_LDS,
+        WAVE_SWIZZLE,
         Literal,
         None,
         Count

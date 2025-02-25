@@ -266,6 +266,7 @@ namespace rocRoller
         template <typename Op, typename IO, typename Context>
         requires(
             CIsAnyOf<Op,
+                     KernelGraph::ControlGraph::Exchange,
                      KernelGraph::ControlGraph::LoadLinear,
                      KernelGraph::ControlGraph::LoadTiled,
                      KernelGraph::ControlGraph::LoadVGPR,

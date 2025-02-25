@@ -183,6 +183,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(ComputeIndex);
             MAKE_OPERATION_VISITOR(Deallocate);
             MAKE_OPERATION_VISITOR(DoWhileOp);
+            MAKE_OPERATION_VISITOR(Exchange);
             MAKE_OPERATION_VISITOR(Kernel);
             MAKE_OPERATION_VISITOR(LoadLDSTile);
             MAKE_OPERATION_VISITOR(LoadLinear);

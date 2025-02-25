@@ -75,6 +75,7 @@ namespace rocRoller
                               ControlGraph::ConditionalOp,
                               ControlGraph::Deallocate,
                               ControlGraph::DoWhileOp,
+                              ControlGraph::Exchange,
                               ControlGraph::ForLoopOp,
                               ControlGraph::Kernel,
                               ControlGraph::LoadLDSTile,

@@ -109,6 +109,9 @@ namespace rocRoller
 
             HasPRNG,
 
+            HasPermLanes16,
+            HasPermLanes32,
+
             Count,
         };
 

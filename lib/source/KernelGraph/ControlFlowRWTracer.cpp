@@ -534,4 +534,6 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(WaitZero const& op, int tag) {}
 
+    void ControlFlowRWTracer::operator()(Exchange const& op, int tag) {}
+
 }

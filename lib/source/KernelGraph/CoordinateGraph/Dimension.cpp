@@ -174,19 +174,22 @@ namespace rocRoller
             , memoryType(memoryType)
             , layoutType(LayoutType::None)
             , subTileSizes(subTileSizes)
+            , miTileSizes(subTileSizes)
         {
         }
 
         MacroTile::MacroTile(std::vector<int> const& sizes,
                              LayoutType              layoutType,
                              std::vector<int> const& subTileSizes,
-                             MemoryType              memoryType)
+                             MemoryType              memoryType,
+                             std::vector<int> const& miTileSizes)
             : BaseDimension()
             , rank(sizes.size())
             , sizes(sizes)
             , memoryType(memoryType)
             , layoutType(layoutType)
             , subTileSizes(subTileSizes)
+            , miTileSizes{miTileSizes.empty() ? subTileSizes : miTileSizes}
         {
             if(this->memoryType == MemoryType::LDS)
                 this->memoryType = MemoryType::WAVE_LDS;
@@ -283,39 +286,47 @@ namespace rocRoller
          */
         WaveTile::WaveTile(MacroTile const& macTile)
         {
-            auto m = macTile.subTileSizes[0];
-            auto n = macTile.subTileSizes[1];
-            auto k = macTile.subTileSizes[2];
-
-            auto M = macTile.sizes[0];
-            auto N = macTile.sizes[1];
-            auto K = macTile.sizes[2];
+            auto waveM = macTile.subTileSizes[0];
+            auto waveN = macTile.subTileSizes[1];
+            auto waveK = macTile.subTileSizes[2];
 
             padBytesOfDim = {};
 
             if(macTile.layoutType == LayoutType::MATRIX_A)
             {
-                sizes = {m, k};
+                auto macM = macTile.sizes[0];
+                auto macK = macTile.sizes[1];
+
+                sizes  = {waveM, waveK};
+                wsizes = {macM / waveM, macK / waveK};
                 if(!macTile.padBytesOfDim.empty())
                 {
                     auto padBytes0 = macTile.padBytesOfDim[0];
                     auto padBytes1 = macTile.padBytesOfDim[1];
-                    padBytesOfDim  = {(M / m) * padBytes0, (K / k) * padBytes1};
+                    padBytesOfDim  = {(macM / waveM) * padBytes0, (macK / waveK) * padBytes1};
                 }
             }
             if(macTile.layoutType == LayoutType::MATRIX_B)
             {
-                sizes = {k, n};
+                auto macK = macTile.sizes[0];
+                auto macN = macTile.sizes[1];
+
+                sizes  = {waveK, waveN};
+                wsizes = {macK / waveK, macN / waveN};
                 if(!macTile.padBytesOfDim.empty())
                 {
                     auto padBytes0 = macTile.padBytesOfDim[0];
                     auto padBytes1 = macTile.padBytesOfDim[1];
-                    padBytesOfDim  = {(K / k) * padBytes0, (N / n) * padBytes1};
+                    padBytesOfDim  = {(macK / waveK) * padBytes0, (macN / waveN) * padBytes1};
                 }
             }
             if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
             {
-                sizes = {m, n};
+                auto macM = macTile.sizes[0];
+                auto macN = macTile.sizes[1];
+
+                sizes  = {waveM, waveN};
+                wsizes = {macM / waveM, macN / waveN};
             }
 
             rank   = 2;
@@ -326,7 +337,9 @@ namespace rocRoller
 
         WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
-            return WaveTileNumber(sdim, Expression::literal(-1), Expression::literal(1u));
+            return WaveTileNumber(sdim,
+                                  Expression::literal(static_cast<uint>(wsizes.at(sdim))),
+                                  Expression::literal(1u));
         }
 
         WaveTileIndex WaveTile::tileIndex(int sdim) const

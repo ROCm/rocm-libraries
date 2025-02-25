@@ -108,6 +108,7 @@ set(
   unit/MetaObserverTest.cpp
   unit/MixedArithmeticTest.cpp
   unit/OperationTagTest.cpp
+  unit/PermLanesTest.cpp
   unit/RegisterAllocatorTest.cpp
   unit/RandomTest.cpp
   unit/RegisterTest.cpp

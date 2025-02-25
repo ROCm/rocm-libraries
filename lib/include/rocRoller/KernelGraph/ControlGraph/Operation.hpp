@@ -430,6 +430,19 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(WaitZero);
 
         /**
+         * Exchange - permute the lanes data within a wave.
+         */
+        struct Exchange
+        {
+            Exchange();
+            Exchange(VariableType const varType);
+
+            VariableType varType;
+
+            std::string name() const;
+        };
+
+        /**
          * SeedPRNG - Set the initial seed value of a random number generator
          */
         struct SeedPRNG
