@@ -263,7 +263,7 @@ namespace MatrixMultiplyTest
             // output macro tile size; we will launch 2x2 waves
             int mac_m = 2 * wave_m;
             int mac_n = 2 * wave_n;
-            int mac_k = 64;
+            int mac_k = 2 * wave_k;
 
             AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
             AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
@@ -864,6 +864,26 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<FP8, float>(32, 32, 16, 1, 2.e-5);
         else
             matrixMultiplyAB<BF8, float>(32, 32, 16, 1, 2.e-5);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_32x32x64)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, float>(32, 32, 64, 1, 2.e-5);
+        else
+            matrixMultiplyAB<BF8, float>(32, 32, 64, 1, 2.e-5);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_16x16x128)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
+            matrixMultiplyAB<FP8, float>(16, 16, 128, 1, 2.e-5);
+        else
+            matrixMultiplyAB<BF8, float>(16, 16, 128, 1, 2.e-5);
     }
 
     TEST_P(MatrixMultiplyTestGPUF6, GPU_MatrixMultiplyMacroTileF6_16x16x128_TN)
