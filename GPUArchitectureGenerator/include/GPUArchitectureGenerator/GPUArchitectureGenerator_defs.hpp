@@ -264,7 +264,9 @@ namespace GPUArchitectureGenerator
              }},
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
-             [](rocRoller::GPUArchitectureTarget x) -> bool { return Is90aGPU(x) || Is94XGPU(x); }},
+             [](rocRoller::GPUArchitectureTarget x) -> bool {
+                 return Is90aGPU(x) || Is94XGPU(x) || Is95XGPU(x);
+             }},
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,

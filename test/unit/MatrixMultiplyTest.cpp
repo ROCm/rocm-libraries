@@ -65,7 +65,7 @@ namespace MatrixMultiplyTest
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
             }
-            if constexpr(std::is_same_v<T, FP6> || std::is_same_v<T, FP4>)
+            if constexpr(std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP4>)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -93,7 +93,7 @@ namespace MatrixMultiplyTest
                 mac_k = 2 * wave_k;
                 K     = 2 * mac_k;
             }
-            if constexpr(std::is_same_v<T, FP6> || std::is_same_v<T, FP4>)
+            if constexpr(std::is_same_v<T, FP6> || std::is_same_v<T, BF6> || std::is_same_v<T, FP4>)
             {
                 mac_k = 2 * wave_k;
                 K     = 4 * mac_k;
@@ -514,6 +514,10 @@ namespace MatrixMultiplyTest
     {
     };
 
+    class MatrixMultiplyTestGPUF6 : public BaseMatrixMultiplyContextFixture<rocRoller::DataType>
+    {
+    };
+
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
         matrixMultiplyMacroTile<float>(32, 32, 2, 1, 2.e-6);
@@ -731,35 +735,28 @@ namespace MatrixMultiplyTest
             EXPECT_EQ(countSubstring(generatedCode, "cbsz:0b001 blgp:0b001"), 2);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP6_32x32x64_TN)
+    void verifyInsturctions(std::string       instructionString,
+                            std::vector<int>& expectedLocalWriteOffsets,
+                            std::vector<int>& expectedLocalReadOffsets,
+                            int               e_numWrite,
+                            int               e_numRead,
+                            int               e_numMFMA,
+                            std::string       mfma,
+                            std::string       mfmaDataTypes)
     {
-        matrixMultiplyMacroTile<FP6, float>(32, 32, 64, 1, 2.e-6, true, "T", "N");
-
-        if(!commandKernel)
-            return;
-
-        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
-
-        int mac_m = 32;
-        int mac_n = 32;
-        int mac_k = 128;
-
-        auto localEndA = 6 * mac_m * mac_k / 8;
+        auto instructions = NormalizedSourceLines(instructionString, false);
 
         int numLocalWrite = 0;
         int numLocalRead  = 0;
         int numMFMA       = 0;
 
-        std::vector<int> expectedLocalWriteOffsets{
-            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
-
-        std::vector<int> expectedLocalReadOffsets{
-            0, 16, localEndA, localEndA + 16, 48, 64, localEndA + 48, localEndA + 64};
-
         for(auto const& instruction : instructions)
         {
-            if(instruction.starts_with("v_mfma_f32_32x32x64_f8f6f4"))
+            if(instruction.starts_with(mfma))
+            {
                 numMFMA++;
+                EXPECT_NE(instruction.find(mfmaDataTypes), std::string::npos);
+            }
 
             // Count the number of ds_write_b128 instructions and make sure they have
             // the expected offset values
@@ -780,63 +777,9 @@ namespace MatrixMultiplyTest
             }
         }
 
-        EXPECT_EQ(numLocalWrite, 6);
-        EXPECT_EQ(numLocalRead, 8);
-        EXPECT_EQ(numMFMA, 2);
-    }
-
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP6_16x16x128_TN)
-    {
-        matrixMultiplyMacroTile<FP6, float>(16, 16, 128, 1, 2.e-6, true, "T", "N");
-
-        if(!commandKernel)
-            return;
-
-        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
-
-        int mac_m = 16;
-        int mac_n = 16;
-        int mac_k = 256;
-
-        auto localEndA = 6 * mac_m * mac_k / 8;
-
-        int numLocalWrite = 0;
-        int numLocalRead  = 0;
-        int numMFMA       = 0;
-
-        std::vector<int> expectedLocalWriteOffsets{
-            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
-
-        std::vector<int> expectedLocalReadOffsets{
-            0, 16, localEndA, localEndA + 16, 96, 112, localEndA + 96, localEndA + 112};
-
-        for(auto const& instruction : instructions)
-        {
-            if(instruction.starts_with("v_mfma_f32_16x16x128_f8f6f4"))
-                numMFMA++;
-
-            // Count the number of ds_write_b128 instructions and make sure they have
-            // the expected offset values
-            if(instruction.starts_with("ds_write_b128"))
-            {
-                if(expectedLocalWriteOffsets[numLocalWrite] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalWriteOffsets[numLocalWrite])));
-                numLocalWrite++;
-            }
-
-            if(instruction.starts_with("ds_read_b128") || instruction.starts_with("ds_read_b64"))
-            {
-                if(expectedLocalReadOffsets[numLocalRead] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalReadOffsets[numLocalRead])));
-                numLocalRead++;
-            }
-        }
-
-        EXPECT_EQ(numLocalWrite, 6);
-        EXPECT_EQ(numLocalRead, 8);
-        EXPECT_EQ(numMFMA, 2);
+        EXPECT_EQ(numLocalWrite, e_numWrite);
+        EXPECT_EQ(numLocalRead, e_numRead);
+        EXPECT_EQ(numMFMA, e_numMFMA);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP4_32x32x64_TN)
@@ -846,7 +789,7 @@ namespace MatrixMultiplyTest
         if(!commandKernel)
             return;
 
-        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+        std::string instructionString = commandKernel->getInstructions();
 
         int mac_m = 32;
         int mac_n = 32;
@@ -854,44 +797,18 @@ namespace MatrixMultiplyTest
 
         auto localEndA = 4 * mac_m * mac_k / 8;
 
-        int numLocalWrite = 0;
-        int numLocalRead  = 0;
-        int numMFMA       = 0;
-
         std::vector<int> expectedLocalWriteOffsets{0, 64, localEndA, localEndA + 64};
 
         std::vector<int> expectedLocalReadOffsets{0, localEndA, 32, localEndA + 32};
 
-        for(auto const& instruction : instructions)
-        {
-            if(instruction.starts_with("v_mfma_f32_32x32x64_f8f6f4"))
-            {
-                numMFMA++;
-                EXPECT_NE(instruction.find("cbsz:0b100 blgp:0b100"), std::string::npos);
-            }
-
-            // Count the number of ds_write_b128 instructions and make sure they have
-            // the expected offset values
-            if(instruction.starts_with("ds_write_b128"))
-            {
-                if(expectedLocalWriteOffsets[numLocalWrite] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalWriteOffsets[numLocalWrite])));
-                numLocalWrite++;
-            }
-
-            if(instruction.starts_with("ds_read_b128") || instruction.starts_with("ds_read_b64"))
-            {
-                if(expectedLocalReadOffsets[numLocalRead] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalReadOffsets[numLocalRead])));
-                numLocalRead++;
-            }
-        }
-
-        EXPECT_EQ(numLocalWrite, 4);
-        EXPECT_EQ(numLocalRead, 4);
-        EXPECT_EQ(numMFMA, 2);
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           4,
+                           4,
+                           2,
+                           "v_mfma_f32_32x32x64_f8f6f4",
+                           "cbsz:0b100 blgp:0b100");
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN)
@@ -901,7 +818,7 @@ namespace MatrixMultiplyTest
         if(!commandKernel)
             return;
 
-        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+        std::string instructionString = commandKernel->getInstructions();
 
         int mac_m = 16;
         int mac_n = 16;
@@ -909,44 +826,18 @@ namespace MatrixMultiplyTest
 
         auto localEndA = 4 * mac_m * mac_k / 8;
 
-        int numLocalWrite = 0;
-        int numLocalRead  = 0;
-        int numMFMA       = 0;
-
         std::vector<int> expectedLocalWriteOffsets{0, 128, localEndA, localEndA + 128};
 
         std::vector<int> expectedLocalReadOffsets{0, localEndA, 64, localEndA + 64};
 
-        for(auto const& instruction : instructions)
-        {
-            if(instruction.starts_with("v_mfma_f32_16x16x128_f8f6f4"))
-            {
-                numMFMA++;
-                EXPECT_NE(instruction.find("cbsz:0b100 blgp:0b100"), std::string::npos);
-            }
-
-            // Count the number of ds_write_b128 instructions and make sure they have
-            // the expected offset values
-            if(instruction.starts_with("ds_write_b128"))
-            {
-                if(expectedLocalWriteOffsets[numLocalWrite] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalWriteOffsets[numLocalWrite])));
-                numLocalWrite++;
-            }
-
-            if(instruction.starts_with("ds_read_b128") || instruction.starts_with("ds_read_b64"))
-            {
-                if(expectedLocalReadOffsets[numLocalRead] > 0)
-                    EXPECT_TRUE(instruction.ends_with(
-                        "offset:" + std::to_string(expectedLocalReadOffsets[numLocalRead])));
-                numLocalRead++;
-            }
-        }
-
-        EXPECT_EQ(numLocalWrite, 4);
-        EXPECT_EQ(numLocalRead, 4);
-        EXPECT_EQ(numMFMA, 2);
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           4,
+                           4,
+                           2,
+                           "v_mfma_f32_16x16x128_f8f6f4",
+                           "cbsz:0b100 blgp:0b100");
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
@@ -975,6 +866,86 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<BF8, float>(32, 32, 16, 1, 2.e-5);
     }
 
+    TEST_P(MatrixMultiplyTestGPUF6, GPU_MatrixMultiplyMacroTileF6_16x16x128_TN)
+    {
+        auto mfmaDataTypes = "cbsz:0b010 blgp:0b010";
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP6)
+            matrixMultiplyMacroTile<FP6, float>(16, 16, 128, 1, 2.e-6, true, "T", "N");
+        else
+        {
+            matrixMultiplyMacroTile<BF6, float>(16, 16, 128, 1, 2.e-6, true, "T", "N");
+            mfmaDataTypes = "cbsz:0b011 blgp:0b011";
+        }
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 16;
+        int mac_n = 16;
+        int mac_k = 256;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 96, 112, localEndA + 96, localEndA + 112};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           6,
+                           8,
+                           2,
+                           "v_mfma_f32_16x16x128_f8f6f4",
+                           mfmaDataTypes);
+    }
+
+    TEST_P(MatrixMultiplyTestGPUF6, GPU_MatrixMultiplyMacroTileF6_32x32x64_TN)
+    {
+        auto mfmaDataTypes = "cbsz:0b010 blgp:0b010";
+        if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP6)
+            matrixMultiplyMacroTile<FP6, float>(32, 32, 64, 1, 2.e-6, true, "T", "N");
+        else
+        {
+            matrixMultiplyMacroTile<BF6, float>(32, 32, 64, 1, 2.e-6, true, "T", "N");
+            mfmaDataTypes = "cbsz:0b011 blgp:0b011";
+        }
+
+        if(!commandKernel)
+            return;
+
+        std::string instructionString = commandKernel->getInstructions();
+
+        int mac_m = 32;
+        int mac_n = 32;
+        int mac_k = 128;
+
+        auto localEndA = 6 * mac_m * mac_k / 8;
+
+        int numLocalWrite = 0;
+        int numLocalRead  = 0;
+        int numMFMA       = 0;
+
+        std::vector<int> expectedLocalWriteOffsets{
+            0, 16, 32, localEndA, localEndA + 16, localEndA + 32};
+
+        std::vector<int> expectedLocalReadOffsets{
+            0, 16, localEndA, localEndA + 16, 48, 64, localEndA + 48, localEndA + 64};
+
+        verifyInsturctions(instructionString,
+                           expectedLocalWriteOffsets,
+                           expectedLocalReadOffsets,
+                           6,
+                           8,
+                           2,
+                           "v_mfma_f32_32x32x64_f8f6f4",
+                           mfmaDataTypes);
+    }
+
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
     {
         matrixMultiplyABC<float>(32, 32, 2, 1, 2.e-6);
@@ -995,10 +966,13 @@ namespace MatrixMultiplyTest
                                                 ::testing::Values(rocRoller::DataType::FP8,
                                                                   rocRoller::DataType::BF8)));
 
+    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTestGPUF6,
+                             MatrixMultiplyTestGPUF6,
+                             ::testing::Combine(mfmaSupportedISAValues(),
+                                                ::testing::Values(rocRoller::DataType::FP6,
+                                                                  rocRoller::DataType::BF6)));
+
     /**
-     * Tests that just assemble kernels with the new instructions.  This is based on a test
-     * from KernelTest that just copies a value into a pointer.
-     *
      * Extra param: M/N tile size of instruction, allowing us to test both
      * v_mfma_scale_f32_16x16x128_f8f6f4 and
      * v_mfma_scale_f32_32x32x64_f8f6f4.
@@ -1006,146 +980,6 @@ namespace MatrixMultiplyTest
     class ScaledMatrixMultiplyTestGPU : public GPUContextFixtureParam<int>
     {
     };
-
-    TEST_P(ScaledMatrixMultiplyTestGPU, Instruction)
-    {
-        auto tileMN = std::get<1>(this->GetParam());
-
-        auto command = std::make_shared<Command>();
-
-        VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
-        VariableType floatVal{DataType::Float, PointerType::Value};
-        VariableType uintVal{DataType::UInt32, PointerType::Value};
-
-        auto ptrTag   = command->allocateTag();
-        auto ptr_arg  = command->allocateArgument(floatPtr, ptrTag, ArgumentType::Value);
-        auto valTag   = command->allocateTag();
-        auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
-        auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
-
-        auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
-        auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
-        auto size_exp = std::make_shared<Expression::Expression>(size_arg);
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        auto k = m_context->kernel();
-
-        k->setKernelDimensions(1);
-
-        k->addArgument({"ptr",
-                        {DataType::Float, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        ptr_exp});
-        k->addArgument({"val", {DataType::Float}, DataDirection::ReadOnly, val_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({size_exp, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_ptr, s_value;
-            co_yield m_context->argLoader()->getValue("ptr", s_ptr);
-            co_yield m_context->argLoader()->getValue("val", s_value);
-
-            auto v_ptr   = Register::Value::Placeholder(m_context,
-                                                      Register::Type::Vector,
-                                                      {DataType::Float, PointerType::PointerGlobal},
-                                                      1);
-            auto v_value = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-
-            co_yield v_ptr->allocate();
-
-            co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-
-            co_yield v_value->allocate();
-
-            int abRegs = 8;
-            int cdRegs = 4;
-            if(tileMN != 16)
-            {
-                abRegs = 8;
-                cdRegs = 16;
-            }
-
-            auto fc     = Register::AllocationOptions::FullyContiguous();
-            auto v_dest = Register::Value::Placeholder(
-                m_context, Register::Type::Accumulator, DataType::Float, cdRegs, fc);
-            auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::FP8x4, abRegs, fc);
-            auto v_b = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::FP8x4, abRegs, fc);
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Accumulator, DataType::Float, cdRegs, fc);
-            auto v_a_scale = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int8, 1, fc);
-            auto v_b_scale = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int8, 1, fc);
-            for(auto reg : {v_a, v_b, v_c, v_a_scale, v_b_scale})
-                co_yield reg->allocate();
-
-            auto mnemonic = tileMN == 16 ? "v_mfma_scale_f32_16x16x128_f8f6f4"
-                                         : "v_mfma_scale_f32_32x32x64_f8f6f4";
-
-            co_yield_(
-                Instruction(mnemonic, {v_dest}, {v_a, v_b, v_c, v_a_scale, v_b_scale}, {}, ""));
-
-            co_yield m_context->copier()->copy(v_value, s_value, "Move value");
-
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
-        };
-
-        m_context->schedule(kb());
-
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(isLocalDevice())
-        {
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
-
-            auto ptr = make_shared_device<float>();
-
-            ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
-
-            KernelArguments kargs;
-            kargs.append("ptr", ptr.get());
-            kargs.append("val", 6.0f);
-            KernelInvocation invocation;
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            float resultValue = 0.0f;
-            ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(resultValue, 6.0f);
-
-            // Call the kernel a second time with different input.
-            KernelArguments kargs2;
-            kargs2.append("ptr", ptr.get());
-            kargs2.append("val", 7.5f);
-
-            executableKernel->executeKernel(kargs2, invocation);
-
-            ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(resultValue, 7.5f);
-        }
-        else
-        {
-            auto assembledKernel = m_context->instructions()->assemble();
-            ASSERT_GT(assembledKernel.size(), 0);
-        }
-    }
 
     TEST_P(ScaledMatrixMultiplyTestGPU, GenInstruction)
     {
@@ -1208,6 +1042,11 @@ namespace MatrixMultiplyTest
 
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
+
+        auto mnemonic = tileMN == 16 ? "v_mfma_scale_f32_16x16x128_f8f6f4"
+                                     : "v_mfma_scale_f32_32x32x64_f8f6f4";
+
+        EXPECT_THAT(output(), testing::HasSubstr(mnemonic));
 
         if(isLocalDevice())
         {
