@@ -6,14 +6,12 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using GD = Graph::Direction;
-
-        bool isMatrixA(MacroTile const& macTile)
+        inline bool isMatrixA(MacroTile const& macTile)
         {
             return macTile.layoutType == LayoutType::MATRIX_A;
         }
 
-        bool isMatrixB(MacroTile const& macTile)
+        inline bool isMatrixB(MacroTile const& macTile)
         {
             return macTile.layoutType == LayoutType::MATRIX_B;
         }
@@ -35,37 +33,26 @@ namespace rocRoller
 
         auto findCandidates(KernelGraph const& graph)
         {
-            auto start = *graph.control.roots().begin();
-
             auto isLoadLDSTileOfTransposedTile = [&](int tag) {
-                auto elem = graph.control.getElement(tag);
-                if(!std::holds_alternative<Operation>(elem))
-                    return false;
-                auto op = std::get<Operation>(elem);
-                if(!std::holds_alternative<LoadLDSTile>(op))
+                auto load = graph.control.get<LoadLDSTile>(tag);
+                if(!load)
                     return false;
 
-                auto load                  = std::get<LoadLDSTile>(op);
                 auto [macTileTag, macTile] = graph.getDimension<MacroTile>(tag);
-                auto elementBits           = DataTypeInfo::Get(load.varType).elementBits;
+                auto elementBits           = DataTypeInfo::Get(load->varType).elementBits;
 
-                return elementBits == 6 && load.isTransposedTile
+                return elementBits == 6 && load->isTransposedTile
                        && (isMatrixA(macTile) || isMatrixB(macTile));
             };
 
-            auto candidates
-                = graph.control.findNodes(start, isLoadLDSTileOfTransposedTile, GD::Downstream);
+            auto candidates = graph.control.findElements(isLoadLDSTileOfTransposedTile);
 
-            // remove `start` element from candidates.
-            auto allButStart = [start](auto c) { return c != start; };
-            return filter(allButStart, std::move(candidates)).to<std::vector>();
+            return candidates.to<std::vector>();
         }
 
         KernelGraph AddF6LDSPadding::apply(KernelGraph const& graph)
         {
             TIMER(t, "KernelGraph::AddF6LDSPadding");
-            auto logger = rocRoller::Log::getLogger();
-            logger->debug("KernelGraph::AddF6LDSPaddingVisitor");
 
             auto candidates = findCandidates(graph);
 
@@ -106,9 +93,8 @@ namespace rocRoller
                     auto maybeLDS = graph.coordinates.get<LDS>(coordTag);
                     if(maybeLDS)
                     {
-                        auto ldsTag = coordTag;
-                        auto lds{*maybeLDS};
-                        auto newLDS(lds);
+                        auto ldsTag                = coordTag;
+                        auto newLDS                = *maybeLDS;
                         newLDS.holdsTransposedTile = true;
                         kgraph.coordinates.setElement(ldsTag, newLDS);
 

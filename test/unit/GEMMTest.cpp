@@ -1311,9 +1311,32 @@ namespace GEMMDriverTest
     GEMMProblem setupGEMMF16(uint waveM, uint waveN, uint waveK)
     {
         GEMMProblem gemm;
+
+        // 1x4 jamming
+        uint wavesPerWGX = 4;
+        uint wavesPerWGY = 4;
+
         gemm.waveM = waveM;
         gemm.waveN = waveN;
         gemm.waveK = waveK;
+
+        gemm.macM = wavesPerWGX * gemm.waveM;
+        gemm.macN = wavesPerWGY * gemm.waveN;
+        gemm.macK = 2 * gemm.waveK;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+
+        gemm.workgroupSizeX = 256;
+        gemm.workgroupSizeY = 1;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.alpha = 2.1;
+        gemm.beta  = 0.75;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
@@ -1413,33 +1436,44 @@ namespace GEMMDriverTest
         uint const trLoadsPerWave = elementsPerWavetile / elementsPerTrLoad;
         uint const dsLoadsPerWave = elementsPerWavetile / (bitsPerWavetileLoad / elementBits);
 
+        // uint const bitsLoadedForAB
+        //     = numDWavetilesPerWave * /*A & B*/ 2 * waveM * waveN * elementBits;
         uint const bitsLoadedForAB
-            = numDWavetilesPerWave * /*A & B*/ 2 * waveM * waveN * elementBits;
+            = (/*A*/ waveM * problem.macK + /*B*/ problem.macK * waveN) * elementBits;
 
         uint const elementBitsC   = DataTypeInfo::Get(DataType::Float).elementBits;
         uint const bitsLoadedForC = numDWavetilesPerWave * waveM * waveN * elementBitsC;
 
-        uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / bitsPerWavetileLoad / wfs;
-        uint const numDSWrites    = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+        // uint const numBufferLoads = (bitsLoadedForAB + bitsLoadedForC) / bitsPerWavetileLoad / wfs;
+        // uint const numDSWrites    = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+
+        uint const numBufferLoadsForC  = bitsLoadedForC / bitsPerWavetileLoad / wfs;
+        uint const numDSWrites         = bitsLoadedForAB / bitsPerWavetileLoad / wfs;
+        uint const numBufferLoadsForAB = numDSWrites;
 
         uint numTrLoads = 0;
         uint numDSReads = 0;
-        {
+        { // 1x4 jamming = 4 tiles. Each tile of A gets multiplied by 4 tiles of B.
             if(problem.transA == "T")
-                numDSReads += numWaves * dsLoadsPerWave;
+                numDSReads += /*number of A tiles*/ 1 * numMFMAsPerWave * dsLoadsPerWave;
             if(problem.transB == "N")
-                numDSReads += numWaves * dsLoadsPerWave;
+                numDSReads += /*number of B tiles*/ 4 * numMFMAsPerWave * dsLoadsPerWave;
 
             if(problem.transA == "N")
-                numTrLoads += numWaves * trLoadsPerWave;
+                numTrLoads += /*number of A tiles*/ 1 * numMFMAsPerWave * trLoadsPerWave;
             if(problem.transB == "T")
-                numTrLoads += numWaves * trLoadsPerWave;
+                numTrLoads += /*number of B tiles*/ 4 * numMFMAsPerWave * trLoadsPerWave;
         }
 
         auto const mfma{std::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
 
-        checkGEMMF16(
-            m_context, mfma, numMFMAs, numBufferLoads, numDSWrites, numDSReads, numTrLoads);
+        checkGEMMF16(m_context,
+                     mfma,
+                     numMFMAs,
+                     numBufferLoadsForC + numBufferLoadsForAB,
+                     numDSWrites,
+                     numDSReads,
+                     numTrLoads);
     }
 
     GEMMProblem setup_GEMMF8_NT()

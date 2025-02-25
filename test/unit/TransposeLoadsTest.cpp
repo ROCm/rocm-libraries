@@ -436,14 +436,14 @@ namespace TransposeLoadsTest
         std::string    mnemonic        = transposeLoadMnemonic(elementBits);
 
         // FIXME: waiting for std::format :(
-        std::string flatLoadDWordX{"flat_load_dwordx" + std::to_string(dwordX) + " "};
+        std::string globalLoadDWordX{"global_load_dwordx" + std::to_string(dwordX) + " "};
         std::string dsWriteBX{"ds_write_b" + std::to_string(dsReadWriteBits) + " "};
 
         std::string code = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(code, mnemonic), 2);
-        EXPECT_EQ(countSubstring(code, "flat_load_dword"), 3);
-        EXPECT_EQ(countSubstring(code, flatLoadDWordX), 2);
+        EXPECT_EQ(countSubstring(code, "global_load_dword"), 3);
+        EXPECT_EQ(countSubstring(code, globalLoadDWordX), 2);
 
         EXPECT_EQ(countSubstring(code, "ds_write_b"), 2);
         EXPECT_EQ(countSubstring(code, dsWriteBX), 2);
