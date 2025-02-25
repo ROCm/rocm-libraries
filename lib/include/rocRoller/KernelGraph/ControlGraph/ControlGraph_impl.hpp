@@ -146,6 +146,19 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
     }
 
+    inline Generator<int> ControlGraph::nodesContaining(int node) const
+    {
+        populateOrderCache();
+
+        for(auto const& pair : m_orderCache)
+        {
+            if(pair.first.second == node && pair.second == NodeOrdering::RightInBodyOfLeft)
+                co_yield pair.first.first;
+            else if(pair.first.first == node && pair.second == NodeOrdering::LeftInBodyOfRight)
+                co_yield pair.first.second;
+        }
+    }
+
     template <typename T>
     requires(std::constructible_from<Operation, T>) inline std::set<
         std::pair<int, int>> ControlGraph::ambiguousNodes() const

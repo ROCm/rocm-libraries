@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2024 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,9 @@
 
 // #define SPDLOG_COMPILED_LIB 1
 #include <spdlog/spdlog.h>
+
+// In order for linking to work for GCC, any includes from fmt must happen after including spdlog.h
+#include <spdlog/fmt/ranges.h>
 
 namespace rocRoller
 {

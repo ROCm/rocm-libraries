@@ -76,11 +76,6 @@ namespace rocRoller
         // Method to generate instructions
         Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg) override;
 
-        inline bool isIdentity(Register::ValuePtr arg) const override
-        {
-            return arg->variableType() == DATATYPE;
-        }
-
         inline static const std::string Name;
     };
 }

@@ -245,11 +245,12 @@ namespace rocRoller
 
         template <typename Op, typename IO, typename Context>
         requires(
-            std::same_as<
-                Op,
-                KernelGraph::ControlGraph::
-                    LoadLinear> || std::same_as<Op, KernelGraph::ControlGraph::LoadTiled> || std::same_as<Op, KernelGraph::ControlGraph::LoadVGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR> || std::same_as<Op, KernelGraph::ControlGraph::LoadLDSTile>) struct
-            MappingTraits<Op, IO, Context>
+            CIsAnyOf<Op,
+                     KernelGraph::ControlGraph::LoadLinear,
+                     KernelGraph::ControlGraph::LoadTiled,
+                     KernelGraph::ControlGraph::LoadVGPR,
+                     KernelGraph::ControlGraph::LoadSGPR,
+                     KernelGraph::ControlGraph::LoadLDSTile>) struct MappingTraits<Op, IO, Context>
         {
             // If this assertion starts failing, it's likely one of these classes has had a member added.
             static_assert(
@@ -284,11 +285,10 @@ namespace rocRoller
 
         template <typename Op, typename IO, typename Context>
         requires(
-            std::same_as<
-                Op,
-                KernelGraph::ControlGraph::
-                    StoreTiled> || std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR> || std::same_as<Op, KernelGraph::ControlGraph::StoreLDSTile>) struct
-            MappingTraits<Op, IO, Context>
+            CIsAnyOf<Op,
+                     KernelGraph::ControlGraph::StoreTiled,
+                     KernelGraph::ControlGraph::StoreSGPR,
+                     KernelGraph::ControlGraph::StoreLDSTile>) struct MappingTraits<Op, IO, Context>
         {
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)

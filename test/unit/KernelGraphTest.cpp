@@ -9,7 +9,6 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Reindexer.hpp>
@@ -1709,7 +1708,7 @@ namespace KernelGraphTest
     }
 
     template <typename T>
-    void CopyStrideOverride(std::shared_ptr<CommandKernel>& commandKernel, bool override = false)
+    void CopyStrideOverride(CommandKernelPtr& commandKernel, bool override = false)
     {
         auto example = rocRollerTest::Graphs::TileCopy<T>();
 
@@ -1760,13 +1759,13 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<int>(commandKernel);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideHalf)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<Half>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
@@ -1791,7 +1790,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideFloat)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<float>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
@@ -1816,7 +1815,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideDouble)
     {
-        std::shared_ptr<CommandKernel> commandKernel;
+        CommandKernelPtr commandKernel;
         CopyStrideOverride<double>(commandKernel, true);
 
         auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
@@ -2396,47 +2395,6 @@ namespace KernelGraphTest
     ).";
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph0.toDOT()));
-    }
-
-    TEST_F(KernelGraphTest, CombineConstraintStatus)
-    {
-        rocRoller::KernelGraph::ConstraintStatus c1;
-        c1.combine(true, "TEST1");
-        EXPECT_TRUE(c1.satisfied);
-        EXPECT_EQ(c1.explanation, "TEST1");
-        c1.combine(false, "TEST2");
-        EXPECT_FALSE(c1.satisfied);
-        EXPECT_EQ(c1.explanation, "TEST1\nTEST2");
-        c1.combine(true, "");
-        EXPECT_FALSE(c1.satisfied);
-        EXPECT_EQ(c1.explanation, "TEST1\nTEST2");
-        rocRoller::KernelGraph::ConstraintStatus c2;
-        c2.combine(c1);
-        EXPECT_FALSE(c2.satisfied);
-        EXPECT_EQ(c2.explanation, "TEST1\nTEST2");
-    }
-
-    TEST_F(KernelGraphTest, EmptyConstraintCheck)
-    {
-        rocRoller::KernelGraph::KernelGraph                  kgraph;
-        std::vector<rocRoller::KernelGraph::GraphConstraint> emptyConstraints;
-
-        auto check = kgraph.checkConstraints(emptyConstraints);
-        EXPECT_TRUE(check.satisfied);
-        EXPECT_EQ(check.explanation, "");
-    }
-
-    TEST_F(KernelGraphTest, FailingDanglingMappingConstraint)
-    {
-        rocRoller::KernelGraph::KernelGraph kgraph;
-        kgraph.mapper.connect(0, 0, NaryArgument::DEST);
-        std::vector<rocRoller::KernelGraph::GraphConstraint> danglingMapping{&NoDanglingMappings};
-
-        auto check = kgraph.checkConstraints(danglingMapping);
-        EXPECT_FALSE(check.satisfied);
-        EXPECT_EQ(check.explanation,
-                  "Dangling Mapping: Control node 0 does not exist.\nDangling Mapping: Control "
-                  "node 0 maps to coordinate node 0, which doesn't exist.");
     }
 
     TEST_F(KernelGraphTestGPU, GPU_Conditional)

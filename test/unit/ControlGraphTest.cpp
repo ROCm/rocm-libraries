@@ -170,6 +170,12 @@ namespace rocRollerTest
 
         EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(loadA_index, mul_index));
 
+        EXPECT_EQ((std::set{loadA_index, loadB_index, add_index}),
+                  control.nodesBefore(mul_index).to<std::set>());
+
+        EXPECT_EQ(std::set{kernel_index}, control.nodesContaining(loadA_index).to<std::set>());
+        EXPECT_EQ(std::set{kernel_index}, control.nodesContaining(storeC_index).to<std::set>());
+
         EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(loadA_index, loadB_index));
 
         EXPECT_EQ(NodeOrdering::RightFirst, control.compareNodes(mul_index, add_index));
@@ -250,6 +256,9 @@ namespace rocRollerTest
 
         // It doesn't walk up ForLoopIncrement edges yet.
         EXPECT_EQ(std::set({scope3, mul, storeE}), control.nodesAfter(forInc).to<std::set>());
+
+        EXPECT_EQ(std::set({forOp, scope2, kernel}), control.nodesContaining(loadD).to<std::set>());
+        EXPECT_EQ(std::set({scope3, kernel}), control.nodesContaining(storeE).to<std::set>());
 
         EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(assign2, assign3));
         EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(assign2, mul));

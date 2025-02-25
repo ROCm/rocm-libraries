@@ -537,17 +537,13 @@ namespace rocRoller
         ExpressionPtr literal(T value, VariableType v);
 
         template <typename T>
-        concept CValue = requires
-        {
-            // clang-format off
-            requires std::same_as<AssemblyKernelArgumentPtr, T> ||
-                     std::same_as<CommandArgumentPtr, T>        ||
-                     std::same_as<CommandArgumentValue, T>      ||
-                     std::same_as<DataFlowTag, T>               ||
-                     std::same_as<Register::ValuePtr, T>        ||
-                     std::same_as<WaveTilePtr, T>;
-            // clang-format on
-        };
+        concept CValue = CIsAnyOf<T,
+                                  AssemblyKernelArgumentPtr,
+                                  CommandArgumentPtr,
+                                  CommandArgumentValue,
+                                  DataFlowTag,
+                                  Register::ValuePtr,
+                                  WaveTilePtr>;
 
         template <Category cat, typename T>
         concept COpCategory = requires
@@ -574,9 +570,7 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CShift
-            = std::same_as<ShiftL, T> || std::same_as<LogicalShiftR,
-                                                      T> || std::same_as<ArithmeticShiftR, T>;
+        concept CShift = CIsAnyOf<T, ShiftL, LogicalShiftR, ArithmeticShiftR>;
 
         template <typename T>
         concept CAssociativeBinary = requires
@@ -598,10 +592,7 @@ namespace rocRoller
         static_assert(!CAssociativeBinary<Subtract>);
 
         template <typename T>
-        concept CTranslateTimeValue = requires
-        {
-            requires std::same_as<CommandArgumentValue, T>;
-        };
+        concept CTranslateTimeValue = std::same_as<T, CommandArgumentValue>;
 
         template <typename T>
         concept CTranslateTimeOperation = requires
@@ -616,10 +607,7 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CKernelLaunchTimeValue = requires
-        {
-            requires std::same_as<CommandArgumentValue, T> || std::same_as<CommandArgumentPtr, T>;
-        };
+        concept CKernelLaunchTimeValue = CIsAnyOf<T, CommandArgumentValue, CommandArgumentPtr>;
 
         template <typename T>
         concept CKernelLaunchTimeOperation = requires
@@ -634,16 +622,12 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CKernelExecuteTimeValue = requires
-        {
-            // clang-format off
-            requires std::same_as<AssemblyKernelArgumentPtr, T> ||
-                     std::same_as<CommandArgumentValue, T>      ||
-                     std::same_as<DataFlowTag, T>               ||
-                     std::same_as<Register::ValuePtr, T>        ||
-                     std::same_as<WaveTilePtr, T>;
-            // clang-format on
-        };
+        concept CKernelExecuteTimeValue = CIsAnyOf<T,
+                                                   AssemblyKernelArgumentPtr,
+                                                   CommandArgumentValue,
+                                                   DataFlowTag,
+                                                   Register::ValuePtr,
+                                                   WaveTilePtr>;
 
         template <typename T>
         concept CKernelExecuteTimeOperation = requires

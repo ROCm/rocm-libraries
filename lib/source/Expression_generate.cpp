@@ -641,11 +641,7 @@ namespace rocRoller
                     }
                 }
 
-                if(GetGenerator<Operation>(dest, results[0])->isIdentity(results[0]))
-                {
-                    dest = results[0];
-                }
-                else if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
+                if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
                 {
                     co_yield generateOp<Operation>(dest, results[0]);
                 }

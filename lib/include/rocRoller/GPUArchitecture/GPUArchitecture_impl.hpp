@@ -137,28 +137,10 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
-        // clang-format off
-        static_assert(
-            std::same_as<T, float>
-        || std::same_as<T, double>
-        || std::same_as<T, Half>
-        || std::same_as<T, BFloat16>
-        || std::same_as<T, FP8>
-        || std::same_as<T, BF8>
-        || std::same_as<T, FP6>
-        || std::same_as<T, BF6>
-        || std::same_as<T, FP4>,
-            "Unsupported floating point type");
-        // clang-format on
+        static_assert(CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4>,
+                      "Unsupported floating point type");
 
-        // clang-format off
-        if constexpr(
-            std::same_as<T, BFloat16>
-        || std::same_as<T, FP8>
-        || std::same_as<T, BF8>
-        || std::same_as<T, FP6>
-        || std::same_as<T, BF6>
-        || std::same_as<T, FP4>)
+        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4>)
         {
             return {};
         }

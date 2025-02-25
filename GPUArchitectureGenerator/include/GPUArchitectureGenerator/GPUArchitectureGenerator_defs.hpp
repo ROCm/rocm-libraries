@@ -1021,7 +1021,6 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x16_f16", 0, {}, 8),
                  // V_MFMA_F32_{*}_BF16
                  rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4_2b_bf16", 0, {}, 16),
-                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4bf16", 0, {}, 16),
                  rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4bf16_1k", 0, {}, 16),
                  rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4_4b_bf16", 0, {}, 8),
                  rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x4bf16", 0, {}, 8),
@@ -1052,9 +1051,6 @@ namespace GPUArchitectureGenerator
                  // These two instructions are new
                  rocRoller::GPUInstructionInfo("v_mfma_i32_16x16x64_i8", 0, {}, 4),
                  rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x32_i8", 0, {}, 8),
-                 // V_MFMA_F32_{*}_XF32
-                 rocRoller::GPUInstructionInfo("v_mfma_f32_16x16x8xf32", 0, {}, 4),
-                 rocRoller::GPUInstructionInfo("v_mfma_f32_32x32x4xf32", 0, {}, 8),
                  // V_MFMA_F64_{*}_F64
                  rocRoller::GPUInstructionInfo("v_mfma_f64_16x16x4_f64", 0, {}, 8),
                  // gfx950 increases the cycles of v_mfma_f64_16x16x4f64 to 64 (32 in gfx940)
