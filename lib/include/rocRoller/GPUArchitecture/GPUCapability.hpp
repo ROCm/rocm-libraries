@@ -27,6 +27,7 @@ namespace rocRoller
             HasExplicitNC,
 
             HasDirectToLds,
+            HasWiderDirectToLds,
             HasAddLshl,
             HasLshlOr,
             HasSMulHi,
@@ -36,12 +37,18 @@ namespace rocRoller
 
             HasMFMA,
             HasMFMA_fp8,
+            HasMFMA_f8f6f4,
             HasMFMA_f64,
             HasMFMA_bf16_32x32x4,
             HasMFMA_bf16_32x32x4_1k,
             HasMFMA_bf16_32x32x8_1k,
             HasMFMA_bf16_16x16x8,
             HasMFMA_bf16_16x16x16_1k,
+
+            HasMFMA_16x16x32_f16,
+            HasMFMA_32x32x16_f16,
+            HasMFMA_16x16x32_bf16,
+            HasMFMA_32x32x16_bf16,
 
             HasAccumOffset,
             HasGlobalOffset,
@@ -92,6 +99,18 @@ namespace rocRoller
             UnalignedSGPRs,
 
             MaxLdsSize,
+
+            HasNaNoo,
+
+            HasDSReadTransposeB16,
+            HasDSReadTransposeB8,
+            HasDSReadTransposeB6,
+            HasDSReadTransposeB4,
+
+            HasPRNG,
+
+            HasPermLanes16,
+            HasPermLanes32,
 
             Count,
         };

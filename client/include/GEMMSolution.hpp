@@ -65,11 +65,16 @@ namespace rocRoller
                                 "Invalid run parameters: all predicates must match.");
                 }
 
-                using ABCDTags                       = std::tuple<Operations::OperationTag,
+                using ABCDTags = std::tuple<Operations::OperationTag,
                                             Operations::OperationTag,
                                             Operations::OperationTag,
                                             Operations::OperationTag>;
+
                 virtual ABCDTags getABCDTags() const = 0;
+
+                using ABScaleTags = std::tuple<Operations::OperationTag, Operations::OperationTag>;
+
+                virtual ABScaleTags getABScaleTags() const = 0;
 
                 ContextPtr context() const
                 {

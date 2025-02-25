@@ -2,6 +2,7 @@
 """Test basic functionality of rocRoller's GEMM client."""
 
 import contextlib
+import functools
 import itertools
 import os
 import pathlib
@@ -22,6 +23,25 @@ def chdir(directory):
         yield
     finally:
         os.chdir(current_directory)
+
+
+@functools.cache
+def rocm_gfx():
+    output = None
+    try:
+        output = subprocess.run(
+            ["rocminfo"], capture_output=True, text=True, check=True
+        ).stdout
+    except subprocess.CalledProcessError:
+        return None
+
+    for line in output.splitlines():
+        if line.startswith("  Name:"):
+            _, arch, *_ = list(map(lambda x: x.strip(), line.split()))
+            if arch.startswith("gfx"):
+                return arch
+
+    return None
 
 
 #
@@ -64,6 +84,11 @@ type_D: float
 type_acc: float
 streamK: false
 streamKTwoTile: false
+matchMemoryAccess: true
+scale_A: None
+scale_B: None
+loadScaleLDS_A: false
+loadScaleLDS_B: false
 ...
 
 """
@@ -174,8 +199,28 @@ def write_solution_config_if_present(tmp_path, solution_params):
     return solution_params
 
 
+def match_architecture(solution_params):
+    """Look for '--arch' option and check if it matches the local device.
+
+    Returns True if either:
+    1. No --arch flag present.
+    2. The --arch flag matches the local device.
+    """
+
+    if not ("--arch" in solution_params):
+        return True
+
+    arch_index = solution_params.index("--arch") + 1
+    arch = solution_params[arch_index]
+
+    return arch == rocm_gfx()
+
+
 def gemm_validate_single_stage(tmp_path, solution_params, problem_params):
     solution_params = write_solution_config_if_present(tmp_path, solution_params)
+
+    if not match_architecture(solution_params):
+        return
 
     cmd = [gemm]
     cmd.extend(["generate"])
@@ -195,6 +240,9 @@ def gemm_validate_two_stage_codeobject(tmp_path, solution_params, problem_params
     cmd.extend(solution_params)
     skip = check_returncode(subprocess.run(cmd))
     if skip:
+        return
+
+    if not match_architecture(solution_params):
         return
 
     cmd = [gemm]
@@ -217,6 +265,9 @@ def gemm_validate_two_stage_assembly(tmp_path, solution_params, problem_params):
     if skip:
         return
 
+    if not match_architecture(solution_params):
+        return
+
     cmd = [gemm]
     cmd.extend(["validate", "--load", asm])
     cmd.extend(problem_params)
@@ -230,6 +281,73 @@ solution_params = [
     ["--config", DP_GEMM],
     # streamk gemm, float, params from command line
     ["--streamk"],
+    # data-parallel gemm, mxfp4, params from command line
+    [
+        "--arch",
+        "gfx950",
+        "--mac_M",
+        "256",
+        "--mac_N",
+        "256",
+        "--mac_K",
+        "64",
+        "--mi",
+        "32x32x64x1",
+        "--type_A",
+        "fp4",
+        "--type_B",
+        "fp4",
+        "--scale_A",
+        "Separate",
+        "--scale_B",
+        "Separate",
+    ],
+    [
+        "--arch",
+        "gfx950",
+        "--mac_M",
+        "256",
+        "--mac_N",
+        "256",
+        "--mac_K",
+        "64",
+        "--mi",
+        "32x32x64x1",
+        "--type_A",
+        "fp4",
+        "--type_B",
+        "fp4",
+        "--type_C",
+        "half",
+        "--type_D",
+        "half",
+        "--scale_A",
+        "Separate",
+        "--scale_B",
+        "Separate",
+    ],
+    [
+        "--arch",
+        "gfx950",
+        "--mac_M",
+        "256",
+        "--mac_N",
+        "256",
+        "--mac_K",
+        "64",
+        "--mi",
+        "32x32x64x1",
+        "--type_A",
+        "fp4",
+        "--type_B",
+        "fp4",
+        "--scale_A",
+        "Separate",
+        "--scale_B",
+        "Separate",
+        "--loadLDSScale_A",
+        "--loadLDSScale_B",
+    ],
 ]
 
 problem_params = [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]

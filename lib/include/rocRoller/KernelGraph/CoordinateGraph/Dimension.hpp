@@ -113,6 +113,8 @@ namespace rocRoller
         {
             std::string argumentName;
 
+            bool needsPadding = false;
+
             using BaseDimension::BaseDimension;
 
             User(std::string const& name);
@@ -236,13 +238,14 @@ namespace rocRoller
          */
         struct LDS : public BaseDimension
         {
-            static constexpr bool HasValue     = false;
-            bool                  isDirect2LDS = false;
-
+            static constexpr bool HasValue = false;
             using BaseDimension::BaseDimension;
 
+            bool isDirect2LDS        = false;
+            bool holdsTransposedTile = false;
+
             LDS();
-            LDS(bool const isDirect2LDS);
+            LDS(bool const isDirect2LDS, bool const holdsTransposedTile = false);
 
             std::string name() const override;
         };
@@ -327,6 +330,19 @@ namespace rocRoller
             std::vector<int> subTileSizes;
 
             /**
+             * Size of matrix instruction tile.
+             */
+            std::vector<int> miTileSizes;
+
+            /**
+             * Number of bytes padding each dimension.
+             *
+             * For example, a MxN Macrotile padded with [[x y]] requires
+             * M * N * elementBytes + N * x + M * y bytes of storage.
+             */
+            std::vector<uint> padBytesOfDim;
+
+            /**
              * Construct MacroTile dimension with deferred rank etc.
              */
             MacroTile();
@@ -356,7 +372,15 @@ namespace rocRoller
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
                       std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE);
+                      MemoryType const        memoryType   = MemoryType::WAVE,
+                      std::vector<int> const& miTileSizes  = {});
+
+            /**
+             * Construct MacroTile dimension that is padded.
+             *
+             * Layout type must be either MATRIX_A or MATRIX_B.
+             */
+            MacroTile(MacroTile& macTile, std::vector<uint> const& padBytesOfDim);
 
             std::string toString() const override;
 
@@ -376,6 +400,11 @@ namespace rocRoller
              * Return total number of elements.
              */
             int elements() const;
+
+            /**
+             * Return total number of padding bytes.
+             */
+            uint paddingBytes() const;
         };
 
         /**
@@ -458,9 +487,18 @@ namespace rocRoller
             int rank = 0;
 
             std::vector<int> sizes;
+            std::vector<int> wsizes;
 
             LayoutType         layout = LayoutType::None;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?
+
+            /**
+             * Number of bytes padding each dimension.
+             *
+             * For example, a MxN Macrotile padded with [[x y]] requires
+             * M * N * elementBytes + N * x + M * y bytes of storage.
+             */
+            std::vector<uint> padBytesOfDim;
 
             WaveTile() = default;
 
@@ -485,6 +523,11 @@ namespace rocRoller
              * Return total number of elements.
              */
             int elements() const;
+
+            /**
+             * Return total number of padding bytes.
+             */
+            uint paddingBytes() const;
         };
 
         /**

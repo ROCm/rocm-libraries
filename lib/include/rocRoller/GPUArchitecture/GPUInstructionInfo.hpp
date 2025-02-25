@@ -224,6 +224,7 @@ namespace rocRoller
         static bool isVSubInst(std::string const& inst);
         static bool isVReadlane(std::string const& inst);
         static bool isVWritelane(std::string const& inst);
+        static bool isVPermlane(std::string const& inst);
         static bool isVDivScale(std::string const& inst);
         static bool isVDivFmas(std::string const& inst);
         /** @} */

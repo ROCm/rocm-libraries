@@ -456,7 +456,14 @@ namespace rocRollerTest
         std::vector<float> hostC;
         std::vector<float> hostA;
         std::vector<float> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<float>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1, beta = 0;
         unsigned int strideD0 = 64, strideD1 = 4096;
         unsigned int strideC0 = 64, strideC1 = 4096;
@@ -524,7 +531,14 @@ namespace rocRollerTest
         std::vector<float> hostC;
         std::vector<float> hostA;
         std::vector<float> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<float>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1, beta = 0;
         unsigned int strideD0 = 3072, strideD1 = 12582912;
         unsigned int strideC0 = 3072, strideC1 = 12582912;
@@ -1001,7 +1015,14 @@ namespace rocRollerTest
         std::vector<float> hostC;
         std::vector<float> hostA;
         std::vector<float> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<float>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1, beta = 0;
         unsigned int strideD0 = 64, strideD1 = 4096;
         unsigned int strideC0 = 64, strideC1 = 4096;
@@ -1069,7 +1090,14 @@ namespace rocRollerTest
         std::vector<float> hostC;
         std::vector<float> hostA;
         std::vector<float> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<float>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1, beta = 0;
         unsigned int strideD0 = 3072, strideD1 = 12582912;
         unsigned int strideC0 = 3072, strideC1 = 12582912;
@@ -1548,7 +1576,14 @@ namespace rocRollerTest
         std::vector<__half> hostC;
         std::vector<__half> hostA;
         std::vector<__half> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<__half>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1.0, beta = 0.0;
         unsigned int strideD0 = 7680, strideD1 = 64880640;
         unsigned int strideC0 = 7680, strideC1 = 64880640;
@@ -2034,7 +2069,14 @@ namespace rocRollerTest
         std::vector<__half> hostC;
         std::vector<__half> hostA;
         std::vector<__half> hostB;
-        DGenInput(hostA, hostB, hostC, sizeA, sizeB, sizeC, seed, 1);
+
+        auto             dataType = TypeInfo<__float>::Var.dataType;
+        TensorDescriptor descA(dataType, {size_t(1), size_t(sizeA)}, "T");
+        TensorDescriptor descB(dataType, {size_t(1), size_t(sizeB)}, "T");
+        TensorDescriptor descC(dataType, {size_t(1), size_t(sizeC)}, "T");
+
+        DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+
         float        alpha = 1.0, beta = 0.0;
         unsigned int strideD0 = 7680, strideD1 = 64880640;
         unsigned int strideC0 = 7680, strideC1 = 64880640;

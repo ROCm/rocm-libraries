@@ -761,18 +761,24 @@ namespace rocRoller
             return op;
         }
 
-        void
-            updateThreadTileForLongDwords(int& t_m, int& t_n, int maxWidth, int numDwordsPerElement)
+        void updateThreadTileForLongDwords(int& t_m,
+                                           int& t_n,
+                                           int  maxWidth,
+                                           uint macTileFastMovingDimSize,
+                                           int  numDwordsPerElement)
         {
             auto numDwordsPerWorkitem = t_m * numDwordsPerElement;
 
             std::vector<int> potentialFactors = {4, 3, 2, 1};
 
-            auto start      = potentialFactors.begin();
-            auto end        = potentialFactors.end();
-            auto factorPred = [numDwordsPerWorkitem, maxWidth](int factor) {
-                return factor <= maxWidth && numDwordsPerWorkitem % factor == 0;
-            };
+            auto start = potentialFactors.begin();
+            auto end   = potentialFactors.end();
+            auto factorPred
+                = [numDwordsPerWorkitem, maxWidth, t_n, macTileFastMovingDimSize](int factor) {
+                      const auto n = t_n * factor;
+                      return factor <= maxWidth && numDwordsPerWorkitem % factor == 0
+                             && (n <= macTileFastMovingDimSize);
+                  };
             auto it = std::find_if(start, end, factorPred);
 
             if(it != potentialFactors.end())
@@ -884,11 +890,14 @@ namespace rocRoller
         VariableType getVariableType(KernelGraph const& graph, int opTag)
         {
             auto l = graph.control.get<LoadTiled>(opTag);
-            auto s = graph.control.get<StoreTiled>(opTag);
             if(l)
                 return l->varType;
+            auto s = graph.control.get<StoreTiled>(opTag);
             if(s)
                 return s->dataType;
+            auto ll = graph.control.get<LoadLDSTile>(opTag);
+            if(ll)
+                return ll->varType;
             Throw<FatalError>("Invalid load/store operation.");
         }
 

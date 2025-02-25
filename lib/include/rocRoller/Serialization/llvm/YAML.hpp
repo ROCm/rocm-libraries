@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2024 Advanced Micro Devices, Inc.
+ * Copyright 2019-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -333,7 +333,10 @@ namespace llvm
                                      rocRoller::Half,
                                      rocRoller::BFloat16,
                                      rocRoller::FP8,
-                                     rocRoller::BF8>) struct ScalarTraits<T>
+                                     rocRoller::BF8,
+                                     rocRoller::FP6,
+                                     rocRoller::BF6,
+                                     rocRoller::FP4>) struct ScalarTraits<T>
         {
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {

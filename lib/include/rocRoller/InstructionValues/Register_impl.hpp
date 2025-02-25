@@ -324,15 +324,16 @@ namespace rocRoller
         inline ValuePtr Value::AllocateLDS(ContextPtr   ctx,
                                            VariableType variableType,
                                            int          count,
-                                           unsigned int alignment)
+                                           unsigned int alignment,
+                                           uint         paddingBytes)
         {
-            auto v               = std::make_shared<Value>();
-            v->m_regType         = Type::LocalData;
-            v->m_varType         = variableType;
-            auto       allocator = ctx->ldsAllocator();
-            auto const info      = DataTypeInfo::Get(variableType);
-            v->m_ldsAllocation
-                = allocator->allocate(CeilDivide(info.elementBits * count, 8u), alignment);
+            auto v                  = std::make_shared<Value>();
+            v->m_regType            = Type::LocalData;
+            v->m_varType            = variableType;
+            auto       allocator    = ctx->ldsAllocator();
+            auto const info         = DataTypeInfo::Get(variableType);
+            auto const elementBytes = CeilDivide(info.elementBits * count, 8u);
+            v->m_ldsAllocation      = allocator->allocate(elementBytes + paddingBytes, alignment);
 
             return v;
         }

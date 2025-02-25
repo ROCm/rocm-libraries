@@ -522,14 +522,36 @@ namespace rocRollerTest
                     int constexpr mantissa_width = 7 - exp_width;
 
                     cpuResult.emplace_back(0);
-                    cpuResult.back().data = DataTypes::cast_to_f8<mantissa_width,
-                                                                  exp_width,
-                                                                  float,
-                                                                  true /*negative_zero_nan*/,
-                                                                  true /*clip*/>(
-                        v /* value to be converted   */,
-                        true /* is stochastic rounding? */,
-                        seed.value() /* seed for stochastic rounding */);
+
+                    bool constexpr is_bf8 = std::is_same_v<DestType, BF8>;
+                    auto const f8Mode     = Settings::getInstance()->get(Settings::F8ModeOption);
+
+                    if(f8Mode == rocRoller::F8Mode::NaNoo)
+                    {
+                        cpuResult.back().data = DataTypes::cast_to_f8<mantissa_width,
+                                                                      exp_width,
+                                                                      float,
+                                                                      false /* is_ocp */,
+                                                                      is_bf8,
+                                                                      true /*negative_zero_nan*/,
+                                                                      true /*clip*/>(
+                            v /* value to be converted   */,
+                            true /* is stochastic rounding? */,
+                            seed.value() /* seed for stochastic rounding */);
+                    }
+                    else
+                    {
+                        cpuResult.back().data = DataTypes::cast_to_f8<mantissa_width,
+                                                                      exp_width,
+                                                                      float,
+                                                                      true /* is_ocp */,
+                                                                      is_bf8,
+                                                                      true /*negative_zero_nan*/,
+                                                                      true /*clip*/>(
+                            v /* value to be converted   */,
+                            true /* is stochastic rounding? */,
+                            seed.value() /* seed for stochastic rounding */);
+                    }
                 }
                 else
                 {

@@ -76,6 +76,21 @@ namespace rocRoller
                 return tostr + ":";
             }
 
+            std::string operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return concatenate("ScaledMatrixMultiply(",
+                                   call(expr.matA),
+                                   ", ",
+                                   call(expr.matB),
+                                   ", ",
+                                   call(expr.matC),
+                                   ", ",
+                                   call(expr.scaleA),
+                                   ", ",
+                                   call(expr.scaleB),
+                                   ")");
+            }
+
             std::string operator()(CommandArgumentPtr const& expr) const
             {
                 if(expr)

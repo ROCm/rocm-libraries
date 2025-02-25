@@ -13,11 +13,14 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureLibrary.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/Costs/Cost.cpp
+    ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F6_Utils.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F8_Utils.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_BF16_Utils.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/Error.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/Logging.cpp
     ${PROJECT_SOURCE_DIR}/lib/source/Scheduler.cpp
+    ${PROJECT_SOURCE_DIR}/lib/source/Utilities/Settings.cpp
+    ${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp
 )
 
 if(DEFINED INTERNAL_MRISAS AND INTERNAL_MRISAS)

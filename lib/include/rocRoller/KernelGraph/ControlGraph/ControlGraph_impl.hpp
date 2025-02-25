@@ -212,23 +212,33 @@ namespace rocRoller::KernelGraph::ControlGraph
                                      T>) inline std::optional<T> ControlGraph::get(int tag) const
     {
         auto x = getElement(tag);
-        if constexpr(std::constructible_from<ControlEdge, T>)
+        if constexpr(CIsAnyOf<T, Operation, ControlEdge>)
         {
-            if(std::holds_alternative<ControlEdge>(x))
+            if(std::holds_alternative<T>(x))
             {
-                if(std::holds_alternative<T>(std::get<ControlEdge>(x)))
-                {
-                    return std::get<T>(std::get<ControlEdge>(x));
-                }
+                return std::get<T>(x);
             }
         }
-        if constexpr(std::constructible_from<Operation, T>)
+        else
         {
-            if(std::holds_alternative<Operation>(x))
+            if constexpr(std::constructible_from<ControlEdge, T>)
             {
-                if(std::holds_alternative<T>(std::get<Operation>(x)))
+                if(std::holds_alternative<ControlEdge>(x))
                 {
-                    return std::get<T>(std::get<Operation>(x));
+                    if(std::holds_alternative<T>(std::get<ControlEdge>(x)))
+                    {
+                        return std::get<T>(std::get<ControlEdge>(x));
+                    }
+                }
+            }
+            if constexpr(std::constructible_from<Operation, T>)
+            {
+                if(std::holds_alternative<Operation>(x))
+                {
+                    if(std::holds_alternative<T>(std::get<Operation>(x)))
+                    {
+                        return std::get<T>(std::get<Operation>(x));
+                    }
                 }
             }
         }

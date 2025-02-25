@@ -22,27 +22,27 @@ if(BUILD_VERBOSE)
 endif()
 
 set(rocroller_src
-    source/AssemblyKernel.cpp
+    source/AssemblyKernel_serialization.cpp
     source/AssemblyKernel.cpp
     source/AssemblyKernelArgument.cpp
-    source/AssemblyKernel_serialization.cpp
-    source/AssemblyKernel_serialization.cpp
     source/AssertOpKinds.cpp
     source/Command_serialization.cpp
     source/CommandSolution.cpp
     source/CommonSubexpressionElim.cpp
     source/Context.cpp
-    source/DataTypes.cpp
     source/DataTypes_BF16_Utils.cpp
+    source/DataTypes_F6_Utils.cpp
     source/DataTypes_F8_Utils.cpp
+    source/DataTypes_Utils.cpp
+    source/DataTypes.cpp
     source/Error.cpp
     source/ExecutableKernel.cpp
-    source/Expression.cpp
     source/Expression_evaluate.cpp
     source/Expression_generate.cpp
     source/Expression_resultType.cpp
     source/Expression_serialization.cpp
     source/Expression_toString.cpp
+    source/Expression.cpp
     source/GPUArchitecture.cpp
     source/GPUArchitectureLibrary.cpp
     source/GPUInstructionInfo.cpp
@@ -108,6 +108,7 @@ set(rocroller_src
     source/CodeGen/Arithmetic/Negate.cpp
     source/CodeGen/Arithmetic/NotEqual.cpp
     source/CodeGen/Arithmetic/RandomNumber.cpp
+    source/CodeGen/Arithmetic/ScaledMatrixMultiply.cpp
     source/CodeGen/Arithmetic/ShiftL.cpp
     source/CodeGen/Arithmetic/ShiftLAdd.cpp
     source/CodeGen/Arithmetic/Subtract.cpp
@@ -150,9 +151,10 @@ set(rocroller_src
     source/KernelGraph/Transformations/AddConvert.cpp
     source/KernelGraph/Transformations/AddDeallocate.cpp
     source/KernelGraph/Transformations/AddDirect2LDS.cpp
+    source/KernelGraph/Transformations/AddF6LDSPadding.cpp
     source/KernelGraph/Transformations/AddLDS.cpp
-    source/KernelGraph/Transformations/AddStreamK.cpp
     source/KernelGraph/Transformations/AddPRNG.cpp
+    source/KernelGraph/Transformations/AddStreamK.cpp
     source/KernelGraph/Transformations/CleanArguments.cpp
     source/KernelGraph/Transformations/CleanLoops.cpp
     source/KernelGraph/Transformations/ConnectWorkgroups.cpp
@@ -204,6 +206,7 @@ set(rocroller_src
     source/Operations/Operation.cpp
     source/Operations/RandomNumberGenerator.cpp
     source/Operations/TensorScalar.cpp
+    source/Operations/T_LoadStore.cpp
 
     source/Schedulers/CooperativeScheduler.cpp
     source/Schedulers/PriorityScheduler.cpp
@@ -212,6 +215,7 @@ set(rocroller_src
     source/Schedulers/SequentialScheduler.cpp
 
     source/Utilities/ReadELF.cpp
+    source/Utilities/Settings.cpp
     source/Utilities/Utils.cpp
 
     ${ROCROLLER_GIT_VERSION_CPP_FILE}

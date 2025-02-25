@@ -220,6 +220,16 @@ TEST_F(GPUArchitectureTest, Validate94xInstructions)
               true);
 }
 
+TEST_F(GPUArchitectureTest, Validate95xInstructions)
+{
+    // Verify permlane instructions exist
+    EXPECT_NO_THROW(GPUArchitectureLibrary::getInstance()->GetInstructionInfo(
+        {GPUArchitectureGFX::GFX950}, "v_permlane16_swap_b32"));
+
+    EXPECT_NO_THROW(GPUArchitectureLibrary::getInstance()->GetInstructionInfo(
+        {GPUArchitectureGFX::GFX950}, "v_permlane32_swap_b32"));
+}
+
 TEST_F(GPUArchitectureTest, MFMA)
 {
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
@@ -269,5 +279,21 @@ TEST_F(GPUArchitectureTest, ToLLVMString)
         EXPECT_EQ(target.features.toString(), "sramecc+xnack+");
         EXPECT_EQ(toString(target.features), "sramecc+xnack+");
         EXPECT_EQ(target.features.toLLVMString(), "+xnack,+sramecc");
+    }
+}
+
+TEST_F(GPUArchitectureTest, F8Mode)
+{
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  {GPUArchitectureTarget{GPUArchitectureGFX::GFX942}}, GPUCapability::HasNaNoo),
+              true);
+    auto allISAs = GPUArchitectureLibrary::getInstance()->getAllSupportedISAs();
+    auto gfx942  = std::remove_if(allISAs.begin(), allISAs.end(), [](const auto& isa) {
+        return isa.gfx == GPUArchitectureGFX::GFX942;
+    });
+    for(auto I = allISAs.begin(); I != gfx942; I++)
+    {
+        EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(*I, GPUCapability::HasNaNoo),
+                  false);
     }
 }

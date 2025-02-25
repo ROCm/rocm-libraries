@@ -13,6 +13,7 @@ namespace rocRoller
         struct AssertOp;
         struct Deallocate;
         struct DoWhileOp;
+        struct Exchange;
         struct ForLoopOp;
         struct Kernel;
         struct LoadLDSTile;
@@ -43,6 +44,7 @@ namespace rocRoller
                                        AssertOp,
                                        Deallocate,
                                        DoWhileOp,
+                                       Exchange,
                                        ForLoopOp,
                                        Kernel,
                                        LoadLDSTile,

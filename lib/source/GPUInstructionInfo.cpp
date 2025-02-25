@@ -165,6 +165,11 @@ namespace rocRoller
         return opCode.rfind("v_writelane", 0) == 0;
     }
 
+    bool GPUInstructionInfo::isVPermlane(std::string const& opCode)
+    {
+        return opCode.rfind("v_permlane", 0) == 0;
+    }
+
     bool GPUInstructionInfo::isVDivScale(std::string const& opCode)
     {
         return opCode.rfind("v_div_scale", 0) == 0;

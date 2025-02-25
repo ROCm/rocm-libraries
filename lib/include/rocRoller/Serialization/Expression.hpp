@@ -113,6 +113,29 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::ScaledMatrixMultiply, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, Expression::ScaledMatrixMultiply& exp, Context& ctx)
+            {
+                iot::mapRequired(io, "matA", exp.matA, ctx);
+                iot::mapRequired(io, "matB", exp.matB, ctx);
+                iot::mapRequired(io, "matC", exp.matC, ctx);
+                iot::mapRequired(io, "scaleA", exp.scaleA, ctx);
+                iot::mapRequired(io, "scaleB", exp.scaleB, ctx);
+            }
+
+            static void mapping(IO& io, Expression::ScaledMatrixMultiply& val)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, val, ctx);
+            }
+        };
+
         template <Expression::CTernary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
         {

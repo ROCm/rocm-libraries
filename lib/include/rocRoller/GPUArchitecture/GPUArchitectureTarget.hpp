@@ -37,6 +37,9 @@ namespace rocRoller
         GFX940,
         GFX941,
         GFX942,
+        GFX950,
+        GFX1010,
+        GFX1011,
         GFX1012,
         GFX1030,
         GFX1200,
@@ -92,6 +95,11 @@ namespace rocRoller
                    || gfx == GPUArchitectureGFX::GFX942;
         }
 
+        constexpr bool isCDNA35GPU() const
+        {
+            return gfx == GPUArchitectureGFX::GFX950;
+        }
+
         constexpr bool isRDNA1GPU() const
         {
             return gfx == GPUArchitectureGFX::GFX1012;
@@ -119,7 +127,7 @@ namespace rocRoller
 
         constexpr bool isCDNAGPU() const
         {
-            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU();
+            return isCDNA1GPU() || isCDNA2GPU() || isCDNA3GPU() || isCDNA35GPU();
         }
 
         constexpr bool isGFX9GPU() const
@@ -173,7 +181,7 @@ namespace rocRoller
         return target.name();
     }
 
-    constexpr std::array<rocRoller::GPUArchitectureTarget, 16> SupportedArchitectures
+    constexpr std::array<rocRoller::GPUArchitectureTarget, 19> SupportedArchitectures
         = {GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.xnack = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX908, {.sramecc = true}},
@@ -185,6 +193,9 @@ namespace rocRoller
            GPUArchitectureTarget{GPUArchitectureGFX::GFX941, {.sramecc = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX942},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX942, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX950},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.sramecc = true}},
+           GPUArchitectureTarget{GPUArchitectureGFX::GFX950, {.xnack = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX1012},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX1012, {.xnack = true}},
            GPUArchitectureTarget{GPUArchitectureGFX::GFX1030},

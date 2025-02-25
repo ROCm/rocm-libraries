@@ -275,6 +275,7 @@ namespace rocRoller
             return dt == DataType::Half || dt == DataType::Halfx2 || dt == DataType::BFloat16
                    || dt == DataType::BFloat16x2 || dt == DataType::FP8 || dt == DataType::BF8
                    || dt == DataType::FP8x4 || dt == DataType::BF8x4 || dt == DataType::Float
+                   || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
                    || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
                    || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
                    || dt == DataType::Bool32 || dt == DataType::Bool64;
@@ -291,7 +292,7 @@ namespace rocRoller
             // of dt doesn't work because target type of convert is not consecutively
             // laid in DataType enum.)
             if(!convertibleTo(dt))
-                Throw<FatalError>("Unsupported datatype conversion: ", ShowValue(dt));
+                Throw<FatalError>("Expression - Unsupported datatype conversion: ", ShowValue(dt));
 
             return std::make_shared<Expression>(Convert{{.arg{a}}, dt});
         }
@@ -379,6 +380,7 @@ namespace rocRoller
         EXPRESSION_INFO(Add);
         EXPRESSION_INFO(Subtract);
         EXPRESSION_INFO(MatrixMultiply);
+        EXPRESSION_INFO(ScaledMatrixMultiply);
         EXPRESSION_INFO(Multiply);
         EXPRESSION_INFO(MultiplyAdd);
         EXPRESSION_INFO(MultiplyHigh);
@@ -510,6 +512,16 @@ namespace rocRoller
                 return {EvaluationTime::KernelExecute};
             }
 
+            EvaluationTimes operator()(ScaledMatrixMultiply const& expr) const
+            {
+                auto matA   = call(expr.matA);
+                auto matB   = call(expr.matB);
+                auto matC   = call(expr.matC);
+                auto scaleA = call(expr.scaleA);
+                auto scaleB = call(expr.scaleB);
+
+                return matA & matB & matC & scaleA & scaleB & ScaledMatrixMultiply::EvalTimes;
+            }
             template <CTernary Expr>
             EvaluationTimes operator()(Expr const& expr) const
             {

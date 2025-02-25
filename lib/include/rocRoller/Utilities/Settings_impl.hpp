@@ -8,6 +8,7 @@
 
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
@@ -42,8 +43,8 @@ namespace rocRoller
         return getInstance()->get(opt);
     }
 
-    template <typename T>
-    inline T SettingsOption<T>::getValue() const
+    template <typename T, bool LazyValue>
+    inline T SettingsOption<T, LazyValue>::getValue() const
     {
         const char* var = std::getenv(name.c_str());
 
@@ -56,12 +57,18 @@ namespace rocRoller
         // Default to defaultValue
         else
         {
-            return defaultValue;
+            if constexpr(LazyValue)
+            {
+                return defaultValue();
+            }
+            else
+            {
+                return defaultValue;
+            }
         }
     }
 
     template <typename Option>
-
     inline void Settings::set(Option const& opt, char const* val)
     {
         set(opt, std::string(val));
@@ -77,8 +84,13 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>("Trying to set " + opt.name
-                              + " with incorrect type. Not setting value.");
+            Throw<FatalError>("Trying to set ",
+                              opt.name,
+                              " with incorrect type ",
+                              typeName<T>(),
+                              "(value: ",
+                              val,
+                              "). Not setting value.");
         }
     }
 
@@ -112,6 +124,27 @@ namespace rocRoller
     }
 
     inline std::ostream& operator<<(std::ostream& os, LogLevel const& input)
+    {
+        return os << toString(input);
+    }
+
+    inline std::string toString(F8Mode f8Mode)
+    {
+
+        switch(f8Mode)
+        {
+        case F8Mode::NaNoo:
+            return "NaNoo";
+        case F8Mode::OCP:
+            return "OCP";
+        case F8Mode::Count:
+            return "Count";
+        }
+
+        Throw<FatalError>("Unexpected F8Mode.");
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const F8Mode& input)
     {
         return os << toString(input);
     }
@@ -162,19 +195,19 @@ namespace rocRoller
         return m_instances;
     }
 
-    template <typename T>
-    inline SettingsOption<T>::SettingsOption(std::string name,
-                                             std::string description,
-                                             T           defaultValue,
-                                             int         bit)
+    template <typename T, bool LazyValue>
+    inline SettingsOption<T, LazyValue>::SettingsOption(std::string      name,
+                                                        std::string      description,
+                                                        DefaultValueType defaultValue,
+                                                        int              bit)
         : SettingsOptionBase(std::move(name), std::move(description))
         , defaultValue(std::move(defaultValue))
         , bit(bit)
     {
     }
 
-    template <typename T>
-    inline T SettingsOption<T>::getTypeValue(std::string const& var) const
+    template <typename T, bool LazyValue>
+    inline T SettingsOption<T, LazyValue>::getTypeValue(std::string const& var) const
     {
         if constexpr(CCountedEnum<T>)
         {
@@ -197,8 +230,8 @@ namespace rocRoller
         }
     }
 
-    template <typename T>
-    inline std::optional<std::any> SettingsOption<T>::getFromEnv() const
+    template <typename T, bool LazyValue>
+    inline std::optional<std::any> SettingsOption<T, LazyValue>::getFromEnv() const
     {
         const char* var = std::getenv(name.c_str());
 
@@ -213,20 +246,27 @@ namespace rocRoller
         }
     }
 
-    template <typename T>
-    inline std::any SettingsOption<T>::getDefault() const
+    template <typename T, bool LazyValue>
+    inline std::any SettingsOption<T, LazyValue>::getDefault() const
     {
-        return defaultValue;
+        if constexpr(LazyValue)
+        {
+            return defaultValue();
+        }
+        else
+        {
+            return defaultValue;
+        }
     }
 
-    template <typename T>
-    inline int SettingsOption<T>::getBitIndex() const
+    template <typename T, bool LazyValue>
+    inline int SettingsOption<T, LazyValue>::getBitIndex() const
     {
         return bit;
     }
 
-    template <typename T>
-    inline std::string SettingsOption<T>::help() const
+    template <typename T, bool LazyValue>
+    inline std::string SettingsOption<T, LazyValue>::help() const
     {
         std::string output = SettingsOptionBase::help() + " ( default: ";
         if constexpr(std::is_same<decltype(this->defaultValue), std::bitset<32>>::value)
@@ -246,7 +286,14 @@ namespace rocRoller
         }
         else
         {
-            output += toString(this->defaultValue);
+            if constexpr(LazyValue)
+            {
+                output += toString(this->defaultValue());
+            }
+            else
+            {
+                output += toString(this->defaultValue);
+            }
         }
         if(this->bit >= 0)
         {

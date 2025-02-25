@@ -101,13 +101,16 @@ namespace SubDwordExpressionTest
                                  DataType::FP8x4,
                                  DataType::BF8x4,
                                  DataType::Int8x4,
-                                 DataType::UInt8x4);
+                                 DataType::UInt8x4,
+                                 DataType::FP6x16,
+                                 DataType::BF6x16,
+                                 DataType::FP4x8);
         SECTION("for each packed datatype")
         {
             auto       info      = DataTypeInfo::Get(dataType);
-            auto const bitOffset = 16;
+            auto const index     = (info.packing > 2) ? 2 : 1;
             auto const bitWidth  = info.elementBits / info.packing;
-            auto const index     = bitOffset / bitWidth;
+            auto const bitOffset = index * bitWidth;
 
             std::string codeForA, codeForB;
 

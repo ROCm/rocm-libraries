@@ -49,6 +49,32 @@ namespace rocRoller
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
+            Expression::ExpressionPtr operator()(Expression::ScaledMatrixMultiply const& expr) const
+            {
+                Expression::ScaledMatrixMultiply cpy = expr;
+                if(expr.matA)
+                {
+                    cpy.matA = call(expr.matA);
+                }
+                if(expr.matB)
+                {
+                    cpy.matB = call(expr.matB);
+                }
+                if(expr.matC)
+                {
+                    cpy.matC = call(expr.matC);
+                }
+                if(expr.scaleA)
+                {
+                    cpy.scaleA = call(expr.scaleA);
+                }
+                if(expr.scaleB)
+                {
+                    cpy.scaleB = call(expr.scaleB);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
+            }
+
             template <Expression::CTernary Expr>
             Expression::ExpressionPtr operator()(Expr const& expr) const
             {
@@ -157,6 +183,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(ComputeIndex);
             MAKE_OPERATION_VISITOR(Deallocate);
             MAKE_OPERATION_VISITOR(DoWhileOp);
+            MAKE_OPERATION_VISITOR(Exchange);
             MAKE_OPERATION_VISITOR(Kernel);
             MAKE_OPERATION_VISITOR(LoadLDSTile);
             MAKE_OPERATION_VISITOR(LoadLinear);

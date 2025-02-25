@@ -1,6 +1,9 @@
+
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -43,26 +46,33 @@ namespace rocRoller
         {
             // Populate data structures with information about multiplies
             // and loads
-            for(const auto node : graph.control.depthFirstVisit(*graph.control.roots().begin()))
-            {
-                if(isOperation<Multiply>(graph.control.getElement(node)))
-                {
-                    auto [macATag, macA] = graph.getDimension<MacroTile>(
-                        node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-                    auto [macBTag, macB] = graph.getDimension<MacroTile>(
-                        node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+            auto root = graph.control.roots().only();
+            AssertFatal(root.has_value());
 
-                    m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS});
-                    m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
-                }
-                else if(isOperation<LoadTiled>(graph.control.getElement(node))
-                        || isOperation<LoadLDSTile>(graph.control.getElement(node)))
-                {
-                    auto coord = graph.mapper.get<MacroTile>(node);
-                    m_loadMap[coord].insert(node);
-                    m_storageDataType[graph.mapper.get<MacroTile>(node)]
-                        = getDataType(graph.control.getNode(node));
-                }
+            auto allNodes = graph.control.depthFirstVisit(*root).filter(
+                graph.control.isElemType<Operation>());
+
+            for(const auto node : allNodes)
+            {
+                auto visitor = rocRoller::overloaded{
+                    [&](Multiply op) {
+                        auto [macATag, macA] = graph.getDimension<MacroTile>(
+                            node, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                        m_multiplyArgs[macATag].push_back({node, NaryArgument::LHS});
+
+                        auto [macBTag, macB] = graph.getDimension<MacroTile>(
+                            node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+                        m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
+                    },
+                    [&](CIsAnyOf<LoadTiled, LoadLDSTile> auto op) {
+                        auto coord = graph.mapper.get<MacroTile>(node);
+                        m_loadMap[coord].insert(node);
+                        m_storageDataType[graph.mapper.get<MacroTile>(node)]
+                            = getDataType(graph.control.getNode(node));
+                    },
+                    [&](auto op) {}};
+
+                std::visit(visitor, graph.control.getNode(node));
             }
 
             for(auto& [storage, multiplies] : m_multiplyArgs)

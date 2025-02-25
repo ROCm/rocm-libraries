@@ -16,6 +16,7 @@ namespace rocRoller
          * | 94x  | v_cmpx_*  | v_readfirstlane_* | 4    |
          * | 94x  | v_cmpx_*  | v_writelane_*     | 4    |
          * | 94x  | v_cmpx_*  | v_*               | 0    |
+         * | 950  | v_cmpx_*  | v_permlane*       | 4    |
          *
          */
             void observeHazard(Instruction const& inst) override;

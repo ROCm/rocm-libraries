@@ -463,6 +463,12 @@ namespace rocRoller
 
             struct ExpressionHasNoneDTVisitor
             {
+                bool operator()(ScaledMatrixMultiply const& expr) const
+                {
+                    return call(expr.matA) || call(expr.matB) || call(expr.matC)
+                           || call(expr.scaleA) || call(expr.scaleB);
+                }
+
                 template <CTernary Expr>
                 bool operator()(Expr const& expr) const
                 {
@@ -776,19 +782,29 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
-                auto [waveA_tag, waveA] = m_graph->getDimension<WaveTile>(
-                    tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
-                auto [waveBTag, waveB] = m_graph->getDimension<WaveTile>(
-                    tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
+                auto getWaveTile = [&](NaryArgument arg) {
+                    auto [waveTag, wave] = m_graph->getDimension<WaveTile>(
+                        tag, Connections::typeArgument<WaveTile>(arg));
+                    auto [macTag, mac] = m_graph->getDimension<MacroTile>(
+                        tag, Connections::typeArgument<MacroTile>(arg));
 
-                auto [macATag, macA] = m_graph->getDimension<MacroTile>(
-                    tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
-                auto [macBTag, macB] = m_graph->getDimension<MacroTile>(
-                    tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+                    wave.vgpr = m_context->registerTagManager()->getRegister(macTag);
 
-                AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
+                    return std::make_shared<WaveTile>(wave);
+                };
 
-                uint numElements = waveA.sizes[0] * waveB.sizes[1];
+                auto waveA = getWaveTile(NaryArgument::LHS);
+                auto waveB = getWaveTile(NaryArgument::RHS);
+
+                AssertFatal(
+                    mult.scaleA == mult.scaleB, ShowValue(mult.scaleA), ShowValue(mult.scaleB));
+                AssertFatal(mult.scaleA == Operations::ScaleMode::None
+                                || mult.scaleA == Operations::ScaleMode::Separate,
+                            ShowValue(mult.scaleA));
+
+                bool scaled = mult.scaleA != Operations::ScaleMode::None;
+
+                uint numElements = waveA->sizes[0] * waveB->sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
                 uint numAGPR     = numElements / wfs;
 
@@ -803,18 +819,30 @@ namespace rocRoller
                     Register::AllocationOptions{.contiguousChunkWidth
                                                 = Register::FULLY_CONTIGUOUS});
 
-                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
-                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
+                auto A = std::make_shared<Expression::Expression>(waveA);
+                auto B = std::make_shared<Expression::Expression>(waveB);
 
-                auto A
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
-                auto B
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
+                Expression::ExpressionPtr expr;
 
-                auto matMul = std::make_shared<Expression::Expression>(
-                    Expression::MatrixMultiply(A, B, D->expression()));
+                if(!scaled)
+                {
+                    // If no scales provided, we use regular matrix multiplication
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::MatrixMultiply(A, B, D->expression()));
+                }
+                else
+                {
+                    auto waveScaleA = getWaveTile(NaryArgument::LHS_SCALE);
+                    auto waveScaleB = getWaveTile(NaryArgument::RHS_SCALE);
 
-                co_yield Expression::generate(D, matMul, m_context);
+                    auto scaleA = std::make_shared<Expression::Expression>(waveScaleA);
+                    auto scaleB = std::make_shared<Expression::Expression>(waveScaleB);
+
+                    expr = std::make_shared<Expression::Expression>(
+                        Expression::ScaledMatrixMultiply(A, B, D->expression(), scaleA, scaleB));
+                }
+
+                co_yield Expression::generate(D, expr, m_context);
             }
 
             Generator<Instruction> operator()(int tag, NOP const&, Transformer coords)
@@ -942,6 +970,131 @@ namespace rocRoller
             {
                 co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture(),
                                                            "Explicit WaitZero operation"));
+            }
+
+            Generator<Instruction> operator()(int tag, Exchange const& exchange, Transformer coords)
+            {
+                auto [waveTileTag, waveTile]   = m_graph->getDimension<WaveTile>(tag);
+                auto [macTileTag, macTile]     = m_graph->getDimension<MacroTile>(tag);
+                auto [vgprIndexTag, vgprIndex] = m_graph->getDimension<VGPRBlockIndex>(tag);
+                auto [simdBlockTag, simdBlock] = m_graph->getDimension<Adhoc>(tag, 0);
+
+                const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
+
+                Expression::ExpressionPtr waveTileExpr, simdBlockExpr, vgprIndexExpr, expectedExpr;
+
+                {
+                    auto [required, path] = findRequiredCoordinates(
+                        waveTileTag, Graph::Direction::Downstream, *m_graph);
+
+                    for(auto r : required)
+                    {
+                        auto expr = std::make_shared<Expression::Expression>(
+                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
+                        coords.setCoordinate(r, expr);
+                    }
+
+                    waveTileExpr = coords.reverse({waveTileTag})[0];
+                }
+
+                {
+                    auto [required, path] = findRequiredCoordinates(
+                        vgprIndexTag, Graph::Direction::Downstream, *m_graph);
+
+                    for(auto r : required)
+                    {
+                        if(r == vgprIndexTag)
+                            continue;
+                        auto expr = std::make_shared<Expression::Expression>(
+                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
+                        coords.setCoordinate(r, expr);
+                    }
+
+                    vgprIndexExpr = coords.reverse({vgprIndexTag})[0];
+                    expectedExpr
+                        = (waveTileExpr / (Expression::literal(waveTileSize) / vgprIndex.size));
+                    AssertFatal(Expression::identical(m_fastArith(vgprIndexExpr),
+                                                      m_fastArith(expectedExpr)),
+                                "Exchange: VGPRIndex must be the slowest running dimension");
+                }
+
+                {
+                    auto [required, path] = findRequiredCoordinates(
+                        simdBlockTag, Graph::Direction::Downstream, *m_graph);
+
+                    for(auto r : required)
+                    {
+                        auto expr = std::make_shared<Expression::Expression>(
+                            Expression::DataFlowTag{r, Register::Type::Vector, DataType::UInt32});
+                        coords.setCoordinate(r, expr);
+                    }
+
+                    simdBlockExpr = coords.reverse({simdBlockTag})[0];
+                    expectedExpr  = waveTileExpr % simdBlock.size;
+                    AssertFatal(Expression::identical(m_fastArith(simdBlockExpr),
+                                                      m_fastArith(expectedExpr)),
+                                "Exchange: SIMDBlock must be the fastest running dimension");
+                }
+
+                const uint wfs     = m_context->kernel()->wavefront_size();
+                const uint numVgpr = waveTileSize / wfs;
+
+                auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
+
+                auto unsegmentedVariableType
+                    = DataTypeInfo::Get(exchange.varType).unsegmentedVariableType();
+
+                if(unsegmentedVariableType)
+                {
+                    auto allocOptions = Register::AllocationOptions::FullyContiguous();
+                    auto temp         = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, exchange.varType, numVgpr, allocOptions);
+                    for(auto index = 0; index < numVgpr; index++)
+                        co_yield generateOp<Expression::BitFieldExtract>(
+                            temp->element({index}),
+                            vgpr,
+                            Expression::BitFieldExtract{
+                                {}, exchange.varType.dataType, index * 8, 8});
+                    vgpr = temp;
+                }
+
+                auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
+                AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag));
+                m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                AssertFatal(vgpr->registerCount() == numVgpr);
+
+                if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
+                {
+                    for(uint32_t i = 0; i < numVgpr; i += 2)
+                    {
+                        co_yield_(Instruction::InoutInstruction(
+                            "v_permlane16_swap_b32",
+                            {vgpr->element({i}), vgpr->element({i + 1})},
+                            {},
+                            ""));
+                    }
+                    for(uint32_t i = 0; i < numVgpr / 2; i++)
+                    {
+                        co_yield_(Instruction::InoutInstruction(
+                            "v_permlane32_swap_b32",
+                            {vgpr->element({i}), vgpr->element({i + 2})},
+                            {},
+                            ""));
+                    }
+                }
+                else if(Expression::identical(vgprIndex.size, Expression::literal(2u)))
+                {
+                    for(uint32_t i = 0; i < numVgpr; i += 2)
+                    {
+                        co_yield_(Instruction::InoutInstruction(
+                            "v_permlane32_swap_b32",
+                            {vgpr->element({i}), vgpr->element({i + 1})},
+                            {},
+                            ""));
+                    }
+                }
+                else
+                    Throw<FatalError>("Exchange for the given vgprIndex size not supported.");
             }
 
             Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG, Transformer coords)

@@ -70,6 +70,21 @@ namespace rocRoller
         return result;
     }
 
+    inline std::vector<GPUArchitectureTarget> GPUArchitectureLibrary::getCDNAISAs()
+    {
+        TIMER(t, "GPUArchitectureLibrary::getCDNAISAs");
+
+        std::vector<GPUArchitectureTarget> result;
+
+        for(auto target : m_gpuArchitectures)
+        {
+            if((target.first).isCDNAGPU())
+                result.push_back(target.first);
+        }
+
+        return result;
+    }
+
     inline std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitectureLibrary::LoadLibrary()
     {
         TIMER(t, "GPUArchitectureLibrary::LoadLibrary");

@@ -266,6 +266,7 @@ namespace rocRoller
         template <typename Op, typename IO, typename Context>
         requires(
             CIsAnyOf<Op,
+                     KernelGraph::ControlGraph::Exchange,
                      KernelGraph::ControlGraph::LoadLinear,
                      KernelGraph::ControlGraph::LoadTiled,
                      KernelGraph::ControlGraph::LoadVGPR,
@@ -273,15 +274,6 @@ namespace rocRoller
                      KernelGraph::ControlGraph::LoadTileDirect2LDS,
                      KernelGraph::ControlGraph::LoadLDSTile>) struct MappingTraits<Op, IO, Context>
         {
-            // If this assertion starts failing, it's likely one of these classes has had a member added.
-            static_assert(
-                CIsAnyOf<
-                    Op,
-                    KernelGraph::ControlGraph::LoadVGPR,
-                    KernelGraph::ControlGraph::LoadSGPR,
-                    KernelGraph::ControlGraph::
-                        LoadTileDirect2LDS> || sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
-
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
             {
@@ -291,13 +283,44 @@ namespace rocRoller
                 {
                     iot::mapRequired(io, "scalar", op.scalar);
                 }
-                if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
+                else if constexpr(std::same_as<Op, KernelGraph::ControlGraph::LoadSGPR>)
                 {
                     //iot::mapRequired(io, "bufOpts", op.bufOpts);
+                }
+                else if constexpr(CIsAnyOf<Op,
+                                           KernelGraph::ControlGraph::LoadTiled,
+                                           KernelGraph::ControlGraph::LoadLDSTile>)
+                {
+                    iot::mapRequired(io, "isTransposedTile", op.isTransposedTile);
+                }
+                else
+                {
+                    // For all Ops other than above, they should have the same memeber (size).
+                    // If this assertion fails, the Op might have new members added.
+                    static_assert(sizeof(Op) == sizeof(KernelGraph::ControlGraph::LoadLinear));
                 }
             }
 
             static void mapping(IO& io, Op& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::Multiply, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::Multiply& op, Context&)
+            {
+                iot::mapRequired(io, "scaleA", op.scaleA);
+                iot::mapRequired(io, "scaleB", op.scaleB);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::Multiply& op)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 
@@ -344,6 +367,10 @@ namespace rocRoller
             {
                 iot::mapRequired(io, "aDims", op.aDims);
                 iot::mapRequired(io, "bDims", op.bDims);
+                iot::mapRequired(io, "scaleModeA", op.scaleModeA);
+                iot::mapRequired(io, "scaleModeB", op.scaleModeB);
+                iot::mapRequired(io, "scaleStridesA", op.scaleStridesA);
+                iot::mapRequired(io, "scaleStridesB", op.scaleStridesB);
             }
 
             static void mapping(IO& io, KernelGraph::ControlGraph::TensorContraction& op)

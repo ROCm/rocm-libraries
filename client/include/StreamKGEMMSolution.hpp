@@ -20,13 +20,13 @@ namespace rocRoller
             public:
                 using DataParallelGEMMSolution::DataParallelGEMMSolution;
 
-                virtual Operations::OperationTag getScratchTag() const override
+                Operations::OperationTag getScratchTag() const override
                 {
                     return m_scratchTag;
                 }
 
             protected:
-                virtual CommandPtr makeCommand(SolutionParameters const& solutionParams) override
+                CommandPtr makeCommand(SolutionParameters const& solutionParams) override
                 {
                     auto command = DataParallelGEMMSolution::makeCommand(solutionParams);
 

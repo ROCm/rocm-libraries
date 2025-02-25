@@ -14,7 +14,7 @@ namespace rocRoller
             T_Load_Linear() = delete;
             explicit T_Load_Linear(OperationTag tensor);
 
-            OperationTag getTensorTag() const;
+            OperationTag getSrcTag() const;
             std::string  toString() const;
 
             bool operator==(T_Load_Linear const& rhs) const;
@@ -24,6 +24,7 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
 
             OperationTag m_tensorTag;
+            OperationTag m_srcTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Linear const& val);
@@ -34,7 +35,7 @@ namespace rocRoller
             T_Load_Scalar() = delete;
             explicit T_Load_Scalar(OperationTag scalar);
 
-            OperationTag getScalarTag() const;
+            OperationTag getSrcTag() const;
             std::string  toString() const;
 
             bool operator==(T_Load_Scalar const& rhs) const;
@@ -44,6 +45,7 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
 
             OperationTag m_scalarTag;
+            OperationTag m_srcTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Scalar const& val);
@@ -54,7 +56,7 @@ namespace rocRoller
             T_Load_Tiled() = delete;
             explicit T_Load_Tiled(OperationTag tensor);
 
-            OperationTag getTensorTag() const;
+            OperationTag getSrcTag() const;
             std::string  toString() const;
 
             bool operator==(T_Load_Tiled const& rhs) const;
@@ -64,6 +66,7 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
 
             OperationTag m_tensorTag;
+            OperationTag m_srcTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val);
@@ -78,14 +81,14 @@ namespace rocRoller
             T_Store_Linear(OperationTag source, OperationTag tensor);
 
             OperationTag getSrcTag() const;
-            OperationTag getTensorTag() const;
+            OperationTag getDstTag() const;
             std::string  toString() const;
 
             bool operator==(T_Store_Linear const& rhs) const;
 
         private:
             OperationTag m_srcTag;
-            OperationTag m_tensorTag;
+            OperationTag m_dstTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Store_Linear const& val);
@@ -97,7 +100,7 @@ namespace rocRoller
             T_Store_Tiled(OperationTag source, OperationTag tensor);
 
             OperationTag getSrcTag() const;
-            OperationTag getTensorTag() const;
+            OperationTag getDstTag() const;
             std::string  toString() const;
 
             bool operator==(T_Store_Tiled const& rhs) const;
@@ -107,11 +110,9 @@ namespace rocRoller
             friend struct rocRoller::Serialization::MappingTraits;
 
             OperationTag m_srcTag;
-            OperationTag m_tensorTag;
+            OperationTag m_dstTag;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Store_Tiled const& val);
     }
 }
-
-#include <rocRoller/Operations/T_LoadStore_impl.hpp>

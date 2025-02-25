@@ -454,7 +454,7 @@ TEST_CASE("lowerPRNG transformation works", "[expression][expression-transformat
 
     auto expr = std::make_shared<Expression::Expression>(Expression::RandomNumber{seedExpr});
 
-    CHECK_THAT(lowerPRNG(expr),
+    CHECK_THAT(lowerPRNG(expr, context.get()),
                IdenticalTo(
                    conditional((logicalShiftR(seedExpr, literal(31u)) & literal(1u)) == literal(1u),
                                literal(197u) ^ (seedExpr << literal(1u)),

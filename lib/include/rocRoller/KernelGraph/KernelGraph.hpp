@@ -93,8 +93,8 @@ namespace rocRoller
 
         /**
          * Generate assembly from a KernelGraph.
-     *
-     * @ingroup KernelGraph
+         *
+         * @ingroup KernelGraph
          */
         Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
 

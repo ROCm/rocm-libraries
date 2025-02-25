@@ -487,7 +487,7 @@ namespace MemoryInstructionsTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, supportedISATuples());
+    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, CDNAISATuples());
 
     struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
@@ -1409,178 +1409,242 @@ namespace MemoryInstructionsTest
                                                 ::testing::Values(rocRoller::DataType::FP8x4,
                                                                   rocRoller::DataType::BF8x4)));
 
-    struct BufferLoad2LDSTest : public GPUContextFixtureParam<int>
+    class BufferLoad2LDSTest : public GPUContextFixtureParam<int>
     {
-        int numBytesParam()
-        {
-            return std::get<1>(GetParam());
-        }
+    };
 
-        void genbufferLoad2LDSTest()
-        {
-            int N = numBytesParam();
+    class GPU_BufferLoad2LDSTest : public GPUContextFixtureParam<int>
+    {
+    };
 
-            auto k = m_context->kernel();
+    void genbufferLoad2LDSTest(rocRoller::ContextPtr m_context, int N)
+    {
+        auto k = m_context->kernel();
 
-            k->setKernelName("bufferLoad2LDSTest");
-            k->setKernelDimensions(1);
+        k->setKernelName("bufferLoad2LDSTest");
+        k->setKernelDimensions(1);
 
-            k->addArgument({"result",
-                            {DataType::Int32, PointerType::PointerGlobal},
-                            DataDirection::WriteOnly});
-            k->addArgument(
-                {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+        k->addArgument(
+            {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
 
-            m_context->schedule(k->preamble());
-            m_context->schedule(k->prolog());
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
 
-            auto kb = [&]() -> Generator<Instruction> {
-                Register::ValuePtr s_result, s_a;
-                co_yield m_context->argLoader()->getValue("result", s_result);
-                co_yield m_context->argLoader()->getValue("a", s_a);
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
 
-                auto vgprSerial = m_context->kernel()->workitemIndex()[0];
+            auto vgprSerial = m_context->kernel()->workitemIndex()[0];
 
-                int size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
+            int size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
 
-                auto v_ptr
-                    = Register::Value::Placeholder(m_context,
-                                                   Register::Type::Vector,
-                                                   DataType::Int32,
-                                                   size,
-                                                   Register::AllocationOptions::FullyContiguous());
+            auto v_ptr
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               DataType::Int32,
+                                               size,
+                                               Register::AllocationOptions::FullyContiguous());
 
-                auto v_result
-                    = Register::Value::Placeholder(m_context,
-                                                   Register::Type::Vector,
-                                                   {DataType::Int32, PointerType::PointerGlobal},
-                                                   1);
+            auto v_result
+                = Register::Value::Placeholder(m_context,
+                                               Register::Type::Vector,
+                                               {DataType::Int32, PointerType::PointerGlobal},
+                                               1);
 
-                auto s_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Scalar, DataType::Int32, 1);
+            auto s_offset = Register::Value::Placeholder(
+                m_context, Register::Type::Scalar, DataType::Int32, 1);
 
-                auto v_lds = Register::Value::AllocateLDS(m_context, DataType::Int32, N);
+            auto v_lds = Register::Value::AllocateLDS(m_context, DataType::Int32, N);
 
-                co_yield Instruction::Comment("Allocate v_ptr");
-                co_yield v_ptr->allocate();
+            co_yield Instruction::Comment("Allocate v_ptr");
+            co_yield v_ptr->allocate();
 
-                co_yield Instruction::Comment("Copy s_result to v_result");
-                co_yield m_context->copier()->copy(v_result, s_result);
+            co_yield Instruction::Comment("Copy s_result to v_result");
+            co_yield m_context->copier()->copy(v_result, s_result);
 
-                co_yield Instruction::Comment("Copy lds offset to spgr");
-                co_yield m_context->copier()->copy(
-                    s_offset, Register::Value::Literal(v_lds->getLDSAllocation()->offset()));
+            co_yield Instruction::Comment("Copy lds offset to spgr");
+            co_yield m_context->copier()->copy(
+                s_offset, Register::Value::Literal(v_lds->getLDSAllocation()->offset()));
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield Instruction::Comment("setup bufDesc");
-                co_yield bufDesc->setup();
-                co_yield Instruction::Comment("Set base pointer");
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield Instruction::Comment("Set buffer size");
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield Instruction::Comment("Set buffer option");
-                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+            auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+            co_yield Instruction::Comment("setup bufDesc");
+            co_yield bufDesc->setup();
+            co_yield Instruction::Comment("Set base pointer");
+            co_yield bufDesc->setBasePointer(s_a);
+            co_yield Instruction::Comment("Set buffer size");
+            co_yield bufDesc->setSize(Register::Value::Literal(N));
+            co_yield Instruction::Comment("Set buffer option");
+            co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
 
-                auto bufInstOpts = rocRoller::BufferInstructionOptions();
-                bufInstOpts.lds  = true;
+            auto bufInstOpts = rocRoller::BufferInstructionOptions();
+            bufInstOpts.lds  = true;
 
-                auto numBytes = (N < 4) ? N : 4;
+            auto      remain       = N;
+            auto      bytesPerMove = 0;
+            const int wordSize     = 4;
 
-                auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
-                auto m0                 = m_context->getM0();
+            auto wordgroupSizeTotal = product(m_context->kernel()->workgroupSize());
+            auto m0                 = m_context->getM0();
 
-                for(int i = 0; i < N; i += numBytes)
+            do
+            {
+                if(bytesPerMove == 0)
                 {
-                    if(i == 0)
+                    co_yield generate(m0, s_offset->expression(), m_context);
+                }
+                else
+                {
+                    // set LDS write base address
+                    co_yield generate(m0,
+                                      m0->expression()
+                                          + Expression::literal(bytesPerMove * wordgroupSizeTotal),
+                                      m_context);
+                    // set global read address
+                    co_yield generate(vgprSerial,
+                                      vgprSerial->expression() + Expression::literal(bytesPerMove),
+                                      m_context);
+                }
+
+                auto maxWidth = (m_context->targetArchitecture().HasCapability(
+                                    GPUCapability::HasWiderDirectToLds))
+                                    ? 4
+                                    : 1;
+                if(remain <= maxWidth * wordSize)
+                {
+                    if(remain == 1 || remain == 2 || remain == 4 || remain == 12 || remain == 16)
                     {
-                        co_yield generate(m0, s_offset->expression(), m_context);
+                        bytesPerMove = remain;
                     }
                     else
                     {
-                        // set LDS write base address
-                        co_yield generate(m0,
-                                          m0->expression()
-                                              + Expression::literal(numBytes * wordgroupSizeTotal),
-                                          m_context);
-                        // set global read address
-                        co_yield generate(vgprSerial,
-                                          vgprSerial->expression() + Expression::literal(numBytes),
-                                          m_context);
+                        bytesPerMove = wordSize;
                     }
-                    co_yield m_context->mem()->barrier();
-                    co_yield m_context->mem()->bufferLoad2LDS(
-                        vgprSerial, bufDesc, bufInstOpts, numBytes);
                 }
-
+                else
+                {
+                    bytesPerMove = maxWidth * wordSize;
+                }
                 co_yield m_context->mem()->barrier();
-                co_yield m_context->mem()->loadLocal(v_ptr, v_lds, 0, N);
+                co_yield m_context->mem()->bufferLoad2LDS(
+                    vgprSerial, bufDesc, bufInstOpts, bytesPerMove);
+                remain -= bytesPerMove;
+            } while(remain > 0);
 
-                co_yield m_context->mem()->storeGlobal(v_result, v_ptr, 0, N);
-            };
+            co_yield m_context->mem()->barrier();
+            co_yield m_context->mem()->loadLocal(v_ptr, v_lds, 0, N);
 
-            setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
+            co_yield m_context->mem()->storeGlobal(v_result, v_ptr, 0, N);
+        };
 
-            m_context->schedule(kb());
-            m_context->schedule(k->postamble());
-            m_context->schedule(k->amdgpu_metadata());
-        }
-    };
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
 
-    TEST_P(BufferLoad2LDSTest, Basic)
+    void chechkDwordWidth(rocRoller::ContextPtr m_context, int numBytes)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
-        int N = numBytesParam();
+        std::string generatedCode = m_context->instructions()->toString();
 
-        if(N % 4 == 3)
+        if(numBytes == 1)
         {
-            EXPECT_THROW(genbufferLoad2LDSTest(), FatalError);
-            GTEST_SKIP();
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte"), 1);
+        }
+        else if(numBytes == 2)
+        {
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ushort"), 1);
         }
         else
         {
-            genbufferLoad2LDSTest();
-        }
+            const int wordSize = 4;
+            AssertFatal(numBytes % wordSize == 0);
+            auto numWords = numBytes / wordSize;
 
-        if(!isLocalDevice())
-        {
-
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-        else
-        {
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
-
-            std::vector<unsigned char> a(N);
-            for(int i = 0; i < N; i++)
-                a[i] = i + 10;
-
-            auto d_a      = make_shared_device(a);
-            auto d_result = make_shared_device<unsigned char>(N);
-
-            KernelArguments kargs;
-            kargs.append<void*>("result", d_result.get());
-            kargs.append<void*>("a", d_a.get());
-            KernelInvocation invocation;
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            std::vector<unsigned char> result(N);
-            ASSERT_THAT(
-                hipMemcpy(
-                    result.data(), d_result.get(), sizeof(unsigned char) * (N), hipMemcpyDefault),
-                HasHipSuccess(0));
-
-            for(int i = 0; i < N; i++)
+            auto numx1 = numWords;
+            int  numx3 = 0, numx4 = 0;
+            if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
             {
-                EXPECT_EQ(result[i], a[i]);
+                const int maxWidth = 4;
+                numx4              = numWords / maxWidth;
+                if(numWords % maxWidth == 3)
+                {
+                    numx3 = 1;
+                    numx1 = 0;
+                }
+                else
+                {
+                    numx1 = numWords % maxWidth;
+                }
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx3 "), numx3);
+                EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4 "), numx4);
             }
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), numx1);
         }
     }
+
+    void exeBufferLoad2LDS(rocRoller::ContextPtr m_context, int N)
+    {
+        genbufferLoad2LDSTest(m_context, N);
+        chechkDwordWidth(m_context, N);
+
+        std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+            = m_context->instructions()->getExecutableKernel();
+
+        std::vector<unsigned char> a(N);
+        for(int i = 0; i < N; i++)
+            a[i] = i + 10;
+
+        auto d_a      = make_shared_device(a);
+        auto d_result = make_shared_device<unsigned char>(N);
+
+        KernelArguments kargs;
+        kargs.append<void*>("result", d_result.get());
+        kargs.append<void*>("a", d_a.get());
+        KernelInvocation invocation;
+
+        executableKernel->executeKernel(kargs, invocation);
+
+        std::vector<unsigned char> result(N);
+        ASSERT_THAT(
+            hipMemcpy(result.data(), d_result.get(), sizeof(unsigned char) * (N), hipMemcpyDefault),
+            HasHipSuccess(0));
+
+        for(int i = 0; i < N; i++)
+        {
+            EXPECT_EQ(result[i], a[i]);
+        }
+    }
+
+    TEST_P(BufferLoad2LDSTest, CodeGen)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
+        int N = std::get<1>(GetParam());
+        genbufferLoad2LDSTest(m_context, N);
+        std::vector<char> assembledKernel = m_context->instructions()->assemble();
+        EXPECT_GT(assembledKernel.size(), 0);
+        chechkDwordWidth(m_context, N);
+    }
+
+    TEST_P(GPU_BufferLoad2LDSTest, Execute)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
+        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
+        int N = std::get<1>(GetParam());
+        exeBufferLoad2LDS(m_context, N);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        GPU_BufferLoad2LDSTest,
+        GPU_BufferLoad2LDSTest,
+        ::testing::Combine(currentGPUISA(),
+                           ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44, 32, 64, 128)));
 
     INSTANTIATE_TEST_SUITE_P(
         BufferLoad2LDSTest,
         BufferLoad2LDSTest,
-        ::testing::Combine(currentGPUISA(), ::testing::Values(1, 2, 4, 8, 12, 16, 32, 64, 128)));
+        ::testing::Combine(CDNAISAValues(),
+                           ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44, 32, 64, 128)));
 }

@@ -538,7 +538,13 @@ namespace rocRoller
                 }
 
                 // Create new operations and update old operation
-                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType));
+                bool isTransposedTile = false;
+                if(isLoad)
+                {
+                    auto loadTile    = k.control.get<LoadTiled>(opTag).value();
+                    isTransposedTile = loadTile.isTransposedTile;
+                }
+                auto loadLDSOp  = k.control.addElement(LoadLDSTile(varType, isTransposedTile));
                 auto storeLDSOp = k.control.addElement(StoreLDSTile(varType.dataType));
 
                 // Update tile

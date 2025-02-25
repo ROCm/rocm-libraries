@@ -27,6 +27,47 @@ namespace rocRoller
 
         struct ExpressionIdenticalVisitor
         {
+            bool operator()(ScaledMatrixMultiply const& a, ScaledMatrixMultiply const& b)
+            {
+                bool matA   = false;
+                bool matB   = false;
+                bool matC   = false;
+                bool scaleA = false;
+                bool scaleB = false;
+
+                matA = call(a.matA, b.matA);
+                if(a.matA == nullptr && b.matA == nullptr)
+                {
+                    matA = true;
+                }
+
+                matB = call(a.matB, b.matB);
+                if(a.matB == nullptr && b.matB == nullptr)
+                {
+                    matB = true;
+                }
+
+                matC = call(a.matC, b.matC);
+                if(a.matC == nullptr && b.matC == nullptr)
+                {
+                    matC = true;
+                }
+
+                scaleA = call(a.scaleA, b.scaleA);
+                if(a.scaleA == nullptr && b.scaleA == nullptr)
+                {
+                    scaleA = true;
+                }
+
+                scaleB = call(a.scaleB, b.scaleB);
+                if(a.scaleB == nullptr && b.scaleB == nullptr)
+                {
+                    scaleB = true;
+                }
+
+                return matA && matB && matC && scaleA && scaleB;
+            }
+
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
@@ -174,6 +215,47 @@ namespace rocRoller
             ExpressionEquivalentVisitor(AlgebraicProperties properties)
                 : m_properties(properties)
             {
+            }
+
+            bool operator()(ScaledMatrixMultiply const& a, ScaledMatrixMultiply const& b)
+            {
+                bool matA   = false;
+                bool matB   = false;
+                bool matC   = false;
+                bool scaleA = false;
+                bool scaleB = false;
+
+                matA = call(a.matA, b.matA);
+                if(a.matA == nullptr && b.matA == nullptr)
+                {
+                    matA = true;
+                }
+
+                matB = call(a.matB, b.matB);
+                if(a.matB == nullptr && b.matB == nullptr)
+                {
+                    matB = true;
+                }
+
+                matC = call(a.matC, b.matC);
+                if(a.matC == nullptr && b.matC == nullptr)
+                {
+                    matC = true;
+                }
+
+                scaleA = call(a.scaleA, b.scaleA);
+                if(a.scaleA == nullptr && b.scaleA == nullptr)
+                {
+                    scaleA = true;
+                }
+
+                scaleB = call(a.scaleB, b.scaleB);
+                if(a.scaleB == nullptr && b.scaleB == nullptr)
+                {
+                    scaleB = true;
+                }
+
+                return matA && matB && matC && scaleA && scaleB;
             }
 
             template <CTernary T>
@@ -531,6 +613,12 @@ namespace rocRoller
                 return Expr::Complexity + call(expr.lhs) + call(expr.r1hs) + call(expr.r2hs);
             }
 
+            int operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return ScaledMatrixMultiply::Complexity + call(expr.matA) + call(expr.matB)
+                       + call(expr.matC) + call(expr.scaleA) + call(expr.scaleB);
+            }
+
             template <CValue Value>
             constexpr int operator()(Value const& expr) const
             {
@@ -587,6 +675,13 @@ namespace rocRoller
             requires(!std::same_as<T, U>) bool operator()(U const& expr)
             {
                 return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
+            }
+
+            template <std::same_as<ScaledMatrixMultiply> U>
+            requires(!std::same_as<T, U>) bool operator()(U const& expr)
+            {
+                return call(expr.matA) || call(expr.matB) || call(expr.matC) || call(expr.scaleA)
+                       || call(expr.scaleB);
             }
 
             template <CValue U>
@@ -683,6 +778,12 @@ namespace rocRoller
             bool operator()(U const& expr) const
             {
                 return identical(expr, subExpr);
+            }
+
+            bool operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return identical(expr, subExpr) || call(expr.matA) || call(expr.matB)
+                       || call(expr.matC) || call(expr.scaleA) || call(expr.scaleB);
             }
 
             bool call(Expression const& expr) const

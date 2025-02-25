@@ -28,7 +28,7 @@ target_include_directories(
 )
 
 add_library(
-    common_test_utilities OBJECT common/Utilities.cpp common/mxDataGen.cpp
+    common_test_utilities OBJECT common/CommonGraphs.cpp common/Utilities.cpp common/mxDataGen.cpp
 )
 
 target_compile_options(
@@ -42,10 +42,12 @@ target_link_libraries(
 
 target_include_directories(common_test_utilities PUBLIC common/)
 
-set(rocRollerTests_SOURCES
+set(
+    rocRollerTests_SOURCES
     unit/ContextFixture.cpp
-    unit/GenericContextFixture.cpp
     unit/GPUContextFixture.cpp
+    unit/GenericContextFixture.cpp
+
     unit/AddStreamKTest.cpp
     unit/AllocatingObserverTest.cpp
     unit/ArgumentLoaderTest.cpp
@@ -59,24 +61,26 @@ set(rocRollerTests_SOURCES
     unit/CommonSubexpressionElimTest.cpp
     unit/ComponentTest.cpp
     unit/ControlGraphTest.cpp
+    unit/ConversionInstructions/Convert_F16_F32.cpp
+    unit/ConversionTest.cpp
     unit/CoordinateGraphTest.cpp
     unit/CopyGeneratorTest.cpp
+    unit/CostTest.cpp
     unit/DataTypesTest.cpp
     unit/DependencyTest.cpp
     unit/ErrorTest.cpp
+    unit/F6Test.cpp
+    unit/F8Test.cpp
     unit/FastDivisionTest.cpp
-    unit/LowerExponentialTest.cpp
     unit/FastMultiplicationTest.cpp
     unit/FileWritingObserverTest.cpp
+    unit/FP4Test.cpp
+    unit/GEMMFusion.cpp
+    unit/GEMMTest.cpp
+    unit/GeneratorTest.cpp
     unit/GPUArchitectureTest.cpp
     unit/GPUInstructionInfoTest.cpp
-    unit/GEMMTest.cpp
-    unit/GEMMFusion.cpp
-    unit/GeneratorTest.cpp
     unit/HalfPrecisionTest.cpp
-    unit/ConversionTest.cpp
-    unit/F8Test.cpp
-    unit/HazardObserverTest.cpp
     unit/HypergraphTest.cpp
     unit/InstructionTest.cpp
     unit/KernelGraphTest.cpp
@@ -91,29 +95,31 @@ set(rocRollerTests_SOURCES
     unit/LDSTest.cpp
     unit/LDSTileCopyTest.cpp
     unit/LockTest.cpp
-    unit/MemoryInstructionsTest.cpp
+    unit/LowerExponentialTest.cpp
     unit/MatrixMultiplyTest.cpp
+    unit/MemoryInstructionsTest.cpp
     unit/MetaObserverTest.cpp
     unit/MFMAHazardObserverTest.cpp
     unit/MFMAUnitObserverTest.cpp
     unit/MixedArithmeticTest.cpp
+    unit/OperationTagTest.cpp
+    unit/PermLanesTest.cpp
     unit/RandomTest.cpp
     unit/RegisterAllocatorTest.cpp
-    unit/RegisterTest.cpp
     unit/RegisterLivenessObserverTest.cpp
-    unit/CostTest.cpp
+    unit/RegisterTest.cpp
     unit/SchedulerTest.cpp
     unit/ScopeTest.cpp
     unit/SourceMatcherTest.cpp
     unit/SupportedInstructionObserverTest.cpp
     unit/TileTransposeAdd.cpp
     unit/TimerTest.cpp
+    unit/TransposeLoadsTest.cpp
     unit/UtilsTest.cpp
     unit/VariantTest.cpp
     unit/VectorAddBenchmark.cpp
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
-    unit/OperationTagTest.cpp
     unit/StreamTest.cpp
     unit/EnumToStringTest.cpp
 )
@@ -175,13 +181,19 @@ set(
     catch/ExpressionToStringTest.cpp
     catch/ExpressionTransformationTest.cpp
     catch/FastArithmeticTest.cpp
+    catch/GlobalLoadStoreTest.cpp
+    catch/HazardObserverTest.cpp
     catch/IdentifyParallelDimensionsTest.cpp
     catch/KernelArgumentsTest.cpp
     catch/KernelGraphConstraintsTest.cpp
     catch/KernelGraphRemoveDuplicatesTest.cpp
     catch/KernelGraphSimplifyTest.cpp
     catch/KernelGraphUtilsTest.cpp
+    catch/LargerLDSTest.cpp
+    catch/MultipleLDSAllocationTest.cpp
+    catch/mxDataGeneratorTest.cpp
     catch/RandomNumberExpressionTest.cpp
+    catch/RandomNumberGenerationTest.cpp
     catch/ScalarExpressionTest.cpp
     catch/SettingsTest.cpp
     catch/SubDwordExpressionTest.cpp
@@ -189,9 +201,6 @@ set(
     catch/TestContextTest.cpp
     catch/UnrollLoopsTest.cpp
     catch/UtilsTest.cpp
-    catch/RandomNumberGenerationTest.cpp
-    catch/mxDataGeneratorTest.cpp
-    catch/GlobalLoadStoreTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

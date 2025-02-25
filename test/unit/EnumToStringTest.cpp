@@ -231,9 +231,11 @@ TEST(EnumToStringTest, ALL)
         {Operations::RandomNumberGenerator::SeedMode::PerThread, "PerThread"},
     });
 
-    verify<Operations::BlockScale::PointerMode>({
-        {Operations::BlockScale::PointerMode::Separate, "Separate"},
-        {Operations::BlockScale::PointerMode::Inline, "Inline"},
+    verify<Operations::ScaleMode>({
+        {Operations::ScaleMode::None, "None"},
+        {Operations::ScaleMode::SingleScale, "SingleScale"},
+        {Operations::ScaleMode::Separate, "Separate"},
+        {Operations::ScaleMode::Inline, "Inline"},
     });
 
     verify<ArgumentType>({
