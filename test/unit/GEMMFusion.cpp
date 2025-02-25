@@ -24,6 +24,7 @@
 #include "TensorDescriptor.hpp"
 #include "Utilities.hpp"
 #include <common/GEMMProblem.hpp>
+#include <common/mxDataGen.hpp>
 
 namespace GEMMDriverTest
 {
@@ -101,7 +102,15 @@ namespace GEMMDriverTest
             std::vector<T> hostB;
             std::vector<T> hostC;
 
-            GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
+            auto dataType = TypeInfo<T>::Var.dataType;
+
+            TensorDescriptor descA(dataType, {size_t(M), size_t(K)}, gemm.transA);
+            TensorDescriptor descB(dataType, {size_t(K), size_t(N)}, gemm.transB);
+            TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
+            TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
+
+            auto seed = 31415u;
+            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
 
             if(setIdentity)
             {
@@ -116,8 +125,7 @@ namespace GEMMDriverTest
             std::shared_ptr<T> deviceC = make_shared_device(hostC);
             std::shared_ptr<T> deviceD = make_shared_device<T>(M * N, 0.0);
 
-            auto command  = std::make_shared<Command>();
-            auto dataType = TypeInfo<T>::Var.dataType;
+            auto command = std::make_shared<Command>();
 
             std::vector<size_t> oneStridesN
                 = gemm.literalStrides ? std::vector<size_t>({(size_t)1}) : std::vector<size_t>({});
@@ -282,11 +290,6 @@ namespace GEMMDriverTest
             commandKernel.setLaunchParameters(launch);
 
             CommandArguments commandArgs = command->createArguments();
-
-            TensorDescriptor descA(dataType, {size_t(M), size_t(K)}, gemm.transA);
-            TensorDescriptor descB(dataType, {size_t(K), size_t(N)}, gemm.transB);
-            TensorDescriptor descC(dataType, {size_t(M), size_t(N)}, "N");
-            TensorDescriptor descRelu(dataType, {size_t(M), size_t(N)}, "N");
 
             setCommandTensorArg(commandArgs, tagTensorA, descA, deviceA.get());
             setCommandTensorArg(commandArgs, tagTensorB, descB, deviceB.get());

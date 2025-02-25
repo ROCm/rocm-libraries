@@ -15,6 +15,7 @@
 #include <rocRoller/Utilities/Version.hpp>
 
 #include <common/Utilities.hpp>
+#include <common/mxDataGen.hpp>
 
 #include "include/DataParallelGEMMSolution.hpp"
 #include "include/GEMMParameters.hpp"
@@ -232,11 +233,25 @@ namespace rocRoller::Client::GEMMClient
 
         // Host Data
         std::cout << "Generating input data..." << std::endl;
-        RandomGenerator random(31415u);
-        auto            h_A = random.vector<A>(problemParams.m * problemParams.k, -1.0, 1.0);
-        auto            h_B = random.vector<B>(problemParams.k * problemParams.n, -1.0, 1.0);
-        std::vector<C>  h_C = random.vector<C>(problemParams.m * problemParams.n, -1.0, 1.0);
-        std::vector<D>  h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
+
+        TensorDescriptor descA(getDataTypeFromString(problemParams.typeA),
+                               {static_cast<unsigned long>(problemParams.m),
+                                static_cast<unsigned long>(problemParams.k)},
+                               problemParams.transA == TransposeType::T ? "T" : "N");
+        TensorDescriptor descB(getDataTypeFromString(problemParams.typeB),
+                               {static_cast<unsigned long>(problemParams.k),
+                                static_cast<unsigned long>(problemParams.n)},
+                               problemParams.transB == TransposeType::T ? "T" : "N");
+        TensorDescriptor descC(getDataTypeFromString(problemParams.typeC),
+                               {static_cast<unsigned long>(problemParams.m),
+                                static_cast<unsigned long>(problemParams.n)},
+                               "N");
+
+        auto           seed = 31415u;
+        auto           h_A  = DGenVector<A>(descA, -1.0, 1.0, seed + 1);
+        auto           h_B  = DGenVector<B>(descB, -1.0, 1.0, seed + 2);
+        std::vector<C> h_C  = DGenVector<C>(descC, -1.0, 1.0, seed + 3);
+        std::vector<D> h_D(problemParams.m * problemParams.n, static_cast<D>(0.0));
 
         auto d_A = make_shared_device(h_A);
         auto d_B = make_shared_device(h_B);

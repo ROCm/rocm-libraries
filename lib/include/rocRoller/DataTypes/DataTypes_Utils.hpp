@@ -6,6 +6,54 @@
 
 namespace rocRoller
 {
+    template <typename T>
+    struct UnsegmentedTypeOf
+    {
+        typedef T type;
+    };
+
+    template <>
+    struct UnsegmentedTypeOf<FP6>
+    {
+        typedef FP6x16 type;
+    };
+
+    template <>
+    struct UnsegmentedTypeOf<BF6>
+    {
+        typedef BF6x16 type;
+    };
+
+    template <>
+    struct UnsegmentedTypeOf<FP4>
+    {
+        typedef FP4x8 type;
+    };
+
+    template <typename T>
+    struct SegmentedTypeOf
+    {
+        typedef T type;
+    };
+
+    template <>
+    struct SegmentedTypeOf<FP6x16>
+    {
+        typedef FP6 type;
+    };
+
+    template <>
+    struct SegmentedTypeOf<BF6x16>
+    {
+        typedef BF6 type;
+    };
+
+    template <>
+    struct SegmentedTypeOf<FP4x8>
+    {
+        typedef FP4 type;
+    };
+
     void                  packFP4x8(uint32_t* out, uint8_t const* data, int n);
     std::vector<uint32_t> packFP4x8(std::vector<uint8_t> const&);
     std::vector<uint8_t>  unpackFP4x8(std::vector<uint32_t> const&);

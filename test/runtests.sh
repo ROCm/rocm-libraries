@@ -18,33 +18,33 @@ F8TESTS=("*GPU_MatrixMultiplyMacroTileF8_16x16x32_NN*"
 "*GPU_MatrixMultiplyABF8_16x16x128*"
 "*GPU_MatrixMultiplyABF8_32x32x64*"
 "*GPU_BasicGEMMFP8_16x16x32_NT*"
-"*GPU_BasicGEMMFP8_16x16x128_NT"
-"*GPU_BasicGEMMBF8_16x16x128_NT"
-"*GPU_BasicGEMMFP8_32x32x64_NT"
-"*GPU_BasicGEMMBF8_32x32x64_NT"
-"*GPU_BasicGEMMFP8_16x16x128_TN"
-"*GPU_BasicGEMMBF8_16x16x128_TN"
-"*GPU_BasicGEMMFP8_32x32x64_TN"
-"*GPU_BasicGEMMBF8_32x32x64_TN"
+"*GPU_BasicGEMMFP8_16x16x128_NT*"
+"*GPU_BasicGEMMBF8_16x16x128_NT*"
+"*GPU_BasicGEMMFP8_32x32x64_NT*"
+"*GPU_BasicGEMMBF8_32x32x64_NT*"
+"*GPU_BasicGEMMFP8_16x16x128_TN*"
+"*GPU_BasicGEMMBF8_16x16x128_TN*"
+"*GPU_BasicGEMMFP8_32x32x64_TN*"
+"*GPU_BasicGEMMBF8_32x32x64_TN*"
 )
 
 F6TESTS=("*GPU_MatrixMultiplyMacroTileF6_16x16x128_TN*"
 "*GPU_MatrixMultiplyMacroTileF6_32x32x64_TN*"
-"*GPU_BasicGEMMFP6_16x16x128_TN"
-"*GPU_BasicGEMMFP6_32x32x64_TN"
-"*GPU_BasicGEMMBF6_16x16x128_TN"
-"*GPU_BasicGEMMBF6_32x32x64_TN"
+"*GPU_BasicGEMMFP6_16x16x128_TN*"
+"*GPU_BasicGEMMFP6_32x32x64_TN*"
+"*GPU_BasicGEMMBF6_16x16x128_TN*"
+"*GPU_BasicGEMMBF6_32x32x64_TN*"
 )
 
 F4TESTS=("*GPU_MatrixMultiplyMacroTileFP4_16x16x128_TN*"
 "*GPU_MatrixMultiplyMacroTileFP4_32x32x64_TN*"
-"*GPU_BasicGEMMFP4_16x16x128_TN"
-"*GPU_BasicGEMMFP4_32x32x64_TN"
+"*GPU_BasicGEMMFP4_16x16x128_TN*"
+"*GPU_BasicGEMMFP4_32x32x64_TN*"
 )
 
-MISCTESTS=("*ScaledMatrixMultiplyTestGPU*"
-"*GPU_BasicScaledGEMM*"
-"*GPU_ScaledGEMMMixed*"
+SCALEDTESTS=("*GPU_ScaledMatrixMultiply*"
+"*GPU_BasicBlockScaledGEMM*"
+"*GPU_BlockScaledGEMMMixed*"
 )
 
 TRANSPOSETESTS=(
@@ -84,7 +84,7 @@ RRPERF_MIXEDTESTS=("gemm_mixed_16x16x128_f8f6f4"
 "gemm_mixed_32x32x64_f8f6f4"
 )
 
-RRPERF_MISCTESTS=()
+RRPERF_SCALEDTESTS=()
 RRPERF_TRANSPOSETESTS=()
 
 RRPERF_TESTS_LIST=()
@@ -100,7 +100,7 @@ while getopts "ct:" opt; do
         ;;
     [?])
         echo >&2 "Usage: $0 [-t option] [-c]
-             option: {f8 | f6 | f4 | mixed | scaled | misc | transpose | small | full}
+             option: {f8 | f6 | f4 | mixed | scaled | transpose | small | full}
              -c: enables client tests.
                  Default: always enabled with small & full, disabled otherwise."
         exit 1
@@ -109,7 +109,7 @@ while getopts "ct:" opt; do
 done
 
 case "${SUITE}" in
-  "f8" | "f6" | "f4" | "mixed" | "scaled" | "misc" | "transpose")
+  "f8" | "f6" | "f4" | "mixed" | "scaled" | "transpose")
       RRTESTS_VARNAME="${SUITE^^}TESTS"
       RRPERF_TESTS_VARNAME="RRPERF_${SUITE^^}TESTS"
       read -r -a RRTESTS_LIST <<<"$(eval echo "\${${RRTESTS_VARNAME}[@]}")"
@@ -126,7 +126,7 @@ case "${SUITE}" in
       for t in "${F8TESTS[@]}"        \
                "${F6TESTS[@]}"        \
                "${F4TESTS[@]}"        \
-               "${MISCTESTS[@]}"      \
+               "${SCALEDTESTS[@]}"      \
                "${MIXEDTESTS[@]}"     \
                "${TRANSPOSETESTS[@]}" ; do
           RRTESTS_LIST+=("$t")
@@ -134,7 +134,7 @@ case "${SUITE}" in
       for t in "${RRPERF_F8TESTS[@]}"        \
                "${RRPERF_F6TESTS[@]}"        \
                "${RRPERF_F4TESTS[@]}"        \
-               "${RRPERF_MISCTESTS[@]}"      \
+               "${RRPERF_SCALEDTESTS[@]}"      \
                "${RRPERF_MIXEDTESTS[@]}"     \
                "${RRPERF_TRANSPOSETESTS[@]}" ; do
           RRPERF_TESTS_LIST+=("$t")
