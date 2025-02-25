@@ -16,6 +16,16 @@ namespace rocRoller
          * | 90a  | v_mfma* read SrcC (16 pass) | v_* write | 19   |
          *
          */
+        class XDLReadSrcC90a : public WaitStateObserver<XDLReadSrcC90a>
+        {
+        public:
+            XDLReadSrcC90a() {}
+            XDLReadSrcC90a(ContextPtr context)
+                : WaitStateObserver<XDLReadSrcC90a>(context){};
+
+            /**
+             * Overriden as we need to target src C only
+             */
             void observeHazard(Instruction const& inst) override;
 
             constexpr static bool required(GPUArchitectureTarget const& target)

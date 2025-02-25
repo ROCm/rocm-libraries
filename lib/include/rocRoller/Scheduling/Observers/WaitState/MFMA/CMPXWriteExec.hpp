@@ -17,6 +17,19 @@ namespace rocRoller
          * | 94x  | v_cmpx* write EXEC | v_mfma*         | 4    |
          *
          */
+        class CMPXWriteExec : public WaitStateObserver<CMPXWriteExec>
+        {
+        public:
+            CMPXWriteExec() {}
+            CMPXWriteExec(ContextPtr context)
+                : WaitStateObserver<CMPXWriteExec>(context)
+            {
+                m_checkACCVGPR = context->targetArchitecture().target().isCDNA1GPU();
+            };
+
+            /**
+             * Overriden as we need to target Exec
+             */
             void observeHazard(Instruction const& inst) override;
 
             constexpr static bool required(GPUArchitectureTarget const& target)

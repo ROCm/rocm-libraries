@@ -1,0 +1,119 @@
+# See here for image contents: https://github.com/devcontainers/images/tree/main/src/base-ubuntu
+
+##
+## Common with other Dockerfiles.
+##
+
+# ubuntu-20.04 = focal
+# ubuntu-22.04 = jammy
+FROM mcr.microsoft.com/devcontainers/base:jammy
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+ARG AMDGPU_URL=https://repo.radeon.com/amdgpu-install/6.2.2/ubuntu/jammy/amdgpu-install_6.2.60202-1_all.deb
+ARG AMDGPU_BUILD_NUMBER=
+ARG AMDGPU_BUILD_URI=
+
+# Propagate the environment variable HTTP_PROXY into the apt config if it's set.
+RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/proxy)
+
+# Add PPA with libstdc++-13-dev for C++20 features (e.g. std::format)
+# We could remove this once libc++-13 or higher is made available through a ROCm/HIP package
+RUN apt-get update && apt-get reinstall -y software-properties-common && add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+RUN apt-get update && apt-get install -y \
+   bc \
+   gdb \
+   libboost-container1.74-dev \
+   libopenblas-dev \
+   libtinfo5 \
+   libncurses-dev \
+   libstdc++-13-dev \
+   m4 \
+   make \
+   nano \
+   netcat \
+   ninja-build \
+   python3-dev \
+   vim \
+   wget \
+   xz-utils
+
+# cmake 3.22.1
+ RUN wget -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh \
+   && sh /tmp/cmake-install.sh --prefix=/usr/local --skip-license \
+   && rm /tmp/cmake-install.sh
+
+# clang-format from ROCm 4.3.1
+ADD docker/install-clang-format /tmp
+RUN /tmp/install-clang-format && rm /tmp/install-clang-format
+ENV PATH="/opt/clang-format/bin:${PATH}"
+
+# ccache
+RUN apt-get update && apt-get install -y \
+      libzstd-dev
+RUN wget -nv https://github.com/ccache/ccache/releases/download/v4.4.2/ccache-4.4.2.tar.gz -O ccache-4.4.2.tar.gz && \
+    tar xf ccache-4.4.2.tar.gz && \
+    cmake -Sccache-4.4.2 -Bbuild -GNinja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_TESTING=OFF \
+      -DREDIS_STORAGE_BACKEND=OFF && \
+    ninja -C build && \
+    sudo ninja -C build install && \
+    rm -r ccache-4.4.2 ccache*.tar.gz build
+
+# cppcheck
+ADD docker/install-cppcheck /tmp
+RUN /tmp/install-cppcheck && rm /tmp/install-cppcheck
+
+# graph & documentation & perf
+RUN apt-get update && apt-get install -y \
+      graphviz \
+      doxygen \
+      linux-tools-common linux-tools-generic
+
+# Python
+RUN wget https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py && rm get-pip.py
+ADD requirements.txt /tmp/requirements.txt
+RUN apt-get purge -y python3-blinker && apt-get autoremove -y
+RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# Install newer version of npm than is available on apt.
+# This includes diff2html-cli for code coverage report.
+ADD docker/setup-node /tmp
+RUN bash --login -ex /tmp/setup-node install && rm /tmp/setup-node
+
+# Tensile
+RUN apt-get update && apt-get install -y \
+    libmsgpack-dev \
+    libboost-program-options-dev \
+    libboost-filesystem-dev \
+    kmod
+
+##
+## Specific to this Dockerfile.  Put faster-changing-things last.
+##
+
+RUN wget -O /tmp/amdgpu_install.deb ${AMDGPU_URL} \
+    && apt-get update \
+    && apt-get install -y /tmp/amdgpu_install.deb \
+    && rm /tmp/amdgpu_install.deb \
+    && if test -n "${AMDGPU_BUILD_NUMBER}"; then amdgpu-repo --amdgpu-build=${AMDGPU_BUILD_NUMBER} --rocm-build=${AMDGPU_BUILD_URI}; fi \
+    && amdgpu-install -y --usecase=rocmdev --no-dkms
+RUN apt-get update && apt-get install -y rocm-llvm-dev
+
+# codeql
+ADD codeql/install_codeql /tmp
+RUN /tmp/install_codeql && rm /tmp/install_codeql
+ENV PATH="/opt/codeql/codeql:${PATH}"
+
+RUN ( \
+    echo "base_image: ${base_image}" && \
+    echo "rocroller: clang" \
+    ) > /.container_info.txt
+
+ENV CXX=/opt/rocm/bin/amdclang++
+ENV CC=/opt/rocm/bin/amdclang
+
+# Clean image
+RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*

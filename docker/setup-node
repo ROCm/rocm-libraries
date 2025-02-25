@@ -1,0 +1,62 @@
+#!/bin/bash -e
+
+export RR_NODE_VERSION=v18.16.1
+export RR_NODE_DIRNAME="node-${RR_NODE_VERSION}-linux-x64"
+export RR_NODE_PACKAGE="${RR_NODE_DIRNAME}.tar.xz"
+
+export RR_NODE_DIR=/opt/node
+export RR_NODE_DIRPATH="${RR_NODE_DIR}/${RR_NODE_DIRNAME}"
+export RR_NODE_BINPATH="${RR_NODE_DIRPATH}/bin"
+
+if [ "$1" = "help" -o "$1" = "-h" -o "$1" = "--help" ]
+then
+
+cat <<END
+setup-node
+Usage:
+
+ $ source $0
+ Adds the node installation binary directory 
+ (${RR_NODE_BINPATH})
+ to your \$PATH.
+
+ $ ./$0 install
+ Installs the configured version of node in ${RR_NODE_DIR}.
+
+END
+
+if [[ "$0" == "$BASH_SOURCE" ]]
+then
+    return
+else
+    exit
+fi
+
+fi
+
+echo ${RR_NODE_BINPATH}
+export PATH=$PATH:${RR_NODE_BINPATH}
+
+if [ "$1" = "install" ]
+then
+    mkdir $RR_NODE_DIR
+    cd $RR_NODE_DIR
+    curl -O https://nodejs.org/dist/${RR_NODE_VERSION}/${RR_NODE_PACKAGE}
+
+    tar -xf ${RR_NODE_PACKAGE}
+    rm ${RR_NODE_PACKAGE}
+
+    echo 'export PATH=$PATH:'"${RR_NODE_BINPATH}" >> /root/.bashrc
+    echo 'export PATH=$PATH:'"${RR_NODE_BINPATH}" >> /etc/skel/.bashrc
+
+    # Install diff2html-cli which is required for code coverage reports.
+    npm install -g diff2html-cli@5.2.9
+
+fi
+
+
+unset RR_NODE_VERSION
+unset RR_NODE_DIRNAME
+unset RR_NODE_PACKAGE
+unset RR_NODE_DIR
+unset RR_NODE_DIRPATH

@@ -19,6 +19,21 @@ namespace rocRoller
          * | 950  | v_cmpx_*  | v_permlane*       | 4    |
          *
          */
+        class VCMPXWrite94x : public WaitStateObserver<VCMPXWrite94x>
+        {
+        public:
+            VCMPXWrite94x() {}
+            VCMPXWrite94x(ContextPtr context)
+                : WaitStateObserver<VCMPXWrite94x>(context){};
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return target.isCDNA3GPU() || target.isCDNA35GPU();
+            }
+
+            /**
+             * Overriden as we need to target Exec
+             */
             void observeHazard(Instruction const& inst) override;
 
             int                   getMaxNops(Instruction const& inst) const;

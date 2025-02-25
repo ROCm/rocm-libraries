@@ -19,6 +19,21 @@ namespace rocRoller
          * | 94x  | v_dot* write | Different opcode            | 3    |
          *
          */
+        class DLWrite : public WaitStateObserver<DLWrite>
+        {
+        public:
+            DLWrite() {}
+            DLWrite(ContextPtr context)
+                : WaitStateObserver<DLWrite>(context){};
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
+            {
+                return target.isCDNA2GPU() || target.isCDNA3GPU() || target.isCDNA35GPU();
+            }
+
+            /**
+             * Overriden to cache inst opcode
+             */
             void observeHazard(Instruction const& inst) override;
 
             int                   getMaxNops(Instruction const& inst) const;

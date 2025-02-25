@@ -243,11 +243,23 @@ def main():
         if args.delete_existing_container:
             printAndRun(["docker", "rm", "-f", container_name])
 
+        build_args = []
+        for arg in ["AMDGPU_URL", "AMDGPU_BUILD_NUMBER", "AMDGPU_BUILD_URI"]:
+            if arg in os.environ:
+                build_args.append(arg + "=" + os.environ[arg])
+
+        def make_build_args(args):
+            rv = []
+            for arg in args:
+                rv.extend(["--build-arg", arg])
+            return rv
+
         if not args.skip_base_build:
             buildImage(
                 dockerfiles[version],
                 base_image_name,
                 args.context,
+                *make_build_args(build_args),
                 *args.base_build_extra_args
             )
 
@@ -256,8 +268,7 @@ def main():
                 args.user_dockerfile,
                 user_image_name,
                 args.context,
-                "--build-arg",
-                "base_image=" + base_image_name,
+                *make_build_args(["base_image=" + base_image_name]),
                 *args.user_build_extra_args
             )
 
