@@ -8,6 +8,7 @@
 
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
@@ -86,7 +87,7 @@ namespace rocRoller
             Throw<FatalError>("Trying to set ",
                               opt.name,
                               " with incorrect type ",
-                              typeid(T).name(),
+                              typeName<T>(),
                               "(value: ",
                               val,
                               "). Not setting value.");

@@ -38,6 +38,7 @@
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 
 #include <libdivide.h>
@@ -121,7 +122,7 @@ namespace rocRoller
                 if constexpr(CHasTypeInfo<LHS> && CHasTypeInfo<RHS>)
                 {
                     Throw<FatalError>("Type mismatch for expression: ",
-                                      typeid(BinaryExpr).name(),
+                                      typeName<BinaryExpr>(),
                                       ". Argument ",
                                       ShowValue(TypeInfo<LHS>::Var),
                                       " incompatible with ",
@@ -131,11 +132,11 @@ namespace rocRoller
                 else
                 {
                     Throw<FatalError>("Type mismatch for expression: ",
-                                      typeid(BinaryExpr).name(),
+                                      typeName<BinaryExpr>(),
                                       ". Argument ",
-                                      ShowValue(typeid(LHS).name()),
+                                      ShowValue(typeName<LHS>()),
                                       " incompatible with ",
-                                      ShowValue(typeid(RHS).name()),
+                                      ShowValue(typeName<RHS>()),
                                       ").");
                 }
             }
@@ -190,13 +191,13 @@ namespace rocRoller
                 operator()(LHS const& lhs, R1HS const& r1hs, R2HS const& r2hs) const
             {
                 Throw<FatalError>("Type mismatch for expression: ",
-                                  typeid(TernaryExpr).name(),
+                                  typeName<TernaryExpr>(),
                                   ". Incompatible arguments ",
-                                  ShowValue(typeid(LHS).name()),
+                                  ShowValue(typeName<LHS>()),
                                   " ",
-                                  ShowValue(typeid(R1HS).name()),
+                                  ShowValue(typeName<R1HS>()),
                                   " ",
-                                  ShowValue(typeid(R2HS).name()),
+                                  ShowValue(typeName<R2HS>()),
                                   ").");
             }
 
@@ -287,15 +288,15 @@ namespace rocRoller
                     Throw<FatalError>("Incompatible type ",
                                       TypeInfo<ARG>::Name(),
                                       " for expression ",
-                                      typeid(UnaryExpr).name());
+                                      typeName<UnaryExpr>());
                 }
                 else
                 {
                     Throw<FatalError>("Incompatible type ",
                                       ShowValue(ARG()),
-                                      typeid(ARG).name(),
+                                      typeName<ARG>(),
                                       " for expression ",
-                                      typeid(UnaryExpr).name());
+                                      typeName<UnaryExpr>());
                 }
             }
 
@@ -670,7 +671,7 @@ namespace rocRoller
             template <typename T>
             constexpr bool operator()(T const& val)
             {
-                Throw<FatalError>("Invalid bool type: ", typeid(T).name());
+                Throw<FatalError>("Invalid bool type: ", typeName<T>());
                 return 0;
             }
 

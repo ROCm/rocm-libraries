@@ -1,6 +1,7 @@
 #pragma once
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Utilities/RTTI.hpp>
 
 namespace rocRoller
 {
@@ -19,7 +20,7 @@ namespace rocRoller
             AssertFatal(std::holds_alternative<T>(dim),
                         "Invalid connection: Dimension type mismatch.",
                         ShowValue(controlIndex),
-                        ShowValue(typeid(T).name()),
+                        ShowValue(typeName<T>()),
                         ShowValue(name<T>()),
                         ShowValue(dim));
             return {tag, std::get<T>(dim)};
