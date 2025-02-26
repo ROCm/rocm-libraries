@@ -10,4 +10,15 @@ Tests:
   api: [C, C_64]
   pointer_mode_host: [true, false]
 
+- name: logging_mode_internal
+  category: quick
+  function: logging
+  precision: *single_double_precisions
+  api: [C, C_64]
+  pointer_mode_host: [true, false]
+  algo: 1 # internal logging with hipblaslt backend
+  os_flags: [ LINUX ]
+  gpu_arch: [ '12??' ] # expected backend for LAYER=8
+
+
 ...
