@@ -27,6 +27,7 @@
 
 #include "../common/utils_custom_type.hpp"
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -120,27 +121,20 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
 
         bool                 is_result_in_output = true;
         rocprim::empty_type* d_values_ptr        = nullptr;
         HIP_CHECK((
-            rocprim::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
+            rocprim::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage.get(),
                                                                      temporary_storage_bytes,
-                                                                     d_keys_input,
+                                                                     d_keys_input.get(),
                                                                      nullptr,
-                                                                     d_keys_output,
+                                                                     d_keys_output.get(),
                                                                      d_values_ptr,
                                                                      nullptr,
                                                                      d_values_ptr,
@@ -153,18 +147,18 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                      false,
                                                                      false)));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                d_temporary_storage,
+                d_temporary_storage.get(),
                 temporary_storage_bytes,
-                d_keys_input,
+                d_keys_input.get(),
                 nullptr,
-                d_keys_output,
+                d_keys_output.get(),
                 d_values_ptr,
                 nullptr,
                 d_values_ptr,
@@ -192,11 +186,11 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
             for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                    d_temporary_storage,
+                    d_temporary_storage.get(),
                     temporary_storage_bytes,
-                    d_keys_input,
+                    d_keys_input.get(),
                     nullptr,
-                    d_keys_output,
+                    d_keys_output.get(),
                     d_values_ptr,
                     nullptr,
                     d_values_ptr,
@@ -225,10 +219,6 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
 
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 
     // pairs benchmark
@@ -257,37 +247,25 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
             values_input[i] = value_type(i);
         }
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        value_type* d_values_input;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<value_type> d_values_output(size);
 
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
 
         bool is_result_in_output = true;
         HIP_CHECK((
-            rocprim::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage,
+            rocprim::detail::radix_sort_onesweep_impl<Config, false>(d_temporary_storage.get(),
                                                                      temporary_storage_bytes,
-                                                                     d_keys_input,
+                                                                     d_keys_input.get(),
                                                                      nullptr,
-                                                                     d_keys_output,
-                                                                     d_values_input,
+                                                                     d_keys_output.get(),
+                                                                     d_values_input.get(),
                                                                      nullptr,
-                                                                     d_values_output,
+                                                                     d_values_output.get(),
                                                                      size,
                                                                      is_result_in_output,
                                                                      rocprim::identity_decomposer{},
@@ -297,21 +275,21 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
                                                                      false,
                                                                      false)));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                d_temporary_storage,
+                d_temporary_storage.get(),
                 temporary_storage_bytes,
-                d_keys_input,
+                d_keys_input.get(),
                 nullptr,
-                d_keys_output,
-                d_values_input,
+                d_keys_output.get(),
+                d_values_input.get(),
                 nullptr,
-                d_values_output,
+                d_values_output.get(),
                 size,
                 is_result_in_output,
                 rocprim::identity_decomposer{},
@@ -336,14 +314,14 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
             for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                    d_temporary_storage,
+                    d_temporary_storage.get(),
                     temporary_storage_bytes,
-                    d_keys_input,
+                    d_keys_input.get(),
                     nullptr,
-                    d_keys_output,
-                    d_values_input,
+                    d_keys_output.get(),
+                    d_values_input.get(),
                     nullptr,
-                    d_values_output,
+                    d_values_output.get(),
                     size,
                     is_result_in_output,
                     rocprim::identity_decomposer{},
@@ -370,12 +348,6 @@ struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size
                                 * (sizeof(key_type) + sizeof(value_type)));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values_output));
     }
 
     void run(benchmark::State&   state,

@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
 #include "../common/utils.hpp"
+#include "../common/utils_device_ptr.hpp"
 #include "../common/warp_exchange.hpp"
+
+// CmdParser
+#include "cmdparser.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -180,8 +182,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-    T* d_output;
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+    common::device_ptr<T> d_output(size);
 
     // HIP events creation
     hipEvent_t start, stop;
@@ -194,7 +195,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
         HIP_CHECK(hipEventRecord(start, stream));
 
         warp_exchange_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Op>
-            <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_output, trials);
+            <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_output.get(), trials);
 
         HIP_CHECK(hipPeekAtLastError());
 
@@ -213,8 +214,6 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 
     state.SetBytesProcessed(state.iterations() * trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * trials * size);
-
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(T, BS, IT, WS, OP)                                                       \

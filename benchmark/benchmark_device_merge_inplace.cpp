@@ -21,9 +21,11 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-#include "cmdparser.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
+
+#include "cmdparser.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -107,7 +109,7 @@ struct inplace_runner
     size_t      right_size;
     hipStream_t stream;
 
-    void*  d_temporary_storage     = nullptr;
+    common::device_ptr<void> d_temporary_storage;
     size_t temporary_storage_bytes = 0;
 
     compare_op_type compare_op{};
@@ -118,32 +120,27 @@ struct inplace_runner
 
     size_t prepare()
     {
-        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage,
+        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage.get(),
                                          temporary_storage_bytes,
                                          d_data,
                                          left_size,
                                          right_size,
                                          compare_op,
                                          stream));
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
 
         return temporary_storage_bytes;
     }
 
     void run()
     {
-        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage,
+        HIP_CHECK(rocprim::merge_inplace(d_temporary_storage.get(),
                                          temporary_storage_bytes,
                                          d_data,
                                          left_size,
                                          right_size,
                                          compare_op,
                                          stream));
-    }
-
-    void clean()
-    {
-        HIP_CHECK(hipFree(d_temporary_storage));
     }
 };
 
@@ -177,11 +174,9 @@ void run_merge_inplace_benchmarks(benchmark::State&   state,
 
     size_t num_bytes = total_size * sizeof(value_type);
 
-    value_type* d_data;
+    common::device_ptr<value_type> d_data(total_size);
 
-    HIP_CHECK(hipMalloc(&d_data, num_bytes));
-
-    runner_type runner{d_data, size_a, size_b, stream};
+    runner_type runner{d_data.get(), size_a, size_b, stream};
 
     size_t temp_storage_size = runner.prepare();
 
@@ -191,7 +186,7 @@ void run_merge_inplace_benchmarks(benchmark::State&   state,
 
     for(auto _ : state)
     {
-        HIP_CHECK(hipMemcpy(d_data, h_data.data(), num_bytes, hipMemcpyHostToDevice));
+        d_data.store(h_data);
 
         HIP_CHECK(hipEventRecord(start, stream));
         runner.run();
@@ -213,9 +208,6 @@ void run_merge_inplace_benchmarks(benchmark::State&   state,
 
     state.SetBytesProcessed(state.iterations() * num_bytes);
     state.SetItemsProcessed(state.iterations() * total_size);
-
-    HIP_CHECK(hipFree(d_data));
-    runner.clean();
 }
 
 #define CREATE_MERGE_INPLACE_BENCHMARK(Value)                                         \

@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/device_adjacent_difference.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -93,17 +94,12 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
         const std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-        T*           d_input;
-        output_type* d_output = nullptr;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            input.size() * sizeof(input[0]),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<T>           d_input(input);
+        common::device_ptr<output_type> d_output;
 
         if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
         {
-            HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
+            d_output.resize(size);
         }
 
         static constexpr auto left_tag  = rocprim::detail::bool_constant<Left>{};
@@ -111,34 +107,27 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
 
         // Allocate temporary storage
         std::size_t temp_storage_size;
-        void*       d_temp_storage = nullptr;
+        common::device_ptr<void> d_temp_storage;
 
         const auto launch = [&]
         {
             return common::dispatch_adjacent_difference(left_tag,
                                                         alias_tag,
-                                                        d_temp_storage,
+                                                        d_temp_storage.get(),
                                                         temp_storage_size,
-                                                        d_input,
-                                                        d_output,
+                                                        d_input.get(),
+                                                        d_output.get(),
                                                         size,
                                                         rocprim::plus<>{},
                                                         stream,
                                                         debug_synchronous);
         };
         HIP_CHECK(launch());
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
+        d_temp_storage.resize(temp_storage_size);
 
         state.run(gbench_state, [&] { HIP_CHECK(launch()); });
 
         state.set_items_processed_per_iteration<T>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_input));
-        if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
-        {
-            HIP_CHECK(hipFree(d_output));
-        }
-        HIP_CHECK(hipFree(d_temp_storage));
     }
 };
 

@@ -21,10 +21,12 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
+#include "../common/utils_device_ptr.hpp"
+
+// CmdParser
+#include "cmdparser.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -139,11 +141,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
     size = BlockSize * ((size + BlockSize - 1) / BlockSize);
     // Allocate and fill memory
     std::vector<T> input(size, (T)1);
-    T*             d_input;
-    T*             d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
     // HIP events creation
@@ -161,8 +160,8 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
                            dim3(BlockSize),
                            0,
                            stream,
-                           d_input,
-                           d_output,
+                           d_input.get(),
+                           d_output.get(),
                            input[0]);
         HIP_CHECK(hipGetLastError());
 
@@ -181,9 +180,6 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 
     state.SetBytesProcessed(state.iterations() * size * sizeof(T) * Trials);
     state.SetItemsProcessed(state.iterations() * size * Trials);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK_IMPL(T, BS, WS, OP)                                                   \
