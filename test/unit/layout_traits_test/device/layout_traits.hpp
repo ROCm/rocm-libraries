@@ -30,6 +30,7 @@
 #include <rocwmma/rocwmma.hpp>
 
 #include "unit_test_traits.hpp"
+#include "common.hpp"
 
 static constexpr uint32_t ERROR_VALUE   = 7;
 static constexpr uint32_t SUCCESS_VALUE = 0;
@@ -67,12 +68,6 @@ namespace rocwmma
         }
 
         return compare_result;
-    }
-
-    ROCWMMA_DEVICE inline bool isFirstThread()
-    {
-        return (threadIdx.x == 0) && (threadIdx.y == 0) && (threadIdx.z == 0) && (blockIdx.x == 0)
-               && (blockIdx.y == 0) && (blockIdx.z == 0);
     }
 
     template <typename LayoutLhs,

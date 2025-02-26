@@ -27,6 +27,15 @@
 #ifndef ROCWMMA_UNIT_TEST_MACROS_HPP
 #define ROCWMMA_UNIT_TEST_MACROS_HPP
 
+#include "common.hpp"
+
+#define ROCWMMA_EXPECT_EQUAL(LHS, RHS, DEBUG_ON_FAIL) \
+    rocwmma::expectEqual(LHS, RHS, DEBUG_ON_FAIL, __FILE__, __LINE__);
+
+#define ROCWMMA_EXPECT_NOT_EQUAL(LHS, RHS, DEBUG_ON_FAIL) \
+    rocwmma::expectNotEqual(LHS, RHS, DEBUG_ON_FAIL, __FILE__, __LINE__);
+
+
 ///
 /// Unit test suite definition
 /// @params

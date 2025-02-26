@@ -72,6 +72,46 @@
 
 namespace rocwmma
 {
+    ROCWMMA_DEVICE inline bool isFirstThread()
+    {
+        return (threadIdx.x == 0) && (threadIdx.y == 0) && (threadIdx.z == 0) && (blockIdx.x == 0)
+                && (blockIdx.y == 0) && (blockIdx.z == 0);
+    }
+
+    template <typename Lhs, typename Rhs>
+    ROCWMMA_DEVICE bool expectEqual(Lhs&& testL, Rhs&& testR, bool debugOnFail, const char* file, uint32_t line)
+    {
+        bool compare_result = (testL == testR);
+        if(!compare_result && debugOnFail && isFirstThread())
+        {
+            printf("<TestBegin>\n");
+            printf("File: %s L:%d\n", file, line);
+            if constexpr(is_same_v<decay_t<Lhs>, hfloat16_t>)
+            {
+                printf("Lhs: %f, Rhs: %f\n", static_cast<float>(testL), static_cast<float>(testR));
+            }
+            printf("FAILED");
+            printf("<Test End>\n");
+        }
+
+        return compare_result;
+    }
+
+    template <typename Lhs, typename Rhs>
+    ROCWMMA_DEVICE bool expectNotEqual(Lhs&& testL, Rhs&& testR, bool debugOnFail, const char* file, uint32_t line)
+    {
+        bool compare_result = (testL != testR);
+        if(!compare_result && debugOnFail && isFirstThread())
+        {
+            printf("<TestBegin>\n");
+            printf("File: %s L:%d\n", file, line);
+            printf("FAILED");
+            printf("<Test End>\n");
+        }
+
+        return compare_result;
+    }
+
     static constexpr uint32_t ERROR_VALUE   = 7u;
     static constexpr uint32_t SUCCESS_VALUE = 0u;
 
