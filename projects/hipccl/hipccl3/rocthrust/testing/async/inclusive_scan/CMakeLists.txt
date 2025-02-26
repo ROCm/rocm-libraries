@@ -9,10 +9,17 @@ function(add_thrust_test_inclusive TEST)
     # This code path used to add "-x c++" to the compiler flags too, but that was
     # superfluous as "-x hip" was already present on the command-line due to linking to
     # hip::device transitively from roc::rocprim_hip.
-    set_source_files_properties(${TEST_SOURCE}
-        PROPERTIES
+    if(USE_HIPCXX)
+        set_source_files_properties(${TEST_SOURCE}
+            PROPERTIES
+            LANGUAGE HIP
+        )
+    else()
+        set_source_files_properties(${TEST_SOURCE}
+            PROPERTIES
             LANGUAGE CXX
-    )
+        )
+    endif()
     if(NOT CMAKE_VERSION VERSION_LESS 3.13)
         add_executable(${TEST_TARGET} ${TEST_SOURCE} $<TARGET_OBJECTS:testframework>)
         target_link_libraries(${TEST_TARGET}

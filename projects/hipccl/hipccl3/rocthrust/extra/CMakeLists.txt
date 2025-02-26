@@ -68,6 +68,15 @@ enable_testing()
 function(add_rocthrust_test TEST_NAME TEST_SOURCES)
   list(GET TEST_SOURCES 0 TEST_MAIN_SOURCE)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
+
+  foreach(test_file ${TEST_SOURCES})
+    if(USE_HIPCXX)
+      set_source_files_properties(${test_file} PROPERTIES LANGUAGE HIP)
+    else()
+      set_source_files_properties(${test_file} PROPERTIES LANGUAGE CXX)
+    endif()
+  endforeach()
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_link_libraries(${TEST_TARGET}
     PRIVATE

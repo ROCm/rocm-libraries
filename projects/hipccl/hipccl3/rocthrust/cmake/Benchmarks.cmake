@@ -37,10 +37,17 @@ endfunction()
 # Registers a .cu as C++ rocThrust benchmark
 function(add_thrust_benchmark BENCHMARK_NAME BENCHMARK_SOURCE NOT_INTERNAL)
     set(BENCHMARK_TARGET "benchmark_thrust_${BENCHMARK_NAME}")
-    set_source_files_properties(${BENCHMARK_SOURCE}
-        PROPERTIES
-            LANGUAGE CXX
-    )
+    if(USE_HIPCXX)
+        set_source_files_properties(${BENCHMARK_SOURCE}
+            PROPERTIES
+                LANGUAGE HIP
+        )
+    else()
+        set_source_files_properties(${BENCHMARK_SOURCE}
+            PROPERTIES
+                LANGUAGE CXX
+        )
+    endif()
     add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
 
     target_link_libraries(${BENCHMARK_TARGET}

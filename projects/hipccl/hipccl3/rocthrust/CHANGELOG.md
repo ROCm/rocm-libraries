@@ -13,6 +13,8 @@ Documentation for rocThrust available at
 
 ### Added
 
+* Added a section to install Thread Building Block (TBB) inside `cmake/Dependencies.cmake` if TBB is not already available.
+* Made Thread Building Block (TBB) an optional dependency with the new `BUILD_HIPSTDPAR_TEST_WITH_TBB` flag, default is `OFF`. When the flag is `OFF` and TBB is not already on the machine it will compile without TBB. Otherwise is will compile it with TBB.
 * Added extended tests to `rtest.py`. These tests are extra tests that did not fit the criteria of smoke and regression tests. These tests will take much longer to run relative to smoke and regression tests. Use `python rtest.py [--emulation|-e|--test|-t]=extended` to run these tests.
 * Added regression tests to `rtest.py`. These tests recreate scenarios that have caused hardware problems in past emulation environments. Use `python rtest.py [--emulation|-e|--test|-t]=regression` to run these tests.
 * Added smoke test options, which runs a subset of the unit tests and ensures that less than 2gb of VRAM will be used. Use `python rtest.py [--emulation|-e|--test|-t]=smoke` to run these tests.
@@ -30,6 +32,10 @@ Documentation for rocThrust available at
 * `--test|-t` is no longer a required flag for `rtest.py`. Instead, the user can use either `--emulation|-e` or `--test|-t`, but not both.
 * Split the contents of HIPSTDPAR's forwarding header into several implementation headers.
 * Fixed `copy_if` to work with large data types (512 bytes)
+
+### Known Issues
+*  `thrust::inclusive_scan_by_key` might produce incorrect results when it's used with -O2 or -O3 optimization.  
+  - The error is caused by a recent compiler change. There is a fix available that will be released at a later date. 
 
 ## rocThrust 3.2.0 for ROCm 6.3
 

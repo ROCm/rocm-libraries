@@ -444,6 +444,66 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
     }
 }
 
+TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
+{
+    using T = large_data;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        thrust::host_vector<T> h_data(size);
+        thrust::sequence(h_data.begin(), h_data.end());
+        thrust::device_vector<T> d_data(size);
+        thrust::sequence(d_data.begin(), d_data.end());
+
+        for(auto seed : get_seeds())
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed);
+
+            thrust::host_vector<T> h_stencil = get_random_data<int>(size, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), seed);;
+            thrust::device_vector<T> d_stencil = h_stencil;
+
+            typename thrust::host_vector<T>::iterator   h_new_end;
+            typename thrust::device_vector<T>::iterator d_new_end;
+
+            // test with Predicate that returns a bool
+            {
+                thrust::host_vector<T>   h_result(size);
+                thrust::device_vector<T> d_result(size);
+
+                h_new_end
+                   = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), is_even<T>());
+                d_new_end
+                    = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), is_even<T>());
+
+                h_result.resize(h_new_end - h_result.begin());
+                d_result.resize(d_new_end - d_result.begin());
+
+                ASSERT_EQ(h_result, d_result);
+            }
+
+            // test with Predicate that returns a non-bool
+            {
+                thrust::host_vector<T>   h_result(size);
+                thrust::device_vector<T> d_result(size);
+
+                h_new_end
+                    = thrust::copy_if(h_data.begin(), h_data.end(), h_stencil.begin(), h_result.begin(), mod_3<T>());
+                d_new_end
+                    = thrust::copy_if(d_data.begin(), d_data.end(), d_stencil.begin(), d_result.begin(), mod_3<T>());
+
+                h_result.resize(h_new_end - h_result.begin());
+                d_result.resize(d_new_end - d_result.begin());
+
+                ASSERT_EQ(h_result, d_result);
+            }
+        }
+    }
+}
+
 TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
 {
     using T = typename TestFixture::input_type;
