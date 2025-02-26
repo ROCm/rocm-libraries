@@ -42,6 +42,11 @@ struct static_for
     }
 };
 
+constexpr size_t max(size_t a, size_t b)
+{
+    return (a > b) ? a : b;
+}
+
 template <typename DataTypeCompute, typename DataTypeOut, size_t MT0, size_t MT1, size_t VW>
 __device__ inline void
     reductionKernel_ijk(DataTypeCompute* in, DataTypeOut* out, int m, int n, int strideJ)
@@ -60,7 +65,8 @@ __device__ inline void
     int num_records       = strideJ * n * sizeof(DataTypeCompute);
     int num_records_bias  = m * sizeof(DataTypeOut);
 
-    DataTypeCompute sum[VW] = {0};
+    constexpr size_t sumLength      = max((size_t)1, VW - 1);
+    DataTypeCompute  sum[sumLength] = {0};
     if(idx + (VW - 1) < m)
     {
         for(int i = 0; i < n; i += MT1)
@@ -102,9 +108,10 @@ __device__ inline void
     {
         for(int i = 0; i < n; i += MT1)
         {
-            int             currRow   = row + i;
-            int             rowStride = currRow * strideJ + voffset;
-            DataTypeCompute tmp[VW - 1];
+            int              currRow   = row + i;
+            int              rowStride = currRow * strideJ + voffset;
+            constexpr size_t tmpLength = max((size_t)1, VW - 1);
+            DataTypeCompute  tmp[tmpLength];
             static_for<0, VW - 1>()([&](int vw) {
                 buffer_load<DataTypeCompute, sizeof(DataTypeCompute)>(
                     tmp[vw],
