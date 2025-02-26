@@ -72,6 +72,7 @@ defaultBenchOptions = {"ProblemType": {
     "SolutionIndex": None, # Only works in AlgoMethod index
     "ApiMethod": "cpp",
     "RotatingBuffer": 512,
+    "Device": 0,
 }, "TuningParameters": {
     "SplitK": [0]
 }, "ProblemSizes": []}
@@ -218,6 +219,7 @@ def findExact(config):
         print("--Running size: %s"%(filename))
         command = [execBenchPath,
                 "--print_kernel_info",
+                "--device", str(config["TestConfig"]["Device"]),
                 "--transA", config["ProblemType"]["TransposeA"],
                 "--transB", config["ProblemType"]["TransposeB"],
                 "--a_type", aType,
