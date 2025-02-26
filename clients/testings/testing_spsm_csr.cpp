@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -691,7 +691,7 @@ static void testing_spsm_csr_extra0(const Arguments& arg)
                                              &buffer_size,
                                              nullptr));
         void* temp_buffer;
-        CHECK_HIP_ERROR(hipMalloc((void**)&temp_buffer, buffer_size));
+        CHECK_HIP_ERROR(rocsparse_hipMalloc((void**)&temp_buffer, buffer_size));
         // Call spsv to perform analysis
         CHECK_ROCSPARSE_ERROR(rocsparse_spsm(handle,
                                              trans_A,
@@ -718,7 +718,7 @@ static void testing_spsm_csr_extra0(const Arguments& arg)
                                              rocsparse_spsm_stage_compute,
                                              &buffer_size,
                                              temp_buffer));
-        CHECK_HIP_ERROR(hipFree(temp_buffer));
+        CHECK_HIP_ERROR(rocsparse_hipFree(temp_buffer));
         // Copy result back to host
         hC.transfer_from(dC);
 
@@ -755,7 +755,7 @@ static void testing_spsm_csr_extra0(const Arguments& arg)
                                              &buffer_size,
                                              nullptr));
         void* temp_buffer;
-        CHECK_HIP_ERROR(hipMalloc((void**)&temp_buffer, buffer_size));
+        CHECK_HIP_ERROR(rocsparse_hipMalloc((void**)&temp_buffer, buffer_size));
         // Call spsv to perform analysis
         CHECK_ROCSPARSE_ERROR(rocsparse_spsm(handle,
                                              trans_A,
@@ -782,7 +782,7 @@ static void testing_spsm_csr_extra0(const Arguments& arg)
                                              rocsparse_spsm_stage_compute,
                                              &buffer_size,
                                              temp_buffer));
-        CHECK_HIP_ERROR(hipFree(temp_buffer));
+        CHECK_HIP_ERROR(rocsparse_hipFree(temp_buffer));
         // Copy result back to host
         hC.transfer_from(dC);
     }

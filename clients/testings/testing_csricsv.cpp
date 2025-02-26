@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,15 +106,7 @@ void testing_csricsv(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_csric0_buffer_size<T>(
         handle, M, nnz, descrM, dcsr_val, dcsr_row_ptr, dcsr_col_ind, info, &buffer_size));
 
-    // Allocate buffer
-    void* dbuffer;
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
-
-    if(!dbuffer)
-    {
-        CHECK_HIP_ERROR(hipErrorOutOfMemory);
-        return;
-    }
+    device_vector<char> dbuffer(buffer_size);
 
     // csric0 analysis
     CHECK_ROCSPARSE_ERROR(rocsparse_csric0_analysis<T>(
@@ -166,8 +158,6 @@ void testing_csricsv(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     CHECK_ROCSPARSE_ERROR(rocsparse_csric0<T>(
         handle, M, nnz, descrM, dcsr_val, dcsr_row_ptr, dcsr_col_ind, info, spol, dbuffer));
-
-    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
 
     // Check for numerical zero pivot using host pointer mode
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
@@ -306,13 +296,7 @@ void testing_csricsv(const Arguments& arg)
     // Determine buffer size maximum
     buffer_size = std::max(buffer_size_l, buffer_size_lt);
 
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
-
-    if(!dbuffer)
-    {
-        CHECK_HIP_ERROR(hipErrorOutOfMemory);
-        return;
-    }
+    dbuffer.resize(buffer_size);
 
     // csrsv analysis
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_analysis<T>(handle,
@@ -501,9 +485,6 @@ void testing_csricsv(const Arguments& arg)
     // Clear csrsv meta data
     CHECK_ROCSPARSE_ERROR(rocsparse_csrsv_clear(handle, descrL, info));
     CHECK_ROCSPARSE_ERROR(rocsparse_csric0_clear(handle, info));
-
-    // Free buffer
-    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
 }
 
 #define INSTANTIATE(TYPE)                                      \

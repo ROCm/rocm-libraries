@@ -316,6 +316,8 @@ namespace rocsparse
                 colors,
                 seq_ptr);
         }
+
+        RETURN_IF_HIP_ERROR(rocsparse_hipFree(seq_ptr));
         return rocsparse_status_success;
     }
 }
