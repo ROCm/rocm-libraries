@@ -10231,7 +10231,7 @@ class KernelWriterAssembly(KernelWriter):
           '''
           tile01 = tP["tile01Idx"]
           mt     = kernel["MacroTile%u" % tile01]
-          gwvw   = max(mt // kernel["NumThreads"], kernel["VectorWidthA"])
+          gwvw   = min(max(mt // kernel["NumThreads"], kernel["VectorWidthA"]), tP["glvw"])
           offsetVgpr  = self.vgprPool.checkOut(gwvw, 1)
           with self.allocTmpSgpr(5, 2) as tmpSgprRes:
             if kernel["GlobalSplitU"] > 1:
