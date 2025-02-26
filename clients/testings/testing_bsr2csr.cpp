@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -154,48 +154,29 @@ void testing_bsr2csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsr2csr<T>(handle,
-                                                       dA.block_direction,
-                                                       dA.mb,
-                                                       dA.nb,
-                                                       bsr_descr,
-                                                       dA.val,
-                                                       dA.ptr,
-                                                       dA.ind,
-                                                       block_dim,
-                                                       csr_descr,
-                                                       dC.val,
-                                                       dC.ptr,
-                                                       dC.ind));
-        }
-
-        double gpu_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsr2csr<T>(handle,
-                                                       dA.block_direction,
-                                                       dA.mb,
-                                                       dA.nb,
-                                                       bsr_descr,
-                                                       dA.val,
-                                                       dA.ptr,
-                                                       dA.ind,
-                                                       block_dim,
-                                                       csr_descr,
-                                                       dC.val,
-                                                       dC.ptr,
-                                                       dC.ind));
-        }
-
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        double gpu_time_used;
+        median_perf(gpu_time_used,
+                    number_cold_calls,
+                    number_hot_calls,
+                    number_hot_calls_2,
+                    rocsparse_bsr2csr<T>,
+                    handle,
+                    dA.block_direction,
+                    dA.mb,
+                    dA.nb,
+                    bsr_descr,
+                    dA.val,
+                    dA.ptr,
+                    dA.ind,
+                    block_dim,
+                    csr_descr,
+                    dC.val,
+                    dC.ptr,
+                    dC.ind);
 
         double gbyte_count = bsr2csr_gbyte_count<T>(Mb, block_dim, nnzb);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

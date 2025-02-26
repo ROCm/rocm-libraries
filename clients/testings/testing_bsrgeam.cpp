@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -394,8 +394,9 @@ void testing_bsrgeam(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
@@ -420,107 +421,52 @@ void testing_bsrgeam(const Arguments& arg)
         device_vector<rocsparse_int> dbsr_col_ind_C(nnzb_C);
         device_vector<T>             dbsr_val_C(block_dim * block_dim * nnzb_C);
 
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam_nnzb(handle,
-                                                         dir,
-                                                         Mb,
-                                                         Nb,
-                                                         block_dim,
-                                                         descrA,
-                                                         nnzb_A,
-                                                         dbsr_row_ptr_A,
-                                                         dbsr_col_ind_A,
-                                                         descrB,
-                                                         nnzb_B,
-                                                         dbsr_row_ptr_B,
-                                                         dbsr_col_ind_B,
-                                                         descrC,
-                                                         dbsr_row_ptr_C_1,
-                                                         &nnzb_C));
-        }
+        double gpu_analysis_time_used;
+        median_perf(
+            gpu_analysis_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+                return rocsparse_bsrgeam_nnzb(handle,
+                                              dir,
+                                              Mb,
+                                              Nb,
+                                              block_dim,
+                                              descrA,
+                                              nnzb_A,
+                                              dbsr_row_ptr_A,
+                                              dbsr_col_ind_A,
+                                              descrB,
+                                              nnzb_B,
+                                              dbsr_row_ptr_B,
+                                              dbsr_col_ind_B,
+                                              descrC,
+                                              dbsr_row_ptr_C_1,
+                                              &nnzb_C);
+            });
 
-        double gpu_analysis_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam_nnzb(handle,
-                                                         dir,
-                                                         Mb,
-                                                         Nb,
-                                                         block_dim,
-                                                         descrA,
-                                                         nnzb_A,
-                                                         dbsr_row_ptr_A,
-                                                         dbsr_col_ind_A,
-                                                         descrB,
-                                                         nnzb_B,
-                                                         dbsr_row_ptr_B,
-                                                         dbsr_col_ind_B,
-                                                         descrC,
-                                                         dbsr_row_ptr_C_1,
-                                                         &nnzb_C));
-        }
-
-        gpu_analysis_time_used = (get_time_us() - gpu_analysis_time_used) / number_hot_calls;
-
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam<T>(handle,
-                                                       dir,
-                                                       Mb,
-                                                       Nb,
-                                                       block_dim,
-                                                       h_alpha,
-                                                       descrA,
-                                                       nnzb_A,
-                                                       dbsr_val_A,
-                                                       dbsr_row_ptr_A,
-                                                       dbsr_col_ind_A,
-                                                       h_beta,
-                                                       descrB,
-                                                       nnzb_B,
-                                                       dbsr_val_B,
-                                                       dbsr_row_ptr_B,
-                                                       dbsr_col_ind_B,
-                                                       descrC,
-                                                       dbsr_val_C,
-                                                       dbsr_row_ptr_C_1,
-                                                       dbsr_col_ind_C));
-        }
-
-        double gpu_solve_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_bsrgeam<T>(handle,
-                                                       dir,
-                                                       Mb,
-                                                       Nb,
-                                                       block_dim,
-                                                       h_alpha,
-                                                       descrA,
-                                                       nnzb_A,
-                                                       dbsr_val_A,
-                                                       dbsr_row_ptr_A,
-                                                       dbsr_col_ind_A,
-                                                       h_beta,
-                                                       descrB,
-                                                       nnzb_B,
-                                                       dbsr_val_B,
-                                                       dbsr_row_ptr_B,
-                                                       dbsr_col_ind_B,
-                                                       descrC,
-                                                       dbsr_val_C,
-                                                       dbsr_row_ptr_C_1,
-                                                       dbsr_col_ind_C));
-        }
-
-        gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;
+        double gpu_solve_time_used;
+        median_perf(
+            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+                return rocsparse_bsrgeam<T>(handle,
+                                            dir,
+                                            Mb,
+                                            Nb,
+                                            block_dim,
+                                            h_alpha,
+                                            descrA,
+                                            nnzb_A,
+                                            dbsr_val_A,
+                                            dbsr_row_ptr_A,
+                                            dbsr_col_ind_A,
+                                            h_beta,
+                                            descrB,
+                                            nnzb_B,
+                                            dbsr_val_B,
+                                            dbsr_row_ptr_B,
+                                            dbsr_col_ind_B,
+                                            descrC,
+                                            dbsr_val_C,
+                                            dbsr_row_ptr_C_1,
+                                            dbsr_col_ind_C);
+            });
 
         double gflop_count
             = bsrgeam_gflop_count<T>(block_dim, nnzb_A, nnzb_B, nnzb_C, h_alpha, h_beta);

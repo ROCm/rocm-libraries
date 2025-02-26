@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -125,6 +125,7 @@ struct Arguments
     rocsparse_int unit_check;
     rocsparse_int timing;
     rocsparse_int iters;
+    rocsparse_int iters_inner;
     rocsparse_int nfreeiter;
     rocsparse_int nmaxiter;
 
@@ -268,6 +269,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(unit_check);
         ROCSPARSE_FORMAT_CHECK(timing);
         ROCSPARSE_FORMAT_CHECK(iters);
+        ROCSPARSE_FORMAT_CHECK(iters_inner);
         ROCSPARSE_FORMAT_CHECK(nfreeiter);
         ROCSPARSE_FORMAT_CHECK(nmaxiter);
         ROCSPARSE_FORMAT_CHECK(denseld);
@@ -507,6 +509,7 @@ private:
         print("unit_check", arg.unit_check);
         print("timing", arg.timing);
         print("iters", arg.iters);
+        print("iters_inner", arg.iters_inner);
         print("nfreeiter", arg.nfreeiter);
         print("nmaxiter", arg.nmaxiter);
         print("denseld", arg.denseld);

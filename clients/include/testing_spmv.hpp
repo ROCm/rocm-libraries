@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -742,26 +742,16 @@ public:
 
         if(arg.timing)
         {
-            const int number_cold_calls = 2;
-            const int number_hot_calls  = arg.iters;
+            const int number_cold_calls  = 2;
+            const int number_hot_calls_2 = arg.iters_inner;
+            const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-            // Warm up
-            for(int iter = 0; iter < number_cold_calls; ++iter)
-            {
-                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
-                    PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_compute)));
-            }
-
-            double gpu_time_used = get_time_us();
-
-            // Performance run
-            for(int iter = 0; iter < number_hot_calls; ++iter)
-            {
-                CHECK_ROCSPARSE_ERROR(rocsparse_spmv(
-                    PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_compute)));
-            }
-
-            gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+            double gpu_time_used;
+            median_perf(
+                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+                    return rocsparse_spmv(
+                        PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_compute));
+                });
 
             const double gflop_count = traits::gflop_count(hA, *h_beta != static_cast<T>(0));
             const double gbyte_count = traits::byte_count(hA, *h_beta != static_cast<T>(0));

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -532,6 +532,7 @@ Arguments:
   - unit_check: rocsparse_int
   - timing: rocsparse_int
   - iters: rocsparse_int
+  - iters_inner: rocsparse_int
   - nfreeiter: rocsparse_int
   - nmaxiter: rocsparse_int
   - denseld: c_int64
@@ -662,6 +663,7 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
+  iters_inner: 5
   nfreeiter: 20
   nmaxiter: 1000
   denseld: -1

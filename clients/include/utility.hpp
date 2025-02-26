@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -856,5 +856,40 @@ std::string rocsparse_exepath();
 
 /*! \brief Return path where the test data file (rocsparse_test.data) is located */
 std::string rocsparse_datapath();
+
+/*! \brief  repeated performance runs of a function with a set of arguments that computes
+ * the median of the mean of the wall-clock time.
+ */
+template <typename T, typename... ARG>
+void median_perf(double& gpu_time_used,
+                 int     number_cold_calls,
+                 int     number_hot_calls,
+                 int     number_hot_calls_2,
+                 T       func,
+                 ARG&... arg)
+{
+    for(int iter = 0; iter < number_cold_calls; ++iter)
+    {
+        CHECK_ROCSPARSE_ERROR(func(arg...));
+    }
+
+    std::vector<double> gpu_time(number_hot_calls);
+
+    for(int iter = 0; iter < number_hot_calls; ++iter)
+    {
+        auto t0 = get_time_us();
+        for(int iter2 = 0; iter2 < number_hot_calls_2; ++iter2)
+        {
+            CHECK_ROCSPARSE_ERROR(func(arg...));
+        }
+        auto t1        = get_time_us();
+        gpu_time[iter] = (t1 - t0) / number_hot_calls_2;
+    }
+
+    std::sort(gpu_time.begin(), gpu_time.end());
+    const int mid = number_hot_calls / 2;
+    gpu_time_used
+        = number_hot_calls % 2 == 0 ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
+}
 
 #endif // UTILITY_HPP

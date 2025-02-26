@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -163,66 +163,40 @@ void testing_coosort(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
+        double gpu_time_used;
+
+        if(by_row)
         {
-            if(by_row)
-            {
-                rocsparse_coosort_by_row(handle,
-                                         M,
-                                         N,
-                                         nnz,
-                                         dcoo_row_ind,
-                                         dcoo_col_ind,
-                                         permute ? dperm : nullptr,
-                                         dbuffer);
-            }
-            else
-            {
-                rocsparse_coosort_by_column(handle,
-                                            M,
-                                            N,
-                                            nnz,
-                                            dcoo_row_ind,
-                                            dcoo_col_ind,
-                                            permute ? dperm : nullptr,
-                                            dbuffer);
-            }
+            median_perf(
+                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+                    return rocsparse_coosort_by_row(handle,
+                                                    M,
+                                                    N,
+                                                    nnz,
+                                                    dcoo_row_ind,
+                                                    dcoo_col_ind,
+                                                    permute ? dperm : nullptr,
+                                                    dbuffer);
+                });
         }
-
-        double gpu_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
+        else
         {
-            if(by_row)
-            {
-                CHECK_ROCSPARSE_ERROR(rocsparse_coosort_by_row(handle,
-                                                               M,
-                                                               N,
-                                                               nnz,
-                                                               dcoo_row_ind,
-                                                               dcoo_col_ind,
-                                                               permute ? dperm : nullptr,
-                                                               dbuffer));
-            }
-            else
-            {
-                CHECK_ROCSPARSE_ERROR(rocsparse_coosort_by_column(handle,
-                                                                  M,
-                                                                  N,
-                                                                  nnz,
-                                                                  dcoo_row_ind,
-                                                                  dcoo_col_ind,
-                                                                  permute ? dperm : nullptr,
-                                                                  dbuffer));
-            }
+            median_perf(
+                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+                    return rocsparse_coosort_by_column(handle,
+                                                       M,
+                                                       N,
+                                                       nnz,
+                                                       dcoo_row_ind,
+                                                       dcoo_col_ind,
+                                                       permute ? dperm : nullptr,
+                                                       dbuffer);
+                });
         }
-
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
 
         double gbyte_count = coosort_gbyte_count<T>(nnz, permute);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

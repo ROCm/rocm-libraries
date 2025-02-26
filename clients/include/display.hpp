@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,7 @@ struct display_key_t
         batch_count_C,
         batch_stride,
         iters,
+        iters_inner,
         nfreeiter,
         nmaxiter,
         function,
@@ -413,6 +414,10 @@ struct display_key_t
         {
             return "iter";
         }
+        case iters_inner:
+        {
+            return "iters_inner";
+        }
         case nfreeiter:
         {
             return "nfreeiter";
@@ -752,6 +757,8 @@ inline void rocsparse_get_matrixname(const char* f, char* name)
         display_timing_info_main(__VA_ARGS__,                                                \
                                  display_key_t::iters,                                       \
                                  arg.iters,                                                  \
+                                 display_key_t::iters_inner,                                 \
+                                 arg.iters_inner,                                            \
                                  "verified",                                                 \
                                  (arg.unit_check ? "yes" : "no"),                            \
                                  display_key_t::function,                                    \
