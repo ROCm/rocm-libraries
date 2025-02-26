@@ -213,7 +213,7 @@ namespace rocwmma
 
                 auto result = DstFrag{};
                 result.mAccess
-                    = register_layout_transform<SrcLayout, DstLayout>::exec(frag.mAccess);
+                    = register_layout_transform<SrcLayout, DstLayout, WaveCount>::exec(frag.mAccess);
                 return result;
             }
         };
