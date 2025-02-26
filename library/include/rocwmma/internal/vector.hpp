@@ -171,32 +171,32 @@ namespace rocwmma
         ROCWMMA_HOST_DEVICE
         constexpr inline VecT& operator/=(const VecT& x_) noexcept;
 
-        ROCWMMA_HOST_DEVICE
-        constexpr inline VecT operator+(const VecT& x_) noexcept;
-
-        ROCWMMA_HOST_DEVICE
-        constexpr inline VecT operator-(const VecT& x_) noexcept;
-
-        ROCWMMA_HOST_DEVICE
-        constexpr inline VecT operator*(const VecT& x_) noexcept;
-
-        ROCWMMA_HOST_DEVICE
-        constexpr inline VecT operator/(const VecT& x_) noexcept;
-
         template <typename U = T, enable_if_integral_t<U>* = nullptr>
         ROCWMMA_HOST_DEVICE inline VecT& operator%=(const VecT& x_) noexcept;
 
+        ROCWMMA_HOST_DEVICE
+        constexpr inline VecT& operator++() noexcept;
+
+        ROCWMMA_HOST_DEVICE
+        constexpr inline VecT operator++(int) noexcept;
+
+        ROCWMMA_HOST_DEVICE
+        constexpr inline VecT& operator--() noexcept;
+
+        ROCWMMA_HOST_DEVICE
+        constexpr inline VecT operator--(int) noexcept;
+
         template <typename U = T, enable_if_signed_t<U>* = nullptr>
         ROCWMMA_HOST_DEVICE inline VecT operator-() const noexcept;
+
+        template <typename U = T, enable_if_integral_t<U>* = nullptr>
+        ROCWMMA_HOST_DEVICE inline VecT operator~() const noexcept;
 
         template <typename U = T, enable_if_integral_t<U>* = nullptr>
         ROCWMMA_HOST_DEVICE inline VecT& operator&=(const VecT& x_) noexcept;
 
         template <typename U = T, enable_if_integral_t<U>* = nullptr>
         ROCWMMA_HOST_DEVICE inline VecT& operator|=(const VecT& x_) noexcept;
-
-        template <typename U = T, enable_if_integral_t<U>* = nullptr>
-        ROCWMMA_HOST_DEVICE inline VecT operator~() const noexcept;
 
         template <typename U = T, enable_if_integral_t<U>* = nullptr>
         ROCWMMA_HOST_DEVICE inline VecT& operator^=(const VecT& x_) noexcept;
@@ -228,6 +228,136 @@ namespace rocwmma
         /// Storage
         T d[Rank];
     };
+
+    template <typename T, unsigned int Rank>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator+(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator+(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator+(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator-(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator-(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator-(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator*(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator*(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator*(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator/(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator/(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator/(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator%(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator%(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator%(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator&(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator&(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator&(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator|(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator|(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator|(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator^(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator^(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator^(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator>>(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator>>(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator>>(U x, non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator<<(non_native_vector_base<T, Rank> const& x,
+                  non_native_vector_base<T, Rank> const& y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator<<(non_native_vector_base<T, Rank> const& x, U y) noexcept;
+
+    template <typename T, unsigned int Rank, typename U, enable_if_integral_t<T>* = nullptr>
+    ROCWMMA_HOST_DEVICE inline constexpr non_native_vector_base<T, Rank>
+        operator<<(U x, non_native_vector_base<T, Rank> const& y) noexcept;
 
 } // namespace rocwmma
 
