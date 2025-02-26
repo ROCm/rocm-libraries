@@ -285,6 +285,23 @@ void log_bench(const char* func, Ts&&... xs)
     *os << std::endl;
 }
 
+inline void log_bench_from_str(std::string s)
+{
+    std::lock_guard<std::mutex> lock(log_mutex);
+    std::ostream*               os = get_logger_os();
+    *os << s.c_str();
+    *os << std::endl;
+}
+
+template <typename... Ts>
+inline std::string log_str(const char* func, Ts&&... xs)
+{
+    std::stringstream ss;
+    ss << "hipblaslt-bench ";
+    log_arguments_bench(ss, std::forward<Ts>(xs)...);
+    return ss.str();
+}
+
 // if profile logging is turned on with
 // (handle->layer_mode & rocblaslt_layer_mode_log_profile) == true
 // log_profile will call argument_profile to profile actual arguments,

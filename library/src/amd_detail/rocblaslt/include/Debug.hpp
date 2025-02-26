@@ -74,6 +74,28 @@ namespace rocblaslt
 #endif
         }
 
+        __attribute__((always_inline)) inline void logMarkerStart(const char* name) const
+        {
+#ifdef HIPBLASLT_ENABLE_MARKER
+            if(m_printLogAsMarker)
+            {
+                roctxRangePush(name);
+            }
+#endif
+        }
+
+        __attribute__((always_inline)) inline void logMarkerStop() const
+        {
+#ifdef HIPBLASLT_ENABLE_MARKER
+            if(m_printLogAsMarker)
+            {
+                roctxRangePop();
+            }
+#endif
+        }
+
+        bool printLogAsMarker() const;
+
         bool preload() const;
 
     private:
@@ -82,6 +104,7 @@ namespace rocblaslt
         int         m_value;
         int         m_value2;
         bool        m_printMarker       = false;
+        bool        m_printLogAsMarker  = false;
         bool        m_preloadAllKernels = false;
 
         Debug();

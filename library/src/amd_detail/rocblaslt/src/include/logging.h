@@ -385,8 +385,8 @@ void log_arguments(
     os << "\n";
 }
 
-template <typename T, typename... Ts>
-void log_arguments_bench(std::ostream& os, T& x, Ts&&... xs)
+template <typename S, typename T, typename... Ts>
+void log_arguments_bench(S& os, T& x, Ts&&... xs)
 {
     if constexpr(std::is_same_v<T, const char*>)
     {

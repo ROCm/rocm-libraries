@@ -43,6 +43,11 @@ namespace rocblaslt
         return m_preloadAllKernels;
     }
 
+    bool Debug::printLogAsMarker() const
+    {
+        return m_printLogAsMarker;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)
@@ -50,11 +55,12 @@ namespace rocblaslt
         const char* hipblaslt_marker = std::getenv("HIPBLASLT_ENABLE_MARKER");
         if(hipblaslt_marker)
         {
-            m_printMarker = strtol(hipblaslt_marker, nullptr, 0) != 0;
+            m_printMarker      = strtol(hipblaslt_marker, nullptr, 0) != 0;
+            m_printLogAsMarker = strtol(hipblaslt_marker, nullptr, 0) == 2;
 #ifndef HIPBLASLT_ENABLE_MARKER
             if(m_printMarker)
                 printf("HIPBLASLT_ENABLE_MARKER is not defined. Please rebuild with -DHIPBLASLT_ENABLE_MARKER=ON\n");
-#endif
+#endif  
         }
 
         const char *hipblaslt_preload = std::getenv("HIPBLASLT_PRELOAD_KERNELS");

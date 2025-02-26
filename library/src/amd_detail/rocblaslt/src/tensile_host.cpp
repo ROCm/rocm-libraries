@@ -514,7 +514,7 @@ namespace
                                             const int32_t& hotIterations,
                                             bool           isCpp)
     {
-        log_bench(
+        auto s = log_str(
             __func__,
             "--api_method",
             isCpp ? "cpp" : "c",
@@ -611,6 +611,14 @@ namespace
             coldIterations,
             "--iters",
             hotIterations);
+        
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+            log_bench_from_str(s);
+        if(rocblaslt::Debug::Instance().printLogAsMarker())
+        {
+            rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
+            rocblaslt::Debug::Instance().logMarkerStop();
+        }
     }
 
     inline void logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGemm& problem,
@@ -838,7 +846,7 @@ namespace
                            .tensor(TensileLite::ContractionProblemGemm::TENSOR::E)
                            .strides()[2];
         }
-        log_bench(
+        auto s = log_str(
             __func__,
             "--api_method",
             isCpp ? "cpp" : "c",
@@ -909,6 +917,14 @@ namespace
             coldIterations,
             "--iters",
             hotIterations);
+
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+            log_bench_from_str(s);
+        if(rocblaslt::Debug::Instance().printLogAsMarker())
+        {
+            rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
+            rocblaslt::Debug::Instance().logMarkerStop();
+        }
     }
 
     inline void
@@ -2140,7 +2156,7 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         data->algoIndex    = *solutionIndex;
         data->inputs       = GetTensileInputs(prob);
 
-        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+        if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench) || rocblaslt::Debug::Instance().printLogAsMarker())
         {
             logBenchFromTensileDataGemm(data->problem,
                                         data->inputs,
@@ -2580,7 +2596,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
         {
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench) || rocblaslt::Debug::Instance().printLogAsMarker())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -2613,7 +2629,7 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                           "GG is initialized with useUserArgs = true, workspace has no arguments.");
                 return rocblaslt_status_not_initialized;
             }
-            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+            if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench) || rocblaslt::Debug::Instance().printLogAsMarker())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
