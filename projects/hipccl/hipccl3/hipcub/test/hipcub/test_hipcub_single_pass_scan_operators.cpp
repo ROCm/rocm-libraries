@@ -365,6 +365,6 @@ TYPED_TEST(HipcubRunningPrefixTest, IntSum)
         std::partial_sum(input.begin(), input.end(), expected.begin());
 
         // We can do direct comparison because we're working on integral types.
-        ASSERT_EQ(expected, output);
+        test_utils::assert_eq(output, expected);
     }
 }
