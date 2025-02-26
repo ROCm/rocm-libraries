@@ -4,6 +4,9 @@
 
 function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
     set(TEST_SOURCE "test_${TEST}.cpp")
+    if(USE_HIPCXX)
+        set_source_files_properties(${TEST_SOURCE} PROPERTIES LANGUAGE HIP)
+    endif()
     set(TEST_TARGET "${TEST}_${TEST_TYPE}.hip")
 
     add_executable(${TEST_TARGET} ${TEST_SOURCE})
@@ -11,7 +14,8 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
         PRIVATE
             --hipstdpar
             --hipstdpar-path=${HIPSTDPAR_LOCATION}
-            --hipstdpar-thrust-path=${THRUST_LOCATION})
+            --hipstdpar-thrust-path=${THRUST_LOCATION}
+            --hipstdpar-prim-path=${ROCPRIM_LOCATION})
     if(INTERPOSE_ALLOC)
         target_compile_options(${TEST_TARGET}
             PRIVATE
@@ -21,9 +25,15 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
     target_link_libraries(${TEST_TARGET}
         PRIVATE
             --hipstdpar
-            TBB::tbb
             Threads::Threads
     )
+
+    if(TARGET TBB::tbb OR TARGET tbb)
+        target_link_libraries(${TEST_TARGET}
+            PRIVATE
+                TBB::tbb
+        )
+    endif()
     
     if (NOT WIN32)
       foreach(gpu_target ${GPU_TARGETS})
@@ -76,26 +86,12 @@ set(ROCTHRUST_CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CXX_STANDARD 17)
 
 # Dependencies
-find_package(TBB QUIET)
-if(NOT TARGET TBB::tbb AND NOT TARGET tbb)
-    message(STATUS "Thread Building Blocks not found. Fetching...")
-    FetchContent_Declare(
-        thread-building-blocks
-        GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
-        GIT_TAG        1c4c93fc5398c4a1acb3492c02db4699f3048dea # v2021.13.0
-    )
-    # Disable tests for TBB
-    set(TBB_TEST OFF CACHE BOOL "Disable TBB tests" FORCE)
-
-    FetchContent_MakeAvailable(thread-building-blocks)
-else()
-    find_package(TBB REQUIRED)
-endif()
 find_package(Threads REQUIRED)
 
-# Define where to find rocThrust and hipstdpar headers
+# Define where to find rocThrust, hipstdpar and rocPRIM headers
 set(THRUST_LOCATION ${PROJECT_SOURCE_DIR})
 set(HIPSTDPAR_LOCATION ${THRUST_LOCATION}/thrust/system/hip/hipstdpar)
+set(ROCPRIM_LOCATION ${ROCPRIM_INCLUDE_DIR})
 
 # Add tests
 add_hipstdpar_test("algorithms" "compile" OFF)

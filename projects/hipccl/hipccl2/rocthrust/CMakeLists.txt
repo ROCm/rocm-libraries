@@ -15,6 +15,39 @@ endif()
 # Note: C is required here for dependencies
 project(rocthrust LANGUAGES CXX C)
 
+# Set CXX flags
+if (NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Set HIP flags
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+set(CMAKE_HIP_EXTENSIONS OFF)
+
+include(CheckLanguage)
+include(CMakeDependentOption)
+
+# Build options
+# Disable -Werror
+option(DISABLE_WERROR "Disable building with Werror" ON)
+option(BUILD_TEST "Build tests" OFF)
+option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
+option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
+option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
+#Set the header wrapper OFF by default.
+option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+
+check_language(HIP)
+cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
 #Adding CMAKE_PREFIX_PATH
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
 
@@ -34,7 +67,6 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
-include(CMakeDependentOption)
 # rocm-cmake contains common cmake code for rocm projects to help
 # setup and install
 include( cmake/FindROCMCmake.cmake )
@@ -47,26 +79,30 @@ include( ROCMHeaderWrapper )
 include( ROCMCheckTargetIds )
 include( ROCMClients )
 
-# Use target ID syntax if supported for GPU_TARGETS
-if (NOT DEFINED AMDGPU_TARGETS)
-  set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
+if(USE_HIPCXX)
+  enable_language(HIP)
 else()
-  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
-endif()
-set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
-
-if(GPU_TARGETS STREQUAL "all")
-  if(BUILD_ADDRESS_SANITIZER)
-    # ASAN builds require xnack
-    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
-    )
+  # Use target ID syntax if supported for GPU_TARGETS
+  if (NOT DEFINED AMDGPU_TARGETS)
+    set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
   else()
-    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
-    )
-  endif() 
-  set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
+  endif()
+  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+
+  if(GPU_TARGETS STREQUAL "all")
+    if(BUILD_ADDRESS_SANITIZER)
+      # ASAN builds require xnack
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
+      )
+    else()
+      rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+        TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+      )
+    endif()
+    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
+  endif()
 endif()
 
 # Get dependencies
@@ -76,18 +112,6 @@ include(cmake/Dependencies.cmake)
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
-# Build options
-# Disable -Werror
-option(DISABLE_WERROR "Disable building with Werror" ON)
-option(BUILD_TEST "Build tests" OFF)
-option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 
 set(RNG_SEED_COUNT 0 CACHE STRING "Number of true random sequences to test each input size for")
 set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each input size for")
@@ -106,17 +130,10 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
   )
 endif ()
 
-# Set CXX flags
-if (NOT DEFINED CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 if(DISABLE_WERROR)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra ")
+  add_compile_options(-Wall -Wextra)
 else()
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+  add_compile_options(-Wall -Wextra -Werror)
 endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
@@ -147,7 +164,7 @@ print_configuration_summary()
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
 
-if(BUILD_TEST OR BUILD_BENCHMARKS)
+if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
