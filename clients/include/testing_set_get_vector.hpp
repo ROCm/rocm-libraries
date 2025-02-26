@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,23 @@ void testing_set_get_vector(const Arguments& arg)
 
     // argument sanity check, quick return if input parameters are invalid before allocating invalid
     // memory
-    if(N < 0 || incx <= 0 || incy <= 0 || ldd <= 0)
+    if(arg.algo == 1) // use arg.algo == 1 to test bad device pointer
+    {
+        T  host_data;
+        T* host_data_ptr = &host_data;
+
+        rocblas_status status
+            = rocblas_set_vector_fn(1, sizeof(T), host_data_ptr, 1, host_data_ptr, 1);
+        hipError_t h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        status  = rocblas_get_vector_fn(1, sizeof(T), host_data_ptr, 1, host_data_ptr, 1);
+        h_error = hipGetLastError(); // clear HIP error
+        GTEST_ASSERT_TRUE(rocblas_status_internal_error == status);
+
+        return;
+    }
+    else if(N < 0 || incx <= 0 || incy <= 0 || ldd <= 0)
     {
         DAPI_EXPECT(rocblas_status_invalid_size,
                     rocblas_set_vector_fn,
