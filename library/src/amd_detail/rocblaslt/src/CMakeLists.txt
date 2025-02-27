@@ -108,6 +108,25 @@ if( BUILD_WITH_TENSILE )
     set_target_properties( TensileHost PROPERTIES POSITION_INDEPENDENT_CODE ON )
   endif()
 
+# Run gcc --version and capture the first line of the output
+execute_process(
+    COMMAND gcc --version
+    OUTPUT_VARIABLE GCC_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+# Extract just the version number from the first line using regular expressions
+string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" GCC_VERSION "${GCC_OUTPUT}")
+
+# Print the extracted GCC version number
+message(STATUS "Extracted GCC Version: ${GCC_VERSION}")
+
+# Compare GCC version and set the flag conditionally if it's 7.5.0 or less
+if(${GCC_VERSION} VERSION_LESS "7.6.0")    
+    # Apply -ftemplate-depth=2048 to tensile_host.cpp if GCC_VERSION is less than 7.6.0 to avoid template recursion
+    set_source_files_properties(src/amd_detail/rocblaslt/src/tensile_host.cpp PROPERTIES COMPILE_FLAGS "-ftemplate-depth=2048")
+endif()
+
   set( Tensile_SRC
     src/amd_detail/rocblaslt/src/tensile_host.cpp
   )
