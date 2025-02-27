@@ -55,6 +55,16 @@ void testing_set_get_vector(const Arguments& arg)
 
         return;
     }
+    else if(N == 0)
+    {
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_set_vector_fn,
+                    (N, sizeof(T), nullptr, incx, nullptr, ldd));
+        DAPI_EXPECT(rocblas_status_success,
+                    rocblas_get_vector_fn,
+                    (N, sizeof(T), nullptr, ldd, nullptr, incy));
+        return;
+    }
     else if(N < 0 || incx <= 0 || incy <= 0 || ldd <= 0)
     {
         DAPI_EXPECT(rocblas_status_invalid_size,
