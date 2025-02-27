@@ -1410,6 +1410,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   break
           else:
 
+            desiredPack = instPerPackA + instPerPackB + ceil(instPerPackM)
             # Step 1
             # put the required pack into mfma iter
             for j in range(_instPerPackA):
@@ -1422,6 +1423,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 numPackedA += 1
                 latencyLeft -= 1
                 insertedPackA += 1
+                desiredPack -= 1
                 if len(instPackLast) == 2:
                   instPackLast.pop(0)
                 instPackLast.append("A")
@@ -1440,6 +1442,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   curPackIdx += 1
                   numPackedA += 1
                   latencyLeft -= 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("A")
@@ -1456,6 +1459,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   numPackedM += 1
                   latencyLeft -= 1
                   insertedPackM += 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("M")
@@ -1473,6 +1477,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     curPackIdx += 1
                     numPackedM += 1
                     latencyLeft -= 1
+                    desiredPack -= 1
                     if len(instPackLast) == 2:
                       instPackLast.pop(0)
                     instPackLast.append("M")
@@ -1488,6 +1493,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 numPackedB += 1
                 latencyLeft -= 1
                 insertedPackB += 1
+                desiredPack -= 1
                 if len(instPackLast) == 2:
                   instPackLast.pop(0)
                 instPackLast.append("B")
@@ -1505,6 +1511,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   curPackIdx += 1
                   numPackedB += 1
                   latencyLeft -= 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("B")
@@ -1512,34 +1519,40 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # Step 2
             # put the desired pack into mfma iter
             if latencyLeft > 0:
-              for j in range(instPerPackA):
+              remainDesiredPack = desiredPack
+              for j in range(remainDesiredPack):
                 if packItemsA:
                   iterCode.add(packItemsA.pop(0))
                   curPackIdx += 1
                   numPackedA += 1
                   latencyLeft -= 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("A")
 
             if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and latencyLeft > 0:
-              for j in range(ceil(instPerPackM)):
+              remainDesiredPack = desiredPack
+              for j in range(remainDesiredPack):
                 if packItemsM:
                   iterCode.add(packItemsM.pop(0))
                   curPackIdx += 1
                   numPackedM += 1
                   latencyLeft -= 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("M")
 
             if latencyLeft > 0:
-              for j in range(instPerPackB):
+              remainDesiredPack = desiredPack
+              for j in range(remainDesiredPack):
                 if packItemsB:
                   iterCode.add(packItemsB.pop(0))
                   curPackIdx += 1
                   numPackedB += 1
                   latencyLeft -= 1
+                  desiredPack -= 1
                   if len(instPackLast) == 2:
                     instPackLast.pop(0)
                   instPackLast.append("B")
@@ -1548,8 +1561,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # since packed register need to wait 2 quad cycle to finish packing
             # we insert pack instruction if we can, or s_nop
             remainLatency = 0
+            iterCode.addComment0("pack scheduling: curPackIdx:%u, numPack:%u, instPackLast:%s" %(curPackIdx,numPack,instPackLast))
             if curPackIdx < numPack + 2:
-              remainLatency = 2
+              if len(instPackLast):
+                remainLatency = 2
+              else:
+                remainLatency = 0
+                remainPacked = len(packItemsA) + len(packItemsB) + len(packItemsM)
+                desiredPack = max(0, desiredPack)
+                if remainPacked > 0:
+                  remainLatency = min(remainPacked, desiredPack)
             elif curPackIdx >= numPack:
               # when the number of inserted packs is >= the number of desired packs
               # check the last 2 inserted packs to see if we need to add extra instructions after the last inersted pack.
@@ -1598,7 +1619,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               else:
                 latency = remainLatency - 1
                 iterCode.add(SNop(waitState=latency, comment="VALU packing writes to be consumed by matrix instruction"))
-                curPackIdx += 1
                 remainLatency -= (latency+1)
 
         if not schedulePackConsiderMetadata:
