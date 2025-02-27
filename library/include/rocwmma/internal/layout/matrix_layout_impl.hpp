@@ -354,10 +354,10 @@ namespace rocwmma
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // Mma instruction size
                   uint32_t SplitK /* = 1*/> // # of splits
         struct ColInlineInt
-            : public MatrixLayoutBase<ColInlineInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
+            : public MatrixLayoutBase<ColInlineInt<BlockDim, BlockK, DataT, MmaDim, SplitK>>
         {
             struct Traits
             {
@@ -365,10 +365,10 @@ namespace rocwmma
                 static constexpr uint32_t WaveSize = Constants::AMDGCN_WAVE_SIZE;
 
                 // Number of elements each thread will fetch in BlockDim direction
-                static constexpr uint32_t DimPerThread = BlockDim / MfmaDim;
+                static constexpr uint32_t DimPerThread = BlockDim / MmaDim;
 
                 // Number of elements each thread will fetch in BlockK direction
-                static constexpr uint32_t KPerThread = BlockK * MfmaDim / (WaveSize * SplitK);
+                static constexpr uint32_t KPerThread = BlockK * MmaDim / (WaveSize * SplitK);
 
                 // How many elements each thread will gather
                 static constexpr uint32_t ElementsPerThread = DimPerThread * KPerThread;
@@ -396,9 +396,9 @@ namespace rocwmma
                 static_assert(BlockK >= SplitK, "Invalid SplitK");
                 static_assert(BlockK % SplitK == 0, "BlockK is not a multiple of SplitK");
 
-                // Check MfmaDim validity
-                static_assert(BlockDim >= MfmaDim, "BlockDim must be larger than MfmaDim");
-                static_assert(BlockDim % MfmaDim == 0, "BlockDim must be a multiple of MfmaDim");
+                // Check MmaDim validity
+                static_assert(BlockDim >= MmaDim, "BlockDim must be larger than MmaDim");
+                static_assert(BlockDim % MmaDim == 0, "BlockDim must be a multiple of MmaDim");
             };
 
             ROCWMMA_DEVICE constexpr static inline auto strideCounts()
@@ -416,7 +416,7 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    ((threadIdx.x / MfmaDim) * Traits::KPerThread)
+                                    ((threadIdx.x / MmaDim) * Traits::KPerThread)
                                         % (BlockK / SplitK));
             }
         };
@@ -424,10 +424,10 @@ namespace rocwmma
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // Mma instruction size
                   uint32_t SplitK /*= 1*/> // # of splits
         struct ColOrthoInt
-            : public MatrixLayoutBase<ColOrthoInt<BlockDim, BlockK, DataT, MfmaDim, SplitK>>
+            : public MatrixLayoutBase<ColOrthoInt<BlockDim, BlockK, DataT, MmaDim, SplitK>>
         {
             struct Traits
             {
@@ -435,10 +435,10 @@ namespace rocwmma
                 static constexpr uint32_t WaveSize = Constants::AMDGCN_WAVE_SIZE;
 
                 // Number of elements each thread will fetch in BlockDim direction
-                static constexpr uint32_t DimPerThread = BlockDim / MfmaDim;
+                static constexpr uint32_t DimPerThread = BlockDim / MmaDim;
 
                 // Number of elements each thread will fetch in BlockK direction
-                static constexpr uint32_t KPerThread = BlockK * MfmaDim / (WaveSize * SplitK);
+                static constexpr uint32_t KPerThread = BlockK * MmaDim / (WaveSize * SplitK);
 
                 // Number of elements that each thread is responsible for
                 static constexpr uint32_t ElementsPerThread = DimPerThread * KPerThread;
@@ -466,9 +466,9 @@ namespace rocwmma
                 static_assert(BlockK >= SplitK, "Invalid SplitK");
                 static_assert(BlockK % SplitK == 0, "BlockK is not a multiple of SplitK");
 
-                // Check MfmaDim validity
-                static_assert(BlockDim >= MfmaDim, "BlockDim must be larger than MfmaDim");
-                static_assert(BlockDim % MfmaDim == 0, "BlockDim must be a multiple of MfmaDim");
+                // Check MmaDim validity
+                static_assert(BlockDim >= MmaDim, "BlockDim must be larger than MmaDim");
+                static_assert(BlockDim % MmaDim == 0, "BlockDim must be a multiple of MmaDim");
             };
 
             ROCWMMA_DEVICE constexpr static inline auto strideCounts()
@@ -488,7 +488,7 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto baseOffset()
             {
                 return make_coord2d((threadIdx.x * Traits::DimPerThread) % BlockDim,
-                                    (threadIdx.x / MfmaDim * Traits::KPerThread)
+                                    (threadIdx.x / MmaDim * Traits::KPerThread)
                                         % (BlockK / SplitK));
             }
         };

@@ -199,10 +199,12 @@ namespace rocwmma
             template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
+                // MmaBlock dim
+                constexpr uint32_t MmaDim = LayoutTraits::MmaDim;
+
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize
-                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / LayoutTraits::MmaDim;
+                constexpr uint32_t AccVecSize = MmaDim * MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / MmaDim;
 
                 // Note: Retrieve VW of native accumulator
                 constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
@@ -211,7 +213,7 @@ namespace rocwmma
                                                                     typename LayoutTraits::DataT,
                                                                     void>::Result;
 
-                return Transforms::soa_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, AccMaxVW>(
+                return Transforms::soa_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, AccMaxVW, MmaDim>(
                     forward<VecT>(v));
             }
         };
@@ -224,11 +226,13 @@ namespace rocwmma
             template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
+                // MmaBlock dim
+                constexpr uint32_t MmaDim = LayoutTraits::MmaDim;
+
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize
-                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / LayoutTraits::MmaDim;
-                constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / LayoutTraits::MmaDim;
+                constexpr uint32_t AccVecSize = MmaDim * MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / MmaDim;
+                constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / MmaDim;
 
                 // Note: Retrieve VW of native accumulator
                 constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
@@ -238,7 +242,7 @@ namespace rocwmma
                                                                     void>::Result;
 
                 return Transforms::
-                    aos_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, MmaBlocksB, AccMaxVW>(
+                    aos_int_to_mma_acc_int_a_major<AccVecSize, MmaBlocksA, MmaBlocksB, AccMaxVW, MmaDim>(
                         forward<VecT>(v));
             }
         };
@@ -251,10 +255,12 @@ namespace rocwmma
             template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
+                // MmaBlock dim
+                constexpr uint32_t MmaDim = LayoutTraits::MmaDim;
+
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize
-                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
-                constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / LayoutTraits::MmaDim;
+                constexpr uint32_t AccVecSize = MmaDim * MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t MmaBlocksB = LayoutTraits::BlockDim / MmaDim;
 
                 // Note: Retrieve VW of native accumulator
                 constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
@@ -263,7 +269,7 @@ namespace rocwmma
                                                                     typename LayoutTraits::DataT,
                                                                     void>::Result;
 
-                return Transforms::mma_acc_int_a_major_to_soa_int<AccVecSize, MmaBlocksB, AccMaxVW>(
+                return Transforms::mma_acc_int_a_major_to_soa_int<AccVecSize, MmaBlocksB, AccMaxVW, MmaDim>(
                     forward<VecT>(v));
             }
         };
@@ -276,9 +282,11 @@ namespace rocwmma
             template <typename VecT>
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
+                // MmaBlock dim
+                constexpr uint32_t MmaDim = LayoutTraits::MmaDim;
+
                 // Vector size per acc block
-                constexpr uint32_t AccVecSize
-                    = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
+                constexpr uint32_t AccVecSize = MmaDim * MmaDim / Constants::AMDGCN_WAVE_SIZE;
 
                 // Note: Retrieve VW of native accumulator
                 constexpr uint32_t AccMaxVW = detail::MaxVWSelector<accumulator,
@@ -287,7 +295,7 @@ namespace rocwmma
                                                                     typename LayoutTraits::DataT,
                                                                     void>::Result;
 
-                return Transforms::mma_acc_int_a_major_to_aos_int<AccVecSize, AccMaxVW>(
+                return Transforms::mma_acc_int_a_major_to_aos_int<AccVecSize, AccMaxVW, MmaDim>(
                     forward<VecT>(v));
             }
         };

@@ -105,28 +105,28 @@ namespace rocwmma
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // MMA instruction size
                   uint32_t SplitK = 1> // # of splits
         struct ColInlineInt;
 
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // MMA instruction size
                   uint32_t SplitK = 1> // # of splits
         struct ColOrthoInt;
 
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // MMA instruction size
                   uint32_t SplitK = 1> // # of splits
         struct RowInlineInt;
 
         template <uint32_t BlockDim,
                   uint32_t BlockK,
                   typename DataT,
-                  uint32_t MfmaDim, // MFMA instruction size
+                  uint32_t MmaDim, // MMA instruction size
                   uint32_t SplitK = 1> // # of splits
         struct RowOrthoInt;
 
