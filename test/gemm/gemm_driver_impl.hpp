@@ -428,12 +428,19 @@ namespace rocwmma
                                                      GetDataType_t<MfmaFragAcc> beta,
                                                      MfmaFragC const&           fragC)
         {
-            for(int i = 0; i < fragD.num_elements; i++)
+            // Split into chunks to not overwhelm the register capacity
+            constexpr uint32_t ChunkSize = min(8u, MfmaFragD::size());
+            for(int i = 0; i < MfmaFragD::size() / ChunkSize; i++)
             {
-                // Perform computation in ComputeT and cast back to OutputT
-                fragD.x[i] = static_cast<GetDataType_t<MfmaFragD>>(
-                    alpha * fragAcc.x[i]
-                    + beta * static_cast<GetDataType_t<MfmaFragAcc>>(fragC.x[i]));
+                for(int j = 0; j < ChunkSize; j++)
+                {
+                    auto idx = i * ChunkSize + j;
+                    // Perform computation in ComputeT and cast back to OutputT
+                    fragD.x[idx] = static_cast<GetDataType_t<MfmaFragD>>(
+                        alpha * fragAcc.x[idx]
+                        + beta * static_cast<GetDataType_t<MfmaFragAcc>>(fragC.x[idx]));
+                }
+
             }
         }
 
@@ -501,6 +508,20 @@ namespace rocwmma
         {
             using WaitLgkmcnt = WaitLgkmcnt<lgkmcnt>;
             WaitLgkmcnt::exec();
+        }
+
+        template <GemmDriverT>
+        __device__ inline void GemmDriver<GemmDriverT_impl>::scheduleKLoop()
+        {
+            // K-loop rough scheduling:
+            // 1. GR
+            // 2. LR
+            // 3. Mma
+            // 4. LW
+            SchedBarrierVmemRead::exec();
+            SchedBarrierDsRead::exec();
+            SchedBarrierMma::exec();
+            SchedBarrierDsWrite::exec();
         }
 
 #undef GemmDriverT
