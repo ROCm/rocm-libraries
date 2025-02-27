@@ -44,6 +44,8 @@
 #include <stdint.h>
 #include <vector>
 
+#include <hipblaslt-ext.hpp>
+
 #define ROCBLASLT_KERNEL __global__
 #define ROCBLASLT_DEVICE_ILF __device__
 
@@ -372,13 +374,34 @@ typedef enum rocblaslt_matmul_preference_attributes_
 /********************************************************************************
  * \brief rocblaslt_matmul_algo holds the description of the matrix
  * multiplication algorithm.
- *******************************************************************************/
 typedef struct __attribute__((packed, aligned(8))) _rocblaslt_matmul_algo
 {
     uint8_t data[8]             = {0};
     bool    fallback            = false;
     size_t  max_workspace_bytes = 0;
 } rocblaslt_matmul_algo;
+ *******************************************************************************/
+
+/********************************************************************************
+ * \brief rocblaslt_matmul_algo holds the description of the matrix
+ * multiplication algorithm.
+ *******************************************************************************/
+typedef struct _rocblaslt_matmul_algo{
+#ifdef __cplusplus
+  uint8_t data[8] = {0}; // must match hipblasLtMatmulAlgo_t layout
+  bool fallback = false; // 
+  uint8_t data_pad[7] = {0}; // has uint8_t data[16] 
+  size_t max_workspace_bytes = 0;
+#else
+  uint8_t data[8];
+  bool fallback;
+  uint8_t data_pad[7];
+  size_t max_workspace_bytes;
+#endif
+} rocblaslt_matmul_algo;
+
+static_assert(sizeof(rocblaslt_matmul_algo) == sizeof(hipblasLtMatmulAlgo_t),
+              "rocblaslt_matmul_algo struct does not match size of hipblasLtMatmulAlgo_t");
 
 /********************************************************************************
  * \brief rocblaslt_matmul_heuristic holds the configured matrix
@@ -451,6 +474,9 @@ namespace rocblaslt
         int                aux_stride     = 0;
     };
 
+    static_assert(sizeof(RocGemmEpilogue) == sizeof(hipblaslt_ext::GemmEpilogue),
+                  "RocGemmEpilogue struct does not match size of hipblaslt_ext::GemmEpilogue");
+
     class RocGemmEpilogueV2
     {
     public:
@@ -493,6 +519,9 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
     };
+
+    static_assert(sizeof(RocGemmInputs) == sizeof(hipblaslt_ext::GemmInputs),
+                  "RocGemmInputs struct does not match size of hipblaslt_ext::GemmInputs");
 
     struct RocGemmInputsV2
     {
