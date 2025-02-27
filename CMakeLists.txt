@@ -219,7 +219,7 @@ if(NOT SKIP_LIBRARY)
         message (STATUS "using local Tensile from ${Tensile_TEST_LOCAL_PATH}, copied to ${Tensile_ROOT}")
       else()
         # Use the virtual-env setup and download package from specified repo:
-        set( tensile_fork "ROCmSoftwarePlatform" CACHE STRING "Tensile fork to use" )
+        set( tensile_fork "ROCm" CACHE STRING "Tensile fork to use" )
         file (STRINGS "tensile_tag.txt" read_tensile_tag)
         set( tensile_tag ${read_tensile_tag} CACHE STRING "Tensile tag to download" )
         virtualenv_install("git+https://github.com/${tensile_fork}/Tensile.git@${tensile_tag}")
