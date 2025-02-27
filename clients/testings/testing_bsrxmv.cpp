@@ -321,12 +321,9 @@ void testing_bsrxmv(const Arguments& arg)
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         double gpu_time_used;
-        median_perf(gpu_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_bsrxmv<T>,
-                    PARAMS(h_alpha, dA, dx, h_beta, dy));
+        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+            return rocsparse_bsrxmv<T>(PARAMS(h_alpha, dA, dx, h_beta, dy));
+        });
 
         //
         // Re-use bsrmv gflop and gbyte counts but with different parameters
