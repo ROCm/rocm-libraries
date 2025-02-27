@@ -118,7 +118,7 @@ def runTestCommand (platform, project, settings)
     }
 
     def hmmTestCommand= ''
-    if (platform.jenkinsLabel.contains('gfx90a') && settings.gfilter.contains('nightly'))
+    if (settings.gfilter.contains('nightly') && (platform.jenkinsLabel.contains('gfx90a') || platform.jenkinsLabel.contains('gfx942')))
     {
         hmmTestCommand = """
                             ${gtestCommonEnv} HSA_XNACK=1 \$ROCBLAS_TEST --gtest_output=xml:test_detail_hmm.xml --gtest_color=yes --gtest_filter=*HMM*-*known_bug*
