@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -72,11 +72,7 @@ if( BUILD_WITH_TENSILE )
 
   set( Tensile_LOGIC "asm_full" CACHE STRING "Tensile to use which logic?")
   set( Tensile_CODE_OBJECT_VERSION "default" CACHE STRING "Tensile code_object_version")
-  if (WIN32)
-    set( Tensile_COMPILER "clang++" CACHE STRING "Tensile compiler")
-  else()
-    set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
-  endif()
+  set( Tensile_COMPILER "${CMAKE_CXX_COMPILER}" CACHE STRING "Tensile compiler")
   set( Tensile_LIBRARY_FORMAT "msgpack" CACHE STRING "Tensile library format")
 
   set_property( CACHE Tensile_LOGIC PROPERTY STRINGS aldebaran asm_full asm_lite asm_miopen hip_lite other )
