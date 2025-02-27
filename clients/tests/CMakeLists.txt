@@ -330,6 +330,9 @@ if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
     add_executable( ${worker} rocfft_mpi_worker.cpp )
+    if( BUILD_FFTW )
+      add_dependencies( ${worker} fftw_double fftw_single )
+    endif()
     target_compile_options( ${worker} PRIVATE -fopenmp )
     target_include_directories( ${worker}
       PRIVATE
