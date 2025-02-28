@@ -333,7 +333,8 @@ Tests:
   - name: dot_reduce_kernel
     category: pre_checkin
     N: [ 10100103 ]
-    incx_incy: *incx_incy_range_small
+    incx: 1
+    incy: 1
     batch_count: [2, 3]
     initialization: hpl
     function:
