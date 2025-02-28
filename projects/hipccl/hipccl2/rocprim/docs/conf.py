@@ -1,4 +1,4 @@
-# Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ with open('../CMakeLists.txt', encoding='utf-8') as f:
 project = "rocPRIM Documentation"
 html_title = f"rocPRIM {version_number} Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -54,5 +54,5 @@ doxygen_project = {
 external_projects = []
 external_projects_current_project = "rocprim"
 
-cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "static"]
+cpp_id_attributes = ["__global__", "__device__", "__host__", "__forceinline__", "__restrict__", "static"]
 cpp_paren_attributes = ["__declspec"]

@@ -50,7 +50,7 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
     const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -73,26 +73,39 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
         }
 
         // Preparing device
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        T* device_output_reductions;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        test_utils::device_ptr<T> device_output(output.size());
+        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
 
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, false
-        );
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, false
-        );
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, false
-        );
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_reductions));
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::using_warp_reduce,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             false);
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::raking_reduce,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             false);
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::raking_reduce_commutative_only,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             false);
     }
 }
 
@@ -115,7 +128,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
     const size_t size      = block_size * 58;
     const size_t grid_size = size / block_size;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -139,11 +152,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
         }
 
         // Preparing device
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        T* device_output_reductions;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions,
-                                                     output_reductions.size() * sizeof(T)));
+        test_utils::device_ptr<T> device_output(output.size());
+        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T,
                         block_size,
@@ -151,8 +161,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
                         binary_op_type>::run(output,
                                              output_reductions,
                                              expected_reductions,
-                                             device_output,
-                                             device_output_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
                                              grid_size,
                                              false);
         static_run_algo<T,
@@ -161,8 +171,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
                         binary_op_type>::run(output,
                                              output_reductions,
                                              expected_reductions,
-                                             device_output,
-                                             device_output_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
                                              grid_size,
                                              false);
 
@@ -172,13 +182,10 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
                         binary_op_type>::run(output,
                                              output_reductions,
                                              expected_reductions,
-                                             device_output,
-                                             device_output_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
                                              grid_size,
                                              false);
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_reductions));
     }
 }
 
@@ -201,7 +208,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultipliesExact)
     const size_t size = block_size * 58;
     const size_t grid_size = size / block_size;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -230,27 +237,40 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultipliesExact)
         }
 
         // Preparing device
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        T* device_output_reductions;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        test_utils::device_ptr<T> device_output(output.size());
+        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
 
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, true
-        );
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, true
-        );
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::using_warp_reduce,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             true);
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::raking_reduce,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             true);
 
-        static_run_algo<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, grid_size, true
-        );
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_reductions));
+        static_run_algo<T,
+                        block_size,
+                        rocprim::block_reduce_algorithm::raking_reduce_commutative_only,
+                        binary_op_type>::run(output,
+                                             output_reductions,
+                                             expected_reductions,
+                                             device_output.get(),
+                                             device_output_reductions.get(),
+                                             grid_size,
+                                             true);
     }
 }
 
@@ -269,7 +289,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
 
     constexpr size_t block_size = TestFixture::block_size;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -303,26 +323,39 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
         }
 
         // Preparing device
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        T* device_output_reductions;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_reductions, output_reductions.size() * sizeof(T)));
+        test_utils::device_ptr<T> device_output(output.size());
+        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
 
-        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, valid_items, grid_size
-        );
-        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, valid_items, grid_size
-        );
-        static_run_valid<T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only, binary_op_type>::run(
-            output, output_reductions, expected_reductions,
-            device_output, device_output_reductions, valid_items, grid_size
-        );
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_reductions));
+        static_run_valid<T,
+                         block_size,
+                         rocprim::block_reduce_algorithm::using_warp_reduce,
+                         binary_op_type>::run(output,
+                                              output_reductions,
+                                              expected_reductions,
+                                              device_output.get(),
+                                              device_output_reductions.get(),
+                                              valid_items,
+                                              grid_size);
+        static_run_valid<T,
+                         block_size,
+                         rocprim::block_reduce_algorithm::raking_reduce,
+                         binary_op_type>::run(output,
+                                              output_reductions,
+                                              expected_reductions,
+                                              device_output.get(),
+                                              device_output_reductions.get(),
+                                              valid_items,
+                                              grid_size);
+        static_run_valid<T,
+                         block_size,
+                         rocprim::block_reduce_algorithm::raking_reduce_commutative_only,
+                         binary_op_type>::run(output,
+                                              output_reductions,
+                                              expected_reductions,
+                                              device_output.get(),
+                                              device_output_reductions.get(),
+                                              valid_items,
+                                              grid_size);
     }
 }
 

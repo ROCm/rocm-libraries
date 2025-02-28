@@ -32,9 +32,14 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_find_first_of.hpp>
+#include <rocprim/functional.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -169,7 +174,7 @@ struct device_find_first_of_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
             {
@@ -191,7 +196,7 @@ struct device_find_first_of_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
                 {

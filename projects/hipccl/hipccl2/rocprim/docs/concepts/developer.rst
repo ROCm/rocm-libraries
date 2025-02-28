@@ -116,7 +116,7 @@ Selecting the default configuration is done based on the target architecture ``t
     struct default_ALGO_config<
         static_cast<unsigned int>(target_arch::gfx1030),
         Type,
-        std::enable_if_t<bool(rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)>>
+        std::enable_if_t<bool(rocprim::traits::get<value_type>().is_floating_point()) && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2)>>
         : ALGO_config<256, 16>
     {};
 
@@ -337,3 +337,22 @@ Pitfalls and common mistakes
 HIP code is compiled in multiple passes: one for the host and one for each targeted device architecture. As such, host code is agnostic of device architecture, and should be designed as such. Only with a ``hipStream`` can the device be inferred and can certain properties be obtained. Since device code is compiled for a specific architecture, it can contain compile-time optimizations for specific architectures. Note that AMD GPUs have a warp size of 32 or 64, and unless specialized, algorithms should work for both warp sizes.
 
 All variables with the ``__shared__`` memory space specifier should either be in a function with the ``__global__`` (``ROCPRIM_KERNEL``) execution space specifier or in a function with the ``__device__`` (``ROCPRIM_DEVICE``) execution space specifier marked with ``__forceinline__`` (``ROCPRIM_FORCE_INLINE``). The reason for this is that without forcing the inlining of the function, the compiler may choose not to optimize shared memory allocations, leading to exceeding the limit dictated by hardware.
+
+Documenting algorithms
+======================
+
+Documenting algorithms requires updating several files.
+
+See `Contributing to the ROCm documentation <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_ for general guidelines.
+
+The ``docs/`` directory contains the ``.rst`` files that form this website. These ``.rst`` files use `Breathe directives <https://breathe.readthedocs.io/en/latest/directives.html>`_ to display `Doxygen's special commands <https://www.doxygen.nl/manual/commands.html>`_, which are used in C++ comments to document code.
+
+Algorithms should be documented in their appropriate ``docs/`` subdirectories, like ``block_ops/`` and ``device_ops/``, based on their scope. :ref:`dev-nth_element` for example is a :ref:`device-wide operation <dev-index>`, documented in ``docs/device_ops/nth_element.rst``.
+
+There are several pages that link to the :ref:`dev-nth_element` documentation:
+
+- ``docs/device_ops/index.rst``, which adds :ref:`dev-nth_element` to :ref:`dev-index`.
+- ``docs/reference/ops_summary.rst``, which adds :ref:`dev-nth_element` to :ref:`ops-summary`.
+- ``docs/sphinx/_toc.yml.in``, which adds :ref:`dev-nth_element` to Sphinx its `Table Of Contents <https://github.com/ROCm/rocPRIM/blob/develop/docs/sphinx/_toc.yml.in>`_, and ``docs/sphinx/_toc.yml`` is automatically generated from this file.
+
+Any newly added algorithm should also update these files. As one can easily forget to update one of them, it is recommended to `build and preview the documentation locally <https://github.com/ROCm/rocPRIM/blob/develop/README.md#building-the-documentation-locally>`_.

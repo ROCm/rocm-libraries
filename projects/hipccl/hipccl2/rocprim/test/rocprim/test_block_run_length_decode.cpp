@@ -32,6 +32,7 @@
 #include "rocprim/block/block_load_func.hpp"
 #include "rocprim/block/block_store_func.hpp"
 #include "rocprim/functional.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 template<class ItemT,
@@ -159,7 +160,7 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
     constexpr unsigned runs_per_thread          = TestFixture::params::runs_per_thread;
     constexpr unsigned decoded_items_per_thread = TestFixture::params::decoded_items_per_thread;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -215,59 +216,26 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
             }
         }
 
-        ItemT* d_run_items{};
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(&d_run_items, run_items.size() * sizeof(ItemT)));
-        HIP_CHECK(hipMemcpy(d_run_items,
-                            run_items.data(),
-                            run_items.size() * sizeof(ItemT),
-                            hipMemcpyHostToDevice));
+        test_utils::device_ptr<ItemT>   d_run_items(run_items);
+        test_utils::device_ptr<LengthT> d_run_lengths(run_lengths);
+        test_utils::device_ptr<ItemT>   d_decoded_runs(expected.size());
+        test_utils::device_ptr<LengthT> d_decoded_offsets(expected.size());
 
-        LengthT* d_run_lengths{};
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_run_lengths,
-                                                     run_lengths.size() * sizeof(LengthT)));
-        HIP_CHECK(hipMemcpy(d_run_lengths,
-                            run_lengths.data(),
-                            run_lengths.size() * sizeof(LengthT),
-                            hipMemcpyHostToDevice));
-
-        ItemT* d_decoded_runs{};
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(&d_decoded_runs, expected.size() * sizeof(ItemT)));
-
-        LengthT* d_decoded_offsets{};
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_decoded_offsets,
-                                                     expected.size() * sizeof(LengthT)));
         block_run_length_decode_kernel<ItemT,
                                        LengthT,
                                        block_size,
                                        runs_per_thread,
                                        decoded_items_per_thread>
-            <<<dim3(1), dim3(block_size), 0, 0>>>(d_run_items,
-                                                  d_run_lengths,
-                                                  d_decoded_runs,
-                                                  d_decoded_offsets);
+            <<<dim3(1), dim3(block_size), 0, 0>>>(d_run_items.get(),
+                                                  d_run_lengths.get(),
+                                                  d_decoded_runs.get(),
+                                                  d_decoded_offsets.get());
 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
-        std::vector<ItemT> output(expected.size());
-        HIP_CHECK(hipMemcpy(output.data(),
-                            d_decoded_runs,
-                            output.size() * sizeof(ItemT),
-                            hipMemcpyDeviceToHost));
-        HIP_CHECK(hipGetLastError())
-
-        std::vector<LengthT> offsets(expected.size());
-        HIP_CHECK(hipMemcpy(offsets.data(),
-                            d_decoded_offsets,
-                            offsets.size() * sizeof(LengthT),
-                            hipMemcpyDeviceToHost));
-
-        HIP_CHECK(hipFree(d_run_items));
-        HIP_CHECK(hipFree(d_run_lengths));
-        HIP_CHECK(hipFree(d_decoded_runs));
-        HIP_CHECK(hipFree(d_decoded_offsets));
+        std::vector<ItemT>   output  = d_decoded_runs.load();
+        std::vector<LengthT> offsets = d_decoded_offsets.load();
 
         unsigned int expected_offset = -1;
         ItemT        previous_value  = ItemT{};

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,12 +44,12 @@ BEGIN_ROCPRIM_NAMESPACE
 /// methods for sorting of items (keys or key-value pairs) partitioned across threads in a block
 /// using radix sort algorithm.
 ///
-/// \tparam Key - the key type.
-/// \tparam BlockSize - the number of threads in a block.
-/// \tparam ItemsPerThread - the number of items contributed by each thread.
-/// \tparam Value - the value type. Default type empty_type indicates
+/// \tparam Key the key type.
+/// \tparam BlockSize the number of threads in a block.
+/// \tparam ItemsPerThread the number of items contributed by each thread.
+/// \tparam Value the value type. Default type empty_type indicates
 /// a keys-only sort.
-/// \tparam RadixBitsPerPass - amount of bits to sort per pass. The Default is 4.
+/// \tparam RadixBitsPerPass amount of bits to sort per pass. The Default is 4.
 /// \tparam RadixRankAlgorithm the rank algorithm used.
 ///
 /// \par Overview
@@ -164,11 +164,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -224,10 +224,10 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is
     /// allocated by the method itself.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -247,11 +247,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -309,10 +309,10 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -335,12 +335,12 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -405,11 +405,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -434,12 +434,12 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -504,11 +504,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -531,11 +531,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -594,10 +594,10 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -618,11 +618,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -681,10 +681,10 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -708,12 +708,12 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -776,11 +776,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -805,12 +805,12 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),
@@ -874,11 +874,11 @@ public:
     ///
     /// \tparam Decomposer The type of the decomposer argument. Defaults to the identity decomposer.
     ///
-    /// \param [in, out] keys - reference to an array of keys provided by a thread.
-    /// \param [in, out] values - reference to an array of values provided by a thread.
-    /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+    /// \param [in, out] keys reference to an array of keys provided by a thread.
+    /// \param [in, out] values reference to an array of values provided by a thread.
+    /// \param [in] begin_bit [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
-    /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+    /// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     /// \param [in] decomposer [optional] If `Key` is not an arithmetic type (integral, floating point),

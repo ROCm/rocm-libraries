@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -132,7 +132,7 @@ unsigned int warp_id()
 }
 
 /// \brief Returns warp id in a block (tile), given the flat (linear, 1D) thread identifier in a multidimensional tile (block).
-/// \param flat_id - the flat id that should be used to compute the warp id.
+/// \param flat_id the flat id that should be used to compute the warp id.
 ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int warp_id(unsigned int flat_id)
 {

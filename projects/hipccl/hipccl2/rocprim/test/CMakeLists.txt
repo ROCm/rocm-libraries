@@ -76,10 +76,16 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
     PRIVATE
       rocprim
   )
-  target_link_libraries(${TEST_TARGET}
-    PRIVATE
+  if(USE_HIPCXX)
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
       $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
-  )
+    )
+  else()
+    target_link_libraries(${TEST_TARGET}
+      PRIVATE
+      hip::device)
+  endif()
 
   target_compile_options(${TEST_TARGET}
     PRIVATE

@@ -41,11 +41,9 @@ template<typename Config,
 struct adjacent_find_impl_kernels
 {
     template<class OutputT, class IdT>
-    static
-ROCPRIM_KERNEL __launch_bounds__(1)
-    void init_adjacent_find(OutputT*              reduce_output,
-                            ordered_block_id<IdT> ordered_tile_id,
-                            const size_t          size)
+    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(1) void init_adjacent_find(OutputT*              reduce_output,
+                                                     ordered_block_id<IdT> ordered_tile_id,
+                                                     const size_t          size)
     {
         // Reset output value.
         *reduce_output = size;
@@ -54,16 +52,13 @@ ROCPRIM_KERNEL __launch_bounds__(1)
         ordered_tile_id.reset();
     }
 
-    static
-ROCPRIM_KERNEL
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-#endif
-        void block_reduce_kernel(TransformedInputIterator transformed_input,
-                                 ReduceIndexIterator      reduce_output,
-                                 const std::size_t        size,
-                                 BinaryPred               op,
-                                 OrderedTileIdType        ordered_tile_id)
+    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
+                                                    .kernel_config.block_size) void
+        block_reduce_kernel(TransformedInputIterator transformed_input,
+                            ReduceIndexIterator      reduce_output,
+                            const std::size_t        size,
+                            BinaryPred               op,
+                            OrderedTileIdType        ordered_tile_id)
     {
         static constexpr adjacent_find_config_params params     = device_params<Config>();
         static constexpr unsigned int                block_size = params.kernel_config.block_size;

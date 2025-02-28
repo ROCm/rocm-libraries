@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 
 #include "../common_test_header.hpp"
 #include "test_utils.hpp"
+#include "test_utils_device_ptr.hpp"
 
 #include <rocprim/device/device_radix_sort.hpp>
 #include <rocprim/iterator/reverse_iterator.hpp>
@@ -59,30 +60,26 @@ TEST(RocprimReverseIteratorTests, DeviceVector)
     std::sort(expected.rbegin(), expected.rend());
     std::vector<T> output(size);
 
-    T* d_input{};
-    T* d_output{};
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(T)));
+    test_utils::device_ptr<T> d_input(input);
+    test_utils::device_ptr<T> d_output(size);
 
-    auto d_output_it = rocprim::make_reverse_iterator(d_output + size);
+    auto d_output_it = rocprim::make_reverse_iterator(d_output.get() + size);
 
-    void*  d_temp_storage{};
     size_t temp_storage_bytes;
 
     HIP_CHECK(
-        rocprim::radix_sort_keys(d_temp_storage, temp_storage_bytes, d_input, d_output_it, size));
+        rocprim::radix_sort_keys(nullptr, temp_storage_bytes, d_input.get(), d_output_it, size));
     ASSERT_NE(temp_storage_bytes, static_cast<size_t>(0));
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_bytes));
-    HIP_CHECK(
-        rocprim::radix_sort_keys(d_temp_storage, temp_storage_bytes, d_input, d_output_it, size));
-    HIP_CHECK(hipMemcpy(output.data(), d_output, size * sizeof(T), hipMemcpyDeviceToHost));
+    test_utils::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
+    HIP_CHECK(rocprim::radix_sort_keys(d_temp_storage.get(),
+                                       temp_storage_bytes,
+                                       d_input.get(),
+                                       d_output_it,
+                                       size));
+
+    output = d_output.load();
     ASSERT_EQ(expected, output);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 TEST(RocprimReverseIteratorTests, TestIncrement)

@@ -32,12 +32,13 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_partial_sort.hpp>
-
-#include <string>
-#include <vector>
+#include <rocprim/functional.hpp>
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 template<typename Key = int, typename Config = rocprim::default_config>
 struct device_partial_sort_benchmark : public config_autotune_interface
@@ -66,9 +67,9 @@ struct device_partial_sort_benchmark : public config_autotune_interface
              hipStream_t         stream) const override
     {
         using key_type = Key;
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(key_type);
-        
+
         size_t middle = 10;
 
         if(!small_n)
@@ -108,7 +109,7 @@ struct device_partial_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(hipMemcpy(d_keys_input,
                                 d_keys_new_data,
@@ -133,7 +134,7 @@ struct device_partial_sort_benchmark : public config_autotune_interface
         for(auto _ : state)
         {
             float elapsed_mseconds = 0;
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(hipMemcpy(d_keys_input,
                                     d_keys_new_data,

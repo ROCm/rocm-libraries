@@ -23,6 +23,10 @@
 #include "benchmark_device_find_first_of.parallel.hpp"
 #include "benchmark_utils.hpp"
 
+#include <rocprim/types.hpp>
+
+#include <stdint.h>
+
 namespace
 {
 auto benchmarks = config_autotune_register::create_bulk(

@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -77,12 +77,12 @@ enum class warp_load_method
 /// \brief The \p warp_load class is a warp level parallel primitive which provides methods
 /// for loading data from continuous memory into a blocked arrangement of items across a warp.
 ///
-/// \tparam T - the input/output type.
-/// \tparam ItemsPerThread - the number of items to be processed by
+/// \tparam T the input/output type.
+/// \tparam ItemsPerThread the number of items to be processed by
 /// each thread.
-/// \tparam WarpSize - the number of threads in the warp. It must be a divisor of the
+/// \tparam WarpSize the number of threads in the warp. It must be a divisor of the
 /// kernel block size.
-/// \tparam Method - the method to load data.
+/// \tparam Method the method to load data.
 ///
 /// \par Overview
 /// * The \p warp_load class has a number of different methods to load data:
@@ -148,11 +148,11 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// warp.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] input - the input iterator to load from.
-    /// \param [out] items - array that data is loaded to.
+    /// \param [in] input the input iterator to load from.
+    /// \param [out] items array that data is loaded to.
     /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview
@@ -175,12 +175,12 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// warp.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] input - the input iterator to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
+    /// \param [in] input the input iterator to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
     /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview
@@ -204,13 +204,13 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// warp.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] input - the input iterator to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
-    /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
+    /// \param [in] input the input iterator to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
+    /// \param [in] out_of_bounds default value assigned to out-of-bound items.
     /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview

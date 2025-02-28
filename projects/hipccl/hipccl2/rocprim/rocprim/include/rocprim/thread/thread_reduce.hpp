@@ -30,8 +30,11 @@
 #ifndef ROCPRIM_THREAD_THREAD_REDUCE_HPP_
 #define ROCPRIM_THREAD_THREAD_REDUCE_HPP_
 
-
 #include "../config.hpp"
+#include "../functional.hpp"
+#include "../type_traits.hpp"
+
+#include <type_traits>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -50,28 +53,55 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \param reduction_op [in] Instance of the reduction operator functor
 /// \param prefix [in] Value to be used as prefix, if NoPrefix is false
 /// \return Value obtained from reduction of input array
-template <
-    int         LENGTH,
-    typename    T,
-    typename    ReductionOp,
-    bool        NoPrefix = false>
-ROCPRIM_DEVICE ROCPRIM_INLINE T thread_reduce(
-    T*           input,
-    ReductionOp reduction_op,
-    T           prefix = T(0))
+template<int LENGTH, typename T, typename ReductionOp, bool NoPrefix = false>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto thread_reduce(T* input, ReductionOp reduction_op, T prefix = T(0))
+    -> std::enable_if_t<!rocprim::detail::is_tuple<T>::value, T>
 {
     T retval;
     if(NoPrefix)
+    {
         retval = input[0];
+    }
     else
+    {
         retval = prefix;
+    }
 
     ROCPRIM_UNROLL
-    for (int i = 0 + NoPrefix; i < LENGTH; ++i)
+    for(int i = 0 + NoPrefix; i < LENGTH; ++i)
+    {
         retval = reduction_op(retval, input[i]);
+    }
 
     return retval;
 }
+
+/// \cond thread_reduce_specialization
+template<int LENGTH, typename T, typename ReductionOp, bool NoPrefix = false>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto thread_reduce(T* input, ReductionOp reduction_op, T prefix = T{})
+    -> std::enable_if_t<rocprim::detail::is_tuple<T>::value, T>
+{
+    T retval;
+    if(NoPrefix)
+    {
+        retval = input[0];
+    }
+    else
+    {
+        retval = prefix;
+    }
+
+    ROCPRIM_UNROLL
+    for(int i = 0 + NoPrefix; i < LENGTH; ++i)
+    {
+        retval = reduction_op(retval, input[i]);
+    }
+
+    return retval;
+}
+/// \endcond
 
 /// \brief Carry out a reduction on an array of elements in one thread
 /// \tparam LENGTH Length of the array to be reduced

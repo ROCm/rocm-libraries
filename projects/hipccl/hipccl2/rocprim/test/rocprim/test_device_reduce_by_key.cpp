@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 // required test headers
 #include "rocprim/types.hpp"
 #include "test_utils_custom_test_types.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 template<class Key,
@@ -91,7 +92,7 @@ using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
 // clang-format off
-typedef ::testing::Types<
+using Params = ::testing::Types<
     params<int, int, rocprim::plus<int>, 1, 1, int, rocprim::equal_to<int>, true>,
     params<double, int, rocprim::plus<int>, 3, 5, long long, custom_key_compare_op1<double>, false, false, true>,
     params<float, custom_double2, rocprim::minimum<custom_double2>, 1, 10000>,
@@ -119,7 +120,7 @@ typedef ::testing::Types<
     params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>,
     params<test_utils::custom_test_array_type<double, 8>, unsigned long, rocprim::plus<>, 69, 420>,
     params<int, int, rocprim::plus<int>, 1, 10, int, ::rocprim::equal_to<int>, false, true>
-> Params;
+>;
 // clang-format on
 
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
@@ -171,7 +172,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
     const unsigned int seed = 123;
     std::default_random_engine gen(seed);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -249,43 +250,24 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                 offset += key_count;
             }
 
-            key_type * d_keys_input;
-            value_type * d_values_input;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(value_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input, keys_input.data(),
-                    size * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_values_input, values_input.data(),
-                    size * sizeof(value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<key_type>   d_keys_input(keys_input);
+            test_utils::device_ptr<value_type> d_values_input(values_input);
 
-            key_type * d_unique_output;
-            aggregate_type * d_aggregates_output;
-            unsigned int * d_unique_count_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_output, unique_count_expected * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_aggregates_output, unique_count_expected * sizeof(aggregate_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output, sizeof(unsigned int)));
+            test_utils::device_ptr<key_type>       d_unique_output(unique_count_expected);
+            test_utils::device_ptr<aggregate_type> d_aggregates_output(unique_count_expected);
+            test_utils::device_ptr<unsigned int>   d_unique_count_output(1);
 
             size_t temporary_storage_bytes;
-
             HIP_CHECK((invoke_reduce_by_key<deterministic, config>(
                 nullptr,
                 temporary_storage_bytes,
-                d_keys_input,
-                d_values_input,
+                d_keys_input.get(),
+                d_values_input.get(),
                 size,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output),
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_aggregates_output),
-                d_unique_count_output,
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_unique_output.get()),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(
+                    d_aggregates_output.get()),
+                d_unique_count_output.get(),
                 reduce_op,
                 key_compare_op,
                 stream,
@@ -293,8 +275,7 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            void * d_temporary_storage;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
@@ -302,57 +283,27 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
                gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK((invoke_reduce_by_key<deterministic, config>(d_temporary_storage,
+            HIP_CHECK((invoke_reduce_by_key<deterministic, config>(d_temporary_storage.get(),
                                                                    temporary_storage_bytes,
-                                                                   d_keys_input,
-                                                                   d_values_input,
+                                                                   d_keys_input.get(),
+                                                                   d_values_input.get(),
                                                                    size,
-                                                                   d_unique_output,
-                                                                   d_aggregates_output,
-                                                                   d_unique_count_output,
+                                                                   d_unique_output.get(),
+                                                                   d_aggregates_output.get(),
+                                                                   d_unique_count_output.get(),
                                                                    reduce_op,
                                                                    key_compare_op,
                                                                    stream,
                                                                    debug_synchronous)));
 
-            
             if(TestFixture::params::use_graphs)
             {
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            HIP_CHECK(hipFree(d_temporary_storage));
-
-            std::vector<key_type> unique_output(unique_count_expected);
-            std::vector<aggregate_type> aggregates_output(unique_count_expected);
-            std::vector<unsigned int> unique_count_output(1);
-            HIP_CHECK(
-                hipMemcpy(
-                    unique_output.data(), d_unique_output,
-                    unique_count_expected * sizeof(key_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    aggregates_output.data(), d_aggregates_output,
-                    unique_count_expected * sizeof(aggregate_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    unique_count_output.data(), d_unique_count_output,
-                    sizeof(unsigned int),
-                    hipMemcpyDeviceToHost
-                )
-            );
-
-            HIP_CHECK(hipFree(d_keys_input));
-            HIP_CHECK(hipFree(d_values_input));
-            HIP_CHECK(hipFree(d_unique_output));
-            HIP_CHECK(hipFree(d_aggregates_output));
-            HIP_CHECK(hipFree(d_unique_count_output));
+            const auto unique_output       = d_unique_output.load();
+            const auto aggregates_output   = d_aggregates_output.load();
+            const auto unique_count_output = d_unique_count_output.load();
 
             if (TestFixture::params::use_graphs)
             {
@@ -399,7 +350,7 @@ void large_indices_reduce_by_key()
         // out: 0  1  1  2  2  2  2  3  3  3  3  3  3  3  3  4
         auto d_keys_input = rocprim::make_transform_iterator(
             rocprim::make_counting_iterator(key_type(1)),
-            [] ROCPRIM_DEVICE(key_type i)
+            [](key_type i)
             {
                 // for i > 0, returns the position of the most significant set bit,
                 // which is equal to the floor of log2
@@ -412,26 +363,19 @@ void large_indices_reduce_by_key()
         // the count is value of the last key plus one as the value of the first key is zero
         unsigned int unique_count_expected = log2(size) + 1;
 
-        key_type*       d_unique_output;
-        aggregate_type* d_aggregates_output;
-        unsigned int*   d_unique_count_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_output,
-                                                     unique_count_expected * sizeof(key_type)));
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(&d_aggregates_output,
-                                               unique_count_expected * sizeof(aggregate_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output, sizeof(unsigned int)));
+        test_utils::device_ptr<key_type>       d_unique_output(unique_count_expected);
+        test_utils::device_ptr<aggregate_type> d_aggregates_output(unique_count_expected);
+        test_utils::device_ptr<unsigned int>   d_unique_count_output(1);
 
         size_t temporary_storage_bytes;
-
         HIP_CHECK(invoke_reduce_by_key<Deterministic>(nullptr,
                                                       temporary_storage_bytes,
                                                       d_keys_input,
                                                       d_values_input,
                                                       size,
-                                                      d_unique_output,
-                                                      d_aggregates_output,
-                                                      d_unique_count_output,
+                                                      d_unique_output.get(),
+                                                      d_aggregates_output.get(),
+                                                      d_unique_count_output.get(),
                                                       reduce_op,
                                                       key_compare_op,
                                                       stream,
@@ -439,9 +383,7 @@ void large_indices_reduce_by_key()
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
-        void* d_temporary_storage;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+        test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;
         if(use_graphs)
@@ -449,46 +391,27 @@ void large_indices_reduce_by_key()
            gHelper.startStreamCapture(stream);
         }
 
-        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage.get(),
                                                       temporary_storage_bytes,
                                                       d_keys_input,
                                                       d_values_input,
                                                       size,
-                                                      d_unique_output,
-                                                      d_aggregates_output,
-                                                      d_unique_count_output,
+                                                      d_unique_output.get(),
+                                                      d_aggregates_output.get(),
+                                                      d_unique_count_output.get(),
                                                       reduce_op,
                                                       key_compare_op,
                                                       stream,
                                                       debug_synchronous));
 
-        
         if(use_graphs)
         {
             gHelper.createAndLaunchGraph(stream);
         }
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-
-        std::vector<key_type>       unique_output(unique_count_expected);
-        std::vector<aggregate_type> aggregates_output(unique_count_expected);
-        std::vector<unsigned int>   unique_count_output(1);
-        HIP_CHECK(hipMemcpy(unique_output.data(),
-                            d_unique_output,
-                            unique_count_expected * sizeof(key_type),
-                            hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(aggregates_output.data(),
-                            d_aggregates_output,
-                            unique_count_expected * sizeof(aggregate_type),
-                            hipMemcpyDeviceToHost));
-        HIP_CHECK(hipMemcpy(unique_count_output.data(),
-                            d_unique_count_output,
-                            sizeof(unsigned int),
-                            hipMemcpyDeviceToHost));
-
-        HIP_CHECK(hipFree(d_unique_output));
-        HIP_CHECK(hipFree(d_aggregates_output));
-        HIP_CHECK(hipFree(d_unique_count_output));
+        const auto unique_output       = d_unique_output.load();
+        const auto aggregates_output   = d_aggregates_output.load();
+        const auto unique_count_output = d_unique_count_output.load();
 
         if(use_graphs)
         {
@@ -524,13 +447,11 @@ TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeySmallValueType)
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueType)
 {
-    // large value type to test TilesPerBlock > 1
     large_indices_reduce_by_key<test_utils::custom_test_type<size_t>>();
 }
 
 TEST(RocprimDeviceReduceByKey, LargeIndicesReduceByKeyLargeValueTypeWithGraphs)
 {
-    // large value type to test TilesPerBlock > 1
     large_indices_reduce_by_key<test_utils::custom_test_type<size_t>, true>();
 }
 
@@ -574,9 +495,7 @@ void large_segment_count_reduce_by_key()
         auto d_unique_output     = rocprim::make_discard_iterator();
         auto d_aggregates_output = rocprim::make_discard_iterator();
 
-        size_t* d_unique_count_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output,
-                                                     sizeof(*d_unique_count_output)));
+        test_utils::device_ptr<size_t> d_unique_count_output(1);
 
         size_t temporary_storage_bytes;
         HIP_CHECK(invoke_reduce_by_key<Deterministic>(nullptr,
@@ -586,7 +505,7 @@ void large_segment_count_reduce_by_key()
                                                       size,
                                                       d_unique_output,
                                                       d_aggregates_output,
-                                                      d_unique_count_output,
+                                                      d_unique_count_output.get(),
                                                       reduce_op,
                                                       key_compare_op,
                                                       stream,
@@ -594,9 +513,7 @@ void large_segment_count_reduce_by_key()
 
         ASSERT_GT(temporary_storage_bytes, 0);
 
-        void* d_temporary_storage;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+        test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         test_utils::GraphHelper gHelper;
         if(use_graphs)
@@ -604,34 +521,25 @@ void large_segment_count_reduce_by_key()
            gHelper.startStreamCapture(stream);
         }
 
-        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage,
+        HIP_CHECK(invoke_reduce_by_key<Deterministic>(d_temporary_storage.get(),
                                                       temporary_storage_bytes,
                                                       d_keys_input,
                                                       d_values_input,
                                                       size,
                                                       d_unique_output,
                                                       d_aggregates_output,
-                                                      d_unique_count_output,
+                                                      d_unique_count_output.get(),
                                                       reduce_op,
                                                       key_compare_op,
                                                       stream,
                                                       debug_synchronous));
 
-        
         if(use_graphs)
         {
             gHelper.createAndLaunchGraph(stream);
         }
 
-        HIP_CHECK(hipFree(d_temporary_storage));
-
-        size_t unique_count_output;
-        HIP_CHECK(hipMemcpy(&unique_count_output,
-                            d_unique_count_output,
-                            sizeof(unique_count_output),
-                            hipMemcpyDeviceToHost));
-
-        HIP_CHECK(hipFree(d_unique_count_output));
+        const auto unique_count_output = d_unique_count_output.load()[0];
 
         ASSERT_EQ(unique_count_output, unique_count_expected);
 
@@ -650,7 +558,6 @@ TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeySmallValueType)
 
 TEST(RocprimDeviceReduceByKey, LargeSegmentCountReduceByKeyLargeValueType)
 {
-    // large value type to test TilesPerBlock > 1
     large_segment_count_reduce_by_key<test_utils::custom_test_type<size_t>>();
 }
 
@@ -679,7 +586,7 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
     ::rocprim::plus<value_type> reduce_op;
     auto                        key_compare_op = [](const auto&, const auto&) { return false; };
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -705,11 +612,9 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
             auto d_unique_output     = rocprim::make_discard_iterator();
             auto d_aggregates_output = rocprim::make_discard_iterator();
 
-            size_t* d_unique_count_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output, sizeof(size_t)));
+            test_utils::device_ptr<size_t> d_unique_count_output(1);
 
             size_t temporary_storage_bytes;
-
             HIP_CHECK(invoke_reduce_by_key<deterministic>(nullptr,
                                                           temporary_storage_bytes,
                                                           d_keys_input,
@@ -717,7 +622,7 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
                                                           size,
                                                           d_unique_output,
                                                           d_aggregates_output,
-                                                          d_unique_count_output,
+                                                          d_unique_count_output.get(),
                                                           reduce_op,
                                                           key_compare_op,
                                                           stream,
@@ -725,32 +630,22 @@ TEST(RocprimDeviceReduceByKey, ReduceByNonEqualKeys)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            void* d_temporary_storage;
-            HIP_CHECK(
-                test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            HIP_CHECK(invoke_reduce_by_key<deterministic>(d_temporary_storage,
+            HIP_CHECK(invoke_reduce_by_key<deterministic>(d_temporary_storage.get(),
                                                           temporary_storage_bytes,
                                                           d_keys_input,
                                                           d_values_input,
                                                           size,
                                                           d_unique_output,
                                                           d_aggregates_output,
-                                                          d_unique_count_output,
+                                                          d_unique_count_output.get(),
                                                           reduce_op,
                                                           key_compare_op,
                                                           stream,
                                                           debug_synchronous));
 
-            HIP_CHECK(hipFree(d_temporary_storage));
-
-            size_t unique_count_output;
-            HIP_CHECK(hipMemcpy(&unique_count_output,
-                                d_unique_count_output,
-                                sizeof(unique_count_output),
-                                hipMemcpyDeviceToHost));
-
-            HIP_CHECK(hipFree(d_unique_count_output));
+            const auto unique_count_output = d_unique_count_output.load()[0];
 
             ASSERT_EQ(unique_count_output, unique_count_expected);
         }

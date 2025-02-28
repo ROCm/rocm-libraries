@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,12 +45,12 @@ namespace detail
 template<class T, unsigned int WarpSize, bool UseAllReduce>
 struct select_warp_reduce_impl
 {
-    typedef typename std::conditional<
+    using type = typename std::conditional<
         // can we use crosslane (DPP or shuffle-based) implementation?
         detail::is_warpsize_shuffleable<WarpSize>::value,
         detail::warp_reduce_crosslane<T, WarpSize, UseAllReduce>, // yes
         detail::warp_reduce_shared_mem<T, WarpSize, UseAllReduce> // no
-    >::type type;
+        >::type;
 };
 
 } // end namespace detail
@@ -59,11 +59,11 @@ struct select_warp_reduce_impl
 /// for performing reduction operations on items partitioned across threads in a hardware
 /// warp.
 ///
-/// \tparam T - the input/output type.
-/// \tparam WarpSize - the size of logical warp size, which can be equal to or less than
+/// \tparam T the input/output type.
+/// \tparam WarpSize the size of logical warp size, which can be equal to or less than
 /// the size of hardware warp (see rocprim::device_warp_size()). Reduce operations are performed
 /// separately within groups determined by WarpSize.
-/// \tparam UseAllReduce - input parameter to determine whether to broadcast final reduction
+/// \tparam UseAllReduce input parameter to determine whether to broadcast final reduction
 /// value to all threads (default is false).
 ///
 /// \par Overview
@@ -119,7 +119,8 @@ class warp_reduce
     using base_type = typename detail::select_warp_reduce_impl<T, WarpSize, UseAllReduce>::type;
 
     // Check if WarpSize is valid for the targets
-    static_assert(WarpSize <= ROCPRIM_MAX_WARP_SIZE, "WarpSize can't be greater than hardware warp size.");
+    static_assert(WarpSize <= ROCPRIM_MAX_WARP_SIZE,
+                  "WarpSize can't be greater than hardware warp size.");
 
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
@@ -134,13 +135,13 @@ public:
 
     /// \brief Performs reduction across threads in a logical warp.
     ///
-    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// \tparam BinaryFunction type of binary function used for reduce. Default type
     /// is rocprim::plus<T>.
     ///
-    /// \param [in] input - thread input value.
-    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op binary operation function object that will be used for reduce.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -177,10 +178,11 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto reduce(T              input,
-                                              T&             output,
-                                              storage_type&  storage,
-                                              BinaryFunction reduce_op = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(T              input,
+                T&             output,
+                storage_type&  storage,
+                BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
     {
         base_type::reduce(input, output, storage, reduce_op);
@@ -189,25 +191,26 @@ public:
     /// \brief Performs reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto
-        reduce(T, T&, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(T, T&, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
     {
-        (void) reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        (void)reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
+                                 "size. Aborting warp sort.");
         return;
     }
 
     /// \brief Performs reduction across threads in a logical warp.
     ///
-    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// \tparam BinaryFunction type of binary function used for reduce. Default type
     /// is rocprim::plus<T>.
     ///
-    /// \param [in] input - thread input value.
-    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
-    /// \param [in] valid_items - number of items that will be reduced in the warp.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] valid_items number of items that will be reduced in the warp.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op binary operation function object that will be used for reduce.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -245,11 +248,12 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto reduce(T              input,
-                                              T&             output,
-                                              int            valid_items,
-                                              storage_type&  storage,
-                                              BinaryFunction reduce_op = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(T              input,
+                T&             output,
+                int            valid_items,
+                storage_type&  storage,
+                BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
     {
         base_type::reduce(input, output, valid_items, storage, reduce_op);
@@ -258,26 +262,27 @@ public:
     /// \brief Performs reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto
-        reduce(T, T&, int, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto reduce(T, T&, int, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
     {
-        (void) reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        (void)reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
+                                 "size. Aborting warp sort.");
         return;
     }
 
     /// \brief Performs head-segmented reduction across threads in a logical warp.
     ///
-    /// \tparam Flag - type of head flags. Must be contextually convertible to \p bool.
-    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// \tparam Flag type of head flags. Must be contextually convertible to \p bool.
+    /// \tparam BinaryFunction type of binary function used for reduce. Default type
     /// is rocprim::plus<T>.
     ///
-    /// \param [in] input - thread input value.
-    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
-    /// \param [in] flag - thread head flag, \p true flags mark beginnings of segments.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] flag thread head flag, \p true flags mark beginnings of segments.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op binary operation function object that will be used for reduce.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -288,12 +293,12 @@ public:
     template<class Flag,
              class BinaryFunction          = ::rocprim::plus<T>,
              unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto head_segmented_reduce(T              input,
-                                                             T&             output,
-                                                             Flag           flag,
-                                                             storage_type&  storage,
-                                                             BinaryFunction reduce_op
-                                                             = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto head_segmented_reduce(T              input,
+                               T&             output,
+                               Flag           flag,
+                               storage_type&  storage,
+                               BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
     {
         base_type::head_segmented_reduce(input, output, flag, storage, reduce_op);
@@ -304,26 +309,28 @@ public:
     template<class Flag,
              class BinaryFunction          = ::rocprim::plus<T>,
              unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto head_segmented_reduce(
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto head_segmented_reduce(
         T, T&, Flag, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
     {
-        (void) reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        (void)reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
+                                 "size. Aborting warp sort.");
         return;
     }
 
     /// \brief Performs tail-segmented reduction across threads in a logical warp.
     ///
-    /// \tparam Flag - type of tail flags. Must be contextually convertible to \p bool.
-    /// \tparam BinaryFunction - type of binary function used for reduce. Default type
+    /// \tparam Flag type of tail flags. Must be contextually convertible to \p bool.
+    /// \tparam BinaryFunction type of binary function used for reduce. Default type
     /// is rocprim::plus<T>.
     ///
-    /// \param [in] input - thread input value.
-    /// \param [out] output - reference to a thread output value. May be aliased with \p input.
-    /// \param [in] flag - thread tail flag, \p true flags mark ends of segments.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] reduce_op - binary operation function object that will be used for reduce.
+    /// \param [in] input thread input value.
+    /// \param [out] output reference to a thread output value. May be aliased with \p input.
+    /// \param [in] flag thread tail flag, \p true flags mark ends of segments.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
+    /// \param [in] reduce_op binary operation function object that will be used for reduce.
     /// The signature of the function should be equivalent to the following:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -334,12 +341,12 @@ public:
     template<class Flag,
              class BinaryFunction          = ::rocprim::plus<T>,
              unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto tail_segmented_reduce(T              input,
-                                                             T&             output,
-                                                             Flag           flag,
-                                                             storage_type&  storage,
-                                                             BinaryFunction reduce_op
-                                                             = BinaryFunction()) ->
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto tail_segmented_reduce(T              input,
+                               T&             output,
+                               Flag           flag,
+                               storage_type&  storage,
+                               BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
     {
         base_type::tail_segmented_reduce(input, output, flag, storage, reduce_op);
@@ -350,12 +357,14 @@ public:
     template<class Flag,
              class BinaryFunction          = ::rocprim::plus<T>,
              unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto tail_segmented_reduce(
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto tail_segmented_reduce(
         T, T&, Flag, storage_type&, BinaryFunction reduce_op = BinaryFunction()) ->
         typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
     {
-        (void) reduce_op;
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp size. Aborting warp sort.");
+        (void)reduce_op;
+        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
+                                 "size. Aborting warp sort.");
         return;
     }
 };

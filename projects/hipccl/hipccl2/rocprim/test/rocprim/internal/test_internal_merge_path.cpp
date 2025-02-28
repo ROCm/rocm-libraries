@@ -2,6 +2,7 @@
 #include "../../common_test_header.hpp"
 #include "../test_utils_assertions.hpp"
 #include "../test_utils_data_generation.hpp"
+#include "rocprim/test_utils_device_ptr.hpp"
 
 #include <rocprim/block/block_store_func.hpp>
 #include <rocprim/detail/merge_path.hpp>
@@ -25,17 +26,13 @@ void serial_merge(std::vector<T>& input,
 {
     static_assert(IPT >= N, "Kernel must be launched such that all items can be processed!");
 
-    size_t num_bytes = sizeof(T) * N;
-    T*     device_data;
-
-    HIP_CHECK(hipMalloc(&device_data, num_bytes));
-    HIP_CHECK(hipMemcpy(device_data, input.data(), num_bytes, hipMemcpyHostToDevice));
+    test_utils::device_ptr<T> device_data(input);
 
     merge_kernel<IPT>
-        <<<1, 1>>>(device_data, rocprim::detail::range_t<>{0, mid, mid, N}, compare_function);
+        <<<1, 1>>>(device_data.get(), rocprim::detail::range_t<>{0, mid, mid, N}, compare_function);
     HIP_CHECK(hipGetLastError());
 
-    HIP_CHECK(hipMemcpy(output.data(), device_data, num_bytes, hipMemcpyDeviceToHost));
+    output = device_data.load();
 }
 
 TEST(RocprimInternalMergePathTests, Basic)

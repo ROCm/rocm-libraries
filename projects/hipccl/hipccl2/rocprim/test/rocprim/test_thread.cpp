@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
+#include "test_utils_device_ptr.hpp"
 
 // required rocprim headers
 #include <rocprim/intrinsics/thread.hpp>
@@ -45,28 +46,26 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params<32, 1, 1>,
-    params<64, 1, 1>,
-    params<128, 1, 1>,
-    params<256, 1, 1>,
-    params<512, 1, 1>,
-    params<1024, 1, 1>,
+using Params = ::testing::Types<params<32, 1, 1>,
+                                params<64, 1, 1>,
+                                params<128, 1, 1>,
+                                params<256, 1, 1>,
+                                params<512, 1, 1>,
+                                params<1024, 1, 1>,
 
-    params<16, 2, 1>,
-    params<32, 2, 1>,
-    params<64, 2, 1>,
-    params<128, 2, 1>,
-    params<256, 2, 1>,
-    params<512, 2, 1>,
+                                params<16, 2, 1>,
+                                params<32, 2, 1>,
+                                params<64, 2, 1>,
+                                params<128, 2, 1>,
+                                params<256, 2, 1>,
+                                params<512, 2, 1>,
 
-    params<8, 2, 2>,
-    params<16, 2, 2>,
-    params<32, 2, 2>,
-    params<64, 2, 2>,
-    params<128, 2, 2>,
-    params<256, 2, 2>
-> Params;
+                                params<8, 2, 2>,
+                                params<16, 2, 2>,
+                                params<32, 2, 2>,
+                                params<64, 2, 2>,
+                                params<128, 2, 2>,
+                                params<256, 2, 2>>;
 
 TYPED_TEST_SUITE(RocprimThreadTests, Params);
 
@@ -96,7 +95,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
         return;
     }
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -112,33 +111,22 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
         }
 
         // Preparing device
-        Type* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, block_size * sizeof(typename decltype(output)::value_type)));
+        test_utils::device_ptr<Type> device_output(block_size);
 
         // Running kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                flat_id_kernel<
-                    block_size_x, block_size_y, block_size_z
-                >
-            ),
-            dim3(1), dim3(block_size_x, block_size_y, block_size_z), 0, 0,
-            device_output
-        );
+            HIP_KERNEL_NAME(flat_id_kernel<block_size_x, block_size_y, block_size_z>),
+            dim3(1),
+            dim3(block_size_x, block_size_y, block_size_z),
+            0,
+            0,
+            device_output.get());
         HIP_CHECK(hipGetLastError());
 
         // Reading results from device
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(typename decltype(output)::value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-
+        output = device_output.load();
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-        HIP_CHECK(hipFree(device_output));
     }
 }
 
@@ -174,7 +162,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
         return;
     }
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -190,32 +178,21 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
         }
 
         // Preparing device
-        Type* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
+        test_utils::device_ptr<Type> device_output(block_size);
         // Running kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                block_id_kernel<
-                    block_size_x, block_size_y, block_size_z
-                >
-            ),
-            dim3(block_size_x, block_size_y, block_size_z), dim3(block_size_x, block_size_y, block_size_z), 0, 0,
-            device_output
-        );
+            HIP_KERNEL_NAME(block_id_kernel<block_size_x, block_size_y, block_size_z>),
+            dim3(block_size_x, block_size_y, block_size_z),
+            dim3(block_size_x, block_size_y, block_size_z),
+            0,
+            0,
+            device_output.get());
         HIP_CHECK(hipGetLastError());
 
         // Reading results from device
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(typename decltype(output)::value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-        HIP_CHECK(hipFree(device_output));
     }
 }

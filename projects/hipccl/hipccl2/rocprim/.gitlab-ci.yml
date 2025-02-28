@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,17 @@ stages:
   - build
   - test
   - benchmark
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS =~ /CI Skip/
+      when: never
+    - if: $CI_MERGE_REQUEST_TITLE !~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 3
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 1
 
 variables:
   PACKAGE_DIR: $BUILD_DIR/package
@@ -110,8 +121,7 @@ copyright-date:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D BUILD_BENCHMARK=ON
-      -D GPU_TARGETS=$GPU_TARGETS
-      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D CMAKE_CXX_STANDARD=14
@@ -170,7 +180,7 @@ build:cmake-minimum-apt:
     - | # Add hardened libc++ assertions for tests only
         if [[ $BUILD_TARGET == "TEST" ]]; then
             echo "Configuring with hardened libc++!"
-            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON"
+            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON -D ROCPRIM_ENABLE_ASSERTS=ON"
         fi
     - cmake
       -G Ninja
@@ -181,8 +191,7 @@ build:cmake-minimum-apt:
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D BUILD_EXAMPLE=ON
-      -D GPU_TARGETS=$GPU_TARGETS
-      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
       -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
@@ -198,8 +207,9 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/test/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/test_*
+      - $BUILD_DIR/test/rocprim/libtest_*
       - $BUILD_DIR/test/test_*
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:cmake-latest:
   stage: build
@@ -249,7 +259,7 @@ build:package:
     paths:
       - $PACKAGE_DIR/rocprim*.deb
       - $PACKAGE_DIR/rocprim*.zip
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:windows:
   stage: build
@@ -269,7 +279,7 @@ build:windows:
       -S $CI_PROJECT_DIR
       -B $CI_PROJECT_DIR/build
       -D BUILD_$BUILD_TARGET=ON
-      -D GPU_TARGETS=$GPU_TARGET
+      -D AMDGPU_TARGETS=$GPU_TARGET
       -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
       -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
@@ -285,7 +295,7 @@ build:windows:
       - $CI_PROJECT_DIR/build/CMakeCache.txt
       - $CI_PROJECT_DIR/build/.ninja_log
       - $CI_PROJECT_DIR/build/CTestTestfile.cmake
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 autotune:build:
   stage: autotune
@@ -317,7 +327,7 @@ autotune:build:
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=ON
       -D BENCHMARK_CONFIG_TUNING=ON
-      -D GPU_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D CMAKE_CXX_STANDARD=14
@@ -334,12 +344,13 @@ autotune:build:
       - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 1 week
 
-test:
+.test:common:
   stage: test
+  tags:
+    - rocm
+    - $GPU
   extends:
     - .cmake-minimum
-    - .rules:test
-    - .gpus:rocm
   needs:
     - job: build:cmake-minimum
       parallel:
@@ -359,9 +370,31 @@ test:
     - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
-      --tests-regex "hip|$GPU_TARGET"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+
+test:any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:common
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:arch-labels
+
+test:all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:test
 
 .test-windows-base:
   stage: test
@@ -402,7 +435,7 @@ test-windows-release:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
-      -D GPU_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
       -D CMAKE_CXX_STANDARD=14
       -S "$CI_PROJECT_DIR/test/extra"
       -B "$CI_PROJECT_DIR/package_test"
@@ -428,7 +461,8 @@ test:install:
       -D CMAKE_CXX_STANDARD=14
       -B build
       -S $CI_PROJECT_DIR
-    - $SUDO_CMD cmake --build build --target install
+    # Preserve $PATH when sudoing
+    - $SUDO_CMD env PATH="$PATH" cmake --build build --target install
     - !reference [.test-package, script]
 
 test:deb:
@@ -452,6 +486,10 @@ test:docs:
   extends:
     - .rules:test
     - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
 
 .benchmark-base:
   stage: benchmark

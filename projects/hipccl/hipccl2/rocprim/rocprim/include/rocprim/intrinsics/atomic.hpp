@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -163,6 +163,91 @@ namespace detail
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    __uint128_t atomic_load(const __uint128_t* address)
+    {
+        __uint128_t result;
+
+#define ROCPRIM_ATOMIC_LOAD(inst, mod, wait, ptr) \
+    asm volatile(inst " %0, %1 " mod "\t\n" wait : "=v"(result) : "v"(ptr) : "memory")
+
+#if ROCPRIM_TARGET_CDNA3
+    #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
+        ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
+        ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_LOAD("global_load_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
+#elif ROCPRIM_TARGET_RDNA4
+    #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
+        ROCPRIM_ATOMIC_LOAD("flat_load_b128", "scope:SCOPE_DEV", "s_wait_loadcnt_dscnt 0x0", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
+        ROCPRIM_ATOMIC_LOAD("ds_load_b128", "", "s_wait_dscnt 0x0", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_LOAD("global_load_b128", "off scope:SCOPE_DEV", "s_wait_loadcnt 0x0", ptr)
+#elif ROCPRIM_TARGET_RDNA2 || ROCPRIM_TARGET_RDNA1
+    #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
+        ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "glc dlc", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
+        ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_LOAD("global_load_dwordx4", "off glc dlc", "s_waitcnt vmcnt(0)", ptr)
+#elif ROCPRIM_TARGET_GCN3
+    #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
+        ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "glc", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
+        ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    // This architecture doesn't support atomics on the global AS.
+    #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) ROCPRIM_ATOMIC_LOAD_FLAT(ptr)
+#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_CDNA2 || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5
+    #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
+        ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "glc", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
+        ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_LOAD("global_load_dwordx4", "off glc", "s_waitcnt vmcnt(0)", ptr)
+#elif defined(__HIP_DEVICE_COMPILE__)
+    // Please submit an issue or pull request!
+    #error support for 128-bit atomics not implemented for current architecture
+#endif
+
+#ifdef __HIP_DEVICE_COMPILE__
+    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_is_shared) \
+        && __has_builtin(__builtin_amdgcn_is_private)
+
+        auto* ptr = (const __attribute__((address_space(0 /*flat*/))) __uint128_t*)address;
+        if(__builtin_amdgcn_is_shared(ptr))
+        {
+            auto* shared_ptr
+                = (const __attribute__((address_space(3 /*lds*/))) __uint128_t*)address;
+            ROCPRIM_ATOMIC_LOAD_SHARED(shared_ptr);
+        }
+        else if(__builtin_amdgcn_is_private(ptr))
+        {
+            ROCPRIM_ATOMIC_LOAD_FLAT(address);
+        }
+        else
+        {
+            auto* global_ptr
+                = (const __attribute__((address_space(1 /*global*/))) __uint128_t*)address;
+            ROCPRIM_ATOMIC_LOAD_GLOBAL(global_ptr);
+        }
+    #else
+        ROCPRIM_ATOMIC_LOAD_FLAT(address);
+    #endif
+#else
+        (void)address;
+        result = 0;
+#endif
+
+        return result;
+
+#undef ROCPRIM_ATOMIC_LOAD
+#undef ROCPRIM_ATOMIC_LOAD_FLAT
+#undef ROCPRIM_ATOMIC_LOAD_SHARED
+#undef ROCPRIM_ATOMIC_LOAD_GLOBAL
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void atomic_store(unsigned char* address, unsigned char value)
     {
         __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
@@ -187,6 +272,79 @@ namespace detail
                                                     unsigned long long  value)
     {
         __hip_atomic_store(address, value, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void atomic_store(__uint128_t* address, const __uint128_t value)
+    {
+#define ROCPRIM_ATOMIC_STORE(inst, mod, wait, ptr) \
+    asm volatile(inst " %0, %1 " mod "\t\n" wait : : "v"(ptr), "v"(value) : "memory")
+
+#if ROCPRIM_TARGET_CDNA3
+    #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
+        ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
+        ROCPRIM_ATOMIC_STORE("ds_write_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_STORE("global_store_dwordx4", "off sc1", "s_waitcnt vmcnt(0)", ptr)
+#elif ROCPRIM_TARGET_RDNA4
+    #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
+        ROCPRIM_ATOMIC_STORE("flat_store_b128", "scope:SCOPE_DEV", "s_wait_storecnt_dscnt 0x0", ptr)
+    #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
+        ROCPRIM_ATOMIC_STORE("ds_store_b128", "", "s_wait_dscnt 0x0", ptr)
+    #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_STORE("global_store_b128", "off scope:SCOPE_DEV", "s_wait_storecnt 0x0", ptr)
+#elif ROCPRIM_TARGET_GCN3
+    #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
+        ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
+        ROCPRIM_ATOMIC_STORE("ds_write_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    // This architecture doesn't support atomics on the global AS.
+    #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) ROCPRIM_ATOMIC_STORE_FLAT(ptr)
+#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_RDNA2 || ROCPRIM_TARGET_RDNA1 || ROCPRIM_TARGET_CDNA2 \
+    || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5
+    #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
+        ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "", "s_waitcnt vmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
+        ROCPRIM_ATOMIC_STORE("ds_write_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
+    #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) \
+        ROCPRIM_ATOMIC_STORE("global_store_dwordx4", "off", "s_waitcnt vmcnt(0)", ptr)
+#elif defined(__HIP_DEVICE_COMPILE__)
+    // Please submit an issue or pull request!
+    #error support for 128-bit atomics not implemented for current architecture
+#endif
+
+#ifdef __HIP_DEVICE_COMPILE__
+    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_is_shared) \
+        && __has_builtin(__builtin_amdgcn_is_private)
+
+        auto* ptr = (__attribute__((address_space(0 /*flat*/))) __uint128_t*)address;
+        if(__builtin_amdgcn_is_shared(ptr))
+        {
+            auto* shared_ptr = (__attribute__((address_space(3 /*lds*/))) __uint128_t*)address;
+            ROCPRIM_ATOMIC_STORE_SHARED(shared_ptr);
+        }
+        else if(__builtin_amdgcn_is_private(ptr))
+        {
+            ROCPRIM_ATOMIC_STORE_FLAT(address);
+        }
+        else
+        {
+            auto* global_ptr = (__attribute__((address_space(1 /*global*/))) __uint128_t*)address;
+            ROCPRIM_ATOMIC_STORE_GLOBAL(global_ptr);
+        }
+    #else
+        ROCPRIM_ATOMIC_STORE_FLAT(address);
+    #endif
+#else
+        (void)address;
+        (void)value;
+#endif
+
+#undef ROCPRIM_ATOMIC_STORE
+#undef ROCPRIM_ATOMIC_STORE_FLAT
+#undef ROCPRIM_ATOMIC_STORE_SHARED
+#undef ROCPRIM_ATOMIC_STORE_GLOBAL
     }
 
     /// \brief Wait for all vector memory operations to complete

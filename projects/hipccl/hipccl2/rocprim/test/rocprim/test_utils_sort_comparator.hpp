@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include <rocprim/type_traits.hpp>
 
 #include "test_utils_bfloat16.hpp"
+#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_half.hpp"
@@ -46,6 +47,7 @@ template<unsigned int StartBit,
                               || std::is_same<Key, rocprim::int128_t>::value,
                           int>
          = 0>
+ROCPRIM_HOST_DEVICE
 auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
@@ -73,11 +75,12 @@ template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
          std::enable_if_t<std::is_same<Key, bool>::value, int> = 0>
+ROCPRIM_HOST_DEVICE
 auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
     unsigned_bits_type bit_key;
-    std::memcpy(&bit_key, &key, sizeof(bit_key));
+    memcpy(&bit_key, &key, sizeof(bit_key));
     return to_bits<StartBit, EndBit>(bit_key);
 }
 
@@ -89,9 +92,11 @@ template<unsigned int StartBit,
                               // radix sorting custom types. A part of this workaround
                               // is to specialize rocprim::is_floating_point<custom_float_type>
                               // that we must counter here.
-                              && !std::is_same<Key, custom_float_type>::value,
+                              && !std::is_same<Key, custom_float_type>::value
+                              && !std::is_same<Key, custom_float_traits_type>::value,
                           int>
          = 0>
+ROCPRIM_HOST_DEVICE
 auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
@@ -127,9 +132,11 @@ template<unsigned int StartBit,
                               // radix sorting custom types. A part of this workaround
                               // is to specialize rocprim::is_custom_test_type<custom_float_type>
                               // that we must counter here.
-                              && !std::is_same<Key, custom_float_type>::value,
+                              && !std::is_same<Key, custom_float_type>::value
+                              && !std::is_same<Key, custom_float_traits_type>::value,
                           int>
          = 0>
+ROCPRIM_HOST_DEVICE
 auto to_bits(const Key& key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using inner_t            = typename inner_type<Key>::type;
@@ -158,6 +165,17 @@ template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
          std::enable_if_t<std::is_same<Key, custom_float_type>::value, int> = 0>
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
+{
+    return to_bits<StartBit, EndBit>(key.x);
+}
+
+template<unsigned int StartBit,
+         unsigned int EndBit,
+         class Key,
+         std::enable_if_t<std::is_same<Key, custom_float_traits_type>::value, int> = 0>
+ROCPRIM_HOST_DEVICE
 auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     return to_bits<StartBit, EndBit>(key.x);
@@ -174,6 +192,7 @@ constexpr bool is_floating_nan_host(const T& a)
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
+    ROCPRIM_HOST_DEVICE
     bool operator()(const Key lhs, const Key rhs) const
     {
         const auto l = detail::to_bits<StartBit, EndBit>(lhs);

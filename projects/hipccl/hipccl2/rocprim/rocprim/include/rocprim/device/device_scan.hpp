@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -100,13 +100,12 @@ template<bool Exclusive,
          class BinaryFunction,
          class InitValueType,
          class AccType>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().kernel_config.block_size) void single_scan_kernel(
-        InputIterator       input,
-        const size_t        size,
-        const InitValueType initial_value,
-        OutputIterator      output,
-        BinaryFunction      scan_op)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    single_scan_kernel(InputIterator       input,
+                       const size_t        size,
+                       const InitValueType initial_value,
+                       OutputIterator      output,
+                       BinaryFunction      scan_op)
 {
     single_scan_kernel_impl<Exclusive, Config>(input,
                                                size,
@@ -127,18 +126,18 @@ template<lookback_scan_determinism Determinism,
          class AccType,
          class LookBackScanState>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().kernel_config.block_size) void lookback_scan_kernel(
-        InputIterator       input,
-        OutputIterator      output,
-        const size_t        size,
-        const InitValueType initial_value,
-        BinaryFunction      scan_op,
-        LookBackScanState   lookback_scan_state,
-        const unsigned int  number_of_blocks,
-        AccType*            previous_last_element = nullptr,
-        AccType*            new_last_element      = nullptr,
-        bool                override_first_value  = false,
-        bool                save_last_value       = false)
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    lookback_scan_kernel(InputIterator       input,
+                         OutputIterator      output,
+                         const size_t        size,
+                         const InitValueType initial_value,
+                         BinaryFunction      scan_op,
+                         LookBackScanState   lookback_scan_state,
+                         const unsigned int  number_of_blocks,
+                         AccType*            previous_last_element = nullptr,
+                         AccType*            new_last_element      = nullptr,
+                         bool                override_first_value  = false,
+                         bool                save_last_value       = false)
 {
     lookback_scan_kernel_impl<Determinism, Exclusive, Config>(
         input,
@@ -153,17 +152,6 @@ ROCPRIM_KERNEL
         override_first_value,
         save_last_value);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
-    { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::steady_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
@@ -386,9 +374,6 @@ inline auto scan_impl(void*               temporary_storage,
     return hipSuccess;
 }
 
-
-#undef ROCPRIM_DETAIL_HIP_SYNC
-
 } // end of detail namespace
 
 /// \brief Parallel inclusive scan primitive for device level.
@@ -411,31 +396,31 @@ inline auto scan_impl(void*               temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using the \p AccType type parameter, see the example below.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam AccType - accumulator type used to propagate the scanned values. Default type
+/// \tparam AccType accumulator type used to propagate the scanned values. Default type
 /// is value type of the input iterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range. It can be
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range. It can be
 /// same as \p input.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -597,34 +582,34 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam AccType - accumulator type used to propagate the scanned values. Default type
+/// \tparam AccType accumulator type used to propagate the scanned values. Default type
 /// is 'InitValueType', unless it's 'rocprim::future_value'. Then it will be the wrapped input type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range. It can be
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range. It can be
 /// same as \p input.
-/// \param [in] initial_value - initial value to start the scan.
+/// \param [in] initial_value initial value to start the scan.
 /// A rocpim::future_value may be passed to use a value that will be later computed.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of

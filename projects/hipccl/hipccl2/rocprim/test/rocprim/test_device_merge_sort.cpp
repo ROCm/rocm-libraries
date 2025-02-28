@@ -30,6 +30,7 @@
 
 // required test headers
 #include "test_utils_custom_float_type.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 // Params for tests
@@ -99,7 +100,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
     bool in_place = false;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -118,28 +119,16 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             in_place = !in_place;
 
             // Generate data
-            std::vector<key_type> input = test_utils::get_random_data<key_type>(size, -100, 100, seed_value); // float16 can't exceed 65504
-            std::vector<key_type> output(size);
+            std::vector<key_type> input
+                = test_utils::get_random_data<key_type>(size,
+                                                        -100,
+                                                        100,
+                                                        seed_value); // float16 can't exceed 65504
 
-            key_type * d_input;
-            key_type * d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(key_type)));
-            if(in_place)
-            {
-                d_output = d_input;
-            }
-            else
-            {
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_type)));
-            }
-            HIP_CHECK(
-                hipMemcpy(
-                    d_input, input.data(),
-                    input.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<key_type> d_input(input);
+            test_utils::device_ptr<key_type> d_output_alloc;
+            d_output_alloc.resize(in_place ? 0 : size);
+            test_utils::device_ptr<key_type>& d_output = in_place ? d_input : d_output_alloc;
 
             // compare function
             compare_function compare_op;
@@ -148,24 +137,22 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             std::vector<key_type> expected(input);
             std::stable_sort(expected.begin(), expected.end(), compare_op);
 
-            // temp storage
-            size_t temp_storage_size_bytes;
-            void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(
-                rocprim::merge_sort(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    compare_op, stream, debug_synchronous
-                )
-            );
+            size_t temp_storage_size_bytes;
+            HIP_CHECK(rocprim::merge_sort(nullptr,
+                                          temp_storage_size_bytes,
+                                          d_input.get(),
+                                          d_output.get(),
+                                          input.size(),
+                                          compare_op,
+                                          stream,
+                                          debug_synchronous));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -174,13 +161,14 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             }
 
             // Run
-            HIP_CHECK(
-                rocprim::merge_sort(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, input.size(),
-                    compare_op, stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
+                                          temp_storage_size_bytes,
+                                          d_input.get(),
+                                          d_output.get(),
+                                          input.size(),
+                                          compare_op,
+                                          stream,
+                                          debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
@@ -191,24 +179,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            HIP_CHECK(
-                hipMemcpy(
-                    output.data(), d_output,
-                    output.size() * sizeof(key_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(hipDeviceSynchronize());
+            const auto output = d_output.load();
 
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-            HIP_CHECK(hipFree(d_input));
-            if(!in_place)
-            {
-                HIP_CHECK(hipFree(d_output));
-            }
-            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {
@@ -233,7 +207,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     bool in_place = false;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -257,48 +231,17 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            std::vector<key_type> keys_output(size);
-            std::vector<value_type> values_output(size);
+            test_utils::device_ptr<key_type> d_keys_input(keys_input);
+            test_utils::device_ptr<key_type> d_keys_output_alloc;
+            d_keys_output_alloc.resize(in_place ? 0 : size);
+            test_utils::device_ptr<key_type>& d_keys_output
+                = in_place ? d_keys_input : d_keys_output_alloc;
 
-            key_type * d_keys_input;
-            key_type * d_keys_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, keys_input.size() * sizeof(key_type)));
-            if(in_place)
-            {
-                d_keys_output = d_keys_input;
-            }
-            else
-            {
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, keys_output.size() * sizeof(key_type)));
-            }
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input, keys_input.data(),
-                    keys_input.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(hipDeviceSynchronize());
-
-            value_type * d_values_input;
-            value_type * d_values_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, values_input.size() * sizeof(value_type)));
-            if(in_place)
-            {
-                d_values_output = d_values_input;
-            }
-            else
-            {
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, values_output.size() * sizeof(value_type)));
-            }
-            HIP_CHECK(
-                hipMemcpy(
-                    d_values_input, values_input.data(),
-                    values_input.size() * sizeof(value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<value_type> d_values_input(values_input);
+            test_utils::device_ptr<value_type> d_values_output_alloc;
+            d_values_output_alloc.resize(in_place ? 0 : size);
+            test_utils::device_ptr<value_type>& d_values_output
+                = in_place ? d_values_input : d_values_output_alloc;
 
             // compare function
             compare_function compare_op;
@@ -315,16 +258,14 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              [compare_op](const key_value& a, const key_value& b)
                              { return compare_op(a.first, b.first); });
 
-            // temp storage
-            size_t temp_storage_size_bytes;
-            void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::merge_sort(d_temp_storage,
+            size_t temp_storage_size_bytes;
+            HIP_CHECK(rocprim::merge_sort(nullptr,
                                           temp_storage_size_bytes,
-                                          d_keys_input,
-                                          d_keys_output,
-                                          d_values_input,
-                                          d_values_output,
+                                          d_keys_input.get(),
+                                          d_keys_output.get(),
+                                          d_values_input.get(),
+                                          d_values_output.get(),
                                           keys_input.size(),
                                           compare_op,
                                           stream,
@@ -334,8 +275,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -344,14 +284,16 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             }
 
             // Run
-            HIP_CHECK(
-                rocprim::merge_sort(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys_input, d_keys_output,
-                    d_values_input, d_values_output, keys_input.size(),
-                    compare_op, stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
+                                          temp_storage_size_bytes,
+                                          d_keys_input.get(),
+                                          d_keys_output.get(),
+                                          d_values_input.get(),
+                                          d_values_output.get(),
+                                          keys_input.size(),
+                                          compare_op,
+                                          stream,
+                                          debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
@@ -362,21 +304,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
-            HIP_CHECK(
-                hipMemcpy(
-                    keys_output.data(), d_keys_output,
-                    keys_output.size() * sizeof(key_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    values_output.data(), d_values_output,
-                    values_output.size() * sizeof(value_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(hipDeviceSynchronize());
+            const auto keys_output   = d_keys_output.load();
+            const auto values_output = d_values_output.load();
 
             // Check if output values are as expected
             std::vector<key_type> expected_key(expected.size());
@@ -389,15 +318,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
-
-            HIP_CHECK(hipFree(d_keys_input));
-            HIP_CHECK(hipFree(d_values_input));
-            if(!in_place)
-            {
-                HIP_CHECK(hipFree(d_keys_output));
-                HIP_CHECK(hipFree(d_values_output));
-            }
-            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
             {

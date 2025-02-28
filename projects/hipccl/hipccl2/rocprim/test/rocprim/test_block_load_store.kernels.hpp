@@ -34,7 +34,7 @@
 #include <rocprim/rocprim.hpp>
 #include <type_traits>
 
-typedef ::testing::Types<
+using ClassParamsFirstPart = ::testing::Types<
     // block_load_direct
     class_params<int8_t,
                  rocprim::block_load_method::block_load_direct,
@@ -164,12 +164,9 @@ typedef ::testing::Types<
                  rocprim::block_load_method::block_load_vectorize,
                  rocprim::block_store_method::block_store_vectorize,
                  512U,
-                 4>
+                 4>>;
 
-    >
-    ClassParamsFirstPart;
-
-typedef ::testing::Types<
+using ClassParamsSecondPart = ::testing::Types<
 
     class_params<double,
                  rocprim::block_load_method::block_load_vectorize,
@@ -312,10 +309,9 @@ typedef ::testing::Types<
                  256U,
                  4>
 
-    >
-    ClassParamsSecondPart;
+    >;
 
-typedef ::testing::Types<
+using ClassParamsThirdPart = ::testing::Types<
     // block_load_striped
     class_params<int,
                  rocprim::block_load_method::block_load_striped,
@@ -422,58 +418,56 @@ typedef ::testing::Types<
                  64U,
                  4>
 
-    >
-    ClassParamsThirdPart;
+    >;
 
-typedef ::testing::Types<vector_params<int, int, 3, false>,
-                         vector_params<int, int4, 4, true>,
-                         vector_params<int, int, 7, false>,
-                         vector_params<int, int4, 8, true>,
-                         vector_params<int, int, 11, false>,
-                         vector_params<int, int4, 16, true>,
+using VectorParams = ::testing::Types<vector_params<int, int, 3, false>,
+                                      vector_params<int, int4, 4, true>,
+                                      vector_params<int, int, 7, false>,
+                                      vector_params<int, int4, 8, true>,
+                                      vector_params<int, int, 11, false>,
+                                      vector_params<int, int4, 16, true>,
 
-                         vector_params<char, char, 3, false>,
-                         vector_params<char, char4, 4, true>,
-                         vector_params<char, char, 7, false>,
-                         vector_params<char, char4, 8, true>,
-                         vector_params<char, char, 11, false>,
-                         vector_params<char, char4, 16, true>,
+                                      vector_params<char, char, 3, false>,
+                                      vector_params<char, char4, 4, true>,
+                                      vector_params<char, char, 7, false>,
+                                      vector_params<char, char4, 8, true>,
+                                      vector_params<char, char, 11, false>,
+                                      vector_params<char, char4, 16, true>,
 
-                         vector_params<short, short, 3, false>,
-                         vector_params<short, short4, 4, true>,
-                         vector_params<short, short, 7, false>,
-                         vector_params<short, short4, 8, true>,
-                         vector_params<short, short, 11, false>,
-                         vector_params<short, short4, 16, true>,
+                                      vector_params<short, short, 3, false>,
+                                      vector_params<short, short4, 4, true>,
+                                      vector_params<short, short, 7, false>,
+                                      vector_params<short, short4, 8, true>,
+                                      vector_params<short, short, 11, false>,
+                                      vector_params<short, short4, 16, true>,
 
-                         vector_params<float, int, 3, false>,
-                         vector_params<float, int4, 4, true>,
-                         vector_params<float, int, 7, false>,
-                         vector_params<float, int4, 8, true>,
-                         vector_params<float, int, 11, false>,
-                         vector_params<float, int4, 16, true>,
+                                      vector_params<float, int, 3, false>,
+                                      vector_params<float, int4, 4, true>,
+                                      vector_params<float, int, 7, false>,
+                                      vector_params<float, int4, 8, true>,
+                                      vector_params<float, int, 11, false>,
+                                      vector_params<float, int4, 16, true>,
 
-                         vector_params<int2, int2, 3, false>,
-                         vector_params<int2, int4, 4, true>,
-                         vector_params<int2, int2, 7, false>,
-                         vector_params<int2, int4, 8, true>,
-                         vector_params<int2, int2, 11, false>,
-                         vector_params<int2, int4, 16, true>,
+                                      vector_params<int2, int2, 3, false>,
+                                      vector_params<int2, int4, 4, true>,
+                                      vector_params<int2, int2, 7, false>,
+                                      vector_params<int2, int4, 8, true>,
+                                      vector_params<int2, int2, 11, false>,
+                                      vector_params<int2, int4, 16, true>,
 
-                         vector_params<float2, int2, 3, false>,
-                         vector_params<float2, int4, 4, true>,
-                         vector_params<float2, int2, 7, false>,
-                         vector_params<float2, int4, 8, true>,
-                         vector_params<float2, int2, 11, false>,
-                         vector_params<float2, int4, 16, true>,
+                                      vector_params<float2, int2, 3, false>,
+                                      vector_params<float2, int4, 4, true>,
+                                      vector_params<float2, int2, 7, false>,
+                                      vector_params<float2, int4, 8, true>,
+                                      vector_params<float2, int2, 11, false>,
+                                      vector_params<float2, int4, 16, true>,
 
-                         vector_params<char4, int, 3, false>,
-                         vector_params<char4, int4, 4, true>,
-                         vector_params<char4, int, 7, false>,
-                         vector_params<char4, int4, 8, true>,
-                         vector_params<char4, int, 11, false>,
-                         vector_params<char4, int4, 16, true>>
-    VectorParams;
+                                      vector_params<char4, int, 3, false>,
+                                      vector_params<char4, int4, 4, true>,
+                                      vector_params<char4, int, 7, false>,
+                                      vector_params<char4, int4, 8, true>,
+                                      vector_params<char4, int, 11, false>,
+                                      vector_params<char4, int4, 16, true>>;
 
 template<rocprim::block_load_method  LoadMethod,
          rocprim::block_store_method StoreMethod,

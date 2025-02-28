@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,8 +60,7 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetIterator>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().kernel_config.block_size)
-void segmented_sort_kernel(
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void segmented_sort_kernel(
     KeysInputIterator                                               keys_input,
     typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
     KeysOutputIterator                                              keys_output,
@@ -97,24 +96,24 @@ template<class Config,
          class ValuesOutputIterator,
          class SegmentIndexIterator,
          class OffsetIterator>
-ROCPRIM_KERNEL __launch_bounds__(
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
     device_params<Config>()
         .kernel_config
-        .block_size)
-void segmented_sort_large_kernel(
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    iterations,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit)
+        .block_size) void
+    segmented_sort_large_kernel(
+        KeysInputIterator                                               keys_input,
+        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
+        KeysOutputIterator                                              keys_output,
+        ValuesInputIterator                                             values_input,
+        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+        ValuesOutputIterator                                            values_output,
+        bool                                                            to_output,
+        SegmentIndexIterator                                            segment_indices,
+        OffsetIterator                                                  begin_offsets,
+        OffsetIterator                                                  end_offsets,
+        unsigned int                                                    iterations,
+        unsigned int                                                    begin_bit,
+        unsigned int                                                    end_bit)
 {
     segmented_sort_large<Config, Descending>(keys_input,
                                              keys_tmp,
@@ -139,26 +138,24 @@ template<class Config,
          class ValuesOutputIterator,
          class SegmentIndexIterator,
          class OffsetIterator>
-ROCPRIM_KERNEL __launch_bounds__(
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
     device_params<Config>()
         .warp_sort_config
-        .block_size_small) void segmented_sort_small_kernel(KeysInputIterator keys_input,
-                                                            typename std::iterator_traits<
-                                                                KeysInputIterator>::value_type*
-                                                                                keys_tmp,
-                                                            KeysOutputIterator  keys_output,
-                                                            ValuesInputIterator values_input,
-                                                            typename std::iterator_traits<
-                                                                ValuesInputIterator>::value_type*
-                                                                                 values_tmp,
-                                                            ValuesOutputIterator values_output,
-                                                            bool                 to_output,
-                                                            unsigned int         num_segments,
-                                                            SegmentIndexIterator segment_indices,
-                                                            OffsetIterator       begin_offsets,
-                                                            OffsetIterator       end_offsets,
-                                                            unsigned int         begin_bit,
-                                                            unsigned int         end_bit)
+        .block_size_small) void
+    segmented_sort_small_kernel(
+        KeysInputIterator                                               keys_input,
+        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
+        KeysOutputIterator                                              keys_output,
+        ValuesInputIterator                                             values_input,
+        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+        ValuesOutputIterator                                            values_output,
+        bool                                                            to_output,
+        unsigned int                                                    num_segments,
+        SegmentIndexIterator                                            segment_indices,
+        OffsetIterator                                                  begin_offsets,
+        OffsetIterator                                                  end_offsets,
+        unsigned int                                                    begin_bit,
+        unsigned int                                                    end_bit)
 {
     segmented_sort_small<Config, Descending>(
         keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
@@ -176,26 +173,24 @@ template<class Config,
          class ValuesOutputIterator,
          class SegmentIndexIterator,
          class OffsetIterator>
-ROCPRIM_KERNEL __launch_bounds__(
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
     device_params<Config>()
         .warp_sort_config
-        .block_size_medium) void segmented_sort_medium_kernel(KeysInputIterator keys_input,
-                                                              typename std::iterator_traits<
-                                                                  KeysInputIterator>::value_type*
-                                                                                  keys_tmp,
-                                                              KeysOutputIterator  keys_output,
-                                                              ValuesInputIterator values_input,
-                                                              typename std::iterator_traits<
-                                                                  ValuesInputIterator>::value_type*
-                                                                                   values_tmp,
-                                                              ValuesOutputIterator values_output,
-                                                              bool                 to_output,
-                                                              unsigned int         num_segments,
-                                                              SegmentIndexIterator segment_indices,
-                                                              OffsetIterator       begin_offsets,
-                                                              OffsetIterator       end_offsets,
-                                                              unsigned int         begin_bit,
-                                                              unsigned int         end_bit)
+        .block_size_medium) void
+    segmented_sort_medium_kernel(
+        KeysInputIterator                                               keys_input,
+        typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
+        KeysOutputIterator                                              keys_output,
+        ValuesInputIterator                                             values_input,
+        typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+        ValuesOutputIterator                                            values_output,
+        bool                                                            to_output,
+        unsigned int                                                    num_segments,
+        SegmentIndexIterator                                            segment_indices,
+        OffsetIterator                                                  begin_offsets,
+        OffsetIterator                                                  end_offsets,
+        unsigned int                                                    begin_bit,
+        unsigned int                                                    end_bit)
 {
     segmented_sort_medium<Config, Descending>(keys_input,
                                               keys_tmp,
@@ -630,32 +625,32 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 ///   * op(a, b) and op(b, a) are both false,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -758,32 +753,32 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 ///   * op(a, b) and op(b, a) are both false,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -887,38 +882,38 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 ///   * op(a, b) and op(b, a) are both false,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] values_input - pointer to the first element in the range to sort.
-/// \param [out] values_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1035,38 +1030,38 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 /// (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] values_input - pointer to the first element in the range to sort.
-/// \param [out] values_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1182,29 +1177,29 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 ///   * op(a, b) and op(b, a) are both false,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1316,29 +1311,29 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 ///   * op(a, b) and op(b, a) are both false,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1451,32 +1446,32 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 /// (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] values - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -1601,32 +1596,32 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 /// (ordered) keys.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
-/// \tparam Key - key type. Must be an integral type or a floating-point type.
-/// \tparam Value - value type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `segmented_radix_sort_config`.
+/// \tparam Key key type. Must be an integral type or a floating-point type.
+/// \tparam Value value type.
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in,out] keys - reference to the double-buffer of keys, its \p current()
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in,out] keys reference to the double-buffer of keys, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in,out] values - reference to the double-buffer of values, its \p current()
+/// \param [in,out] values reference to the double-buffer of values, its \p current()
 /// contains the input range and will be updated to point to the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
+/// \param [in] size number of element in the input range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] begin_bit [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
 /// Non-default value not supported for floating-point key-types.
-/// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
+/// \param [in] end_bit [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
 /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of

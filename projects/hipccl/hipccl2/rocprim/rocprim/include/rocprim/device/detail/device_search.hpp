@@ -254,25 +254,25 @@ template<class Config, class InputIterator1, class InputIterator2, class BinaryF
 struct search_impl_kernels
 {
     static ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-    void search_kernel_shared(InputIterator1 input,
-                              InputIterator2 keys,
-                              size_t*        output,
-                              size_t         size,
-                              size_t         keys_size,
-                              BinaryFunction compare_function)
+ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+        search_kernel_shared(InputIterator1 input,
+                             InputIterator2 keys,
+                             size_t*        output,
+                             size_t         size,
+                             size_t         keys_size,
+                             BinaryFunction compare_function)
     {
         search_kernel_shared_impl<Config>(input, keys, output, size, keys_size, compare_function);
     }
 
     static ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-    void search_kernel(InputIterator1 input,
-                       InputIterator2 keys,
-                       size_t*        output,
-                       size_t         size,
-                       size_t         keys_size,
-                       BinaryFunction compare_function)
+ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+        search_kernel(InputIterator1 input,
+                      InputIterator2 keys,
+                      size_t*        output,
+                      size_t         size,
+                      size_t         keys_size,
+                      BinaryFunction compare_function)
     {
         search_kernel_impl<Config>(input, keys, output, size, keys_size, compare_function);
     }
