@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -204,7 +204,7 @@ auto async_stable_sort_n(
       nullptr
     , tmp_size
     , first
-    , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
+    , static_cast<std::uint8_t*>(nullptr) // Items.
     , n
     , comp
     , nullptr // Null stream, just for sizing.
@@ -215,7 +215,7 @@ auto async_stable_sort_n(
 
   // Allocate temporary storage.
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, tmp_size
   );
 
@@ -273,7 +273,7 @@ auto async_stable_sort_n(
       tmp_ptr
     , tmp_size
     , first
-    , static_cast<thrust::detail::uint8_t*>(nullptr) // Items.
+    , static_cast<std::uint8_t*>(nullptr) // Items.
     , n
     , comp
     , e.stream().native_handle()
@@ -394,7 +394,7 @@ auto async_stable_sort_n(
     sizeof(T) * n, 128
   );
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, keys_temp_storage + tmp_size
   );
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,6 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/config.h>
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/transform.h>
@@ -44,6 +43,8 @@
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -122,7 +123,7 @@ namespace __adjacent_difference
                         OutputIt                   result,
                         BinaryOp                   binary_op)
     {
-        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
 
         size_type   num_items    = thrust::distance(first, last);
         size_t      storage_size = 0;
@@ -165,7 +166,7 @@ namespace __adjacent_difference
                                     "adjacent_difference failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy,
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy,
                                                                                 storage_size);
         void* ptr = static_cast<void*>(tmp.data().get());
 
@@ -244,7 +245,7 @@ adjacent_difference(execution_policy<Derived>& policy,
                     InputIt                    last,
                     OutputIt                   result)
 {
-    typedef typename iterator_traits<InputIt>::value_type input_type;
+    using input_type = typename iterator_traits<InputIt>::value_type;
     return hip_rocprim::adjacent_difference(policy, first, last, result, minus<input_type>());
 }
 

@@ -183,7 +183,7 @@ struct bit_not
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(~THRUST_FWD(t1)))
-  THRUST_TRAILING_RETURN(decltype(~THRUST_FWD(t1)))
+  -> decltype(~THRUST_FWD(t1))
   {
     return ~THRUST_FWD(t1);
   }
@@ -213,7 +213,7 @@ struct bit_lshift
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1, T2&& t2) const
   noexcept(noexcept(THRUST_FWD(t1) << THRUST_FWD(t2)))
-  THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t1) << THRUST_FWD(t2)))
+  -> decltype(THRUST_FWD(t1) << THRUST_FWD(t2))
   {
     return THRUST_FWD(t1) << THRUST_FWD(t2);
   }
@@ -277,7 +277,7 @@ struct bit_rshift
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1& t1, T2&& t2) const
   noexcept(noexcept(THRUST_FWD(t1) >> THRUST_FWD(t2)))
-  THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t1) >> THRUST_FWD(t2)))
+  -> decltype(THRUST_FWD(t1) >> THRUST_FWD(t2))
   {
     return THRUST_FWD(t1) >> THRUST_FWD(t2);
   }

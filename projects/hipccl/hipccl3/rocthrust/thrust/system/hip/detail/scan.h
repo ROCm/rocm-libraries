@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,7 +31,6 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/functional.h>
 
@@ -43,6 +42,7 @@
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
 
+#include <cstdint>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -127,7 +127,7 @@ namespace __scan
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(invoke_inclusive_scan(policy,
-                                                          NULL,
+                                                          nullptr,
                                                           storage_size,
                                                           input_it,
                                                           output_it,
@@ -138,7 +138,7 @@ namespace __scan
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -238,7 +238,7 @@ namespace __scan
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(invoke_exclusive_scan(policy,
-                                                          NULL,
+                                                          nullptr,
                                                           storage_size,
                                                           input_it,
                                                           output_it,
@@ -250,7 +250,7 @@ namespace __scan
                                     "scan failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 

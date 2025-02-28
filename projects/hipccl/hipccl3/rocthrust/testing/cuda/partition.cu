@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/count.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -49,9 +66,9 @@ void partition_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Pre
 template<typename ExecutionPolicy>
 void TestPartitionDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef typename thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = typename thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] = 1; 
   data[1] = 2; 
@@ -109,9 +126,9 @@ void partition_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Ite
 template<typename ExecutionPolicy>
 void TestPartitionStencilDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef typename thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = typename thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] = 0;
   data[1] = 1;
@@ -176,9 +193,9 @@ void partition_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last
 template<typename ExecutionPolicy>
 void TestPartitionCopyDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] =  1; 
   data[1] =  2; 
@@ -189,7 +206,7 @@ void TestPartitionCopyDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  typedef thrust::pair<iterator,iterator> pair_type;
+  using pair_type = thrust::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
   
   partition_copy_kernel<<<1,1>>>(exec, data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>(), iterators.begin());
@@ -246,8 +263,8 @@ void partition_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last
 template<typename ExecutionPolicy>
 void TestPartitionCopyStencilDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<int> data(5);
   data[0] =  0; 
   data[1] =  1; 
@@ -265,8 +282,8 @@ void TestPartitionCopyStencilDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
-  typedef thrust::pair<iterator,iterator> pair_type;
+  using iterator  = typename thrust::device_vector<int>::iterator;
+  using pair_type = thrust::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   partition_copy_kernel<<<1,1>>>(exec, data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), is_even<T>(), iterators.begin());
@@ -323,9 +340,9 @@ void stable_partition_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 la
 template<typename ExecutionPolicy>
 void TestStablePartitionDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef typename thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = typename thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] = 1; 
   data[1] = 2; 
@@ -383,9 +400,9 @@ void stable_partition_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 la
 template<typename ExecutionPolicy>
 void TestStablePartitionStencilDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef typename thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = typename thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] = 0;
   data[1] = 1;
@@ -450,9 +467,9 @@ void stable_partition_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterato
 template<typename ExecutionPolicy>
 void TestStablePartitionCopyDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  typedef thrust::device_vector<T>::iterator iterator;
-  
+  using T        = int;
+  using iterator = thrust::device_vector<T>::iterator;
+
   thrust::device_vector<T> data(5);
   data[0] =  1; 
   data[1] =  2; 
@@ -463,7 +480,7 @@ void TestStablePartitionCopyDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  typedef thrust::pair<iterator,iterator> pair_type;
+  using pair_type = thrust::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
   
   stable_partition_copy_kernel<<<1,1>>>(exec, data.begin(), data.end(), true_results.begin(), false_results.begin(), is_even<T>(), iterators.begin());
@@ -520,8 +537,8 @@ void stable_partition_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterato
 template<typename ExecutionPolicy>
 void TestStablePartitionCopyStencilDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<int> data(5);
   data[0] =  0; 
   data[1] =  1; 
@@ -539,8 +556,8 @@ void TestStablePartitionCopyStencilDevice(ExecutionPolicy exec)
   thrust::device_vector<int> true_results(2);
   thrust::device_vector<int> false_results(3);
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
-  typedef thrust::pair<iterator,iterator> pair_type;
+  using iterator  = typename thrust::device_vector<int>::iterator;
+  using pair_type = thrust::pair<iterator, iterator>;
   thrust::device_vector<pair_type> iterators(1);
 
   stable_partition_copy_kernel<<<1,1>>>(exec, data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), is_even<T>(), iterators.begin());
@@ -662,10 +679,10 @@ DECLARE_UNITTEST(TestPartitionIfWithLargeNumberOfItems);
 template<typename ExecutionPolicy>
 void TestPartitionCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
-  typedef Vector::iterator   Iterator;
-  
+  using Vector   = thrust::device_vector<int>;
+  using T        = Vector::value_type;
+  using Iterator = Vector::iterator;
+
   Vector data(5);
   data[0] = 1; 
   data[1] = 2; 

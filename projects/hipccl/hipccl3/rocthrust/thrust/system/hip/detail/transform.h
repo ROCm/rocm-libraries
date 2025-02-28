@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -217,8 +217,7 @@ namespace __transform
         if(num_items == 0)
             return result;
 
-        typedef unary_transform_f<InputIt, OutputIt, StencilIt, TransformOp, Predicate>
-            unary_transform_t;
+        using unary_transform_t = unary_transform_f<InputIt, OutputIt, StencilIt, TransformOp, Predicate>;
 
         // We use 'parallel_for' instead of 'rocprim::transform', since 'thrust::transform' allows
         // the function to modify the input iterator! 'rocprim::transform' does not write any
@@ -251,13 +250,12 @@ namespace __transform
         if(num_items == 0)
             return result;
 
-        typedef binary_transform_f<InputIt1,
-                                   InputIt2,
-                                   OutputIt,
-                                   StencilIt,
-                                   TransformOp,
-                                   Predicate>
-            binary_transform_t;
+        using binary_transform_t = binary_transform_f<InputIt1,
+                                                      InputIt2,
+                                                      OutputIt,
+                                                      StencilIt,
+                                                      TransformOp,
+                                                      Predicate>;
 
         // We use 'parallel_for' instead of 'rocprim::transform', since 'thrust::transform' allows
         // the function to modify the input iterator! 'rocprim::transform' does not write any
@@ -294,7 +292,7 @@ transform_if(execution_policy<Derived>& policy,
              TransformOp                transform_op,
              Predicate                  predicate)
 {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
     return __transform::unary(
         policy, first, result, num_items, stencil, transform_op, predicate
@@ -348,7 +346,7 @@ transform_if(execution_policy<Derived>& policy,
              TransformOp                transform_op,
              Predicate                  predicate)
 {
-    typedef typename iterator_traits<InputIt1>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt1>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
     return __transform::binary(
         policy, first1, first2, result, num_items, stencil, transform_op, predicate

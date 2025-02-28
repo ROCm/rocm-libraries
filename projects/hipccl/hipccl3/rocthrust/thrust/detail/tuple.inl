@@ -60,18 +60,18 @@ template<size_t N, class T>
   struct tuple_element_impl
 {
   private:
-    typedef typename T::tail_type Next;
+    using Next = typename T::tail_type;
 
   public:
     /*! The result of this metafunction is returned in \c type.
      */
-    typedef typename tuple_element_impl<N-1, Next>::type type;
+    using type = typename tuple_element_impl<N-1, Next>::type;
 }; // end tuple_element
 
 template<class T>
   struct tuple_element_impl<0,T>
 {
-  typedef typename T::head_type type;
+  using type = typename T::head_type;
 };
 
 template <size_t N, class T>
@@ -153,10 +153,10 @@ template <class HT, class TT> struct cons;
 // -- some traits classes for get functions
 template <class T> struct access_traits
 {
-  typedef const T& const_type;
-  typedef T& non_const_type;
+  using const_type = const T&;
+  using non_const_type = T&;
 
-  typedef const typename thrust::detail::remove_cv<T>::type& parameter_type;
+  using parameter_type = const typename thrust::detail::remove_cv<T>::type&;
 
 // used as the tuple constructors parameter types
 // Rationale: non-reference tuple element types can be cv-qualified.
@@ -167,10 +167,10 @@ template <class T> struct access_traits
 
 template <class T> struct access_traits<T&>
 {
-  typedef T& const_type;
-  typedef T& non_const_type;
+  using const_type = T&;
+  using non_const_type = T&;
 
-  typedef T& parameter_type;
+  using parameter_type = T&;
 }; // end access_traits<T&>
 
 // forward declarations of get()
@@ -252,18 +252,18 @@ struct get_class<0>
 
 template <bool If, class Then, class Else> struct IF
 {
-  typedef Then RET;
+  using RET = Then;
 };
 
 template <class Then, class Else> struct IF<false, Then, Else>
 {
-  typedef Else RET;
+  using RET = Else;
 };
 
 //  These helper templates wrap void types and plain function types.
 //  The rationale is to allow one to write tuple types with those types
 //  as elements, even though it is not possible to instantiate such object.
-//  E.g: typedef tuple<void> some_type; // ok
+//  E.g: using some_type = tuple<void>; // ok
 //  but: some_type x; // fails
 
 template <class T> class non_storeable_type
@@ -279,23 +279,23 @@ template <class T> struct wrap_non_storeable_type
   //  ::thrust::detail::is_function<T>::value, non_storeable_type<T>, T
   //>::RET type;
 
-  typedef T type;
+  using type = T;
 };
 
 template <> struct wrap_non_storeable_type<void>
 {
-  typedef non_storeable_type<void> type;
+  using type = non_storeable_type<void>;
 };
 
 
 template <class HT, class TT>
   struct cons
 {
-  typedef HT head_type;
-  typedef TT tail_type;
+  using head_type = HT;
+  using tail_type = TT;
 
-  typedef typename
-    wrap_non_storeable_type<head_type>::type stored_head_type;
+  using stored_head_type = typename
+                          wrap_non_storeable_type<head_type>::type;
 
   stored_head_type head;
   tail_type tail;
@@ -410,12 +410,12 @@ template <class HT, class TT>
 template <class HT>
   struct cons<HT, null_type>
 {
-  typedef HT head_type;
-  typedef null_type tail_type;
-  typedef cons<HT, null_type> self_type;
+  using head_type = HT;
+  using tail_type = null_type;
+  using self_type = cons<HT, null_type>;
 
-  typedef typename
-    wrap_non_storeable_type<head_type>::type stored_head_type;
+  using stored_head_type = typename
+                          wrap_non_storeable_type<head_type>::type;
   stored_head_type head;
 
   typename access_traits<stored_head_type>::non_const_type
@@ -511,17 +511,16 @@ template <class T0, class T1, class T2, class T3, class T4,
           class T5, class T6, class T7, class T8, class T9>
   struct map_tuple_to_cons
 {
-  typedef cons<T0,
+  using type = cons<T0,
                typename map_tuple_to_cons<T1, T2, T3, T4, T5,
-                                          T6, T7, T8, T9, null_type>::type
-              > type;
+                                          T6, T7, T8, T9, null_type>::type>;
 }; // end map_tuple_to_cons
 
 // The empty tuple is a null_type
 template <>
   struct map_tuple_to_cons<null_type, null_type, null_type, null_type, null_type, null_type, null_type, null_type, null_type, null_type>
 {
-  typedef null_type type;
+  using type = null_type;
 }; // end map_tuple_to_cons<...>
 
 
@@ -542,7 +541,7 @@ template <>
 
 template<class T>
 struct make_tuple_traits {
-  typedef T type;
+  using type = T;
 
   // commented away, see below  (JJ)
   //  typedef typename IF<
@@ -566,9 +565,7 @@ struct make_tuple_traits {
 
 template<class T>
 struct make_tuple_traits<T&> {
-  typedef typename
-     detail::generate_error<T&>::
-       do_not_use_with_reference_type error;
+  using error = typename detail::generate_error<T&>::do_not_use_with_reference_type;
 };
 
 // Arrays can't be stored as plain types; convert them to references.
@@ -576,32 +573,32 @@ struct make_tuple_traits<T&> {
 // parameters as const T& and thus the knowledge of the potential
 // non-constness of actual argument is lost.
 template<class T, int n>  struct make_tuple_traits <T[n]> {
-  typedef const T (&type)[n];
+  using type = const T (&)[n];
 };
 
 template<class T, int n>
 struct make_tuple_traits<const T[n]> {
-  typedef const T (&type)[n];
+  using type = const T (&)[n];
 };
 
 template<class T, int n>  struct make_tuple_traits<volatile T[n]> {
-  typedef const volatile T (&type)[n];
+  using type = const volatile T (&)[n];
 };
 
 template<class T, int n>
 struct make_tuple_traits<const volatile T[n]> {
-  typedef const volatile T (&type)[n];
+  using type = const volatile T (&)[n];
 };
 
 // XXX enable these if we ever care about reference_wrapper -jph
 //template<class T>
 //struct make_tuple_traits<reference_wrapper<T> >{
-//  typedef T& type;
+//  using type = T&;
 //};
 //
 //template<class T>
 //struct make_tuple_traits<const reference_wrapper<T> >{
-//  typedef T& type;
+//  using type = T&;
 //};
 
 
@@ -614,17 +611,16 @@ template <
   class T9 = null_type
 >
 struct make_tuple_mapper {
-  typedef
-    tuple<typename make_tuple_traits<T0>::type,
-          typename make_tuple_traits<T1>::type,
-          typename make_tuple_traits<T2>::type,
-          typename make_tuple_traits<T3>::type,
-          typename make_tuple_traits<T4>::type,
-          typename make_tuple_traits<T5>::type,
-          typename make_tuple_traits<T6>::type,
-          typename make_tuple_traits<T7>::type,
-          typename make_tuple_traits<T8>::type,
-          typename make_tuple_traits<T9>::type> type;
+  using type = tuple<typename make_tuple_traits<T0>::type,
+                     typename make_tuple_traits<T1>::type,
+                     typename make_tuple_traits<T2>::type,
+                     typename make_tuple_traits<T3>::type,
+                     typename make_tuple_traits<T4>::type,
+                     typename make_tuple_traits<T5>::type,
+                     typename make_tuple_traits<T6>::type,
+                     typename make_tuple_traits<T7>::type,
+                     typename make_tuple_traits<T8>::type,
+                     typename make_tuple_traits<T9>::type>;
 };
 
 } // end detail
@@ -682,7 +678,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0>::type
     make_tuple(const T0& t0)
 {
-  typedef typename detail::make_tuple_mapper<T0>::type t;
+  using t = typename detail::make_tuple_mapper<T0>::type;
   return t(t0);
 } // end make_tuple()
 
@@ -691,7 +687,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1>::type
     make_tuple(const T0& t0, const T1& t1)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1>::type;
   return t(t0,t1);
 } // end make_tuple()
 
@@ -700,7 +696,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2>::type;
   return t(t0,t1,t2);
 } // end make_tuple()
 
@@ -709,7 +705,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3>::type;
   return t(t0,t1,t2,t3);
 } // end make_tuple()
 
@@ -718,7 +714,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4>::type;
   return t(t0,t1,t2,t3,t4);
 } // end make_tuple()
 
@@ -727,7 +723,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4, T5>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5>::type;
   return t(t0,t1,t2,t3,t4,t5);
 } // end make_tuple()
 
@@ -736,7 +732,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4, T5, T6>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6>::type;
   return t(t0,t1,t2,t3,t4,t5,t6);
 } // end make_tuple()
 
@@ -745,7 +741,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4, T5, T6, T7>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7>::type;
   return t(t0,t1,t2,t3,t4,t5,t6,t7);
 } // end make_tuple()
 
@@ -754,7 +750,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4, T5, T6, T7, T8>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7, const T8& t8)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7,T8>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7,T8>::type;
   return t(t0,t1,t2,t3,t4,t5,t6,t7,t8);
 } // end make_tuple()
 
@@ -763,7 +759,7 @@ THRUST_HOST_DEVICE inline
   typename detail::make_tuple_mapper<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>::type
     make_tuple(const T0& t0, const T1& t1, const T2& t2, const T3& t3, const T4& t4, const T5& t5, const T6& t6, const T7& t7, const T8& t8, const T9& t9)
 {
-  typedef typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7,T8,T9>::type t;
+  using t = typename detail::make_tuple_mapper<T0,T1,T2,T3,T4,T5,T6,T7,T8,T9>::type;
   return t(t0,t1,t2,t3,t4,t5,t6,t7,t8,t9);
 } // end make_tuple()
 

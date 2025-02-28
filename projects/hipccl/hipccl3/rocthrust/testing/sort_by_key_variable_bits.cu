@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/sort.h>
 
@@ -5,15 +22,14 @@
 
 using namespace unittest;
 
-typedef unittest::type_list<
+using UnsignedIntegerTypes = unittest::type_list<
 #if !(defined(__GNUC__) && (__GNUC__ <= 4) && (__GNUC_MINOR__ <= 1))
 // XXX GCC 4.1 miscompiles the char sorts with -O2 for some reason
                             unittest::uint8_t,
 #endif
                             unittest::uint16_t,
                             unittest::uint32_t,
-                            unittest::uint64_t> UnsignedIntegerTypes;
-
+                            unittest::uint64_t>;
 
 template <typename T>
 struct TestSortByKeyVariableBits

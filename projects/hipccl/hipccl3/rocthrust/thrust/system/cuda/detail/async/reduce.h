@@ -94,7 +94,7 @@ unique_eager_future<remove_cvref_t<T>> async_reduce_n(
 
   // Allocate temporary storage.
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, sizeof(U) + tmp_size
   );
 
@@ -195,7 +195,7 @@ auto async_reduce(
 )
 THRUST_RETURNS(
   thrust::system::cuda::detail::async_reduce_n(
-    policy, first, distance(first, last), init, op
+    policy, first, thrust::distance(first, last), init, op
   )
 )
 
@@ -244,7 +244,7 @@ unique_eager_event async_reduce_into_n(
 
   // Allocate temporary storage.
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, tmp_size
   );
 
@@ -329,7 +329,7 @@ auto async_reduce_into(
 )
 THRUST_RETURNS(
   thrust::system::cuda::detail::async_reduce_into_n(
-    policy, first, distance(first, last), output, init, op
+    policy, first, thrust::distance(first, last), output, init, op
   )
 )
 

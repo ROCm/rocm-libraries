@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -156,7 +156,7 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 {
     using K = typename TestFixture::input_type; // key type
-    typedef unsigned int V; // value type
+    using V = unsigned int; // value type
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -176,8 +176,8 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
             );
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
-                std::numeric_limits<V>::min(),
-                std::numeric_limits<V>::max(),
+                get_default_limits<V>::min(),
+                get_default_limits<V>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
@@ -188,13 +188,13 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
             thrust::device_vector<K> d_keys_output(size);
             thrust::device_vector<V> d_vals_output(size);
 
-            typedef typename thrust::host_vector<K>::iterator   HostKeyIterator;
-            typedef typename thrust::host_vector<V>::iterator   HostValIterator;
-            typedef typename thrust::device_vector<K>::iterator DeviceKeyIterator;
-            typedef typename thrust::device_vector<V>::iterator DeviceValIterator;
+            using HostKeyIterator   = typename thrust::host_vector<K>::iterator;
+            using HostValIterator   = typename thrust::host_vector<V>::iterator;
+            using DeviceKeyIterator = typename thrust::device_vector<K>::iterator;
+            using DeviceValIterator = typename thrust::device_vector<V>::iterator;
 
-            typedef typename thrust::pair<HostKeyIterator, HostValIterator>     HostIteratorPair;
-            typedef typename thrust::pair<DeviceKeyIterator, DeviceValIterator> DeviceIteratorPair;
+            using HostIteratorPair   = typename thrust::pair<HostKeyIterator, HostValIterator>;
+            using DeviceIteratorPair = typename thrust::pair<DeviceKeyIterator, DeviceValIterator>;
 
             HostIteratorPair   h_last = thrust::reduce_by_key(h_keys.begin(),
                                                             h_keys.end(),
@@ -226,7 +226,7 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKey)
 TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
 {
     using V = typename TestFixture::input_type; // value type
-    typedef unsigned int K; // key type
+    using K = unsigned int; // key type
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -246,8 +246,8 @@ TYPED_TEST(ReduceByKeysIntegralTests, TestReduceByKeyToDiscardIterator)
             );
             thrust::host_vector<V> h_vals = get_random_data<V>(
                 size,
-                std::numeric_limits<V>::min(),
-                std::numeric_limits<V>::max(),
+                get_default_limits<V>::min(),
+                get_default_limits<V>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<K> d_keys = h_keys;
@@ -432,7 +432,7 @@ TEST(ReduceByKeyTests, TestReduceByKeyDevice)
 }
 
 // Maps indices to key ids
-class div_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class div_op
 {
     std::int64_t m_divisor;
 
@@ -448,7 +448,7 @@ public:
 };
 
 // Produces unique sequence for key
-class mod_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class mod_op
 {
     std::int64_t m_divisor;
 

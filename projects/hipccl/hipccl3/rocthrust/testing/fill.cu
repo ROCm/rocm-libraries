@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 template <class Vector>
 void TestFillSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -139,7 +139,7 @@ DECLARE_VARIABLE_UNITTEST(TestFill);
 template <class Vector>
 void TestFillNSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -268,7 +268,7 @@ DECLARE_VARIABLE_UNITTEST(TestFillN);
 template <typename Vector>
 void TestFillZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(3,T(0));
     Vector v2(3,T(0));
@@ -293,8 +293,8 @@ DECLARE_VECTOR_UNITTEST(TestFillZipIterator);
 
 void TestFillTuple(void)
 {
-    typedef int T;
-    typedef thrust::tuple<T,T> Tuple;
+    using T = int;
+    using Tuple = thrust::tuple<T,T>;
 
     thrust::host_vector<Tuple>   h(3, Tuple(0,0));
     thrust::device_vector<Tuple> d(3, Tuple(0,0));
@@ -314,7 +314,7 @@ struct TypeWithTrivialAssigment
 
 void TestFillWithTrivialAssignment(void)
 {
-    typedef TypeWithTrivialAssigment T;
+    using T = TypeWithTrivialAssigment;
 
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);
@@ -371,7 +371,7 @@ struct TypeWithNonTrivialAssigment
 
 void TestFillWithNonTrivialAssignment(void)
 {
-    typedef TypeWithNonTrivialAssigment T;
+    using T = TypeWithNonTrivialAssigment;
 
     thrust::host_vector<T>   h(1);
     thrust::device_vector<T> d(1);

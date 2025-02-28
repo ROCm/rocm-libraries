@@ -20,15 +20,13 @@
 #include <thrust/detail/type_traits.h>
 #include <limits>
 
-//#include <stdint.h> // for intmax_t (not provided on MSVS 2005)
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
 // XXX good enough for the platforms we care about
-typedef long long intmax_t;
+using intmax_t = long long;
 
 template<typename Number>
   struct is_signed
@@ -84,7 +82,7 @@ template<typename Integer>
     };
 
   public:
-    typedef typename
+    using type = typename
       eval_if<
         and_<
           std::numeric_limits<Integer>::is_signed,
@@ -101,7 +99,7 @@ template<typename Integer>
             identity_<intmax_t>
           >
         >
-      >::type type;
+      >::type;
 }; // end integer_difference
 
 
@@ -120,7 +118,7 @@ THRUST_HOST_DEVICE
 typename numeric_difference<Number>::type
 numeric_distance(Number x, Number y)
 {
-  typedef typename numeric_difference<Number>::type difference_type;
+  using difference_type = typename numeric_difference<Number>::type;
   return difference_type(y) - difference_type(x);
 } // end numeric_distance
 

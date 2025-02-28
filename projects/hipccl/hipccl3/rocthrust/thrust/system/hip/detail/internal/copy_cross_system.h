@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -91,7 +91,7 @@ namespace __copy
                      (THRUST_UNUSED_VAR(sys1); THRUST_UNUSED_VAR(sys2); THRUST_UNUSED_VAR(n);
                       THRUST_UNUSED_VAR(begin);
                       return result;),
-                     (typedef typename iterator_traits<InputIt>::value_type InputTy; if(n > 0) {
+                     (using InputTy = typename iterator_traits<InputIt>::value_type; if(n > 0) {
                          trivial_device_copy(
                              derived_cast(sys1),
                              derived_cast(sys2),
@@ -111,7 +111,7 @@ namespace __copy
                               OutputIt                                  result)
     {
         // get type of the input data
-        typedef typename thrust::iterator_value<InputIt>::type InputTy;
+        using InputTy = typename thrust::iterator_value<InputIt>::type;
 
         // copy input data into host temp storage
         InputIt last = first;
@@ -194,7 +194,7 @@ cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
                           OutputIt                                  result)
 {
     // get type of the input data
-    typedef typename thrust::iterator_value<InputIt>::type InputTy;
+    using InputTy = typename thrust::iterator_value<InputIt>::type;
 
     // allocate device temp storage
     thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);

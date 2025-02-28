@@ -30,7 +30,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/type_traits.h>
@@ -45,6 +44,8 @@
 
 #include <cub/device/device_adjacent_difference.cuh>
 #include <cub/util_math.cuh>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -85,13 +86,13 @@ namespace __adjacent_difference {
     using Dispatch32 = cub::DispatchAdjacentDifference<InputIt,
                                                        OutputIt,
                                                        BinaryOp,
-                                                       thrust::detail::int32_t,
+                                                       std::int32_t,
                                                        may_alias,
                                                        read_left>;
     using Dispatch64 = cub::DispatchAdjacentDifference<InputIt,
                                                        OutputIt,
                                                        BinaryOp,
-                                                       thrust::detail::int64_t,
+                                                       std::int64_t,
                                                        may_alias,
                                                        read_left>;
 
@@ -214,7 +215,7 @@ namespace __adjacent_difference {
     cuda_cub::throw_on_error(status, "adjacent_difference failed on 1st step");
 
     // Allocate temporary storage.
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+    thrust::detail::temporary_array<std::uint8_t, Derived>
       tmp(policy, storage_size);
 
     status = doit_step(static_cast<void *>(tmp.data().get()),
@@ -274,7 +275,7 @@ adjacent_difference(execution_policy<Derived> &policy,
                     InputIt                    last,
                     OutputIt                   result)
 {
-  typedef typename iterator_traits<InputIt>::value_type input_type;
+  using input_type = typename iterator_traits<InputIt>::value_type;
   return cuda_cub::adjacent_difference(policy,
                                        first,
                                        last,

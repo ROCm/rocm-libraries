@@ -1,6 +1,6 @@
 /*
  *  Copyright 2020-2021 NVIDIA Corporation
- *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -85,15 +85,13 @@ private:
   using iterator_value_type = typename thrust::iterator_value<Iterator>::type;
 
 public:
-    typedef thrust::iterator_adaptor
-    <
-        transform_input_output_iterator<InputFunction, OutputFunction, Iterator>
-      , Iterator
-      , detail::invoke_result_t<InputFunction, iterator_value_type>
-      , thrust::use_default
-      , thrust::use_default
-      , transform_input_output_iterator_proxy<InputFunction, OutputFunction, Iterator>
-    > type;
+  using type =
+    thrust::iterator_adaptor<transform_input_output_iterator<InputFunction, OutputFunction, Iterator>,
+                             Iterator,
+                             detail::invoke_result_t<InputFunction, iterator_value_type>,
+                             thrust::use_default,
+                             thrust::use_default,
+                             transform_input_output_iterator_proxy<InputFunction, OutputFunction, Iterator>>;
 };
 
 // Register transform_input_output_iterator_proxy with 'is_proxy_reference' from

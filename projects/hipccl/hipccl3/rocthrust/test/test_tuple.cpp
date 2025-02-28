@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ TYPED_TEST(TupleTests, TestTupleConstructor)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            10, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));
@@ -131,8 +131,8 @@ TYPED_TEST(TupleTests, TestMakeTuple)
 
         thrust::host_vector<T> data = get_random_data<T>(
             10,
-            std::numeric_limits<T>::min(),
-            std::numeric_limits<T>::max(),
+            get_default_limits<T>::min(),
+            get_default_limits<T>::max(),
             seed
         );
 
@@ -231,7 +231,7 @@ TYPED_TEST(TupleTests, TestTupleGet)
 
 
         thrust::host_vector<T> data = get_random_data<T>(
-            10, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            10, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         thrust::tuple<T> t1(data[0]);
         ASSERT_EQ(data[0], thrust::get<0>(t1));
@@ -520,8 +520,8 @@ TEST(TupleTests, TestTupleSwap)
     ASSERT_EQ(b, thrust::get<1>(t2));
     ASSERT_EQ(c, thrust::get<2>(t2));
 
-    typedef thrust::tuple<user_swappable, user_swappable, user_swappable, user_swappable>
-        swappable_tuple;
+    using swappable_tuple =
+        thrust::tuple<user_swappable, user_swappable, user_swappable, user_swappable>;
 
     thrust::host_vector<swappable_tuple>   h_v1(1), h_v2(1);
     thrust::device_vector<swappable_tuple> d_v1(1), d_v2(1);

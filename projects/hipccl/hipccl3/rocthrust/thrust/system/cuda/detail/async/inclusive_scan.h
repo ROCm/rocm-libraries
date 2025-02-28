@@ -77,13 +77,13 @@ async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
                                        OutputIt,
                                        BinaryOp,
                                        cub::NullType,
-                                       thrust::detail::int32_t,
+                                       std::int32_t,
                                        AccumT>;
   using Dispatch64 = cub::DispatchScan<ForwardIt,
                                        OutputIt,
                                        BinaryOp,
                                        cub::NullType,
-                                       thrust::detail::int64_t,
+                                       std::int64_t,
                                        AccumT>;
 
   auto const device_alloc = get_async_device_allocator(policy);
@@ -111,7 +111,7 @@ async_inclusive_scan_n(execution_policy<DerivedPolicy>& policy,
   }
 
   // Allocate temporary storage.
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, tmp_size
   );
   void* const tmp_ptr = raw_pointer_cast(content.get());

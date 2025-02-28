@@ -18,7 +18,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/static_assert.h> // for depend_on_instantiation
 #include <thrust/iterator/iterator_traits.h>
@@ -26,7 +25,8 @@
 #include <thrust/system/omp/detail/reduce_intervals.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/function.h>
-#include <thrust/detail/cstdint.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -60,12 +60,12 @@ void reduce_intervals(execution_policy<DerivedPolicy> &,
   );
 
 #if (THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE == THRUST_TRUE)
-  typedef typename thrust::iterator_value<OutputIterator>::type OutputType;
+  using OutputType = typename thrust::iterator_value<OutputIterator>::type;
 
   // wrap binary_op
   thrust::detail::wrapped_function<BinaryFunction,OutputType> wrapped_binary_op(binary_op);
 
-  typedef thrust::detail::intptr_t index_type;
+  using index_type = std::intptr_t;
 
   index_type n = static_cast<index_type>(decomp.size());
 

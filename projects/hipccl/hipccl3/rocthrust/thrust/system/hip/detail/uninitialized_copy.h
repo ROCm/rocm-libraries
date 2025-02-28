@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -49,8 +49,8 @@ namespace __uninitialized_copy
         InputIt  input;
         OutputIt output;
 
-        typedef typename iterator_traits<InputIt>::value_type  InputType;
-        typedef typename iterator_traits<OutputIt>::value_type OutputType;
+        using InputType  = typename iterator_traits<InputIt>::value_type;
+        using OutputType = typename iterator_traits<OutputIt>::value_type;
 
         THRUST_HIP_FUNCTION
         functor(InputIt input_, OutputIt output_)
@@ -78,7 +78,7 @@ uninitialized_copy_n(execution_policy<Derived>& policy,
                      Size                       count,
                      OutputIt                   result)
 {
-    typedef __uninitialized_copy::functor<InputIt, OutputIt> functor_t;
+    using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
     hip_rocprim::parallel_for(policy, functor_t(first, result), count);
     return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);

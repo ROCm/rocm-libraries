@@ -47,7 +47,7 @@ class device_ptr_memory_resource final
         device_ptr<void>
     >
 {
-    typedef typename Upstream::pointer upstream_ptr;
+    using upstream_ptr = typename Upstream::pointer;
 
 public:
     /*! Initialize the adaptor with the global instance of the upstream resource. Obtains
@@ -69,8 +69,8 @@ public:
 
     /*! Allocates space using the upstream resource.
      *
-     *  \param bytes - the size of the requested allocation, in bytes
-     *  \param alignment - alignment size, in bytes
+     *  \param bytes the size of the requested allocation, in bytes
+     *  \param alignment alignment size, in bytes
      *  \return a pointer to the newly allocated storage.
      */
     THRUST_NODISCARD THRUST_HOST
@@ -80,9 +80,9 @@ public:
     }
 
     /*! Deallocates space that was previously allocated using this allocator.
-     * \param p - the pointer that was previously returned by \p do_allocate
-    *  \param bytes - size of the allocation, in bytes
-    *  \param alignment - alignment size, in bytes
+     * \param p the pointer that was previously returned by \p do_allocate
+    *  \param bytes size of the allocation, in bytes
+    *  \param alignment alignment size, in bytes
      */
     THRUST_HOST
     virtual void do_deallocate(pointer p, std::size_t bytes, std::size_t alignment) override
@@ -106,10 +106,9 @@ class device_allocator
         device_ptr_memory_resource<device_memory_resource>
     >
 {
-    typedef thrust::mr::stateless_resource_allocator<
+    using base = thrust::mr::stateless_resource_allocator<
         T,
-        device_ptr_memory_resource<device_memory_resource>
-    > base;
+        device_ptr_memory_resource<device_memory_resource> >;
 
 public:
     /*! The \p rebind metafunction provides the type of a \p device_allocator
@@ -122,7 +121,7 @@ public:
     {
         /*! The typedef \p other gives the type of the rebound \p device_allocator.
          */
-        typedef device_allocator<U> other;
+        using other = device_allocator<U>;
     };
 
     /*! Default constructor has no effect. */

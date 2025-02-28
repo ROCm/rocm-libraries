@@ -75,11 +75,7 @@ mismatch(execution_policy<Derived>& policy,
          InputIt2                   first2,
          BinaryPred                 binary_pred)
 {
-  typedef transform_pair_of_input_iterators_t<bool,
-                                              InputIt1,
-                                              InputIt2,
-                                              BinaryPred>
-      transform_t;
+  using transform_t = transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>;
 
   transform_t transform_first = transform_t(first1, first2, binary_pred);
 
@@ -101,7 +97,7 @@ mismatch(execution_policy<Derived>& policy,
          InputIt1                   last1,
          InputIt2                   first2)
 {
-  typedef typename thrust::iterator_value<InputIt1>::type InputType1;
+  using InputType1 = typename thrust::iterator_value<InputIt1>::type;
   return cuda_cub::mismatch(policy,
                          first1,
                          last1,

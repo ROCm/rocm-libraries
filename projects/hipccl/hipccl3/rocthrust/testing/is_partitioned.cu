@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ struct is_even
 template<typename Vector>
 void TestIsPartitionedSimple(void)
 {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
 
   Vector v(4);
   v[0] = 1; v[1] = 1; v[2] = 1; v[3] = 0;
@@ -62,7 +62,7 @@ DECLARE_VECTOR_UNITTEST(TestIsPartitionedSimple);
 template <class Vector>
 void TestIsPartitioned(void)
 {
-  typedef typename Vector::value_type T;
+  using T = typename Vector::value_type;
 
   const size_t n = (1 << 16) + 13;
 

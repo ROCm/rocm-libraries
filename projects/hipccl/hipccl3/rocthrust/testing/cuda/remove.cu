@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/remove.h>
 #include <thrust/execution_policy.h>
@@ -52,10 +69,8 @@ void remove_copy_if_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last
 }
 #endif
 
-
-template<typename T>
+template <typename T>
 struct is_even
-  : thrust::unary_function<T,bool>
 {
   THRUST_HOST_DEVICE bool operator()(T x)
   {
@@ -63,10 +78,8 @@ struct is_even
   }
 };
 
-
-template<typename T>
+template <typename T>
 struct is_true
-  : thrust::unary_function<T,bool>
 {
   THRUST_HOST_DEVICE bool operator()(T x)
   {
@@ -83,7 +96,7 @@ void TestRemoveDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_data = unittest::random_samples<int>(n);
   thrust::device_vector<int> d_data = h_data;
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_result(1);
   
   size_t h_size = thrust::remove(h_data.begin(), h_data.end(), 0) - h_data.begin();
@@ -124,7 +137,7 @@ void TestRemoveIfDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_data = unittest::random_samples<int>(n);
   thrust::device_vector<int> d_data = h_data;
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_result(1);
   
   size_t h_size = thrust::remove_if(h_data.begin(), h_data.end(), is_true<int>()) - h_data.begin();
@@ -165,7 +178,7 @@ void TestRemoveIfStencilDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_data = unittest::random_samples<int>(n);
   thrust::device_vector<int> d_data = h_data;
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_result(1);
   
   thrust::host_vector<bool>   h_stencil = unittest::random_integers<bool>(n);
@@ -212,7 +225,7 @@ void TestRemoveCopyDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_result(n);
   thrust::device_vector<int> d_result(n);
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_new_end(1);
   
   size_t h_size = thrust::remove_copy(h_data.begin(), h_data.end(), h_result.begin(), 0) - h_result.begin();
@@ -256,7 +269,7 @@ void TestRemoveCopyIfDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_result(n);
   thrust::device_vector<int> d_result(n);
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_new_end(1);
   
   size_t h_size = thrust::remove_copy_if(h_data.begin(), h_data.end(), h_result.begin(), is_true<int>()) - h_result.begin();
@@ -300,7 +313,7 @@ void TestRemoveCopyIfStencilDevice(ExecutionPolicy exec)
   thrust::host_vector<int>   h_result(n);
   thrust::device_vector<int> d_result(n);
 
-  typedef typename thrust::device_vector<int>::iterator iterator;
+  using iterator = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iterator> d_new_end(1);
 
   thrust::host_vector<bool>   h_stencil = unittest::random_integers<bool>(n);
@@ -340,8 +353,8 @@ DECLARE_UNITTEST(TestRemoveCopyIfStencilDeviceDevice);
 
 void TestRemoveCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -371,8 +384,8 @@ DECLARE_UNITTEST(TestRemoveCudaStreams);
 
 void TestRemoveCopyCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -405,8 +418,8 @@ DECLARE_UNITTEST(TestRemoveCopyCudaStreams);
 
 void TestRemoveIfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -436,8 +449,8 @@ DECLARE_UNITTEST(TestRemoveIfCudaStreams);
 
 void TestRemoveIfStencilCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -475,8 +488,8 @@ DECLARE_UNITTEST(TestRemoveIfStencilCudaStreams);
 
 void TestRemoveCopyIfCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 
@@ -509,8 +522,8 @@ DECLARE_UNITTEST(TestRemoveCopyIfCudaStreams);
 
 void TestRemoveCopyIfStencilCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(5);
   data[0] =  1; 

@@ -83,32 +83,15 @@ template<unsigned int default_value,
          unsigned int key7 = 0, unsigned int value7 = default_value>
 struct static_map
 {
-  typedef cons<
-    key_value<key0,value0>,
-    cons<
-      key_value<key1,value1>,
-      cons<
-        key_value<key2,value2>,
-        cons<
-          key_value<key3,value3>,
-          cons<
-            key_value<key4,value4>,
-            cons<
-              key_value<key5,value5>,
-              cons<
-                key_value<key6,value6>,
-                cons<
-                  key_value<key7,value7>
-                >
-              >
-            >
-          >
-        >
-      >
-    >
-  > impl;
+  using impl = cons<
+    key_value<key0, value0>,
+    cons<key_value<key1, value1>,
+         cons<key_value<key2, value2>,
+              cons<key_value<key3, value3>,
+                   cons<key_value<key4, value4>,
+                        cons<key_value<key5, value5>, cons<key_value<key6, value6>, cons<key_value<key7, value7>>>>>>>>>;
 
-  template<unsigned int key>
+  template <unsigned int key>
   struct static_get
   {
     static const unsigned int value = impl::template static_get<key,default_value>::value;

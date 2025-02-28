@@ -52,7 +52,7 @@ struct unary_plus
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(+THRUST_FWD(t1)))
-  THRUST_TRAILING_RETURN(decltype(+THRUST_FWD(t1)))
+  -> decltype(+THRUST_FWD(t1))
   {
     return +THRUST_FWD(t1);
   }
@@ -321,7 +321,7 @@ struct prefix_increment
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(++THRUST_FWD(t1)))
-  THRUST_TRAILING_RETURN(decltype(++THRUST_FWD(t1)))
+  -> decltype(++THRUST_FWD(t1))
   {
     return ++THRUST_FWD(t1);
   }
@@ -351,7 +351,7 @@ struct postfix_increment
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(THRUST_FWD(t1)++))
-  THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t1)++))
+  -> decltype(THRUST_FWD(t1)++)
   {
     return THRUST_FWD(t1)++;
   }
@@ -381,7 +381,7 @@ struct prefix_decrement
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(--THRUST_FWD(t1)))
-  THRUST_TRAILING_RETURN(decltype(--THRUST_FWD(t1)))
+  -> decltype(--THRUST_FWD(t1))
   {
     return --THRUST_FWD(t1);
   }
@@ -411,7 +411,7 @@ struct postfix_decrement
   THRUST_HOST_DEVICE
   constexpr auto operator()(T1&& t1) const
   noexcept(noexcept(THRUST_FWD(t1)--))
-  THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t1)--))
+  -> decltype(THRUST_FWD(t1)--)
   {
     return THRUST_FWD(t1)--;
   }

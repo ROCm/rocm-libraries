@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,24 +39,24 @@ TYPED_TEST(SetIntersectionKeyValueTests, TestSetIntersectionKeyValue)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<U> h_keys_a = get_random_data<U>(
-                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed);
+                size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed);
             thrust::host_vector<U> h_values_a = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_keys_b = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + 2 * seed_value_addition
             );
             thrust::host_vector<U> h_values_b = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + 3 * seed_value_addition
             );
 

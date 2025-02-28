@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,10 +33,10 @@
 template <class ExampleVector, typename NewType> 
 struct vector_like
 {
-    typedef typename ExampleVector::allocator_type alloc;
-    typedef typename thrust::detail::allocator_traits<alloc> alloc_traits;
-    typedef typename alloc_traits::template rebind_alloc<NewType> new_alloc;
-    typedef thrust::detail::vector_base<NewType, new_alloc> type;
+    using alloc        = typename ExampleVector::allocator_type;
+    using alloc_traits = typename thrust::detail::allocator_traits<alloc>;
+    using new_alloc    = typename alloc_traits::template rebind_alloc<NewType>;
+    using type         = thrust::detail::vector_base<NewType, new_alloc>;
 };
 
 template <class Vector>
@@ -53,8 +53,8 @@ void TestVectorLowerBoundSimple(void)
     Vector input(10);
     thrust::sequence(input.begin(), input.end());
 
-    typedef typename Vector::difference_type int_type;
-    typedef typename vector_like<Vector, int_type>::type IntVector;
+    using int_type  = typename Vector::difference_type;
+    using IntVector = typename vector_like<Vector, int_type>::type;
 
     // test with integral output type
     IntVector integral_output(10);
@@ -76,7 +76,7 @@ void TestVectorLowerBoundSimple(void)
     ASSERT_EQUAL(integral_output[9], 5);
 
 //    // test with interator output type
-//    typedef typename vector_like<Vector, typename Vector::iterator>::type IteratorVector;
+//    using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
 //    IteratorVector iterator_output(10);
 //    thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
 //
@@ -154,8 +154,8 @@ void TestVectorUpperBoundSimple(void)
     Vector input(10);
     thrust::sequence(input.begin(), input.end());
 
-    typedef typename Vector::difference_type int_type;
-    typedef typename vector_like<Vector, int_type>::type IntVector;
+    using int_type = typename Vector::difference_type;
+    using IntVector = typename vector_like<Vector, int_type>::type;
 
     // test with integral output type
     IntVector integral_output(10);
@@ -175,7 +175,7 @@ void TestVectorUpperBoundSimple(void)
     ASSERT_EQUAL(integral_output[9], 5);
 
 //    // test with interator output type
-//    typedef typename vector_like<Vector, typename Vector::iterator>::type IteratorVector;
+//    using IteratorVector = typename vector_like<Vector, typename Vector::iterator>::type;
 //    IteratorVector iterator_output(10);
 //    thrust::lower_bound(vec.begin(), vec.end(), input.begin(), input.end(), iterator_output.begin());
 //
@@ -253,9 +253,9 @@ void TestVectorBinarySearchSimple(void)
     Vector input(10);
     thrust::sequence(input.begin(), input.end());
 
-    typedef typename vector_like<Vector, bool>::type BoolVector;
-    typedef typename Vector::difference_type int_type;
-    typedef typename vector_like<Vector,  int_type>::type IntVector;
+    using BoolVector = typename vector_like<Vector, bool>::type;
+    using int_type = typename Vector::difference_type;
+    using IntVector = typename vector_like<Vector,  int_type>::type;
 
     // test with boolean output type
     BoolVector bool_output(10);
@@ -351,7 +351,7 @@ struct TestVectorLowerBound
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
     
-    typedef typename thrust::host_vector<T>::difference_type int_type;
+    using int_type = typename thrust::host_vector<T>::difference_type;
     thrust::host_vector<int_type>   h_output(2*n);
     thrust::device_vector<int_type> d_output(2*n);
 
@@ -375,7 +375,7 @@ struct TestVectorUpperBound
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
     
-    typedef typename thrust::host_vector<T>::difference_type int_type;
+    using int_type = typename thrust::host_vector<T>::difference_type;
     thrust::host_vector<int_type>   h_output(2*n);
     thrust::device_vector<int_type> d_output(2*n);
 
@@ -398,7 +398,7 @@ struct TestVectorBinarySearch
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
     
-    typedef typename thrust::host_vector<T>::difference_type int_type;
+    using int_type = typename thrust::host_vector<T>::difference_type;
     thrust::host_vector<int_type>   h_output(2*n);
     thrust::device_vector<int_type> d_output(2*n);
 

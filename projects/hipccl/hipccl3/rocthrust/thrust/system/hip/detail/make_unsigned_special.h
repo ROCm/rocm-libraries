@@ -1,6 +1,6 @@
 /*
  *  Copyright 2019 NVIDIA Corporation
- *  Modifications Copyright (c) 2020-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2020-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,15 +28,15 @@ namespace detail {
     struct make_unsigned_special;
 
     template<>
-    struct make_unsigned_special<int> { typedef unsigned int type; };
+    struct make_unsigned_special<int> { using type = unsigned int; };
 
     // this is special, because HIP's atomicAdd doesn't have an overload
     // for unsigned long, for some godforsaken reason
     template<>
-    struct make_unsigned_special<long> { typedef unsigned long long type; };
+    struct make_unsigned_special<long> { using type = unsigned long long; };
 
     template<>
-    struct make_unsigned_special<long long> { typedef unsigned long long type; };
+    struct make_unsigned_special<long long> { using type = unsigned long long; };
 
 }
 }

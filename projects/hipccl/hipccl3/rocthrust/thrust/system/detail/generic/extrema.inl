@@ -148,7 +148,7 @@ ForwardIterator min_element(thrust::execution_policy<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last)
 {
-  typedef typename thrust::iterator_value<ForwardIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<ForwardIterator>::type;
 
   return thrust::min_element(exec, first, last, thrust::less<value_type>());
 } // end min_element()
@@ -164,8 +164,8 @@ ForwardIterator min_element(thrust::execution_policy<DerivedPolicy> &exec,
   if (first == last)
     return last;
 
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type      InputType;
-  typedef typename thrust::iterator_traits<ForwardIterator>::difference_type IndexType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
+  using IndexType = typename thrust::iterator_traits<ForwardIterator>::difference_type;
 
   thrust::tuple<InputType, IndexType> result =
     thrust::reduce
@@ -185,7 +185,7 @@ ForwardIterator max_element(thrust::execution_policy<DerivedPolicy> &exec,
                             ForwardIterator first,
                             ForwardIterator last)
 {
-  typedef typename thrust::iterator_value<ForwardIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<ForwardIterator>::type;
 
   return thrust::max_element(exec, first, last, thrust::less<value_type>());
 } // end max_element()
@@ -201,8 +201,8 @@ ForwardIterator max_element(thrust::execution_policy<DerivedPolicy> &exec,
   if (first == last)
     return last;
 
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type      InputType;
-  typedef typename thrust::iterator_traits<ForwardIterator>::difference_type IndexType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
+  using IndexType = typename thrust::iterator_traits<ForwardIterator>::difference_type;
 
   thrust::tuple<InputType, IndexType> result =
     thrust::reduce
@@ -222,7 +222,7 @@ thrust::pair<ForwardIterator,ForwardIterator> minmax_element(thrust::execution_p
                                                              ForwardIterator first, 
                                                              ForwardIterator last)
 {
-  typedef typename thrust::iterator_value<ForwardIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<ForwardIterator>::type;
 
   return thrust::minmax_element(exec, first, last, thrust::less<value_type>());
 } // end minmax_element()
@@ -238,8 +238,8 @@ thrust::pair<ForwardIterator,ForwardIterator> minmax_element(thrust::execution_p
   if (first == last)
     return thrust::make_pair(last, last);
 
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type      InputType;
-  typedef typename thrust::iterator_traits<ForwardIterator>::difference_type IndexType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
+  using IndexType = typename thrust::iterator_traits<ForwardIterator>::difference_type;
 
   thrust::tuple< thrust::tuple<InputType,IndexType>, thrust::tuple<InputType,IndexType> > result = 
     thrust::transform_reduce

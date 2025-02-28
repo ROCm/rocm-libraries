@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,6 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/temporary_array.h>
@@ -45,6 +44,8 @@
 #include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+
+#include <cstdint>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -86,10 +87,10 @@ namespace __reduce
         bool        debug_sync         = THRUST_HIP_DEBUG_SYNC_FLAG;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::reduce(NULL,
+        hip_rocprim::throw_on_error(rocprim::reduce(nullptr,
                                                     temp_storage_bytes,
                                                     first,
-                                                    reinterpret_cast<T*>(NULL),
+                                                    static_cast<T*>(nullptr),
                                                     init,
                                                     static_cast<size_t>(num_items),
                                                     binary_op,
@@ -109,7 +110,7 @@ namespace __reduce
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         ptr = static_cast<void*>(tmp.data().get());
 
         // Create pointers with alignment
@@ -182,7 +183,7 @@ T reduce(execution_policy<Derived>& policy,
          T                          init,
          BinaryOp                   binary_op)
 {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
     // FIXME: Check for RA iterator.
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
     return hip_rocprim::reduce_n(policy, first, num_items, init, binary_op);
@@ -205,7 +206,7 @@ reduce(execution_policy<Derived>& policy,
        InputIt                    first,
        InputIt                    last)
 {
-    typedef typename iterator_traits<InputIt>::value_type value_type;
+    using value_type = typename iterator_traits<InputIt>::value_type;
     return hip_rocprim::reduce(policy, first, last, value_type(0));
 }
 

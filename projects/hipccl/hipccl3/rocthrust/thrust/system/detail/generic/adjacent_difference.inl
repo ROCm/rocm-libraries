@@ -39,7 +39,7 @@ OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec
                                    InputIterator first, InputIterator last,
                                    OutputIterator result)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
   thrust::minus<InputType> binary_op;
 
   return thrust::adjacent_difference(exec, first, last, result, binary_op);
@@ -53,7 +53,7 @@ OutputIterator adjacent_difference(thrust::execution_policy<DerivedPolicy> &exec
                                    OutputIterator result,
                                    BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<InputIterator>::value_type;
 
   if(first == last)
   {

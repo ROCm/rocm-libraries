@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -47,8 +47,8 @@ count_if(execution_policy<Derived>& policy,
          InputIt                    last,
          UnaryPred                  unary_pred)
 {
-    typedef typename iterator_traits<InputIt>::difference_type        size_type;
-    typedef transform_input_iterator_t<size_type, InputIt, UnaryPred> flag_iterator_t;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
+    using flag_iterator_t = transform_input_iterator_t<size_type, InputIt, UnaryPred>;
 
     return reduce_n(policy,
                                  flag_iterator_t(first, unary_pred),

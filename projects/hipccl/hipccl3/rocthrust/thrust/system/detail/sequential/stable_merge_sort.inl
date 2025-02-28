@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ void inplace_merge(sequential::execution_policy<DerivedPolicy> &exec,
                    RandomAccessIterator last,
                    StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type value_type;
+  using value_type = typename thrust::iterator_value<RandomAccessIterator>::type;
 
   thrust::detail::temporary_array<value_type, DerivedPolicy> a(exec, first, middle);
   thrust::detail::temporary_array<value_type, DerivedPolicy> b(exec, middle, last);
@@ -69,8 +69,8 @@ void inplace_merge_by_key(sequential::execution_policy<DerivedPolicy> &exec,
                           RandomAccessIterator2 first2,
                           StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type value_type1;
-  typedef typename thrust::iterator_value<RandomAccessIterator2>::type value_type2;
+  using value_type1 = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using value_type2 = typename thrust::iterator_value<RandomAccessIterator2>::type;
 
   RandomAccessIterator2 middle2 = first2 + (middle1 - first1);
   RandomAccessIterator2 last2   = first2 + (last1   - first1);
@@ -209,8 +209,8 @@ void iterative_stable_merge_sort(sequential::execution_policy<DerivedPolicy> &ex
                                  RandomAccessIterator last,
                                  StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type value_type;
-  typedef typename thrust::iterator_difference<RandomAccessIterator>::type difference_type;
+  using value_type      = typename thrust::iterator_value<RandomAccessIterator>::type;
+  using difference_type = typename thrust::iterator_difference<RandomAccessIterator>::type;
 
   difference_type n = last - first;
   difference_type partition_size = 32;
@@ -265,9 +265,9 @@ void iterative_stable_merge_sort_by_key(sequential::execution_policy<DerivedPoli
                                         RandomAccessIterator2 values_first,
                                         StrictWeakOrdering comp)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator1>::type      value_type1;
-  typedef typename thrust::iterator_value<RandomAccessIterator2>::type      value_type2;
-  typedef typename thrust::iterator_difference<RandomAccessIterator1>::type difference_type;
+  using value_type1     = typename thrust::iterator_value<RandomAccessIterator1>::type;
+  using value_type2     = typename thrust::iterator_value<RandomAccessIterator2>::type;
+  using difference_type = typename thrust::iterator_difference<RandomAccessIterator1>::type;
 
   difference_type n = keys_last - keys_first;
   difference_type partition_size = 32;

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2024 Advanced Micro Devices, Inc.
+# Copyright 2024-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
@@ -10,12 +10,17 @@ function(add_hipstdpar_test TEST TEST_TYPE INTERPOSE_ALLOC)
     set(TEST_TARGET "${TEST}_${TEST_TYPE}.hip")
 
     add_executable(${TEST_TARGET} ${TEST_SOURCE})
+    target_compile_options(${TEST_TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_compile_options(${TEST_TARGET}
         PRIVATE
             --hipstdpar
             --hipstdpar-path=${HIPSTDPAR_LOCATION}
             --hipstdpar-thrust-path=${THRUST_LOCATION}
-            --hipstdpar-prim-path=${ROCPRIM_LOCATION})
+            --hipstdpar-prim-path=${ROCPRIM_LOCATION}
+            # --hipstdpar-thrust-path is not enough because thrust/rocthrust_version.hpp is
+            # generated in the binary directory
+            -idirafter ${THRUST_BINARY_LOCATION}
+    )
     if(INTERPOSE_ALLOC)
         target_compile_options(${TEST_TARGET}
             PRIVATE
@@ -88,8 +93,10 @@ set(CMAKE_CXX_STANDARD 17)
 # Dependencies
 find_package(Threads REQUIRED)
 
-# Define where to find rocThrust, hipstdpar and rocPRIM headers
+# Define where to find rocThrust, rocPRIM and hipstdpar headers
 set(THRUST_LOCATION ${PROJECT_SOURCE_DIR})
+set(THRUST_BINARY_LOCATION ${PROJECT_BINARY_DIR}/thrust/include)
+set(ROCPRIM_LOCATION ${rocprim_INCLUDE_DIR})
 set(HIPSTDPAR_LOCATION ${THRUST_LOCATION}/thrust/system/hip/hipstdpar)
 set(ROCPRIM_LOCATION ${ROCPRIM_INCLUDE_DIR})
 

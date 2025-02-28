@@ -172,7 +172,6 @@ System
 ======
 
 .. doxygengroup:: system
-    :inner:
 
 Utility
 =======

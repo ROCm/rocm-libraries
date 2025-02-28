@@ -46,7 +46,7 @@ template<typename T>
     template<typename Env>
       struct result
     {
-      typedef T type;
+      using type = T;
     };
 
     THRUST_HOST_DEVICE

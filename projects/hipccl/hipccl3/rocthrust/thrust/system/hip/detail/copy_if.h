@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,7 +31,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -43,6 +42,8 @@
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -77,7 +78,7 @@ namespace hip_rocprim
 namespace __copy_if
 {
     template <unsigned int ItemsPerThread, typename InputIt, typename BoolIt, typename IntIt, typename OutputIt>
-    __global__ void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFirst, const size_t size, OutputIt output)
+    ROCPRIM_KERNEL void copy_if_kernel(InputIt first, BoolIt flagsFirst, IntIt posFirst, const size_t size, OutputIt output)
     {
         const size_t baseIdx = (blockIdx.x * blockDim.x + threadIdx.x) * ItemsPerThread;
 
@@ -111,11 +112,11 @@ namespace __copy_if
             return output;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(NULL,
+        hip_rocprim::throw_on_error(rocprim::select(nullptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     output,
-                                                    reinterpret_cast<size_type*>(NULL),
+                                                    static_cast<size_type*>(nullptr),
                                                     num_items,
                                                     predicate,
                                                     stream,
@@ -134,7 +135,7 @@ namespace __copy_if
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         ptr = static_cast<void*>(tmp.data().get());
 
         // Create pointers with alignment
@@ -163,8 +164,8 @@ namespace __copy_if
     {
         using namespace thrust::system::hip_rocprim::temp_storage;
         using size_type = typename iterator_traits<InputIt>::difference_type;
-        using pos_type = thrust::detail::uint32_t;
-        using flag_type = thrust::detail::uint8_t;
+        using pos_type  = std::uint32_t;
+        using flag_type = std::uint8_t;
 
         size_type   num_items  = thrust::distance(first, last);
         hipStream_t stream     = hip_rocprim::stream(policy);
@@ -198,7 +199,7 @@ namespace __copy_if
             "copy_if failed while determining inclusive scan storage size");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
         // Perform a scan on the positions.
@@ -251,7 +252,7 @@ namespace __copy_if
         -> std::enable_if_t<(sizeof(typename std::iterator_traits<InputIt>::value_type) < 512), OutputIt>
     {
         using namespace thrust::system::hip_rocprim::temp_storage;
-        typedef typename iterator_traits<InputIt>::difference_type size_type;
+        using size_type = typename iterator_traits<InputIt>::difference_type;
 
         size_type   num_items          = thrust::distance(first, last);
         size_t      temp_storage_bytes = 0;
@@ -264,12 +265,12 @@ namespace __copy_if
         auto flags = thrust::make_transform_iterator(stencil, predicate);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::select(NULL,
+        hip_rocprim::throw_on_error(rocprim::select(nullptr,
                                                     temp_storage_bytes,
                                                     first,
                                                     flags,
                                                     output,
-                                                    reinterpret_cast<size_type*>(NULL),
+                                                    static_cast<size_type*>(nullptr),
                                                     num_items,
                                                     stream,
                                                     debug_sync),
@@ -290,7 +291,7 @@ namespace __copy_if
                       l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         ptr = static_cast<void*>(tmp.data().get());
 
         // Create pointers with alignment

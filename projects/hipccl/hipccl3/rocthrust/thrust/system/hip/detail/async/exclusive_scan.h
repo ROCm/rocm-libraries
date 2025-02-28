@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -94,7 +94,7 @@ async_exclusive_scan_n(execution_policy<DerivedPolicy>& policy,
   }
 
   // Allocate temporary storage.
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, tmp_size
   );
   void* const tmp_ptr = raw_pointer_cast(content.get());

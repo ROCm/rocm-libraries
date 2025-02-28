@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -346,7 +346,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartition)
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator h_iter
@@ -381,11 +381,11 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionStencil)
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition);
             thrust::device_vector<T> d_data    = h_data;
             thrust::device_vector<T> d_stencil = h_stencil;
@@ -422,7 +422,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopy)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -483,11 +483,11 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencil)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
@@ -553,11 +553,11 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencil)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
@@ -623,7 +623,7 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyToDiscardIterator)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -730,11 +730,11 @@ TYPED_TEST(PartitionIntegerTests, TestPartitionCopyStencilToDiscardIterator)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -851,7 +851,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartition)
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             typename thrust::host_vector<T>::iterator h_iter
@@ -881,11 +881,11 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionStencil)
 
             // setup ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
@@ -918,7 +918,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopy)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -975,7 +975,7 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyToDiscardIterator)
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t n_true  = thrust::count_if(h_data.begin(), h_data.end(), is_even<T>());
@@ -1082,11 +1082,11 @@ TYPED_TEST(PartitionIntegerTests, TestStablePartitionCopyStencilToDiscardIterato
 
             // setup input ranges
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::device_vector<T> d_data    = h_data;
@@ -1851,7 +1851,7 @@ void PartitionCopyKernel(int const N, int* array, int* true_arr, int* false_arr,
         thrust::device_ptr<int> end(array + N);
         thrust::device_ptr<int> true_begin(true_arr);
         thrust::device_ptr<int> false_begin(false_arr);
-        typedef thrust::device_vector<int>::iterator iter;
+        using iter = thrust::device_vector<int>::iterator;
 
         thrust::pair<iter,iter> end_pair = thrust::partition_copy(thrust::hip::par, begin, end, true_begin, false_begin, is_even<int>());
         size_array[0] = end_pair.first - iter(true_begin);

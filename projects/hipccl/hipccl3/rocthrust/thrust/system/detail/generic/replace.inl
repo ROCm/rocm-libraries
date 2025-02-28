@@ -92,7 +92,7 @@ THRUST_HOST_DEVICE
                                  Predicate pred,
                                  const T &new_value)
 {
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type OutputType;
+  using OutputType = typename thrust::iterator_traits<OutputIterator>::value_type;
 
   detail::new_value_if<Predicate,T,OutputType> op(pred,new_value);
   return thrust::transform(exec, first, last, result, op);
@@ -109,7 +109,7 @@ THRUST_HOST_DEVICE
                                  Predicate pred,
                                  const T &new_value)
 {
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type OutputType;
+  using OutputType = typename thrust::iterator_traits<OutputIterator>::value_type;
 
   detail::new_value_if<Predicate,T,OutputType> op(pred,new_value);
   return thrust::transform(exec, first, last, stencil, result, op);

@@ -309,7 +309,7 @@ template<typename T, typename Alloc>
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-  typedef thrust::detail::is_integral<InputIterator> Integer;
+  using Integer = thrust::detail::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
@@ -325,7 +325,7 @@ template<typename T, typename Alloc>
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-  typedef thrust::detail::is_integral<InputIterator> Integer;
+  using Integer = thrust::detail::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
@@ -718,7 +718,7 @@ template<typename T, typename Alloc>
 {
   // we could have received assign(n, x), so disambiguate on the
   // type of InputIterator
-  typedef typename thrust::detail::is_integral<InputIterator> integral;
+  using integral = typename thrust::detail::is_integral<InputIterator>;
 
   assign_dispatch(first, last, integral());
 } // end vector_base::assign()
@@ -762,7 +762,7 @@ template<typename T, typename Alloc>
 {
   // we could have received insert(position, n, x), so disambiguate on the
   // type of InputIterator
-  typedef typename thrust::detail::is_integral<InputIterator> integral;
+  using integral = typename thrust::detail::is_integral<InputIterator>;
 
   insert_dispatch(position, first, last, integral());
 } // end vector_base::insert()
@@ -1274,8 +1274,8 @@ bool vector_equal(InputIterator1 first1, InputIterator1 last1,
 {
   typename thrust::iterator_difference<InputIterator1>::type n = thrust::distance(first1,last1);
 
-  typedef typename thrust::iterator_system<InputIterator1>::type FromSystem1;
-  typedef typename thrust::iterator_system<InputIterator2>::type FromSystem2;
+  using FromSystem1 = typename thrust::iterator_system<InputIterator1>::type;
+  using FromSystem2 = typename thrust::iterator_system<InputIterator2>::type;
 
   // bring both ranges to the host system
   // note that these copies are no-ops if the range is already convertible to the host system
@@ -1292,8 +1292,8 @@ template <typename InputIterator1, typename InputIterator2>
 bool vector_equal(InputIterator1 first1, InputIterator1 last1,
                   InputIterator2 first2)
 {
-  typedef typename thrust::iterator_system<InputIterator1>::type system1;
-  typedef typename thrust::iterator_system<InputIterator2>::type system2;
+  using system1 = typename thrust::iterator_system<InputIterator1>::type;
+  using system2 = typename thrust::iterator_system<InputIterator2>::type;
 
   // dispatch on the sameness of the two systems
   return vector_equal(first1, last1, first2,

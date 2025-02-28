@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +61,16 @@
 #include <random>
 #include <string>
 #include <type_traits>
+
+#define ROCRAND_CHECK(condition)                                                             \
+    {                                                                                        \
+        rocrand_status _status = condition;                                                  \
+        if(_status != ROCRAND_STATUS_SUCCESS)                                                \
+        {                                                                                    \
+            std::cout << "rocRAND error: " << _status << " line: " << __LINE__ << std::endl; \
+            exit(_status);                                                                   \
+        }                                                                                    \
+    }
 
 namespace bench_utils
 {
@@ -295,14 +305,14 @@ namespace detail
             , seed_type(m_seed_type)
             , entropy_reduction(m_entropy_reduction)
         {
-            rocrand_create_generator(&gen, ROCRAND_RNG_PSEUDO_DEFAULT);
+            ROCRAND_CHECK(rocrand_create_generator(&gen, ROCRAND_RNG_PSEUDO_DEFAULT));
             const managed_seed managed_seed {seed_type};
             seed = seed_t {managed_seed.get_0()};
         }
 
         ~device_generator_base_t()
         {
-            rocrand_destroy_generator(gen);
+            ROCRAND_CHECK(rocrand_destroy_generator(gen));
         }
 
         template <typename T>
@@ -368,8 +378,8 @@ namespace detail
             distribution.resize(num_items);
             double* d_distribution = thrust::raw_pointer_cast(distribution.data());
 
-            rocrand_set_seed(gen, seed.get());
-            rocrand_generate_uniform_double(gen, d_distribution, num_items);
+            ROCRAND_CHECK(rocrand_set_seed(gen, seed.get()));
+            ROCRAND_CHECK(rocrand_generate_uniform_double(gen, d_distribution, num_items));
 
             hipError_t error = hipDeviceSynchronize();
             if(error != hipSuccess)

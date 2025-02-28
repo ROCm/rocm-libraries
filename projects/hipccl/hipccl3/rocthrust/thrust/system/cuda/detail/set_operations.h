@@ -31,7 +31,6 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/distance.h>
@@ -45,6 +44,7 @@
 #include <thrust/system/cuda/detail/par_to_seq.h>
 #include <thrust/system/cuda/detail/util.h>
 
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -119,7 +119,7 @@ namespace __set_operations {
   THRUST_DEVICE_FUNCTION Size
   merge_path(It1 a, Size aCount, It2 b, Size bCount, Size diag, Comp comp)
   {
-    typedef typename thrust::iterator_traits<It1>::value_type T;
+    using T = typename thrust::iterator_traits<It1>::value_type;
 
     Size begin = thrust::max<Size>(0, diag - bCount);
     Size end   = thrust::min<Size>(diag, aCount);
@@ -148,7 +148,7 @@ namespace __set_operations {
                 Size2     levels,
                 CompareOp compare_op)
   {
-    typedef typename iterator_traits<It1>::value_type T;
+    using T = typename iterator_traits<It1>::value_type;
 
     Size index1 = merge_path<false>(keys1,
                                     num_keys1,
@@ -246,12 +246,11 @@ namespace __set_operations {
                   COMBINED_INPUT_BYTES)>::value>::value,
     };
 
-    typedef PtxPolicy<128,
-                      ITEMS_PER_THREAD,
-                      cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                      cub::LOAD_DEFAULT,
-                      cub::BLOCK_SCAN_WARP_SCANS>
-        type;
+    using type = PtxPolicy<128,
+                           ITEMS_PER_THREAD,
+                           cub::BLOCK_LOAD_WARP_TRANSPOSE,
+                           cub::LOAD_DEFAULT,
+                           cub::BLOCK_SCAN_WARP_SCANS>;
   }; // tuning sm30
 
   template<class T, class U>
@@ -273,12 +272,11 @@ namespace __set_operations {
                   COMBINED_INPUT_BYTES)>::value>::value,
     };
 
-    typedef PtxPolicy<256,
-                      ITEMS_PER_THREAD,
-                      cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                      cub::LOAD_DEFAULT,
-                      cub::BLOCK_SCAN_WARP_SCANS>
-        type;
+    using type = PtxPolicy<256,
+                           ITEMS_PER_THREAD,
+                           cub::BLOCK_LOAD_WARP_TRANSPOSE,
+                           cub::LOAD_DEFAULT,
+                           cub::BLOCK_SCAN_WARP_SCANS>;
   }; // tuning sm52
 
   template<class T, class U>
@@ -300,12 +298,11 @@ namespace __set_operations {
                   COMBINED_INPUT_BYTES)>::value>::value,
     };
 
-    typedef PtxPolicy<512,
-                      ITEMS_PER_THREAD,
-                      cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                      cub::LOAD_DEFAULT,
-                      cub::BLOCK_SCAN_WARP_SCANS>
-        type;
+    using type = PtxPolicy<512,
+                           ITEMS_PER_THREAD,
+                           cub::BLOCK_LOAD_WARP_TRANSPOSE,
+                           cub::LOAD_DEFAULT,
+                           cub::BLOCK_SCAN_WARP_SCANS>;
   }; // tuning sm60
 
   template <class KeysIt1,
@@ -320,44 +317,34 @@ namespace __set_operations {
             class HAS_VALUES>
   struct SetOpAgent
   {
-    typedef typename iterator_traits<KeysIt1>::value_type  key1_type;
-    typedef typename iterator_traits<KeysIt2>::value_type  key2_type;
-    typedef typename iterator_traits<ValuesIt1>::value_type value1_type;
-    typedef typename iterator_traits<ValuesIt2>::value_type value2_type;
+    using key1_type   = typename iterator_traits<KeysIt1>::value_type;
+    using key2_type   = typename iterator_traits<KeysIt2>::value_type;
+    using value1_type = typename iterator_traits<ValuesIt1>::value_type;
+    using value2_type = typename iterator_traits<ValuesIt2>::value_type;
 
-    typedef key1_type  key_type;
-    typedef value1_type value_type;
+    using key_type   = key1_type;
+    using value_type = value1_type;
 
-    typedef cub::ScanTileState<Size> ScanTileState;
+    using ScanTileState = cub::ScanTileState<Size>;
 
     template <class Arch>
     struct PtxPlan : Tuning<Arch, key_type, value_type>::type
     {
-      typedef Tuning<Arch, key_type, value_type> tuning;
+      using tuning = Tuning<Arch, key_type, value_type>;
 
-      typedef typename core::LoadIterator<PtxPlan, KeysIt1>::type   KeysLoadIt1;
-      typedef typename core::LoadIterator<PtxPlan, KeysIt2>::type   KeysLoadIt2;
-      typedef typename core::LoadIterator<PtxPlan, ValuesIt1>::type ValuesLoadIt1;
-      typedef typename core::LoadIterator<PtxPlan, ValuesIt2>::type ValuesLoadIt2;
+      using KeysLoadIt1   = typename core::LoadIterator<PtxPlan, KeysIt1>::type;
+      using KeysLoadIt2   = typename core::LoadIterator<PtxPlan, KeysIt2>::type;
+      using ValuesLoadIt1 = typename core::LoadIterator<PtxPlan, ValuesIt1>::type;
+      using ValuesLoadIt2 = typename core::LoadIterator<PtxPlan, ValuesIt2>::type;
 
-      typedef typename core::BlockLoad<PtxPlan, KeysLoadIt1>::type   BlockLoadKeys1;
-      typedef typename core::BlockLoad<PtxPlan, KeysLoadIt2>::type   BlockLoadKeys2;
-      typedef typename core::BlockLoad<PtxPlan, ValuesLoadIt1>::type BlockLoadValues1;
-      typedef typename core::BlockLoad<PtxPlan, ValuesLoadIt2>::type BlockLoadValues2;
+      using BlockLoadKeys1   = typename core::BlockLoad<PtxPlan, KeysLoadIt1>::type;
+      using BlockLoadKeys2   = typename core::BlockLoad<PtxPlan, KeysLoadIt2>::type;
+      using BlockLoadValues1 = typename core::BlockLoad<PtxPlan, ValuesLoadIt1>::type;
+      using BlockLoadValues2 = typename core::BlockLoad<PtxPlan, ValuesLoadIt2>::type;
 
-      typedef cub::TilePrefixCallbackOp<Size,
-                                        cub::Sum,
-                                        ScanTileState,
-                                        Arch::ver>
-          TilePrefixCallback;
+      using TilePrefixCallback = cub::TilePrefixCallbackOp<Size, cub::Sum, ScanTileState, Arch::ver>;
 
-      typedef cub::BlockScan<Size,
-                             PtxPlan::BLOCK_THREADS,
-                             PtxPlan::SCAN_ALGORITHM,
-                             1,
-                             1,
-                             Arch::ver>
-          BlockScan;
+      using BlockScan = cub::BlockScan<Size, PtxPlan::BLOCK_THREADS, PtxPlan::SCAN_ALGORITHM, 1, 1, Arch::ver>;
 
       // gather required temporary storage in a union
       //
@@ -397,22 +384,22 @@ namespace __set_operations {
       };    // union TempStorage
     };      // struct PtxPlan
 
-    typedef typename core::specialize_plan_msvc10_war<PtxPlan>::type::type ptx_plan;
+    using ptx_plan = typename core::specialize_plan_msvc10_war<PtxPlan>::type::type;
 
-    typedef typename ptx_plan::KeysLoadIt1   KeysLoadIt1;
-    typedef typename ptx_plan::KeysLoadIt2   KeysLoadIt2;
-    typedef typename ptx_plan::ValuesLoadIt1 ValuesLoadIt1;
-    typedef typename ptx_plan::ValuesLoadIt2 ValuesLoadIt2;
+    using KeysLoadIt1   = typename ptx_plan::KeysLoadIt1;
+    using KeysLoadIt2   = typename ptx_plan::KeysLoadIt2;
+    using ValuesLoadIt1 = typename ptx_plan::ValuesLoadIt1;
+    using ValuesLoadIt2 = typename ptx_plan::ValuesLoadIt2;
 
-    typedef typename ptx_plan::BlockLoadKeys1   BlockLoadKeys1;
-    typedef typename ptx_plan::BlockLoadKeys2   BlockLoadKeys2;
-    typedef typename ptx_plan::BlockLoadValues1 BlockLoadValues1;
-    typedef typename ptx_plan::BlockLoadValues2 BlockLoadValues2;
+    using BlockLoadKeys1   = typename ptx_plan::BlockLoadKeys1;
+    using BlockLoadKeys2   = typename ptx_plan::BlockLoadKeys2;
+    using BlockLoadValues1 = typename ptx_plan::BlockLoadValues1;
+    using BlockLoadValues2 = typename ptx_plan::BlockLoadValues2;
 
-    typedef typename ptx_plan::TilePrefixCallback TilePrefixCallback;
-    typedef typename ptx_plan::BlockScan BlockScan;
+    using TilePrefixCallback = typename ptx_plan::TilePrefixCallback;
+    using BlockScan          = typename ptx_plan::BlockScan;
 
-    typedef typename ptx_plan::TempStorage TempStorage;
+    using TempStorage = typename ptx_plan::TempStorage;
 
     enum
     {
@@ -838,7 +825,7 @@ namespace __set_operations {
     template <class Arch>
     struct PtxPlan : PtxPolicy<256> {};
 
-    typedef core::specialize_plan<PtxPlan> ptx_plan;
+    using ptx_plan = core::specialize_plan<PtxPlan>;
 
     //---------------------------------------------------------------------
     // Agent entry point
@@ -878,7 +865,7 @@ namespace __set_operations {
     template <class Arch>
     struct PtxPlan : PtxPolicy<128> {};
 
-    typedef core::specialize_plan<PtxPlan> ptx_plan;
+    using ptx_plan = core::specialize_plan<PtxPlan>;
 
     //---------------------------------------------------------------------
     // Agent entry point
@@ -1143,24 +1130,22 @@ namespace __set_operations {
     using core::AgentPlan;
     using core::AgentLauncher;
 
-    typedef AgentLauncher<
-        SetOpAgent<KeysIt1,
-                   KeysIt2,
-                   ValuesIt1,
-                   ValuesIt2,
-                   KeysOutputIt,
-                   ValuesOutputIt,
-                   Size,
-                   CompareOp,
-                   SetOp,
-                   HAS_VALUES> >
-        set_op_agent;
+    using set_op_agent = AgentLauncher<
+                         SetOpAgent<KeysIt1,
+                                    KeysIt2,
+                                    ValuesIt1,
+                                    ValuesIt2,
+                                    KeysOutputIt,
+                                    ValuesOutputIt,
+                                    Size,
+                                    CompareOp,
+                                    SetOp,
+                                    HAS_VALUES> >;
 
-    typedef AgentLauncher<PartitionAgent<KeysIt1, KeysIt2, Size, CompareOp> >
-        partition_agent;
+    using partition_agent = AgentLauncher<PartitionAgent<KeysIt1, KeysIt2, Size, CompareOp> >;
 
-    typedef typename set_op_agent::ScanTileState ScanTileState;
-    typedef AgentLauncher<InitAgent<ScanTileState, Size> > init_agent;
+    using ScanTileState = typename set_op_agent::ScanTileState;
+    using init_agent = AgentLauncher<InitAgent<ScanTileState, Size> >;
 
 
     AgentPlan set_op_plan    = set_op_agent::get_plan(stream);
@@ -1179,7 +1164,7 @@ namespace __set_operations {
                                               num_tiles);
     size_t partition_agent_storage = (num_tiles + 1) * sizeof(Size) * 2;
 
-    void *allocations[3] = {NULL, NULL, NULL};
+    void *allocations[3] = {nullptr, nullptr, nullptr};
     size_t allocation_sizes[3] = {tile_agent_storage,
                                   partition_agent_storage,
                                   vshmem_storage};
@@ -1190,7 +1175,7 @@ namespace __set_operations {
                                  allocation_sizes);
     CUDA_CUB_RET_IF_FAIL(status);
 
-    if (d_temp_storage == NULL)
+    if (d_temp_storage == nullptr)
     {
       return status;
     }
@@ -1202,7 +1187,7 @@ namespace __set_operations {
     CUDA_CUB_RET_IF_FAIL(status);
 
     pair<Size, Size> *partitions = (pair<Size, Size> *)allocations[1];
-    char *vshmem_ptr = vshmem_storage > 0 ? (char *)allocations[2] : NULL;
+    char *vshmem_ptr = vshmem_storage > 0 ? (char *)allocations[2] : nullptr;
 
     init_agent ia(init_plan, num_tiles, stream, "set_op::init_agent");
     ia.launch(tile_state, num_tiles);
@@ -1262,7 +1247,7 @@ namespace __set_operations {
                  CompareOp                  compare_op,
                  SetOp                      set_op)
   {
-    typedef typename iterator_traits<KeysIt1>::difference_type size_type;
+    using size_type = typename iterator_traits<KeysIt1>::difference_type;
 
     size_type num_keys1 = static_cast<size_type>(thrust::distance(keys1_first, keys1_last));
     size_type num_keys2 = static_cast<size_type>(thrust::distance(keys2_first, keys2_last));
@@ -1275,7 +1260,7 @@ namespace __set_operations {
 
     cudaError_t status;
     THRUST_DOUBLE_INDEX_TYPE_DISPATCH(status, doit_step<HAS_VALUES>,
-        num_keys1, num_keys2, (NULL,
+        num_keys1, num_keys2, (nullptr,
                                    temp_storage_bytes,
                                    keys1_first,
                                    keys2_first,
@@ -1285,25 +1270,25 @@ namespace __set_operations {
                                    num_keys2_fixed,
                                    keys_output,
                                    values_output,
-                                   reinterpret_cast<std::size_t*>(NULL),
+                                   static_cast<std::size_t*>(nullptr),
                                    compare_op,
                                    set_op,
                                    stream));
     cuda_cub::throw_on_error(status, "set_operations failed on 1st step");
 
     size_t allocation_sizes[2] = {sizeof(std::size_t), temp_storage_bytes};
-    void * allocations[2]      = {NULL, NULL};
+    void * allocations[2]      = {nullptr, nullptr};
 
     size_t storage_size = 0;
 
-    status = core::alias_storage(NULL,
+    status = core::alias_storage(nullptr,
                                  storage_size,
                                  allocations,
                                  allocation_sizes);
     cuda_cub::throw_on_error(status, "set_operations failed on 1st alias_storage");
 
     // Allocate temporary storage.
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+    thrust::detail::temporary_array<std::uint8_t, Derived>
       tmp(policy, storage_size);
     void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -1399,7 +1384,7 @@ set_difference(execution_policy<Derived> &policy,
                ItemsIt2                   items2_last,
                OutputIt                   result)
 {
-  typedef typename thrust::iterator_value<ItemsIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
   return cuda_cub::set_difference(policy,
                                   items1_first,
                                   items1_last,
@@ -1429,7 +1414,7 @@ set_intersection(execution_policy<Derived> &policy,
 {
   THRUST_CDP_DISPATCH(
     (using items1_t  = thrust::iterator_value_t<ItemsIt1>;
-     items1_t *null_ = NULL;
+     items1_t *null_ = nullptr;
      auto tmp = __set_operations::set_operations<thrust::detail::false_type>(
        policy,
        items1_first,
@@ -1465,7 +1450,7 @@ set_intersection(execution_policy<Derived> &policy,
                  ItemsIt2                   items2_last,
                  OutputIt                   result)
 {
-  typedef typename thrust::iterator_value<ItemsIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
   return cuda_cub::set_intersection(policy,
                                     items1_first,
                                     items1_last,
@@ -1531,7 +1516,7 @@ set_symmetric_difference(execution_policy<Derived> &policy,
                          ItemsIt2                   items2_last,
                          OutputIt                   result)
 {
-  typedef typename thrust::iterator_value<ItemsIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
   return cuda_cub::set_symmetric_difference(policy,
                                             items1_first,
                                             items1_last,
@@ -1596,7 +1581,7 @@ set_union(execution_policy<Derived> &policy,
           ItemsIt2                   items2_last,
           OutputIt                   result)
 {
-  typedef typename thrust::iterator_value<ItemsIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<ItemsIt1>::type;
   return cuda_cub::set_union(policy,
                              items1_first,
                              items1_last,
@@ -1681,7 +1666,7 @@ set_difference_by_key(execution_policy<Derived> &policy,
                       KeysOutputIt               keys_result,
                       ItemsOutputIt              items_result)
 {
-  typedef typename thrust::iterator_value<KeysIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
   return cuda_cub::set_difference_by_key(policy,
                                          keys1_first,
                                          keys1_last,
@@ -1759,7 +1744,7 @@ set_intersection_by_key(execution_policy<Derived> &policy,
                         KeysOutputIt               keys_result,
                         ItemsOutputIt              items_result)
 {
-  typedef typename thrust::iterator_value<KeysIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
   return cuda_cub::set_intersection_by_key(policy,
                                            keys1_first,
                                            keys1_last,
@@ -1840,7 +1825,7 @@ set_symmetric_difference_by_key(execution_policy<Derived> &policy,
                                 KeysOutputIt               keys_result,
                                 ItemsOutputIt              items_result)
 {
-  typedef typename thrust::iterator_value<KeysIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
   return cuda_cub::set_symmetric_difference_by_key(policy,
                                                    keys1_first,
                                                    keys1_last,
@@ -1921,7 +1906,7 @@ set_union_by_key(execution_policy<Derived> &policy,
                  KeysOutputIt               keys_result,
                  ItemsOutputIt              items_result)
 {
-  typedef typename thrust::iterator_value<KeysIt1>::type value_type;
+  using value_type = typename thrust::iterator_value<KeysIt1>::type;
   return cuda_cub::set_union_by_key(policy,
                                     keys1_first,
                                     keys1_last,

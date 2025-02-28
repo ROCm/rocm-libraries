@@ -36,7 +36,7 @@ THRUST_HOST_DEVICE
                 ForwardIterator first,
                 ForwardIterator last)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type T;
+  using T = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   thrust::sequence(exec, first, last, T(0));
 } // end sequence()

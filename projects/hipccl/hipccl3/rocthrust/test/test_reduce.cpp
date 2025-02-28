@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ TYPED_TEST(ReducePrimitiveTests, TestReduce)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             T init = T(13);
@@ -114,7 +114,7 @@ TYPED_TEST(ReducePrimitiveTests, TestReduce)
             T h_result = thrust::reduce(h_data.begin(), h_data.end(), init);
             T d_result = thrust::reduce(d_data.begin(), d_data.end(), init);
 
-            ASSERT_EQ(h_result, d_result);
+            test_equality(h_result, d_result);
         }
     }
 }
@@ -166,7 +166,7 @@ TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -175,7 +175,7 @@ TYPED_TEST(ReduceIntegerTests, TestReduceWithOperator)
             T cpu_result = thrust::reduce(h_data.begin(), h_data.end(), init, plus_mod_10<T>());
             T gpu_result = thrust::reduce(d_data.begin(), d_data.end(), init, plus_mod_10<T>());
 
-            ASSERT_EQ(cpu_result, gpu_result);
+            test_equality(cpu_result, gpu_result);
         }
     }
 }

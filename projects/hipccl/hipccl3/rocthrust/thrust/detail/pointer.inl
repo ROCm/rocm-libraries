@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -140,8 +140,8 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     ::dereference() const
 {
   // Need to handle cpp refs and fancy refs differently:
-  typedef typename super_t::reference RefT;
-  typedef typename thrust::detail::is_reference<RefT>::type IsCppRef;
+  using RefT     = typename super_t::reference;
+  using IsCppRef = typename thrust::detail::is_reference<RefT>::type;
 
   const derived_type& derivedPtr = static_cast<const derived_type&>(*this);
 

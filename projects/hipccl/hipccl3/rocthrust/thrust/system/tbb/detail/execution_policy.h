@@ -57,7 +57,7 @@ template<typename Derived>
   struct execution_policy
     : thrust::system::cpp::detail::execution_policy<Derived>
 {
-  typedef tag tag_type; 
+  using tag_type = tag;
   operator tag() const { return tag(); }
 };
 

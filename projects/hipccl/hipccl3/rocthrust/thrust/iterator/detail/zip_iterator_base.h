@@ -85,9 +85,7 @@ struct dereference_iterator
   template<typename Iterator>
   struct apply
   {
-    typedef typename
-      iterator_traits<Iterator>::reference
-    type;
+    using type = typename iterator_traits<Iterator>::reference;
   }; // end apply
 
   // XXX silence warnings of the form "calling a __host__ function from a THRUST_HOST_DEVICE function is not allowed
@@ -133,9 +131,9 @@ template<
     class BinaryMetaFun
   , typename StartType
 >
-  struct tuple_meta_accumulate<thrust::tuple<>,BinaryMetaFun,StartType>
+struct tuple_meta_accumulate<thrust::tuple<>,BinaryMetaFun,StartType>
 {
-   typedef typename thrust::detail::identity_<StartType>::type type;
+  using type = typename thrust::detail::identity_<StartType>::type;
 };
 
 
@@ -147,15 +145,10 @@ template<
 >
   struct tuple_meta_accumulate<thrust::tuple<T,Ts...>,BinaryMetaFun,StartType>
 {
-   typedef typename apply2<
-       BinaryMetaFun
-     , T
-     , typename tuple_meta_accumulate<
-           thrust::tuple<Ts...>
-         , BinaryMetaFun
-         , StartType
-       >::type
-   >::type type;
+  using type =
+    typename apply2<BinaryMetaFun,
+                    T,
+                    typename tuple_meta_accumulate<thrust::tuple<Ts...>, BinaryMetaFun, StartType>::type>::type;
 };
 
 
@@ -223,16 +216,10 @@ struct minimum_category_lambda
 template<typename IteratorTuple>
 struct minimum_traversal_category_in_iterator_tuple
 {
-  typedef typename tuple_meta_transform<
-      IteratorTuple
-    , thrust::iterator_traversal
-  >::type tuple_of_traversal_tags;
+  using tuple_of_traversal_tags = typename tuple_meta_transform<IteratorTuple, thrust::iterator_traversal>::type;
 
-  typedef typename tuple_impl_specific::tuple_meta_accumulate<
-      tuple_of_traversal_tags
-    , minimum_category_lambda
-    , thrust::random_access_traversal_tag
-  >::type type;
+  using type = typename tuple_impl_specific::
+    tuple_meta_accumulate<tuple_of_traversal_tags, minimum_category_lambda, thrust::random_access_traversal_tag>::type;
 };
 
 
@@ -250,16 +237,11 @@ struct minimum_system_lambda
 template<typename IteratorTuple>
 struct minimum_system_in_iterator_tuple
 {
-  typedef typename thrust::detail::tuple_meta_transform<
-    IteratorTuple,
-    thrust::iterator_system
-  >::type tuple_of_system_tags;
+  using tuple_of_system_tags =
+    typename thrust::detail::tuple_meta_transform<IteratorTuple, thrust::iterator_system>::type;
 
-  typedef typename tuple_impl_specific::tuple_meta_accumulate<
-    tuple_of_system_tags,
-    minimum_system_lambda,
-    thrust::any_system_tag
-  >::type type;
+  using type = typename tuple_impl_specific::
+    tuple_meta_accumulate<tuple_of_system_tags, minimum_system_lambda, thrust::any_system_tag>::type;
 };
 
 namespace zip_iterator_base_ns
@@ -273,9 +255,7 @@ template<typename Tuple, typename IndexSequence>
 template<typename Tuple, size_t... Is>
   struct tuple_of_iterator_references_helper<Tuple, thrust::index_sequence<Is...>>
 {
-  typedef thrust::detail::tuple_of_iterator_references<
-    typename thrust::tuple_element<Is,Tuple>::type...
-  > type;
+  using type = thrust::detail::tuple_of_iterator_references<typename thrust::tuple_element<Is, Tuple>::type...>;
 };
 
 
@@ -283,16 +263,12 @@ template<typename IteratorTuple>
   struct tuple_of_iterator_references
 {
   // get a thrust::tuple of the iterators' references
-  typedef typename tuple_meta_transform<
-    IteratorTuple,
-    iterator_reference
-  >::type tuple_of_references;
+  using tuple_of_references = typename tuple_meta_transform<IteratorTuple, thrust::iterator_reference>::type;
 
   // map thrust::tuple<T...> to tuple_of_iterator_references<T...>
-  typedef typename tuple_of_iterator_references_helper<
+  using type = typename tuple_of_iterator_references_helper<
     tuple_of_references,
-    thrust::make_index_sequence<thrust::tuple_size<tuple_of_references>::value>
-  >::type type;
+    thrust::make_index_sequence<thrust::tuple_size<tuple_of_references>::value>>::type;
 };
 
 
@@ -311,39 +287,39 @@ template<typename IteratorTuple>
  //private:
     // reference type is the type of the tuple obtained from the
     // iterators' reference types.
-    typedef typename zip_iterator_base_ns::tuple_of_iterator_references<IteratorTuple>::type reference;
+    using reference = typename zip_iterator_base_ns::tuple_of_iterator_references<IteratorTuple>::type;
 
     // Boost's Value type is the same as reference type.
-    //typedef reference value_type;
-    typedef typename tuple_of_value_types<IteratorTuple>::type value_type;
+    //using value_type = reference;
+    using value_type = typename tuple_of_value_types<IteratorTuple>::type;
 
     // Difference type is the first iterator's difference type
-    typedef typename thrust::iterator_traits<
-      typename thrust::tuple_element<0, IteratorTuple>::type
-    >::difference_type difference_type;
+    using difference_type = typename thrust::iterator_traits<
+                              typename thrust::tuple_element<0, IteratorTuple>::type
+                               >::difference_type;
 
     // Iterator system is the minimum system tag in the
     // iterator tuple
-    typedef typename
-    minimum_system_in_iterator_tuple<IteratorTuple>::type system;
+    using system = typename
+      minimum_system_in_iterator_tuple<IteratorTuple>::type;
 
     // Traversal category is the minimum traversal category in the
     // iterator tuple
-    typedef typename
-    minimum_traversal_category_in_iterator_tuple<IteratorTuple>::type traversal_category;
+    using traversal_category = typename
+      minimum_traversal_category_in_iterator_tuple<IteratorTuple>::type;
 
  public:
 
     // The iterator facade type from which the zip iterator will
     // be derived.
-    typedef thrust::iterator_facade<
-        zip_iterator<IteratorTuple>,
-        value_type,
-        system,
-        traversal_category,
-        reference,
-        difference_type
-    > type;
+    using type = thrust::iterator_facade<
+                  zip_iterator<IteratorTuple>,
+                  value_type,
+                  system,
+                  traversal_category,
+                  reference,
+                  difference_type
+                  >;
 }; // end zip_iterator_base
 
 } // end detail

@@ -80,7 +80,7 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
   public:
     /*! The type of the raw pointer
      */
-    typedef typename super_t::base_type raw_pointer;
+    using raw_pointer = typename super_t::base_type;
 
     /*! \p pointer's default constructor initializes its encapsulated pointer to \c 0
      */
@@ -239,10 +239,10 @@ pointer<T,DerivedPolicy> malloc(const thrust::detail::execution_policy_base<Deri
  *  // allocate storage for 100 ints with thrust::get_temporary_buffer
  *  const int N = 100;
  *
- *  typedef thrust::pair<
+ *  using ptr_and_size_t = thrust::pair<
  *    thrust::pointer<int,thrust::device_system_tag>,
  *    std::ptrdiff_t
- *  > ptr_and_size_t;
+ *  >;
  *
  *  thrust::device_system_tag device_sys;
  *  ptr_and_size_t ptr_and_size = thrust::get_temporary_buffer<int>(device_sys, N);
@@ -319,10 +319,10 @@ void free(const thrust::detail::execution_policy_base<DerivedPolicy> &system, Po
  *  // allocate storage for 100 ints with thrust::get_temporary_buffer
  *  const int N = 100;
  *
- *  typedef thrust::pair<
+ *  using ptr_and_size_t = thrust::pair<
  *    thrust::pointer<int,thrust::device_system_tag>,
  *    std::ptrdiff_t
- *  > ptr_and_size_t;
+ *  >;
  *
  *  thrust::device_system_tag device_sys;
  *  ptr_and_size_t ptr_and_size = thrust::get_temporary_buffer<int>(device_sys, N);

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorInitializerList);
 template <class Vector>
 void TestVectorFrontBack(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(3);
     v[0] = 0; v[1] = 1; v[2] = 2;
@@ -97,8 +97,8 @@ DECLARE_VECTOR_UNITTEST(TestVectorFrontBack);
 template <class Vector>
 void TestVectorData(void)
 {
-    typedef typename Vector::pointer PointerT;
-    typedef typename Vector::const_pointer PointerConstT;
+    using PointerT = typename Vector::pointer;
+    using PointerConstT = typename Vector::const_pointer;
 
     Vector v(3);
     v[0] = 0; v[1] = 1; v[2] = 2;
@@ -152,7 +152,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorElementAssignment);
 template <class Vector>
 void TestVectorFromSTLVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::vector<T> stl_vector(3);
     stl_vector[0] = 0;
@@ -179,7 +179,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFromSTLVector);
 template <class Vector>
 void TestVectorFillAssign(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> v;
     v.assign(3, 13);
@@ -195,7 +195,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFillAssign);
 template <class Vector>
 void TestVectorAssignFromSTLVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::vector<T> stl_vector(3);
     stl_vector[0] = 0;
@@ -216,7 +216,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromSTLVector);
 template <class Vector>
 void TestVectorFromBiDirectionalIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::list<T> stl_list;
     stl_list.push_back(0);
@@ -236,7 +236,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorFromBiDirectionalIterator);
 template <class Vector>
 void TestVectorAssignFromBiDirectionalIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     std::list<T> stl_list;
     stl_list.push_back(0);
@@ -257,7 +257,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromBiDirectionalIterator);
 template <class Vector>
 void TestVectorAssignFromHostVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> h(3);
     h[0] = 0;
@@ -275,7 +275,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromHostVector);
 template <class Vector>
 void TestVectorToAndFromHostVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::host_vector<T> h(3);
     h[0] = 0;
@@ -314,7 +314,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorToAndFromHostVector);
 template <class Vector>
 void TestVectorAssignFromDeviceVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::device_vector<T> d(3);
     d[0] = 0;
@@ -332,7 +332,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorAssignFromDeviceVector);
 template <class Vector>
 void TestVectorToAndFromDeviceVector(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::device_vector<T> h(3);
     h[0] = 0;
@@ -371,7 +371,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorToAndFromDeviceVector);
 template <class Vector>
 void TestVectorWithInitialValue(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     const T init = 17;
 
@@ -702,7 +702,7 @@ DECLARE_VECTOR_UNITTEST(TestVectorUninitialisedCopy);
 template <class Vector>
 void TestVectorShrinkToFit(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v;
 
@@ -744,7 +744,7 @@ void TestVectorContainingLargeType(void)
     // Thrust issue #5
     // http://code.google.com/p/thrust/issues/detail?id=5
     const static int N = 100;
-    typedef LargeStruct<N> T;
+    using T            = LargeStruct<N>;
 
     thrust::device_vector<T> dv1;
     thrust::host_vector<T>   hv1;

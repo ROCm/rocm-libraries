@@ -56,7 +56,7 @@ THRUST_HOST_DEVICE
                           const T &x,
                           thrust::detail::false_type) // has_trivial_copy_constructor
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
   thrust::for_each(exec, first, last, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -86,7 +86,7 @@ THRUST_HOST_DEVICE
                                        const T &x,
                                        thrust::detail::false_type) // has_trivial_copy_constructor
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
   return thrust::for_each_n(exec, first, n, thrust::detail::uninitialized_fill_functor<ValueType>(x));
 } // end uninitialized_fill()
@@ -102,9 +102,9 @@ THRUST_HOST_DEVICE
                           ForwardIterator last,
                           const T &x)
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
-  typedef thrust::detail::has_trivial_copy_constructor<ValueType> ValueTypeHasTrivialCopyConstructor;
+  using ValueTypeHasTrivialCopyConstructor = thrust::detail::has_trivial_copy_constructor<ValueType>;
 
   thrust::system::detail::generic::detail::uninitialized_fill(exec, first, last, x,
     ValueTypeHasTrivialCopyConstructor());
@@ -120,9 +120,9 @@ THRUST_HOST_DEVICE
                                        Size n,
                                        const T &x)
 {
-  typedef typename iterator_traits<ForwardIterator>::value_type ValueType;
+  using ValueType = typename iterator_traits<ForwardIterator>::value_type;
 
-  typedef thrust::detail::has_trivial_copy_constructor<ValueType> ValueTypeHasTrivialCopyConstructor;
+  using ValueTypeHasTrivialCopyConstructor = thrust::detail::has_trivial_copy_constructor<ValueType>;
 
   return thrust::system::detail::generic::detail::uninitialized_fill_n(exec, first, n, x,
     ValueTypeHasTrivialCopyConstructor());

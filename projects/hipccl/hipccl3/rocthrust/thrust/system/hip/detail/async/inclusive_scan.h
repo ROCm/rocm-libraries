@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -91,7 +91,7 @@ namespace hip
             // Allocate temporary storage.
 
             auto tmp
-                = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(device_alloc, tmp_size);
+                = uninitialized_allocate_unique_n<std::uint8_t>(device_alloc, tmp_size);
 
             // The array was dynamically allocated, so we assume that it's suitably
             // aligned for any type of data. `malloc`/`hipMalloc`/`new`/`std::allocator`

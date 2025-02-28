@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/tabulate.h>
 #include <thrust/functional.h>
@@ -16,10 +33,10 @@ void tabulate_kernel(ExecutionPolicy exec, Iterator first, Iterator last, Functi
 template<typename ExecutionPolicy>
 void TestTabulateDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
+  using Vector = thrust::device_vector<int>;
   using namespace thrust::placeholders;
-  typedef typename Vector::value_type T;
-  
+  using T = typename Vector::value_type;
+
   Vector v(5);
 
   tabulate_kernel<<<1,1>>>(exec, v.begin(), v.end(), thrust::identity<T>());
@@ -75,9 +92,9 @@ DECLARE_UNITTEST(TestTabulateDeviceDevice);
 void TestTabulateCudaStreams()
 {
   using namespace thrust::placeholders;
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
-  
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
+
   Vector v(5);
 
   cudaStream_t s;

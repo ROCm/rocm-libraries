@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -117,8 +117,7 @@ struct my_allocator_with_custom_destroy
         return !(*this == other);
     }
 
-    typedef thrust::detail::true_type is_always_equal;
-
+    using is_always_equal = thrust::detail::true_type;
 
 
     // use composition rather than inheritance
@@ -141,12 +140,12 @@ TEST(AllocatorTests, TestAllocatorCustomDestroy)
 
 struct my_minimal_allocator
 {
-    typedef int value_type;
+    using value_type = int;
 
     // XXX ideally, we shouldn't require
     //     these two typedefs
-    typedef int&       reference;
-    typedef const int& const_reference;
+    using reference = int&;
+    using const_reference = const int&;
 
     __host__ __device__ my_minimal_allocator() {}
 

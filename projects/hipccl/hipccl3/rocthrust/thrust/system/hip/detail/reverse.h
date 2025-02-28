@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -75,7 +75,7 @@ namespace hip_rocprim
     void THRUST_HIP_FUNCTION
     reverse(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last)
     {
-        typedef typename thrust::iterator_difference<ItemsIt>::type difference_type;
+        using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
         // find the midpoint of [first,last)
         difference_type N = thrust::distance(first, last);

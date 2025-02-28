@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -118,9 +118,6 @@ inline _CCCL_HOST_DEVICE
 
 using _CUDA_VSTD::get;
 
-/*! \endcond
- */
-
 /*! \} // pair
  */
 
@@ -194,11 +191,11 @@ template <typename T1, typename T2>
 {
   /*! \p first_type is the type of \p pair's first object type.
    */
-  typedef T1 first_type;
+  using first_type = T1;
 
   /*! \p second_type is the type of \p pair's second object type.
    */
-  typedef T2 second_type;
+  using second_type = T2;
 
   /*! The \p pair's first object.
    */
@@ -365,6 +362,9 @@ template <typename T1, typename T2>
     pair<T1,T2> make_pair(T1 x, T2 y);
 
 
+/*! \cond
+ */
+
 /*! This convenience metafunction is included for compatibility with
  *  \p tuple. It returns either the type of a \p pair's
  *  \c first_type or \c second_type in its nested type, \c type.
@@ -382,6 +382,9 @@ template<size_t N, class T> struct tuple_element;
  *  \tparam Pair A \c pair type of interest.
  */
 template<typename Pair> struct tuple_size;
+
+/*! \endcond
+ */
 
 
 /*! This convenience function returns a reference to either the first or

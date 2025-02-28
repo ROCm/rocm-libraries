@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <thrust/equal.h>
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -98,15 +115,13 @@ void initialize_values(Vector& values)
 template<typename ExecutionPolicy>
 void TestReduceByKeyDevice(ExecutionPolicy exec)
 {
-  typedef int T;
-  
+  using T = int;
+
   thrust::device_vector<T> keys;
   thrust::device_vector<T> values;
 
-  typedef typename thrust::pair<
-    typename thrust::device_vector<T>::iterator,
-    typename thrust::device_vector<T>::iterator
-  > iterator_pair;
+  using iterator_pair =
+    typename thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator>;
 
   thrust::device_vector<iterator_pair> new_last_vec(1);
   iterator_pair new_last;
@@ -212,8 +227,8 @@ DECLARE_UNITTEST(TestReduceByKeyDeviceNoSync);
 template<typename ExecutionPolicy>
 void TestReduceByKeyCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector keys;
   Vector values;
@@ -299,7 +314,7 @@ DECLARE_UNITTEST(TestReduceByKeyCudaStreamsNoSync);
 
 
 // Maps indices to key ids
-class div_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class div_op
 {
   std::int64_t m_divisor;
 
@@ -315,7 +330,7 @@ public:
 };
 
 // Produces unique sequence for key
-class mod_op : public thrust::unary_function<std::int64_t, std::int64_t>
+class mod_op
 {
   std::int64_t m_divisor;
 

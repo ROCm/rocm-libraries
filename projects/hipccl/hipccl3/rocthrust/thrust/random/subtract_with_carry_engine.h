@@ -24,8 +24,8 @@
 #include <thrust/detail/config.h>
 #include <thrust/random/detail/random_core_access.h>
 
-#include <thrust/detail/cstdint.h>
 #include <cstddef> // for size_t
+#include <cstdint>
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN
@@ -78,7 +78,7 @@ template<typename UIntType, size_t w, size_t s, size_t r>
     /*! \typedef result_type
      *  \brief The type of the unsigned integer produced by this \p subtract_with_carry_engine.
      */
-    typedef UIntType result_type;
+    using result_type = UIntType;
 
     // engine characteristics
 
@@ -226,7 +226,7 @@ operator>>(std::basic_istream<CharT,Traits> &is,
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p ranlux24_base
  *        shall produce the value \c 7937952 .
  */
-typedef subtract_with_carry_engine<thrust::detail::uint32_t, 24, 10, 24> ranlux24_base;
+using ranlux24_base = subtract_with_carry_engine<std::uint32_t, 24, 10, 24>;
 
 
 // XXX N2111 uses uint_fast64_t here
@@ -237,7 +237,7 @@ typedef subtract_with_carry_engine<thrust::detail::uint32_t, 24, 10, 24> ranlux2
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p ranlux48_base
  *        shall produce the value \c 192113843633948 .
  */
-typedef subtract_with_carry_engine<thrust::detail::uint64_t, 48,  5, 12> ranlux48_base;
+using ranlux48_base = subtract_with_carry_engine<std::uint64_t, 48, 5, 12>;
 
 /*! \} // end predefined_random
  */

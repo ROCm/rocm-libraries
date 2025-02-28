@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/iterator/discard_iterator.h>
 
@@ -73,8 +90,8 @@ void TestZippedDiscardIterator(void)
 {
   using namespace thrust;
 
-  typedef tuple<discard_iterator<> >  IteratorTuple1;
-  typedef zip_iterator<IteratorTuple1> ZipIterator1;
+  using IteratorTuple1 = tuple<discard_iterator<>>;
+  using ZipIterator1   = zip_iterator<IteratorTuple1>;
 
   IteratorTuple1 t = thrust::make_tuple(thrust::make_discard_iterator());
 
@@ -87,8 +104,8 @@ void TestZippedDiscardIterator(void)
 
   ASSERT_EQUAL(10, thrust::get<0>(z_iter1_first.get_iterator_tuple()) - thrust::make_discard_iterator());
 
-  typedef tuple<int *, discard_iterator<> > IteratorTuple2;
-  typedef zip_iterator<IteratorTuple2>      ZipIterator2;
+  using IteratorTuple2 = tuple<int*, discard_iterator<>>;
+  using ZipIterator2   = zip_iterator<IteratorTuple2>;
 
   ZipIterator2 z_iter_first = thrust::make_zip_iterator(thrust::make_tuple((int*)0, thrust::make_discard_iterator()));
   ZipIterator2 z_iter_last  = z_iter_first + 10;

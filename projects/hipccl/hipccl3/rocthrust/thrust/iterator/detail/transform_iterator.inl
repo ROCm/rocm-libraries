@@ -36,31 +36,24 @@ namespace detail
 template <class UnaryFunc, class Iterator, class Reference, class Value>
 struct transform_iterator_base
 {
- private:
-    // By default, dereferencing the iterator yields the same as the function.
-    typedef typename thrust::detail::ia_dflt_help<
-      Reference,
-      thrust::detail::result_of_adaptable_function<UnaryFunc(typename thrust::iterator_value<Iterator>::type)>
-    >::type reference;
+private:
+  // By default, dereferencing the iterator yields the same as the function.
+  using reference = typename thrust::detail::ia_dflt_help<
+    Reference,
+    thrust::detail::result_of_adaptable_function<UnaryFunc(typename thrust::iterator_value<Iterator>::type)>>::type;
 
     // To get the default for Value: remove any reference on the
     using value_type =
       typename thrust::detail::ia_dflt_help<Value, thrust::remove_cvref<reference>>::type;
 
- public:
-    typedef thrust::iterator_adaptor
-    <
-        transform_iterator<UnaryFunc, Iterator, Reference, Value>
-      , Iterator
-      , value_type
-      , thrust::use_default   // Leave the system alone
-        //, thrust::use_default   // Leave the traversal alone
-        // use the Iterator's category to let any system iterators remain random access even though
-        // transform_iterator's reference type may not be a reference
-        // XXX figure out why only iterators whose reference types are true references are random access
-        , typename thrust::iterator_traits<Iterator>::iterator_category
-      , reference
-    > type;
+public:
+  using type =
+    thrust::iterator_adaptor<transform_iterator<UnaryFunc, Iterator, Reference, Value>,
+                             Iterator,
+                             value_type,
+                             thrust::use_default,
+                             typename thrust::iterator_traits<Iterator>::iterator_category,
+                             reference>;
 };
 
 

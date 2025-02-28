@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,7 +30,6 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/binary_search.h>
 #include <thrust/distance.h>
@@ -38,6 +37,8 @@
 #include <thrust/system/hip/execution_policy.h>
 
 #include <rocprim/rocprim.hpp>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -69,7 +70,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::lower_bound(NULL,
+        hip_rocprim::throw_on_error(rocprim::lower_bound(nullptr,
                                                          storage_size,
                                                          haystack_begin,
                                                          needles_begin,
@@ -82,7 +83,7 @@ namespace __binary_search
                                     "lower_bound: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -131,7 +132,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::upper_bound(NULL,
+        hip_rocprim::throw_on_error(rocprim::upper_bound(nullptr,
                                                          storage_size,
                                                          haystack_begin,
                                                          needles_begin,
@@ -144,7 +145,7 @@ namespace __binary_search
                                     "upper_bound: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -193,7 +194,7 @@ namespace __binary_search
         thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::binary_search(NULL,
+        hip_rocprim::throw_on_error(rocprim::binary_search(nullptr,
                                                            storage_size,
                                                            haystack_begin,
                                                            needles_begin,
@@ -206,7 +207,7 @@ namespace __binary_search
                                     "binary_search: failed on 1st call");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -467,7 +468,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
             results_type result(policy, 1);
 
             {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -484,8 +485,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
 
             difference_type h_result;
             {
-                typedef
-                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
                 result_out_system_t                                          result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -553,7 +553,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           results_type result(policy, 1);
 
           {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -571,8 +571,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
 
           difference_type h_result;
           {
-                typedef
-                    typename thrust::iterator_system<difference_type*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<difference_type*>::type;
                 result_out_system_t                                          result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -638,7 +637,7 @@ bool binary_search(execution_policy<Derived>& policy,
           results_type result(policy, 1);
 
           {
-                typedef typename thrust::iterator_system<const T*>::type value_in_system_t;
+                using value_in_system_t = typename thrust::iterator_system<const T*>::type;
                 value_in_system_t                                        value_in_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(
@@ -656,7 +655,7 @@ bool binary_search(execution_policy<Derived>& policy,
 
           int h_result;
           {
-                typedef typename thrust::iterator_system<int*>::type result_out_system_t;
+                using result_out_system_t = typename thrust::iterator_system<int*>::type;
                 result_out_system_t                                  result_out_system;
                 using thrust::system::detail::generic::select_system;
                 thrust::copy_n(

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2021 NVIDIA Corporation
- *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@
 
 #include <thrust/detail/config/device_system.h>
 #include <thrust/version.h>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#include <thrust/rocthrust_version.hpp>
+#endif
 
 /**
  * \file namespace.h
@@ -89,7 +92,7 @@
 #endif
 
 // clang-format off
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 #  if !defined(THRUST_DETAIL_ABI_NS_NAME)
 #    define THRUST_DETAIL_COUNT_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, \
                                   _14, _15, _16, _17, _18, _19, _20, N, ...)              \
@@ -152,18 +155,23 @@
 #    define THRUST_DETAIL_ABI_NS_BEGIN
 #    define THRUST_DETAIL_ABI_NS_END
 #  else // not defined(THRUST_DISABLE_ABI_NAMESPACE)
-#    if defined(_NVHPC_CUDA)
-#      define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, NV_TARGET_SM_INTEGER_LIST) {
-#      define THRUST_DETAIL_ABI_NS_END }
-#    else // not defined(_NVHPC_CUDA)
-#      define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, __CUDA_ARCH_LIST__) {
-#      define THRUST_DETAIL_ABI_NS_END }
-#    endif // not defined(_NVHPC_CUDA)
+#    if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#      if defined(_NVHPC_CUDA)
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, NV_TARGET_SM_INTEGER_LIST) {
+#        define THRUST_DETAIL_ABI_NS_END }
+#      else // not defined(_NVHPC_CUDA)
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, __CUDA_ARCH_LIST__) {
+#        define THRUST_DETAIL_ABI_NS_END }
+#      endif // not defined(_NVHPC_CUDA)
+#    else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#        define THRUST_DETAIL_ABI_NS_BEGIN inline namespace THRUST_DETAIL_ABI_NS_NAME(THRUST_VERSION, ROCTHRUST_VERSION) {
+#        define THRUST_DETAIL_ABI_NS_END }
+#    endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  endif // not defined(THRUST_DISABLE_ABI_NAMESPACE)
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#else // !(THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP)
 #  define THRUST_DETAIL_ABI_NS_BEGIN
 #  define THRUST_DETAIL_ABI_NS_END
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 // clang-format on
 
 /**

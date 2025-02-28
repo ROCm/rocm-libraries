@@ -57,7 +57,7 @@ template<typename BidirectionalIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<BidirectionalIterator>::type System;
+  using System = typename thrust::iterator_system<BidirectionalIterator>::type;
 
   System system;
 
@@ -73,8 +73,8 @@ template<typename BidirectionalIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<BidirectionalIterator>::type System1;
-  typedef typename thrust::iterator_system<OutputIterator>::type        System2;
+  using System1 = typename thrust::iterator_system<BidirectionalIterator>::type;
+  using System2 = typename thrust::iterator_system<OutputIterator>::type;
 
   System1 system1;
   System2 system2;

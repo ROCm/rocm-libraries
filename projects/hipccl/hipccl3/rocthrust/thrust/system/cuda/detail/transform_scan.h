@@ -56,12 +56,9 @@ transform_inclusive_scan(execution_policy<Derived> &policy,
   using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
   using value_type = thrust::remove_cvref_t<result_type>;
 
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-  typedef transform_input_iterator_t<value_type,
-                                     InputIt,
-                                     TransformOp>
-      transformed_iterator_t;
+  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
+  using transformed_iterator_t = transform_input_iterator_t<value_type, InputIt, TransformOp>;
 
   return cuda_cub::inclusive_scan_n(policy,
                                  transformed_iterator_t(first, transform_op),
@@ -88,12 +85,9 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
   // Use the initial value type per https://wg21.link/P0571
   using result_type = thrust::remove_cvref_t<InitialValueType>;
 
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
-  size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-  typedef transform_input_iterator_t<result_type,
-                                     InputIt,
-                                     TransformOp>
-      transformed_iterator_t;
+  using size_type              = typename iterator_traits<InputIt>::difference_type;
+  size_type num_items          = static_cast<size_type>(thrust::distance(first, last));
+  using transformed_iterator_t = transform_input_iterator_t<result_type, InputIt, TransformOp>;
 
   return cuda_cub::exclusive_scan_n(policy,
                                  transformed_iterator_t(first, transform_op),

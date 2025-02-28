@@ -55,7 +55,7 @@ ForwardIterator lower_bound(sequential::execution_policy<DerivedPolicy> &,
     bool
   > wrapped_comp(comp);
 
-  typedef typename thrust::iterator_difference<ForwardIterator>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<ForwardIterator>::type;
 
   difference_type len = thrust::distance(first, last);
 
@@ -100,7 +100,7 @@ ForwardIterator upper_bound(sequential::execution_policy<DerivedPolicy> &,
     bool
   > wrapped_comp(comp);
 
-  typedef typename thrust::iterator_difference<ForwardIterator>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<ForwardIterator>::type;
 
   difference_type len = thrust::distance(first, last);
 

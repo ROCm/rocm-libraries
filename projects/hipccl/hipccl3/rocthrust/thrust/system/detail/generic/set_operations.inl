@@ -46,7 +46,7 @@ OutputIterator set_difference(thrust::execution_policy<DerivedPolicy> &exec,
                               InputIterator2                           last2,
                               OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_difference(exec, first1, last1, first2, last2, result, thrust::less<value_type>());
 } // end set_difference()
 
@@ -70,7 +70,7 @@ thrust::pair<OutputIterator1,OutputIterator2>
                         OutputIterator1                          keys_result,
                         OutputIterator2                          values_result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_difference_by_key(exec, keys_first1, keys_last1, keys_first2, keys_last2, values_first1, values_first2, keys_result, values_result, thrust::less<value_type>());
 } // end set_difference_by_key()
 
@@ -96,13 +96,13 @@ thrust::pair<OutputIterator1,OutputIterator2>
                         OutputIterator2                          values_result,
                         StrictWeakOrdering                       comp)
 {
-  typedef thrust::tuple<InputIterator1, InputIterator3>   iterator_tuple1;
-  typedef thrust::tuple<InputIterator2, InputIterator4>   iterator_tuple2;
-  typedef thrust::tuple<OutputIterator1, OutputIterator2> iterator_tuple3;
+  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
 
-  typedef thrust::zip_iterator<iterator_tuple1> zip_iterator1;
-  typedef thrust::zip_iterator<iterator_tuple2> zip_iterator2;
-  typedef thrust::zip_iterator<iterator_tuple3> zip_iterator3;
+  using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
+  using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
+  using zip_iterator3 = thrust::zip_iterator<iterator_tuple3>;
 
   zip_iterator1 zipped_first1 = thrust::make_zip_iterator(thrust::make_tuple(keys_first1, values_first1));
   zip_iterator1 zipped_last1  = thrust::make_zip_iterator(thrust::make_tuple(keys_last1, values_first1));
@@ -132,7 +132,7 @@ OutputIterator set_intersection(thrust::execution_policy<DerivedPolicy> &exec,
                                 InputIterator2                           last2,
                                 OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_intersection(exec, first1, last1, first2, last2, result, thrust::less<value_type>());
 } // end set_intersection()
 
@@ -154,7 +154,7 @@ thrust::pair<OutputIterator1,OutputIterator2>
                           OutputIterator1                          keys_result,
                           OutputIterator2                          values_result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_intersection_by_key(exec, keys_first1, keys_last1, keys_first2, keys_last2, values_first1, keys_result, values_result, thrust::less<value_type>());
 } // end set_intersection_by_key()
 
@@ -178,16 +178,16 @@ thrust::pair<OutputIterator1,OutputIterator2>
                           OutputIterator2                          values_result,
                           StrictWeakOrdering                       comp)
 {
-  typedef typename thrust::iterator_value<InputIterator3>::type value_type1;
-  typedef thrust::constant_iterator<value_type1>                constant_iterator;
+  using value_type1       = typename thrust::iterator_value<InputIterator3>::type;
+  using constant_iterator = thrust::constant_iterator<value_type1>;
 
-  typedef thrust::tuple<InputIterator1, InputIterator3>     iterator_tuple1;
-  typedef thrust::tuple<InputIterator2, constant_iterator>  iterator_tuple2;
-  typedef thrust::tuple<OutputIterator1, OutputIterator2>   iterator_tuple3;
+  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = thrust::tuple<InputIterator2, constant_iterator>;
+  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
 
-  typedef thrust::zip_iterator<iterator_tuple1> zip_iterator1;
-  typedef thrust::zip_iterator<iterator_tuple2> zip_iterator2;
-  typedef thrust::zip_iterator<iterator_tuple3> zip_iterator3;
+  using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
+  using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
+  using zip_iterator3 = thrust::zip_iterator<iterator_tuple3>;
 
   // fabricate a values_first2 by repeating a default-constructed value_type1
   // XXX assumes value_type1 is default-constructible
@@ -221,7 +221,7 @@ OutputIterator set_symmetric_difference(thrust::execution_policy<DerivedPolicy> 
                                         InputIterator2                           last2,
                                         OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_symmetric_difference(exec, first1, last1, first2, last2, result, thrust::less<value_type>());
 } // end set_symmetric_difference()
 
@@ -245,7 +245,7 @@ thrust::pair<OutputIterator1,OutputIterator2>
                                   OutputIterator1                          keys_result,
                                   OutputIterator2                          values_result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_symmetric_difference_by_key(exec, keys_first1, keys_last1, keys_first2, keys_last2, values_first1, values_first2, keys_result, values_result, thrust::less<value_type>());
 } // end set_symmetric_difference_by_key()
 
@@ -271,13 +271,13 @@ thrust::pair<OutputIterator1,OutputIterator2>
                                   OutputIterator2                          values_result,
                                   StrictWeakOrdering                       comp)
 {
-  typedef thrust::tuple<InputIterator1, InputIterator3>   iterator_tuple1;
-  typedef thrust::tuple<InputIterator2, InputIterator4>   iterator_tuple2;
-  typedef thrust::tuple<OutputIterator1, OutputIterator2> iterator_tuple3;
+  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
 
-  typedef thrust::zip_iterator<iterator_tuple1> zip_iterator1;
-  typedef thrust::zip_iterator<iterator_tuple2> zip_iterator2;
-  typedef thrust::zip_iterator<iterator_tuple3> zip_iterator3;
+  using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
+  using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
+  using zip_iterator3 = thrust::zip_iterator<iterator_tuple3>;
 
   zip_iterator1 zipped_first1 = thrust::make_zip_iterator(thrust::make_tuple(keys_first1, values_first1));
   zip_iterator1 zipped_last1  = thrust::make_zip_iterator(thrust::make_tuple(keys_last1, values_first1));
@@ -307,7 +307,7 @@ OutputIterator set_union(thrust::execution_policy<DerivedPolicy> &exec,
                          InputIterator2                           last2,
                          OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_union(exec, first1, last1, first2, last2, result, thrust::less<value_type>());
 } // end set_union()
 
@@ -331,7 +331,7 @@ thrust::pair<OutputIterator1,OutputIterator2>
                    OutputIterator1                          keys_result,
                    OutputIterator2                          values_result)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type value_type;
+  using value_type = typename thrust::iterator_value<InputIterator1>::type;
   return thrust::set_union_by_key(exec, keys_first1, keys_last1, keys_first2, keys_last2, values_first1, values_first2, keys_result, values_result, thrust::less<value_type>());
 } // end set_union_by_key()
 
@@ -357,13 +357,13 @@ thrust::pair<OutputIterator1,OutputIterator2>
                    OutputIterator2                          values_result,
                    StrictWeakOrdering                       comp)
 {
-  typedef thrust::tuple<InputIterator1, InputIterator3>   iterator_tuple1;
-  typedef thrust::tuple<InputIterator2, InputIterator4>   iterator_tuple2;
-  typedef thrust::tuple<OutputIterator1, OutputIterator2> iterator_tuple3;
+  using iterator_tuple1 = thrust::tuple<InputIterator1, InputIterator3>;
+  using iterator_tuple2 = thrust::tuple<InputIterator2, InputIterator4>;
+  using iterator_tuple3 = thrust::tuple<OutputIterator1, OutputIterator2>;
 
-  typedef thrust::zip_iterator<iterator_tuple1> zip_iterator1;
-  typedef thrust::zip_iterator<iterator_tuple2> zip_iterator2;
-  typedef thrust::zip_iterator<iterator_tuple3> zip_iterator3;
+  using zip_iterator1 = thrust::zip_iterator<iterator_tuple1>;
+  using zip_iterator2 = thrust::zip_iterator<iterator_tuple2>;
+  using zip_iterator3 = thrust::zip_iterator<iterator_tuple3>;
 
   zip_iterator1 zipped_first1 = thrust::make_zip_iterator(thrust::make_tuple(keys_first1, values_first1));
   zip_iterator1 zipped_last1  = thrust::make_zip_iterator(thrust::make_tuple(keys_last1, values_first1));

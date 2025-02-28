@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,60 +35,6 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-// unary_negate does not need to know argument_type
-template<typename Predicate>
-struct unary_negate
-{
-  typedef bool result_type;
-
-  Predicate pred;
-
-  THRUST_HOST_DEVICE
-  explicit unary_negate(const Predicate& pred) : pred(pred) {}
-
-  template <typename T>
-  THRUST_HOST_DEVICE
-  bool operator()(const T& x)
-  {
-    return !bool(pred(x));
-  }
-};
-
-// binary_negate does not need to know first_argument_type or second_argument_type
-template<typename Predicate>
-struct binary_negate
-{
-  typedef bool result_type;
-
-  Predicate pred;
-
-  THRUST_HOST_DEVICE
-  explicit binary_negate(const Predicate& pred) : pred(pred) {}
-
-  template <typename T1, typename T2>
-  THRUST_HOST_DEVICE
-  bool operator()(const T1& x, const T2& y)
-  {
-    return !bool(pred(x,y));
-  }
-};
-
-template<typename Predicate>
-THRUST_HOST_DEVICE
-thrust::detail::unary_negate<Predicate> not1(const Predicate &pred)
-{
-  return thrust::detail::unary_negate<Predicate>(pred);
-}
-
-template<typename Predicate>
-THRUST_HOST_DEVICE
-thrust::detail::binary_negate<Predicate> not2(const Predicate &pred)
-{
-  return thrust::detail::binary_negate<Predicate>(pred);
-}
-
-
 // convert a predicate to a 0 or 1 integral value
 template<typename Predicate, typename IntegralType>
 struct predicate_to_integral
@@ -103,21 +49,6 @@ struct predicate_to_integral
   IntegralType operator()(const T& x)
   {
     return pred(x) ? IntegralType(1) : IntegralType(0);
-  }
-};
-
-
-// note that detail::equal_to does not force conversion from T2 -> T1 as equal_to does
-template<typename T1>
-struct equal_to
-{
-  typedef bool result_type;
-
-  template <typename T2>
-  THRUST_HOST_DEVICE
-  bool operator()(const T1& lhs, const T2& rhs) const
-  {
-    return lhs == rhs;
   }
 };
 
@@ -141,7 +72,7 @@ struct equal_to_value
 template<typename Predicate>
 struct tuple_binary_predicate
 {
-  typedef bool result_type;
+  using result_type = bool;
 
   THRUST_HOST_DEVICE
   tuple_binary_predicate(const Predicate& p) : pred(p) {}
@@ -159,7 +90,7 @@ struct tuple_binary_predicate
 template<typename Predicate>
 struct tuple_not_binary_predicate
 {
-  typedef bool result_type;
+  using result_type = bool;
 
   THRUST_HOST_DEVICE
   tuple_not_binary_predicate(const Predicate& p) : pred(p) {}
@@ -177,7 +108,7 @@ struct tuple_not_binary_predicate
 template<typename Generator>
   struct host_generate_functor
 {
-  typedef void result_type;
+  using result_type = void;
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE
@@ -211,7 +142,7 @@ template<typename Generator>
 template<typename Generator>
   struct device_generate_functor
 {
-  typedef void result_type;
+  using result_type = void;
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE
@@ -255,7 +186,7 @@ template<typename System, typename Generator>
 template<typename ResultType, typename BinaryFunction>
   struct zipped_binary_op
 {
-  typedef ResultType result_type;
+  using result_type = ResultType;
 
   THRUST_HOST_DEVICE
   zipped_binary_op(BinaryFunction binary_op)
@@ -305,7 +236,7 @@ template<typename T>
 template<typename UnaryFunction>
   struct unary_transform_functor
 {
-  typedef void result_type;
+  using result_type = void;
 
   UnaryFunction f;
 

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2020-2023 Advanced Micro Devices, Inc.
+# Copyright 2020-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 
@@ -13,6 +13,7 @@ set_source_files_properties(device.cu
 )
 add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
+target_compile_options(${EXAMPLE_TARGET} PRIVATE ${COMPILE_OPTIONS})
 target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
         rocthrust

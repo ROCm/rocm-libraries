@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/device_ptr.h>
 #include <thrust/transform.h>
@@ -8,7 +25,7 @@
 
 void TestNvccIndependenceTransform(void)
 {
-  typedef int T;
+  using T     = int;
   const int n = 10;
 
   thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -26,7 +43,7 @@ DECLARE_UNITTEST(TestNvccIndependenceTransform);
 
 void TestNvccIndependenceReduce(void)
 {
-  typedef int T;
+  using T     = int;
   const int n = 10;
 
   thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);
@@ -43,7 +60,7 @@ DECLARE_UNITTEST(TestNvccIndependenceReduce);
 
 void TestNvccIndependenceExclusiveScan(void)
 {
-  typedef int T;
+  using T     = int;
   const int n = 10;
 
   thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -60,7 +77,7 @@ DECLARE_UNITTEST(TestNvccIndependenceExclusiveScan);
 
 void TestNvccIndependenceSort(void)
 {
-  typedef int T;
+  using T     = int;
   const int n = 10;
 
   thrust::host_vector<T>   h_data = unittest::random_integers<T>(n);

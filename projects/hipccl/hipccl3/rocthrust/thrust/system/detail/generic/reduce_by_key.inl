@@ -48,7 +48,7 @@ struct reduce_by_key_functor
 {
   AssociativeOperator binary_op;
 
-  typedef typename thrust::tuple<ValueType, TailFlagType> result_type;
+  using result_type = typename thrust::tuple<ValueType, TailFlagType>;
 
   THRUST_HOST_DEVICE
   reduce_by_key_functor(AssociativeOperator _binary_op) : binary_op(_binary_op) {}
@@ -83,9 +83,9 @@ THRUST_HOST_DEVICE
                   BinaryPredicate binary_pred,
                   BinaryFunction binary_op)
 {
-    typedef typename thrust::iterator_traits<InputIterator1>::difference_type difference_type;
+  using difference_type = typename thrust::iterator_traits<InputIterator1>::difference_type;
 
-    typedef unsigned int FlagType;  // TODO use difference_type
+  using FlagType = unsigned int; // TODO use difference_type
 
     // Use the input iterator's value type per https://wg21.link/P0571
     using ValueType = typename thrust::iterator_value<InputIterator2>::type;
@@ -98,15 +98,16 @@ THRUST_HOST_DEVICE
 
     InputIterator2 values_last = values_first + n;
 
-    // compute head flags
-    thrust::detail::temporary_array<FlagType,ExecutionPolicy> head_flags(exec, n);
-    thrust::transform(exec, keys_first, keys_last - 1, keys_first + 1, head_flags.begin() + 1, thrust::detail::not2(binary_pred));
-    head_flags[0] = 1;
+  // compute head flags
+  thrust::detail::temporary_array<FlagType, ExecutionPolicy> head_flags(exec, n);
+  thrust::transform(
+    exec, keys_first, keys_last - 1, keys_first + 1, head_flags.begin() + 1, thrust::not_fn(binary_pred));
+  head_flags[0] = 1;
 
-    // compute tail flags
-    thrust::detail::temporary_array<FlagType,ExecutionPolicy> tail_flags(exec, n); //COPY INSTEAD OF TRANSFORM
-    thrust::transform(exec, keys_first, keys_last - 1, keys_first + 1, tail_flags.begin(), thrust::detail::not2(binary_pred));
-    tail_flags[n-1] = 1;
+  // compute tail flags
+  thrust::detail::temporary_array<FlagType, ExecutionPolicy> tail_flags(exec, n); // COPY INSTEAD OF TRANSFORM
+  thrust::transform(exec, keys_first, keys_last - 1, keys_first + 1, tail_flags.begin(), thrust::not_fn(binary_pred));
+  tail_flags[n - 1] = 1;
 
     // scan the values by flag
     thrust::detail::temporary_array<ValueType,ExecutionPolicy> scanned_values(exec, n);
@@ -146,7 +147,7 @@ THRUST_HOST_DEVICE
                   OutputIterator1 keys_output,
                   OutputIterator2 values_output)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type KeyType;
+  using KeyType = typename thrust::iterator_value<InputIterator1>::type;
 
   // use equal_to<KeyType> as default BinaryPredicate
   return thrust::reduce_by_key(exec, keys_first, keys_last, values_first, keys_output, values_output, thrust::equal_to<KeyType>());
@@ -169,11 +170,9 @@ THRUST_HOST_DEVICE
                   OutputIterator2 values_output,
                   BinaryPredicate binary_pred)
 {
-  typedef typename thrust::detail::eval_if<
-    thrust::detail::is_output_iterator<OutputIterator2>::value,
-    thrust::iterator_value<InputIterator2>,
-    thrust::iterator_value<OutputIterator2>
-  >::type T;
+  using T = typename thrust::detail::eval_if<thrust::detail::is_output_iterator<OutputIterator2>::value,
+                                             thrust::iterator_value<InputIterator2>,
+                                             thrust::iterator_value<OutputIterator2>>::type;
 
   // use plus<T> as default BinaryFunction
   return thrust::reduce_by_key(exec,

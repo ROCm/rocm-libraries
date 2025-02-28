@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@
  */
 
 #include <thrust/binary_search.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sort.h>
+
+#include <cstdint>
 
 #include "test_header.hpp"
 
@@ -248,12 +249,12 @@ TEST(CountingIteratorTests, TestCountingIteratorLowerBound)
 
 TEST(CountingIteratorTests, TestCountingIteratorDifference)
 {
-    using Iterator   = typename thrust::counting_iterator<thrust::detail::uint64_t>;
+    using Iterator   = typename thrust::counting_iterator<std::uint64_t>;
     using Difference = typename thrust::iterator_difference<Iterator>::type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Difference diff = std::numeric_limits<thrust::detail::uint32_t>::max() + 1;
+    Difference diff = std::numeric_limits<std::uint32_t>::max() + 1;
 
     Iterator first(0);
     Iterator last = first + diff;

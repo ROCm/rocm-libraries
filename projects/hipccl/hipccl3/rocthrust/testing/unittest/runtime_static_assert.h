@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #pragma once
 
 #include <string>
@@ -25,7 +42,7 @@ namespace unittest
 #define ASSERT_STATIC_ASSERT(X)                                                                      \
     {                                                                                                \
         bool                                      triggered = false;                                 \
-        typedef unittest::static_assert_exception ex_t;                                              \
+        using ex_t = unittest::static_assert_exception;                                              \
         thrust::device_ptr<ex_t>                  device_ptr = thrust::device_new<ex_t>();           \
         ex_t*                                     raw_ptr    = thrust::raw_pointer_cast(device_ptr); \
         hipError_t                                err                                                \
@@ -33,7 +50,7 @@ namespace unittest
         if(err != hipSuccess)                                                                        \
         {                                                                                            \
             thrust::device_free(device_ptr);                                                         \
-            raw_ptr = NULL;                                                                          \
+            raw_ptr = nullptr;                                                                       \
             unittest::UnitTestFailure f;                                                             \
             f << "[" << __FILE__ << ":" << __LINE__ << "] hipMemcpyToSymbol failed";                 \
             throw f;                                                                                 \
@@ -51,7 +68,7 @@ namespace unittest
             triggered = static_cast<ex_t>(*device_ptr).triggered;                                    \
         }                                                                                            \
         thrust::device_free(device_ptr);                                                             \
-        raw_ptr = NULL;                                                                              \
+        raw_ptr = nullptr;                                                                           \
         err     = ::hipMemcpyToSymbol(unittest::detail::device_exception, &raw_ptr, sizeof(ex_t*));  \
         if(err != hipSuccess)                                                                        \
         {                                                                                            \
@@ -72,7 +89,7 @@ namespace unittest
 #define ASSERT_STATIC_ASSERT(X) \
     { \
         bool triggered = false; \
-        typedef unittest::static_assert_exception ex_t; \
+        using ex_t = unittest::static_assert_exception; \
         try { X; } catch (ex_t) { triggered = true; } \
         if (!triggered) { unittest::UnitTestFailure f; f << "[" << __FILE__ << ":" << __LINE__ << "] did not trigger a THRUST_STATIC_ASSERT"; throw f; } \
     }
@@ -106,7 +123,7 @@ namespace unittest
     THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
         __attribute__((used))
 #endif
-        THRUST_DEVICE static static_assert_exception* device_exception = NULL;
+        THRUST_DEVICE static static_assert_exception* device_exception = nullptr;
     }
 
     THRUST_HOST_DEVICE

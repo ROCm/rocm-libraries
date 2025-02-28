@@ -34,7 +34,7 @@ namespace mr
  * Together, these two properties enable \p polymorphic_adaptor_resource to be used in the
  * implementation of a polymorphic allocator: an allocator whose behaviour is specified at runtime.
  *
- * \tparam Pointer - the pointer type that will be used to create the memory resource.
+ * \tparam Pointer the pointer type that will be used to create the memory resource.
  * Defaults to void*.
  */
 template<typename Pointer = void *>
@@ -42,15 +42,15 @@ class polymorphic_adaptor_resource final : public memory_resource<Pointer>
 {
 public:
     /*! Constructs a new \p polymorphic_adaptor_resource
-     * \param t - A pointer to a memory_resource that this instance will wrap.
+     * \param t A pointer to a memory_resource that this instance will wrap.
      */
     polymorphic_adaptor_resource(memory_resource<Pointer> * t) : upstream_resource(t)
     {
     }
 
     /*! Performs a memory allocation.
-     * \param bytes - the requested size of the allocation, in bytes
-     * \param alignment - specifies the alignment for the allocation.
+     * \param bytes the requested size of the allocation, in bytes
+     * \param alignment specifies the alignment for the allocation.
      *  Defaults to THRUST_MR_DEFAULT_ALIGNMENT.
      */
     virtual Pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
@@ -59,9 +59,9 @@ public:
     }
 
     /*! Deallocates memory that was previously allocated with this allocator.
-     * \param p - pointer to the memory that was previously allocated by \p do_allocate
-     * \param bytes - the size of the allocation that was requested, in bytes
-     * \param alignment - specifies the alignment that was used for the allocation
+     * \param p pointer to the memory that was previously allocated by \p do_allocate
+     * \param bytes the size of the allocation that was requested, in bytes
+     * \param alignment specifies the alignment that was used for the allocation
      */
     virtual void do_deallocate(Pointer p, std::size_t bytes, std::size_t alignment) override
     {

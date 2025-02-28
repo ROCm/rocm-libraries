@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ template<typename BaseAllocator>
   struct no_throw_allocator : BaseAllocator
 {
   private:
-    typedef BaseAllocator super_t;
+    using super_t = BaseAllocator;
 
   public:
     inline THRUST_HOST_DEVICE
@@ -37,10 +37,10 @@ template<typename BaseAllocator>
       : super_t(other)
     {}
 
-    template<typename U>
-      struct rebind
+    template <typename U>
+    struct rebind
     {
-      typedef no_throw_allocator<typename super_t::template rebind<U>::other> other;
+      using other = no_throw_allocator<typename super_t::template rebind<U>::other>;
     }; // end rebind
 
     THRUST_HOST_DEVICE

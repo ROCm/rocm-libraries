@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ TESTS_DEFINE(RemoveTests, FullTestsParams);
 TESTS_DEFINE(RemoveVariableTests, NumericalTestsParams);
 
 template <typename T>
-struct is_even : thrust::unary_function<T, bool>
+struct is_even
 {
     __host__ __device__ bool operator()(T x)
     {
@@ -38,7 +38,7 @@ struct is_even : thrust::unary_function<T, bool>
 };
 
 template <typename T>
-struct is_true : thrust::unary_function<T, bool>
+struct is_true
 {
     __host__ __device__ bool operator()(T x)
     {
@@ -482,7 +482,7 @@ TYPED_TEST(RemoveVariableTests, TestRemove)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -514,7 +514,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIf)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -548,7 +548,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveIfStencil)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -592,7 +592,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopy)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -631,7 +631,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_data = h_data;
 
@@ -667,7 +667,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::host_vector<T>   h_output(size);
@@ -676,15 +676,13 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyToDiscardIteratorZipped)
             size_t num_zeros    = thrust::count(h_data.begin(), h_data.end(), T(0));
             size_t num_nonzeros = h_data.size() - num_zeros;
 
-            typedef thrust::tuple<typename thrust::host_vector<T>::iterator,
-                                  thrust::discard_iterator<>>
-                Tuple1;
-            typedef thrust::tuple<typename thrust::device_vector<T>::iterator,
-                                  thrust::discard_iterator<>>
-                Tuple2;
+            using Tuple1 = thrust::tuple<typename thrust::host_vector<T>::iterator,
+                                         thrust::discard_iterator<>>;
+            using Tuple2 = thrust::tuple<typename thrust::device_vector<T>::iterator,
+                                          thrust::discard_iterator<>>;
 
-            typedef thrust::zip_iterator<Tuple1> ZipIterator1;
-            typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+            using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+            using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
             ZipIterator1 h_result = thrust::remove_copy(
                 thrust::make_zip_iterator(thrust::make_tuple(h_data.begin(), h_data.begin())),
@@ -724,7 +722,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIf)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::host_vector<T>   h_result(size);
@@ -762,11 +760,11 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             size_t num_false
-                = thrust::count_if(h_data.begin(), h_data.end(), thrust::not1(is_true<T>()));
+                = thrust::count_if(h_data.begin(), h_data.end(), thrust::not_fn(is_true<T>()));
 
             thrust::discard_iterator<> h_result = thrust::remove_copy_if(
                 h_data.begin(), h_data.end(), thrust::make_discard_iterator(), is_true<T>());
@@ -797,7 +795,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencil)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::host_vector<bool> h_stencil
@@ -848,7 +846,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_data = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_data = h_data;
 
             thrust::host_vector<bool> h_stencil = get_random_data<bool>(
@@ -860,7 +858,7 @@ TYPED_TEST(RemoveVariableTests, TestRemoveCopyIfStencilToDiscardIterator)
             thrust::device_vector<bool> d_stencil = h_stencil;
 
             size_t num_false
-                = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not1(is_true<T>()));
+                = thrust::count_if(h_stencil.begin(), h_stencil.end(), thrust::not_fn(is_true<T>()));
 
             thrust::discard_iterator<> h_result
                 = thrust::remove_copy_if(h_data.begin(),

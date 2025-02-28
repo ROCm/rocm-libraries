@@ -34,6 +34,7 @@ function(add_thrust_test_exclusive TEST)
                 testframework
         )
     endif()
+    target_compile_options(${TEST_TARGET} PRIVATE ${COMPILE_OPTIONS})
     set_target_properties(${TEST_TARGET}
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"

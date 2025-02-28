@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2020-2023 Advanced Micro Devices, Inc.
+# Copyright 2020-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 if (WIN32)
@@ -22,6 +22,7 @@ function(add_thrust_example EXAMPLE)
     endif()
     add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
+    target_compile_options(${EXAMPLE_TARGET} PRIVATE ${COMPILE_OPTIONS})
     target_link_libraries(${EXAMPLE_TARGET}
         PRIVATE
             rocthrust

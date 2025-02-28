@@ -47,7 +47,7 @@ THRUST_HOST_DEVICE
                              OutputIterator output,
                              BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator>::value_type T;
+  using T = typename thrust::iterator_traits<InputIterator>::value_type;
 
   if(first != last)
   {
@@ -99,7 +99,7 @@ THRUST_HOST_DEVICE
                  ForwardIterator last,
                  BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type T;
+  using T = typename thrust::iterator_traits<ForwardIterator>::value_type;
   typename thrust::iterator_traits<ForwardIterator>::difference_type count{};
 
   if(first != last)

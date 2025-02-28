@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,53 +37,52 @@
 #include <thrust/mr/allocator.h>
 
 // define some common lists of types
-typedef unittest::type_list<int,
-                            unsigned int,
-                            float> ThirtyTwoBitTypes;
+using ThirtyTwoBitTypes = unittest::type_list<int,
+                                              unsigned int,
+                                              float>;
 
-typedef unittest::type_list<long long,
-                            unsigned long long,
-                            double> SixtyFourBitTypes;
+using SixtyFourBitTypes = unittest::type_list<long long,
+                                              unsigned long long,
+                                              double>;
+using IntegralTypes = unittest::type_list<char,
+                                          signed char,
+                                          unsigned char,
+                                          short,
+                                          unsigned short,
+                                          int,
+                                          unsigned int,
+                                          long,
+                                          unsigned long,
+                                          long long,
+                                          unsigned long long>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long> IntegralTypes;
+using SignedIntegralTypes = unittest::type_list<signed char,
+                                                signed short,
+                                                signed int,
+                                                signed long,
+                                                signed long long>;
 
-typedef unittest::type_list<signed char,
-                            signed short,
-                            signed int,
-                            signed long,
-                            signed long long> SignedIntegralTypes;
+using UnsignedIntegralTypes = unittest::type_list<unsigned char,
+                                                  unsigned short,
+                                                  unsigned int,
+                                                  unsigned long,
+                                                  unsigned long long>;
 
-typedef unittest::type_list<unsigned char,
-                            unsigned short,
-                            unsigned int,
-                            unsigned long,
-                            unsigned long long> UnsignedIntegralTypes;
+using ByteTypes = unittest::type_list<char,
+                                      signed char,
+                                      unsigned char>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char> ByteTypes;
+using SmallIntegralTypes = unittest::type_list<char,
+                                               signed char,
+                                               unsigned char,
+                                               short,
+                                               unsigned short>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short> SmallIntegralTypes;
+using LargeIntegralTypes = unittest::type_list<long long,
+                                               unsigned long long>;
 
-typedef unittest::type_list<long long,
-                            unsigned long long> LargeIntegralTypes;
-
-typedef unittest::type_list<float,
-                            double> FloatingPointTypes;
+using FloatingPointTypes = unittest::type_list<float,
+                                               double>;
 
 // A type that behaves as if it was a normal numeric type,
 // so it can be used in the same tests as "normal" numeric types.
@@ -264,34 +263,34 @@ class integer_traits<custom_numeric>
 
 THRUST_NAMESPACE_END
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long,
-                            float,
-                            double,
-                            custom_numeric> NumericTypes;
+using NumericTypes = unittest::type_list<char,
+                                         signed char,
+                                         unsigned char,
+                                         short,
+                                         unsigned short,
+                                         int,
+                                         unsigned int,
+                                         long,
+                                         unsigned long,
+                                         long long,
+                                         unsigned long long,
+                                         float,
+                                         double,
+                                         custom_numeric>;
 
-typedef unittest::type_list<char,
-                            signed char,
-                            unsigned char,
-                            short,
-                            unsigned short,
-                            int,
-                            unsigned int,
-                            long,
-                            unsigned long,
-                            long long,
-                            unsigned long long,
-                            float,
-                            double> BuiltinNumericTypes;
+using BuiltinNumericTypes = unittest::type_list<char,
+                                                signed char,
+                                                unsigned char,
+                                                short,
+                                                unsigned short,
+                                                int,
+                                                unsigned int,
+                                                long,
+                                                unsigned long,
+                                                long long,
+                                                unsigned long long,
+                                                float,
+                                                double>;
 
 inline void chop_prefix(std::string& str, const std::string& prefix)
 {
@@ -319,8 +318,8 @@ inline std::string base_class_name(const std::string& name)
 
 enum TestStatus { Pass = 0, Failure = 1, KnownFailure = 2, Error = 3, UnknownException = 4};
 
-typedef std::set<std::string>              ArgumentSet;
-typedef std::map<std::string, std::string> ArgumentMap;
+using ArgumentSet = std::set<std::string>;
+using ArgumentMap = std::map<std::string, std::string>;
 
 std::vector<size_t> get_test_sizes(void);
 void                set_test_sizes(const std::string&);
@@ -343,7 +342,7 @@ class UnitTestDriver;
 
 class UnitTestDriver
 {
-  typedef std::map<std::string, UnitTest*> TestMap;
+  using TestMap = std::map<std::string, UnitTest*>;
 
   TestMap test_map;
 
@@ -550,7 +549,7 @@ template<template <typename> class TestName, typename TypeList>
     void run()
     {
       // get the first type in the list
-      typedef typename unittest::get_type<TypeList,0>::type first_type;
+      using first_type = typename unittest::get_type<TypeList,0>::type;
 
       unittest::for_each_type<TypeList,TestName,first_type,0> for_each;
 
@@ -576,7 +575,7 @@ template<template <typename> class TestName, typename TypeList>
         for(size_t i = 0; i != sizes.size(); ++i)
         {
             // get the first type in the list
-            typedef typename unittest::get_type<TypeList,0>::type first_type;
+            using first_type = typename unittest::get_type<TypeList,0>::type;
 
             unittest::for_each_type<TypeList,TestName,first_type,0> loop;
 
@@ -604,13 +603,13 @@ template<template <typename> class TestName,
   void run()
   {
     // zip up the type list with Alloc
-    typedef typename unittest::transform1<TypeList, Alloc>::type AllocList;
+    using AllocList = typename unittest::transform1<TypeList, Alloc>::type;
 
     // zip up the type list & alloc list with Vector
-    typedef typename unittest::transform2<TypeList, AllocList, Vector>::type VectorList;
+    using VectorList = typename unittest::transform2<TypeList, AllocList, Vector>::type;
 
     // get the first type in the list
-    typedef typename unittest::get_type<VectorList,0>::type first_type;
+    using first_type = typename unittest::get_type<VectorList, 0>::type;
 
     unittest::for_each_type<VectorList,TestName,first_type,0> loop;
 

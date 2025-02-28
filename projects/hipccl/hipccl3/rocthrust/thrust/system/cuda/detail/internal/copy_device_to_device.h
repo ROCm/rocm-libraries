@@ -52,7 +52,7 @@ namespace __copy {
                    OutputIt                   result,
                    thrust::detail::true_type)
   {
-    typedef typename thrust::iterator_traits<InputIt>::value_type InputTy;
+    using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
     const auto n = thrust::distance(first, last);
     if (n > 0) {
       cudaError status;
@@ -76,7 +76,7 @@ namespace __copy {
                    OutputIt                   result,
                    thrust::detail::false_type)
   {
-    typedef typename thrust::iterator_traits<InputIt>::value_type InputTy;
+    using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
     return cuda_cub::transform(policy,
                             first,
                             last,

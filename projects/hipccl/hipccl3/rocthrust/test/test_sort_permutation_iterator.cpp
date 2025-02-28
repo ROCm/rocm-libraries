@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ class strided_range
 public:
     using difference_type = typename thrust::iterator_difference<Iterator>::type;
 
-    struct stride_functor : public thrust::unary_function<difference_type, difference_type>
+    struct stride_functor
     {
         difference_type stride;
 

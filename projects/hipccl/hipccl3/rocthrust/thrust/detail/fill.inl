@@ -60,7 +60,7 @@ THRUST_HOST_DEVICE
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -76,7 +76,7 @@ THRUST_HOST_DEVICE
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<OutputIterator>::type System;
+  using System = typename thrust::iterator_system<OutputIterator>::type;
 
   System system;
 

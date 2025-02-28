@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -162,7 +162,7 @@ DECLARE_UNITTEST(TestTransformExclusiveScanDispatchImplicit);
 template <class Vector>
 void TestTransformScanSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -305,8 +305,8 @@ VariableUnitTest<TestTransformScan, IntegralTypes> TestTransformScanInstance;
 template <class Vector>
 void TestTransformScanCountingIterator(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename thrust::iterator_system<typename Vector::iterator>::type space;
+    using T     = typename Vector::value_type;
+    using space = typename thrust::iterator_system<typename Vector::iterator>::type;
 
     thrust::counting_iterator<T, space> first(1);
 

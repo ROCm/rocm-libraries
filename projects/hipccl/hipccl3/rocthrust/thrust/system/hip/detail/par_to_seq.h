@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -48,7 +48,7 @@ namespace hip_rocprim
     template <class Policy>
     struct cvt_to_seq_impl
     {
-        typedef thrust::detail::seq_t seq_t;
+        using seq_t = thrust::detail::seq_t;
 
         static seq_t THRUST_HIP_FUNCTION doit(Policy&)
         {
@@ -62,14 +62,10 @@ struct cvt_to_seq_impl<
     thrust::detail::execute_with_allocator<Allocator,
                                            execute_on_stream_base> >
 {
-  typedef thrust::detail::execute_with_allocator<Allocator,
-                                                 execute_on_stream_base>
-      Policy;
-  typedef thrust::detail::execute_with_allocator<
-      Allocator,
-      thrust::system::detail::sequential::execution_policy>
-      seq_t;
-
+  using Policy = thrust::detail::execute_with_allocator<Allocator,
+                                                        execute_on_stream_base>;
+  using seq_t = thrust::detail::execute_with_allocator<Allocator,
+                thrust::system::detail::sequential::execution_policy>;
 
     static seq_t THRUST_HIP_FUNCTION
     doit(Policy& policy)
