@@ -713,6 +713,9 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
                                      hipStream_t stream = 0,
                                      bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     empty_type * values = nullptr;
     bool ignored;
     return detail::segmented_radix_sort_impl<Config, false>(
@@ -841,6 +844,9 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
                                           hipStream_t stream = 0,
                                           bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     empty_type * values = nullptr;
     bool ignored;
     return detail::segmented_radix_sort_impl<Config, true>(
@@ -989,6 +995,9 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
                                       hipStream_t stream = 0,
                                       bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     bool ignored;
     return detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
@@ -1133,6 +1142,9 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
                                            hipStream_t stream = 0,
                                            bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     bool ignored;
     return detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
@@ -1261,6 +1273,9 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
                                      hipStream_t stream = 0,
                                      bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     empty_type * values = nullptr;
     bool is_result_in_output;
     hipError_t error = detail::segmented_radix_sort_impl<Config, false>(
@@ -1395,6 +1410,9 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
                                           hipStream_t stream = 0,
                                           bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     empty_type * values = nullptr;
     bool is_result_in_output;
     hipError_t error = detail::segmented_radix_sort_impl<Config, true>(
@@ -1545,6 +1563,9 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
                                       hipStream_t stream = 0,
                                       bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     bool is_result_in_output;
     hipError_t error = detail::segmented_radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
@@ -1689,6 +1710,9 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
                                            hipStream_t stream = 0,
                                            bool debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     bool is_result_in_output;
     hipError_t error = detail::segmented_radix_sort_impl<Config, true>(
         temporary_storage, storage_size,

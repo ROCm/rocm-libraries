@@ -310,6 +310,9 @@ hipError_t adjacent_difference(void* const          temporary_storage,
                                const hipStream_t    stream            = 0,
                                const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = false;
     static constexpr bool right    = false;
     return detail::adjacent_difference_impl<Config, in_place, right>(
@@ -361,6 +364,9 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
                                        const hipStream_t    stream            = 0,
                                        const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = true;
     static constexpr bool right    = false;
     return detail::adjacent_difference_impl<Config, in_place, right>(
@@ -413,6 +419,9 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
                                        const hipStream_t    stream            = 0,
                                        const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = true;
     static constexpr bool right    = false;
     return detail::adjacent_difference_impl<Config, in_place, right>(temporary_storage,
@@ -515,6 +524,9 @@ hipError_t adjacent_difference_right(void* const          temporary_storage,
                                      const hipStream_t    stream            = 0,
                                      const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = false;
     static constexpr bool right    = true;
     return detail::adjacent_difference_impl<Config, in_place, right>(
@@ -566,6 +578,9 @@ hipError_t adjacent_difference_right_inplace(void* const          temporary_stor
                                              const hipStream_t    stream = 0,
                                              const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = true;
     static constexpr bool right    = true;
     return detail::adjacent_difference_impl<Config, in_place, right>(
@@ -617,6 +632,9 @@ hipError_t adjacent_difference_right_inplace(void* const          temporary_stor
                                              const hipStream_t    stream = 0,
                                              const bool           debug_synchronous = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     static constexpr bool in_place = true;
     static constexpr bool right    = true;
     return detail::adjacent_difference_impl<Config, in_place, right>(temporary_storage,
