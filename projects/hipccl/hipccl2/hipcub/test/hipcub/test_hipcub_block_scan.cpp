@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ public:
     static constexpr unsigned int               block_size = Params::block_size;
 };
 
-typedef ::testing::Types<
+using SingleValueTestParams = ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BLOCK_SCAN_WARP_SCANS
     // -----------------------------------------------------------------------
@@ -83,8 +83,7 @@ typedef ::testing::Types<
     params<short, 162U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<unsigned int, 255U, 1, hipcub::BLOCK_SCAN_RAKING>,
     params<int, 377U, 1, hipcub::BLOCK_SCAN_RAKING>,
-    params<unsigned char, 377U, 1, hipcub::BLOCK_SCAN_RAKING>>
-    SingleValueTestParams;
+    params<unsigned char, 377U, 1, hipcub::BLOCK_SCAN_RAKING>>;
 
 TYPED_TEST_SUITE(HipcubBlockScanSingleValueTests, SingleValueTestParams);
 
@@ -165,6 +164,118 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScan)
                            0,
                            0,
                            device_output);
+
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        HIP_CHECK(hipMemcpy(output.data(),
+                            device_output,
+                            output.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        // Validating results
+        test_utils::assert_near(output, expected, test_utils::precision<T>::value * block_size);
+
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<unsigned int               BlockSize,
+         unsigned int               ItemsPerThread,
+         hipcub::BlockScanAlgorithm Algorithm,
+         class T>
+__global__ __launch_bounds__(BlockSize)
+void inclusive_scan_initial_value_kernel(T* device_output, T initial_value)
+{
+    const unsigned int index
+        = (hipBlockIdx_x * BlockSize * ItemsPerThread) + hipThreadIdx_x * ItemsPerThread;
+    T input[ItemsPerThread];
+    T output[ItemsPerThread];
+
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+    {
+        input[i] = device_output[index + i];
+    }
+
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(input, output, initial_value, hipcub::Sum());
+
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+    {
+        device_output[index + i] = output[i];
+    }
+}
+
+TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanInitialValue)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
+    constexpr auto   algorithm  = TestFixture::algorithm;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t size      = block_size * 113;
+    const size_t grid_size = size / block_size;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> output        = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        T              initial_value = test_utils::get_random_value<T>(2, 200, seed_value);
+        SCOPED_TRACE(testing::Message() << "with initial_value = " << initial_value);
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), 0);
+        for(size_t i = 0; i < output.size() / block_size; i++)
+        {
+            acc_type accumulator(initial_value);
+            for(size_t j = 0; j < block_size; j++)
+            {
+                auto idx      = i * block_size + j;
+                accumulator   = binary_op_host(static_cast<acc_type>(output[idx]), accumulator);
+                expected[idx] = static_cast<T>(accumulator);
+            }
+        }
+
+        // Writing to device memory
+        T* device_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(
+            &device_output,
+            output.size() * sizeof(typename decltype(output)::value_type)));
+
+        HIP_CHECK(hipMemcpy(device_output,
+                            output.data(),
+                            output.size() * sizeof(T),
+                            hipMemcpyHostToDevice));
+
+        // Launching kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(inclusive_scan_initial_value_kernel<block_size, 1, algorithm, T>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output,
+            initial_value);
 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -299,6 +410,150 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduce)
         HIP_CHECK(hipFree(device_output_reductions));
     }
 }
+
+template<unsigned int               BlockSize,
+         unsigned int               ItemsPerThread,
+         hipcub::BlockScanAlgorithm Algorithm,
+         class T>
+__global__
+    __launch_bounds__(BlockSize)
+void inclusive_scan_reduce_initial_value_kernel(T* device_output,
+                                                T* device_output_reductions,
+                                                T  initial_value)
+{
+    const unsigned int index
+        = (hipBlockIdx_x * BlockSize * ItemsPerThread) + hipThreadIdx_x * ItemsPerThread;
+    T input[ItemsPerThread];
+    T output[ItemsPerThread];
+    T reduction;
+
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+    {
+        input[i] = device_output[index + i];
+    }
+
+    using bscan_t = hipcub::BlockScan<T, BlockSize, Algorithm>;
+    __shared__ typename bscan_t::TempStorage temp_storage;
+    bscan_t(temp_storage).InclusiveScan(input, output, initial_value, hipcub::Sum(), reduction);
+
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
+    {
+        device_output[index + i] = output[i];
+    }
+    if(hipThreadIdx_x == 0)
+    {
+        device_output_reductions[hipBlockIdx_x] = reduction;
+    }
+}
+
+// CUB fails to compute the block aggregate correctly when using the API for initial value support.
+#ifndef __HIP_PLATFORM_NVIDIA__
+
+TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
+    constexpr auto   algorithm  = TestFixture::algorithm;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    // Given block size not supported
+    if(block_size > test_utils::get_max_block_size())
+    {
+        return;
+    }
+
+    const size_t size      = block_size * 113;
+    const size_t grid_size = size / block_size;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output_reductions(size / block_size, 0);
+        T              initial_value = test_utils::get_random_value<T>(2, 200, seed_value);
+        SCOPED_TRACE(testing::Message() << "with initial_value = " << initial_value);
+
+        // Calculate expected results on host
+        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        for(size_t i = 0; i < output.size() / block_size; i++)
+        {
+            acc_type accumulator(initial_value);
+            for(size_t j = 0; j < block_size; j++)
+            {
+                auto idx      = i * block_size + j;
+                accumulator   = binary_op_host(static_cast<acc_type>(output[idx]), accumulator);
+                expected[idx] = static_cast<T>(accumulator);
+            }
+            expected_reductions[i] = expected[(i + 1) * block_size - 1];
+        }
+
+        // Writing to device memory
+        T* device_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(
+            &device_output,
+            output.size() * sizeof(typename decltype(output)::value_type)));
+        T* device_output_reductions;
+        HIP_CHECK(test_common_utils::hipMallocHelper(
+            &device_output_reductions,
+            output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)));
+
+        HIP_CHECK(hipMemcpy(device_output,
+                            output.data(),
+                            output.size() * sizeof(T),
+                            hipMemcpyHostToDevice));
+
+        HIP_CHECK(hipMemset(device_output_reductions, T(0), output_reductions.size() * sizeof(T)));
+
+        // Launching kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(
+                inclusive_scan_reduce_initial_value_kernel<block_size, 1, algorithm, T>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output,
+            device_output_reductions,
+            initial_value);
+
+        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Read from device memory
+        HIP_CHECK(hipMemcpy(output.data(),
+                            device_output,
+                            output.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        HIP_CHECK(hipMemcpy(output_reductions.data(),
+                            device_output_reductions,
+                            output_reductions.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        // Validating results
+        test_utils::assert_near(output, expected, test_utils::precision<T>::value * block_size);
+        test_utils::assert_near(output_reductions,
+                                expected_reductions,
+                                test_utils::precision<T>::value * block_size);
+
+        HIP_CHECK(hipFree(device_output));
+        HIP_CHECK(hipFree(device_output_reductions));
+    }
+}
+#endif // __HIP_PLATFORM_NVIDIA__
 
 template<unsigned int BlockSize, hipcub::BlockScanAlgorithm Algorithm, class T>
 __global__ __launch_bounds__(BlockSize) void inclusive_scan_prefix_callback_kernel(
@@ -893,7 +1148,7 @@ public:
     static constexpr unsigned int               items_per_thread = Params::items_per_thread;
 };
 
-typedef ::testing::Types<
+using InputArrayTestParams = ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockScanAlgorithm::using_warp_scan
     // -----------------------------------------------------------------------
@@ -921,8 +1176,7 @@ typedef ::testing::Types<
     params<float, 255, 15, hipcub::BLOCK_SCAN_RAKING>,
     // half and bfloat require small block sizes due to the very limited accuracy
     params<test_utils::half, 65, 5, hipcub::BLOCK_SCAN_RAKING>,
-    params<test_utils::bfloat16, 16, 5, hipcub::BLOCK_SCAN_RAKING>>
-    InputArrayTestParams;
+    params<test_utils::bfloat16, 16, 5, hipcub::BLOCK_SCAN_RAKING>>;
 
 TYPED_TEST_SUITE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
 

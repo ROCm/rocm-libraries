@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,13 +33,18 @@
 
 #include "test_utils_data_generation.hpp"
 
-template<class Key, class Count, unsigned int MinSegmentLength, unsigned int MaxSegmentLength>
+template<class Key,
+         class Count,
+         unsigned int MinSegmentLength,
+         unsigned int MaxSegmentLength,
+         bool         UseGraphs = false>
 struct params
 {
     using key_type                                   = Key;
     using count_type                                 = Count;
     static constexpr unsigned int min_segment_length = MinSegmentLength;
     static constexpr unsigned int max_segment_length = MaxSegmentLength;
+    static constexpr bool         use_graphs         = UseGraphs;
 };
 
 template<class Params>
@@ -49,19 +54,21 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params<int, int, 1, 1>,
-                         params<double, int, 3, 5>,
-                         params<float, int, 1, 10>,
-                         params<unsigned long long, size_t, 1, 30>,
-                         params<int, unsigned int, 20, 100>,
-                         params<float, unsigned long long, 100, 400>,
-                         params<unsigned int, unsigned int, 200, 600>,
-                         params<double, int, 100, 2000>,
-                         params<int, unsigned int, 1000, 5000>,
-                         params<unsigned int, size_t, 2048, 2048>,
-                         params<unsigned int, unsigned int, 1000, 50000>,
-                         params<unsigned long long, unsigned long long, 100000, 100000>>
-    Params;
+using Params = ::testing::Types<params<int, int, 1, 1>,
+                                params<double, int, 3, 5>,
+                                params<float, int, 1, 10>,
+                                params<unsigned long long, size_t, 1, 30>,
+                                params<int, unsigned int, 20, 100>,
+                                params<float, unsigned long long, 100, 400>,
+                                params<unsigned int, unsigned int, 200, 600>,
+                                params<double, int, 100, 2000>,
+                                params<int, unsigned int, 1000, 5000>,
+                                params<unsigned int, size_t, 2048, 2048>,
+                                params<unsigned int, unsigned int, 1000, 50000>,
+                                params<unsigned long long, unsigned long long, 100000, 100000>,
+                                // Test graph capture
+                                params<int, int, 1, 1, true>,
+                                params<float, int, 1, 10, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceRunLengthEncode, Params);
 
@@ -78,6 +85,13 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
                                   std::uniform_real_distribution<key_type>,
                                   std::uniform_int_distribution<key_type>>::type;
 
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -87,7 +101,6 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            hipStream_t stream = 0; // default
 
             // Generate data and calculate expected results
             std::vector<key_type>   unique_expected;
@@ -155,6 +168,12 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
             HIP_CHECK(hipcub::DeviceRunLengthEncode::Encode(d_temporary_storage,
                                                             temporary_storage_bytes,
                                                             d_input,
@@ -163,6 +182,11 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
                                                             d_runs_count_output,
                                                             size,
                                                             stream));
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -196,7 +220,17 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
                 ASSERT_EQ(unique_output[i], unique_expected[i]);
                 ASSERT_EQ(counts_output[i], counts_expected[i]);
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -214,6 +248,13 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
                                   std::uniform_real_distribution<key_type>,
                                   std::uniform_int_distribution<key_type>>::type;
 
+    hipStream_t stream = 0; // default
+    if(TestFixture::params::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
+
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value
@@ -223,7 +264,6 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
         for(size_t size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size= " << size);
-            hipStream_t stream = 0; // default
 
             // Generate data and calculate expected results
             std::vector<offset_type> offsets_expected;
@@ -306,6 +346,12 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
             HIP_CHECK(
                 test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
+            test_utils::GraphHelper gHelper;
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.startStreamCapture(stream);
+            }
+
             HIP_CHECK(hipcub::DeviceRunLengthEncode::NonTrivialRuns(d_temporary_storage,
                                                                     temporary_storage_bytes,
                                                                     d_input,
@@ -314,6 +360,11 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
                                                                     d_runs_count_output,
                                                                     size,
                                                                     stream));
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.createAndLaunchGraph(stream);
+            }
 
             HIP_CHECK(hipFree(d_temporary_storage));
 
@@ -350,6 +401,16 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
                 ASSERT_EQ(offsets_output[i], offsets_expected[i]);
                 ASSERT_EQ(counts_output[i], counts_expected[i]);
             }
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
+    }
+
+    if(TestFixture::params::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -372,7 +372,7 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
                             hipMemcpyHostToDevice));
 
         // Test with discard output iterator
-        // typedef typename std::iterator_traits<Type>::difference_type OffsetT;
+        // using OffsetT = typename std::iterator_traits<Type>::difference_type;
         hipcub::DiscardOutputIterator<size_t> discard_itr;
 
         // Running kernel

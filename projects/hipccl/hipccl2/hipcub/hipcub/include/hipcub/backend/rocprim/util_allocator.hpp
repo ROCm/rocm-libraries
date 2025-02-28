@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -87,13 +87,13 @@ struct CachingDeviceAllocator
         {}
 
         // Constructor (suitable for searching maps for a range of suitable blocks, given a device)
-        BlockDescriptor(int device) :
-            d_ptr(NULL),
-            bytes(0),
-            bin(INVALID_BIN),
-            device(device),
-            associated_stream(0),
-            ready_event(0)
+        BlockDescriptor(int device)
+            : d_ptr(nullptr)
+            , bytes(0)
+            , bin(INVALID_BIN)
+            , device(device)
+            , associated_stream(0)
+            , ready_event(0)
         {}
 
         // Comparison functor for comparing device pointers
@@ -116,7 +116,7 @@ struct CachingDeviceAllocator
     };
 
     /// BlockDescriptor comparator function interface
-    typedef bool (*Compare)(const BlockDescriptor &, const BlockDescriptor &);
+    using Compare = bool (*)(const BlockDescriptor&, const BlockDescriptor&);
 
     class TotalBytes {
     public:
@@ -126,14 +126,13 @@ struct CachingDeviceAllocator
     };
 
     /// Set type for cached blocks (ordered by size)
-    typedef std::multiset<BlockDescriptor, Compare> CachedBlocks;
+    using CachedBlocks = std::multiset<BlockDescriptor, Compare>;
 
     /// Set type for live blocks (ordered by ptr)
-    typedef std::multiset<BlockDescriptor, Compare> BusyBlocks;
+    using BusyBlocks = std::multiset<BlockDescriptor, Compare>;
 
     /// Map type of device ordinals to the number of cached bytes cached by each device
-    typedef std::map<int, TotalBytes> GpuCachedBytes;
-
+    using GpuCachedBytes = std::map<int, TotalBytes>;
 
     //---------------------------------------------------------------------
     // Utility functions
@@ -302,7 +301,7 @@ struct CachingDeviceAllocator
         size_t          bytes,              ///< [in] Minimum number of bytes for the allocation
         hipStream_t     active_stream = 0)  ///< [in] The stream to be associated with this allocation
     {
-        *d_ptr                          = NULL;
+        *d_ptr                                 = nullptr;
         int entrypoint_device           = INVALID_DEVICE_ORDINAL;
         hipError_t error                = hipSuccess;
 

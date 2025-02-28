@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Test that it does nothing
     params<int, int, 1U>,
     params<unsigned int, int, 2U>,
@@ -66,8 +66,7 @@ typedef ::testing::Types<
     params<test_utils::bfloat16, test_utils::bfloat16, 7U>,
     params<test_utils::half, test_utils::half, 6U>,
     //params<test_utils::half, long long, 6U>,
-    params<test_utils::bfloat16, int, 7U>>
-    Params;
+    params<test_utils::bfloat16, int, 7U>>;
 
 TYPED_TEST_SUITE(HipcubThreadSort, Params);
 

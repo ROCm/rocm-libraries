@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -129,21 +129,21 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params1<int, 10, 0, 10>,
-                         params1<int, 128, 0, 256>,
-                         params1<unsigned int, 12345, 10, 12355, short>,
-                         params1<unsigned short, 65536, 0, 65536, int>,
-                         params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
-                         params1<unsigned char, 256, 0, 256, short>,
-                         params1<test_utils::half, 55, -123, +123, test_utils::half>,
-                         params1<test_utils::bfloat16, 55, -123, +123, test_utils::bfloat16>,
-                         params1<double, 10, 0, 1000, double, int>,
-                         params1<int, 123, 100, 5635, int>,
-                         params1<double, 55, -123, +123, double>,
-                         params1<int, 10, 0, 10, int, int, true>,
-                         // Regression: sample_type = int and level_type = size_t
-                         params1<int, 123, 100, 5635, size_t>>
-    Params1;
+using Params1
+    = ::testing::Types<params1<int, 10, 0, 10>,
+                       params1<int, 128, 0, 256>,
+                       params1<unsigned int, 12345, 10, 12355, short>,
+                       params1<unsigned short, 65536, 0, 65536, int>,
+                       params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
+                       params1<unsigned char, 256, 0, 256, short>,
+                       params1<test_utils::half, 55, -123, +123, test_utils::half>,
+                       params1<test_utils::bfloat16, 55, -123, +123, test_utils::bfloat16>,
+                       params1<double, 10, 0, 1000, double, int>,
+                       params1<int, 123, 100, 5635, int>,
+                       params1<double, 55, -123, +123, double>,
+                       params1<int, 10, 0, 10, int, int, true>,
+                       // Regression: sample_type = int and level_type = size_t
+                       params1<int, 123, 100, 5635, size_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
 
@@ -342,13 +342,12 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params1<uint16_t, 1, 0, 10>,
-                         params1<uint16_t, 2, 0, 10>,
-                         params1<uint32_t, 1, 0, 10>,
-                         params1<uint32_t, 2, 0, 10>,
-                         params1<uint64_t, 1, 0, 10>,
-                         params1<uint64_t, 2, 0, 10>>
-    Params1Overflow;
+using Params1Overflow = ::testing::Types<params1<uint16_t, 1, 0, 10>,
+                                         params1<uint16_t, 2, 0, 10>,
+                                         params1<uint32_t, 1, 0, 10>,
+                                         params1<uint32_t, 2, 0, 10>,
+                                         params1<uint64_t, 1, 0, 10>,
+                                         params1<uint64_t, 2, 0, 10>>;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramEvenOverflow, Params1Overflow);
 
@@ -459,7 +458,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params2 = ::testing::Types<
     params2<int, 10, 0, 1, 10>,
     params2<unsigned char, 5, 10, 10, 20>,
     params2<unsigned int, 10000, 0, 1, 100>,
@@ -471,8 +470,7 @@ typedef ::testing::Types<
     params2<double, 3, 10000, 1000, 1000, double, unsigned int>,
     params2<int, 10, 0, 1, 10, int, int, true>,
     // Regression: sample_type = int and level_type = size_t
-    params2<int, 10, 0, 1, 10, size_t>>
-    Params2;
+    params2<int, 10, 0, 1, 10, size_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
 
@@ -703,22 +701,22 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
-                         params3<int, 2, 1, 10, 0, 10>,
-                         params3<int, 3, 3, 128, 0, 256>,
-                         params3<unsigned int, 1, 1, 12345, 10, 12355, short>,
-                         params3<unsigned int, 4, 4, 65536, 0, 65536, int>,
-                         params3<unsigned char, 3, 1, 10, 20, 240, unsigned char, unsigned int>,
-                         params3<unsigned char, 2, 2, 256, 0, 256, short>,
-                         params3<test_utils::half, 4, 3, 55, -123, +123, test_utils::half>,
-                         params3<test_utils::bfloat16, 4, 3, 55, -123, +123, test_utils::bfloat16>,
-                         params3<double, 4, 2, 10, 0, 1000, double, int>,
-                         params3<int, 3, 2, 123, 100, 5635, int>,
-                         params3<double, 4, 3, 55, -123, +123, double>,
-                         params3<int, 4, 3, 2000, 0, 2000, int, int, true>,
-                         // Regression: sample_type = int and level_type = size_t
-                         params3<int, 4, 3, 2000, 0, 2000, size_t>>
-    Params3;
+using Params3
+    = ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
+                       params3<int, 2, 1, 10, 0, 10>,
+                       params3<int, 3, 3, 128, 0, 256>,
+                       params3<unsigned int, 1, 1, 12345, 10, 12355, short>,
+                       params3<unsigned int, 4, 4, 65536, 0, 65536, int>,
+                       params3<unsigned char, 3, 1, 10, 20, 240, unsigned char, unsigned int>,
+                       params3<unsigned char, 2, 2, 256, 0, 256, short>,
+                       params3<test_utils::half, 4, 3, 55, -123, +123, test_utils::half>,
+                       params3<test_utils::bfloat16, 4, 3, 55, -123, +123, test_utils::bfloat16>,
+                       params3<double, 4, 2, 10, 0, 1000, double, int>,
+                       params3<int, 3, 2, 123, 100, 5635, int>,
+                       params3<double, 4, 3, 55, -123, +123, double>,
+                       params3<int, 4, 3, 2000, 0, 2000, int, int, true>,
+                       // Regression: sample_type = int and level_type = size_t
+                       params3<int, 4, 3, 2000, 0, 2000, size_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
 
@@ -1020,7 +1018,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params4 = ::testing::Types<
     params4<int, 4, 3, 10, 0, 1, 10>,
     params4<unsigned char, 2, 2, 5, 10, 10, 20>,
     params4<unsigned int, 1, 1, 10000, 0, 1, 100>,
@@ -1032,8 +1030,7 @@ typedef ::testing::Types<
     params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>,
     params4<int, 4, 3, 10, 0, 1, 10, int, int, true>,
     // Regression: sample_type = int and level_type = size_t
-    params4<int, 4, 3, 10, 0, 1, 10, size_t>>
-    Params4;
+    params4<int, 4, 3, 10, 0, 1, 10, size_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);
 

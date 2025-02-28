@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ public:
     static constexpr unsigned int block_size = Params::block_size;
 };
 
-typedef ::testing::Types<
+using SingleValueTestParams = ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS
     // -----------------------------------------------------------------------
@@ -104,13 +104,21 @@ typedef ::testing::Types<
     params<int, 256U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
     params<int, 512U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
     params<int, 1024U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
-    params<unsigned long, 65U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<unsigned long,
+           65U,
+           1,
+           hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
     params<long, 37U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
     params<short, 162U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
-    params<unsigned int, 255U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
+    params<unsigned int,
+           255U,
+           1,
+           hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
     params<int, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>,
-    params<unsigned char, 377U, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>
-> SingleValueTestParams;
+    params<unsigned char,
+           377U,
+           1,
+           hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY>>;
 
 TYPED_TEST_SUITE(HipcubBlockReduceSingleValueTests, SingleValueTestParams);
 
@@ -352,7 +360,7 @@ public:
     static constexpr unsigned int items_per_thread = Params::items_per_thread;
 };
 
-typedef ::testing::Types<
+using InputArrayTestParams = ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS
     // -----------------------------------------------------------------------
@@ -382,8 +390,7 @@ typedef ::testing::Types<
     params<float, 255, 15, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
     // half and bfloat require small block sizes due to the very limited accuracy
     params<test_utils::half, 32, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<test_utils::bfloat16, 32, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>>
-    InputArrayTestParams;
+    params<test_utils::bfloat16, 32, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>>;
 
 TYPED_TEST_SUITE(HipcubBlockReduceInputArrayTests, InputArrayTestParams);
 

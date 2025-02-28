@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,24 +38,23 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params<char>,
-                         params<unsigned char>,
-                         params<short>,
-                         params<unsigned short>,
-                         params<int>,
-                         params<uint>,
-                         params<long>,
-                         params<unsigned long>,
-                         params<long long>,
-                         params<unsigned long long>,
-                         params<float>,
-                         params<double>
+using Params = ::testing::Types<params<char>,
+                                params<unsigned char>,
+                                params<short>,
+                                params<unsigned short>,
+                                params<int>,
+                                params<uint>,
+                                params<long>,
+                                params<unsigned long>,
+                                params<long long>,
+                                params<unsigned long long>,
+                                params<float>,
+                                params<double>
 #ifdef __HIP_PLATFORM_AMD__
-                         ,
-                         params<bool> // Doesn't work on NVIDIA / CUB
+                                ,
+                                params<bool> // Doesn't work on NVIDIA / CUB
 #endif
-                         >
-    Params;
+                                >;
 
 TYPED_TEST_SUITE(HipcubVector, Params);
 

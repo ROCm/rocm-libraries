@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,8 @@ include:
         - /deps-format.yaml
         - /deps-rocm.yaml
         - /deps-nvcc.yaml
+        - /deps-vcpkg.yaml
+        - /deps-windows.yaml
         - /deps-compiler-acceleration.yaml
         - /gpus-rocm.yaml
         - /gpus-nvcc.yaml
@@ -40,6 +42,10 @@ stages:
   - build
   - test
   - benchmark
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /CI Skip/
 
 clang-format:
   extends:
@@ -113,7 +119,6 @@ build:rocm:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D GPU_TARGETS="$GPU_TARGETS"
-      -D GPU_TEST_TARGETS="$GPU_TARGETS"
       -D ROCM_SYMLINK_LIBS=OFF
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
@@ -170,14 +175,101 @@ build:rocm-benchmark:
       - $CI_PROJECT_DIR/build/CMakeCache.txt
     expire_in: 2 weeks
 
-test:rocm:
+.rocm-windows-rocprim:
+  variables:
+    ROCPRIM_GIT_BRANCH: "develop_stream"
+  script:
+    # Install rocPRIM from git
+    - $BRANCH_NAME = $env:ROCPRIM_GIT_BRANCH
+    - if ($env:CI_COMMIT_BRANCH -eq "develop" -or $env:CI_COMMIT_BRANCH -eq "master") { $BRANCH_NAME = $env:CI_COMMIT_BRANCH }
+    - git clone -b "$BRANCH_NAME" --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL} $CI_PROJECT_DIR/rocPRIM
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
+      -D CMAKE_INSTALL_PREFIX=$CI_PROJECT_DIR/rocPRIM_install
+      -D ONLY_INSTALL=ON
+      -B $CI_PROJECT_DIR/rocPRIM/build
+      -S $CI_PROJECT_DIR/rocPRIM
+    - cmake --build $CI_PROJECT_DIR/rocPRIM/build --target install
+
+build:rocm-windows:
+  extends:
+    - .rocm-windows-rocprim
+    - .rules:build
+    - .gpus:rocm-windows
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+  stage: build
+  needs: []
+  script:
+    - !reference [".rocm-windows-rocprim", script]
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror -Wno-error=pass-failed"
+      -D CMAKE_PREFIX_PATH:PATH="$CI_PROJECT_DIR/rocPRIM_install;${env:HIP_PATH}"
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=ON
+      -D BUILD_EXAMPLE=ON
+      -D GPU_TARGETS=$GPU_TARGET
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/test/hipcub/test_*
+      - $CI_PROJECT_DIR/build/test/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/test/hipcub/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/gtest/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/.ninja_log
+    expire_in: 1 day
+  parallel:
+    matrix:
+      - BUILD_VERSION: [14, 17]
+
+build:rocm-windows-benchmark:
+  extends:
+    - .rocm-windows-rocprim
+    - .rules:build
+    - .gpus:rocm-windows
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
+  stage: build
+  needs: []
+  script:
+    - !reference [".rocm-windows-rocprim", script]
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+      -D CMAKE_PREFIX_PATH:PATH="$CI_PROJECT_DIR/rocPRIM_install;${env:HIP_PATH}"
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_BENCHMARK=ON
+      -D GPU_TARGETS=$GPU_TARGET
+      -D CMAKE_CXX_STANDARD=17
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/build/benchmark/*
+      - $CI_PROJECT_DIR/build/deps/googlebenchmark/
+      - $CI_PROJECT_DIR/build/.ninja_log
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+    expire_in: 1 day
+
+.test:rocm:
   stage: test
   needs:
     - build:rocm
+  tags:
+    - rocm
+    - $GPU
   extends:
     - .rocm
-    - .gpus:rocm
-    - .rules:test
   script:
     - cd $CI_PROJECT_DIR/build
     - cmake
@@ -191,9 +283,44 @@ test:rocm:
     - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
-      --tests-regex "$GPU_TARGET"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+
+test:rocm-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:rocm
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:rocm-label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:arch-labels
+
+test:rocm-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:test
+
+test:rocm-windows:
+  stage: test
+  extends:
+    - .deps:rocm-windows
+    - .gpus:rocm-gpus-windows
+    - .deps:visual-studio-devshell
+    - .rules:test
+  needs:
+    - job: build:rocm-windows
+  script:
+    - cd $CI_PROJECT_DIR/build
+    - ctest --output-on-failure
 
 .benchmark:
   stage: benchmark
@@ -379,20 +506,38 @@ build:nvcc-benchmark:
       - $CI_PROJECT_DIR/build/CMakeCache.txt
     expire_in: 2 weeks
 
-test:nvcc:
+.test:nvcc:
   stage: test
+  tags:
+    - nvcc
+    - $GPU
   needs:
     - build:nvcc
   extends:
     - .nvcc
-    - .gpus:nvcc
-    - .rules:test
   before_script:
     # This is only needed because of the legacy before_script in .gpus:nvcc would otherwise overwrite before_script
     - !reference [.nvcc, before_script]
   script:
     - cd $CI_PROJECT_DIR/build
     - ctest --output-on-failure --repeat-until-fail 2
+
+test:nvcc-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:nvcc
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+
+test:nvcc-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:nvcc
+    - .test:nvcc
+    - .rules:test
 
 benchmark:nvcc:
   needs:

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -100,31 +100,31 @@ struct precision<custom_test_type<T>>
 template<class T>
 struct is_add_operator : std::false_type
 {
-    typedef uint8_t value_type;
+    using value_type = uint8_t;
 };
 
 template<class T>
 struct is_add_operator<test_utils::plus(T)> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 template<class T>
 struct is_add_operator<test_utils::minus(T)> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 template<class T>
 struct is_multiply_operator : std::false_type
 {
-    typedef uint8_t value_type;
+    using value_type = uint8_t;
 };
 
 template<class T>
 struct is_multiply_operator<test_utils::multiplies(T)> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 /* Plus to operator selector for host-side
@@ -136,8 +136,8 @@ struct is_multiply_operator<test_utils::multiplies(T)> : std::true_type
 template<typename T>
 struct select_plus_operator_host
 {
-    typedef test_utils::plus type;
-    typedef T                acc_type;
+    using type     = test_utils::plus;
+    using acc_type = T;
 };
 
 template<class InputIt, class OutputIt, class BinaryOperation, class acc_type>

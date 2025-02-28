@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ public:
     using output_type = typename Params::output_type;
 };
 
-typedef ::testing::Types<
+using ThreadOperatorsParameters = ::testing::Types<
     ThreadOperatorsParams<int, short>,
     ThreadOperatorsParams<int, long>,
     ThreadOperatorsParams<int, float>,
@@ -72,8 +72,7 @@ typedef ::testing::Types<
     ThreadOperatorsParams<test_utils::half, float>, // Doesn't work on NVIDIA / CUB
     ThreadOperatorsParams<test_utils::bfloat16, float> // Doesn't work on NVIDIA / CUB
 #endif
-    >
-    ThreadOperatorsParameters;
+    >;
 
 TYPED_TEST_SUITE(HipcubThreadOperatorsTests, ThreadOperatorsParameters);
 
@@ -203,7 +202,7 @@ public:
     using output_type = typename Params::output_type;
 };
 
-typedef ::testing::Types<
+using DivisionOperatorParameters = ::testing::Types<
     ThreadOperatorsParams<int, short>,
     ThreadOperatorsParams<int, long>,
     ThreadOperatorsParams<int, float>,
@@ -222,8 +221,7 @@ typedef ::testing::Types<
     ThreadOperatorsParams<test_utils::half, float>, // Doesn't work on NVIDIA / CUB
     ThreadOperatorsParams<test_utils::bfloat16, float> // Doesn't work on NVIDIA / CUB
 #endif
-    >
-    DivisionOperatorParameters;
+    >;
 TYPED_TEST_SUITE(HipcubDivisionOperatorTests, DivisionOperatorParameters);
 
 TYPED_TEST(HipcubDivisionOperatorTests, Division)
@@ -348,17 +346,16 @@ public:
     using output_type = typename Params::output_type;
 };
 
-typedef ::testing::Types<ThreadOperatorsParams<int, short>,
-                         ThreadOperatorsParams<int, long>,
-                         ThreadOperatorsParams<int, float>,
-                         ThreadOperatorsParams<int, double>,
-                         ThreadOperatorsParams<short, long>,
-                         ThreadOperatorsParams<short, float>,
-                         ThreadOperatorsParams<short, double>,
-                         ThreadOperatorsParams<long, float>,
-                         ThreadOperatorsParams<long, double>,
-                         ThreadOperatorsParams<float, double>>
-    NCThreadOperatorsParameters;
+using NCThreadOperatorsParameters = ::testing::Types<ThreadOperatorsParams<int, short>,
+                                                     ThreadOperatorsParams<int, long>,
+                                                     ThreadOperatorsParams<int, float>,
+                                                     ThreadOperatorsParams<int, double>,
+                                                     ThreadOperatorsParams<short, long>,
+                                                     ThreadOperatorsParams<short, float>,
+                                                     ThreadOperatorsParams<short, double>,
+                                                     ThreadOperatorsParams<long, float>,
+                                                     ThreadOperatorsParams<long, double>,
+                                                     ThreadOperatorsParams<float, double>>;
 
 std::vector<size_t> get_sizes()
 {

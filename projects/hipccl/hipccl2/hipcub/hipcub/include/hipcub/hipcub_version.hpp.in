@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 #define HIPCUB_VERSION_HPP_
 
 /// \def HIPCUB_VERSION
-/// \brief HIPCUB library version
+/// \brief hipCUB library version
 ///
 /// Version number may not be visible in the documentation.
 ///
@@ -32,7 +32,7 @@
 ///
 /// For example, if HIPCUB_VERSION is 100500, then the major version is 1,
 /// the minor version is 5, and the patch level is 0.
-#define HIPCUB_VERSION @hipcub_VERSION_MAJOR@ * 100000 + @hipcub_VERSION_MINOR@ * 100 + @hipcub_VERSION_PATCH@
+#define HIPCUB_VERSION @hipcub_VERSION_NUMBER@
 
 #define HIPCUB_VERSION_MAJOR @hipcub_VERSION_MAJOR@
 #define HIPCUB_VERSION_MINOR @hipcub_VERSION_MINOR@

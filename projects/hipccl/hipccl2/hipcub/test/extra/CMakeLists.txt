@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.5.0)
+  set(CCCL_MINIMUM_VERSION 2.6.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
     find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
@@ -109,7 +109,7 @@ else()
 endif()
 
 # Find hipCUB
-find_package(hipcub CONFIG REQUIRED)
+find_package(hipcub CONFIG REQUIRED PATHS "${ROCM_ROOT}/lib/cmake/hipcub")
 
 # Build CXX flags
 if (NOT DEFINED CMAKE_CXX_STANDARD)

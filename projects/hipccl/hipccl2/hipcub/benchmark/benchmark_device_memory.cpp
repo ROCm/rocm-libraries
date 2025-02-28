@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,9 +58,10 @@ struct operation;
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<no_operation, T, ItemsPerThread, BlockSize>
 {
-    typedef empty_storage_type storage_type;
+    using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE inline void
+    HIPCUB_DEVICE
+    inline void
         operator()(storage_type& /*storage*/, T (&)[ItemsPerThread], T* = nullptr) const
     {}
 };
@@ -69,11 +70,13 @@ struct operation<no_operation, T, ItemsPerThread, BlockSize>
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 {
-    typedef empty_storage_type storage_type;
+    using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage,
-                                         T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr) const
+    HIPCUB_DEVICE
+    inline void
+        operator()(storage_type& storage,
+                   T (&input)[ItemsPerThread],
+                   T* global_mem_output = nullptr) const
     {
         (void)storage;
         (void)global_mem_output;
@@ -96,14 +99,15 @@ struct operation<custom_operation, T, ItemsPerThread, BlockSize>
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<block_scan, T, ItemsPerThread, BlockSize>
 {
-    typedef
-        typename hipcub::BlockScan<T, BlockSize, hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS>
-                                                  block_scan_type;
-    typedef typename block_scan_type::TempStorage storage_type;
+    using block_scan_type =
+        typename hipcub::BlockScan<T, BlockSize, hipcub::BlockScanAlgorithm::BLOCK_SCAN_WARP_SCANS>;
+    using storage_type = typename block_scan_type::TempStorage;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage,
-                                         T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+    HIPCUB_DEVICE
+    inline void
+        operator()(storage_type& storage,
+                   T (&input)[ItemsPerThread],
+                   T* global_mem_output = nullptr)
     {
         (void)global_mem_output;
 
@@ -117,11 +121,13 @@ struct operation<block_scan, T, ItemsPerThread, BlockSize>
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<atomics_no_collision, T, ItemsPerThread, BlockSize>
 {
-    typedef empty_storage_type storage_type;
+    using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage,
-                                         T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+    HIPCUB_DEVICE
+    inline void
+        operator()(storage_type& storage,
+                   T (&input)[ItemsPerThread],
+                   T* global_mem_output = nullptr)
     {
         (void)storage;
         (void)input;
@@ -140,11 +146,13 @@ struct operation<atomics_no_collision, T, ItemsPerThread, BlockSize>
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
 {
-    typedef empty_storage_type storage_type;
+    using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage,
-                                         T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+    HIPCUB_DEVICE
+    inline void
+        operator()(storage_type& storage,
+                   T (&input)[ItemsPerThread],
+                   T* global_mem_output = nullptr)
     {
         (void)storage;
         (void)input;
@@ -163,11 +171,13 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
 template<typename T, unsigned int ItemsPerThread, unsigned int BlockSize>
 struct operation<atomics_inter_block_collision, T, ItemsPerThread, BlockSize>
 {
-    typedef empty_storage_type storage_type;
+    using storage_type = empty_storage_type;
 
-    HIPCUB_DEVICE inline void operator()(storage_type& storage,
-                                         T (&input)[ItemsPerThread],
-                                         T* global_mem_output = nullptr)
+    HIPCUB_DEVICE
+    inline void
+        operator()(storage_type& storage,
+                   T (&input)[ItemsPerThread],
+                   T* global_mem_output = nullptr)
     {
         (void)storage;
         (void)input;
@@ -237,9 +247,9 @@ template<typename T,
          typename CustomOp>
 __global__ __launch_bounds__(BlockSize) void operation_kernel(T* input, T* output, CustomOp op)
 {
-    typedef memory_operation<MemOp>                                              mem_op;
-    typedef hipcub::BlockLoad<T, BlockSize, ItemsPerThread, mem_op::load_type>   load_type;
-    typedef hipcub::BlockStore<T, BlockSize, ItemsPerThread, mem_op::store_type> store_type;
+    using mem_op     = memory_operation<MemOp>;
+    using load_type  = hipcub::BlockLoad<T, BlockSize, ItemsPerThread, mem_op::load_type>;
+    using store_type = hipcub::BlockStore<T, BlockSize, ItemsPerThread, mem_op::store_type>;
 
     __shared__ union
     {

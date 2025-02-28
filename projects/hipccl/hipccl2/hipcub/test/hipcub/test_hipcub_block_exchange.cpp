@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,7 @@ struct dummy
     }
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Power of 2 BlockSize and ItemsPerThread = 1 (no rearrangement)
     params<int, int, 128, 4>,
     params<float, double, 128, 4>,
@@ -92,8 +92,7 @@ typedef ::testing::Types<
     params<float, int, 33U, 5>,
     params<char, dummy<double>, 464U, 2>,
     params<unsigned short, unsigned int, 100U, 3>,
-    params<short, int, 234U, 9>>
-    Params;
+    params<short, int, 234U, 9>>;
 
 TYPED_TEST_SUITE(HipcubBlockExchangeTests, Params);
 

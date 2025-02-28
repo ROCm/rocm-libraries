@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -75,46 +75,64 @@
 namespace test_common_utils
 {
 
-inline int obtain_device_from_ctest()
+inline char* __get_env(const char* name)
+{
+    char* env;
+#ifdef _MSC_VER
+    size_t  len;
+    errno_t err = _dupenv_s(&env, &len, name);
+    if(err)
+    {
+        return nullptr;
+    }
+#else
+    env = std::getenv(name);
+#endif
+    return env;
+}
+
+inline void clean_env(char* env)
 {
 #ifdef _MSC_VER
-    #pragma warning(push)
-    #pragma warning( \
-        disable : 4996) // getenv: This function or variable may be unsafe. Consider using _dupenv_s instead.
-#endif
-    static const std::string rg0 = "CTEST_RESOURCE_GROUP_0";
-    if(std::getenv(rg0.c_str()) != nullptr)
+    if(env != nullptr)
     {
-        std::string amdgpu_target = std::getenv(rg0.c_str());
+        free(env);
+    }
+#endif
+    (void)env;
+}
+
+inline int obtain_device_from_ctest()
+{
+    static const std::string rg0    = "CTEST_RESOURCE_GROUP_0";
+    char*                    env    = __get_env(rg0.c_str());
+    int                      device = 0;
+    if(env != nullptr)
+    {
+        std::string amdgpu_target(env);
         std::transform(
             amdgpu_target.cbegin(),
             amdgpu_target.cend(),
             amdgpu_target.begin(),
             // Feeding std::toupper plainly results in implicitly truncating conversions between int and char triggering warnings.
             [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-        std::string reqs = std::getenv((rg0 + "_" + amdgpu_target).c_str());
-        return std::atoi(
+        char*       env_reqs = __get_env((rg0 + "_" + amdgpu_target).c_str());
+        std::string reqs(env_reqs);
+        device = std::atoi(
             reqs.substr(reqs.find(':') + 1, reqs.find(',') - (reqs.find(':') + 1)).c_str());
+        clean_env(env_reqs);
     }
-    else
-        return 0;
-#ifdef _MSC_VER
-    #pragma warning(pop)
-#endif
+    clean_env(env);
+    return device;
 }
 
 inline bool use_hmm()
 {
-    if (getenv("HIPCUB_USE_HMM") == nullptr)
-    {
-        return false;
-    }
 
-    if (strcmp(getenv("HIPCUB_USE_HMM"), "1") == 0)
-    {
-        return true;
-    }
-    return false;
+    char*      env = __get_env("HIPCUB_USE_HMM");
+    const bool hmm = (env != nullptr) && (strcmp(env, "1") == 0);
+    clean_env(env);
+    return hmm;
 }
 
 // Helper for HMM allocations: HMM is requested through HIPCUB_USE_HMM environment variable

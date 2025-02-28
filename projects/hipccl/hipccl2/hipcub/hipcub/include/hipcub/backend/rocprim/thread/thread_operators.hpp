@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -286,9 +286,13 @@ using accumulator_t = std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
 // for example:
 //
 // /// The output value type
-// typedef typename If<(Equals<typename std::iterator_traits<OutputIteratorT>::value_type, void>::VALUE),  // OutputT =  (if output iterator's value type is void) ?
-//     typename std::iterator_traits<InputIteratorT>::value_type,                                          // ... then the input iterator's value type,
-//     typename std::iterator_traits<OutputIteratorT>::value_type>::Type OutputT;                          // ... else the output iterator's value type
+// using OutputT =
+//     typename If<(Equals<typename std::iterator_traits<OutputIteratorT>::value_type,
+//                         void>::VALUE),           // OutputT =  (if output iterator's value type is void) ?
+//                 typename std::iterator_traits<
+//                     InputIteratorT>::value_type, // ... then the input iterator's value type,
+//                 typename std::iterator_traits<OutputIteratorT>::value_type>::
+//         Type;                                    // ... else the output iterator's value type
 //
 // rocPRIM (as well as Thrust) uses result type of BinaryFunction instead (if not void):
 //

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,42 +53,41 @@ public:
     static constexpr unsigned int bin_size = Params::bin_size;
 };
 
-typedef ::testing::Types<
+using InputArrayTestParams = ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_ATOMIC
     // -----------------------------------------------------------------------
-    params<unsigned int, 6U,   32, 18U>,
-    params<unsigned int, 32,   2, 64>,
-    params<unsigned int, 256,  3, 512>,
-    params<unsigned int, 512,  4>,
+    params<unsigned int, 6U, 32, 18U>,
+    params<unsigned int, 32, 2, 64>,
+    params<unsigned int, 256, 3, 512>,
+    params<unsigned int, 512, 4>,
     params<unsigned int, 1024, 1>,
-    params<unsigned int, 37,   2>,
-    params<unsigned int, 65,   5>,
-    params<unsigned int, 162,  7>,
-    params<unsigned int, 255,  15>,
+    params<unsigned int, 37, 2>,
+    params<unsigned int, 65, 5>,
+    params<unsigned int, 162, 7>,
+    params<unsigned int, 255, 15>,
     // -----------------------------------------------------------------------
     // hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT
     // -----------------------------------------------------------------------
-    params<unsigned int, 6U,   32,  18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 32,   2,   64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 256,  3,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 512,  4,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 6U, 32, 18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 32, 2, 64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 256, 3, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 512, 4, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
     params<unsigned int, 1024, 1, 1024, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 37,   2,   37, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 65,   5,   65, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 162,  7,  162, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned int, 255,  15, 255, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned char, 6U,   32,  18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned char, 32,   2,   64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned char, 256,  3,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned char, 512,  4,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 37, 2, 37, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 65, 5, 65, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 162, 7, 162, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned int, 255, 15, 255, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned char, 6U, 32, 18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned char, 32, 2, 64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned char, 256, 3, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned char, 512, 4, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
     params<unsigned char, 1024, 1, 1024, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned short, 6U,   32,  18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned short, 32,   2,   64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned short, 256,  3,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned short, 512,  4,  512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
-    params<unsigned short, 1024, 1, 1024, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>
-> InputArrayTestParams;
+    params<unsigned short, 6U, 32, 18U, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned short, 32, 2, 64, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned short, 256, 3, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned short, 512, 4, 512, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>,
+    params<unsigned short, 1024, 1, 1024, hipcub::BlockHistogramAlgorithm::BLOCK_HISTO_SORT>>;
 
 TYPED_TEST_SUITE(HipcubBlockHistogramInputArrayTests, InputArrayTestParams);
 

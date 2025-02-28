@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,18 +37,14 @@
 #include "test_utils_half.hpp"
 
 #include "common_test_header.hpp"
+#include <cstdint>
 #include <ostream>
+#include <type_traits>
 
-template<
-    class T,
-    hipcub::CacheLoadModifier LoadModifier,
-    hipcub::CacheStoreModifier StoreModifier
->
+template<class T>
 struct params
 {
     using type = T;
-    static constexpr hipcub::CacheLoadModifier load_modifier = LoadModifier;
-    static constexpr hipcub::CacheStoreModifier store_modifier = StoreModifier;
 };
 
 template<class Params>
@@ -56,45 +52,71 @@ class HipcubThreadOperationTests : public ::testing::Test
 {
 public:
     using type = typename Params::type;
-    static constexpr hipcub::CacheLoadModifier load_modifier = Params::load_modifier;
-    static constexpr hipcub::CacheStoreModifier store_modifier = Params::store_modifier;
 };
 
-typedef ::testing::Types<
-    params<int8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-    params<int16_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-    params<uint8_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-    params<uint16_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-    params<uint32_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-    params<uint64_t, hipcub::LOAD_CA, hipcub::STORE_WB>,
-
-    params<int8_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-    params<int16_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-    params<uint8_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-    params<uint16_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-    params<uint32_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-    params<uint64_t, hipcub::LOAD_CG, hipcub::STORE_CG>,
-
-    params<int8_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<int16_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<uint8_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<uint16_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<uint32_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<uint64_t, hipcub::LOAD_CV, hipcub::STORE_WT>,
-    params<test_utils::bfloat16, hipcub::LOAD_CV, hipcub::STORE_WB>,
-    params<test_utils::half, hipcub::LOAD_CV, hipcub::STORE_WB>,
-    params<test_utils::custom_test_type<uint64_t>, hipcub::LOAD_CV, hipcub::STORE_WB>,
-    params<test_utils::custom_test_type<double>, hipcub::LOAD_CV, hipcub::STORE_WB>>
-    ThreadOperationTestParams;
+using ThreadOperationTestParams = ::testing::Types<params<int8_t>,
+                                                   params<int16_t>,
+                                                   params<uint8_t>,
+                                                   params<uint16_t>,
+                                                   params<uint32_t>,
+                                                   params<uint64_t>,
+                                                   params<float>,
+                                                   params<double>,
+                                                   params<test_utils::bfloat16>,
+                                                   params<test_utils::half>
+#ifdef __HIP_PLATFORM_AMD__
+                                                   ,
+                                                   params<test_utils::custom_test_type<uint64_t>>,
+                                                   params<test_utils::custom_test_type<double>>
+#endif
+                                                   >;
 
 TYPED_TEST_SUITE(HipcubThreadOperationTests, ThreadOperationTestParams);
 
-template<class Type, hipcub::CacheLoadModifier Modifier>
+template<class Type>
 __global__
 void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    device_output[index] = hipcub::ThreadLoad<Modifier>(device_input + index);
+
+    if(index % 8 == 0)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_DEFAULT>(device_input + index);
+    }
+    else if(index % 8 == 1)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CA>(device_input + index);
+    }
+    else if(index % 8 == 2)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CG>(device_input + index);
+    }
+    else if(index % 8 == 3)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CS>(device_input + index);
+    }
+    else if(index % 8 == 4)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_CV>(device_input + index);
+    }
+    else if(index % 8 == 5)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_LDG>(device_input + index);
+    }
+    else if(index % 8 == 5)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_LDG>(device_input + index);
+    }
+    else if(index % 8 == 6)
+    {
+        device_output[index] = hipcub::ThreadLoad<hipcub::LOAD_VOLATILE>(device_input + index);
+    }
+    else // index % 8 == 7
+    {
+        device_output[index] = hipcub::ThreadLoadVolatilePointer(
+            device_input + index,
+            hipcub::Int2Type<std::is_fundamental<Type>::value>());
+    }
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Load)
@@ -105,8 +127,6 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
 
     using T        = typename TestFixture::type;
     using native_T = test_utils::convert_to_native_t<T>;
-
-    constexpr hipcub::CacheLoadModifier Modifier = TestFixture::load_modifier;
 
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
@@ -146,7 +166,7 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
             )
         );
 
-        thread_load_kernel<T, Modifier><<<grid_size, block_size>>>(device_input, device_output);
+        thread_load_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
 
         // Reading results back
         HIP_CHECK(
@@ -168,12 +188,129 @@ TYPED_TEST(HipcubThreadOperationTests, Load)
     }
 }
 
-template<class Type, hipcub::CacheStoreModifier Modifier>
+template<uint32_t ItemsPerThread, class Type>
+__global__
+void thread_unroll_kernel(Type* volatile const device_input, Type* device_output)
+{
+    size_t id    = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    size_t index = id * ItemsPerThread;
+
+#ifdef __HIP_PLATFORM_AMD__
+    if(id % 2 == 0)
+    {
+        hipcub::UnrolledThreadLoad<ItemsPerThread, hipcub::LOAD_VOLATILE>(device_input + index,
+                                                                          device_output + index);
+    }
+    else
+    {
+        hipcub::UnrolledCopy<ItemsPerThread>(device_input + index, device_output + index);
+    }
+#else
+    hipcub::UnrolledCopy<ItemsPerThread>(device_input + index, device_output + index);
+#endif
+}
+
+TYPED_TEST(HipcubThreadOperationTests, Unrolled)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
+    constexpr uint32_t block_size     = 256;
+    constexpr uint32_t grid_size      = 128;
+    constexpr uint32_t ItemsPerThread = 4;
+    constexpr uint32_t size           = block_size * grid_size * ItemsPerThread;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
+        std::vector<T> output(size);
+
+        // Calculate expected results on host
+        std::vector<T> expected = input;
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(device_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+
+        thread_unroll_kernel<ItemsPerThread, T>
+            <<<grid_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
+
+        // Reading results back
+        HIP_CHECK(hipMemcpy(output.data(),
+                            device_output,
+                            output.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        // Verifying results
+        for(size_t i = 0; i < output.size(); i++)
+        {
+            ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
+        }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<class Type>
 __global__
 void thread_store_kernel(Type* const device_input, Type* device_output)
 {
     size_t index = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    hipcub::ThreadStore<Modifier>(device_output + index, device_input[index]);
+
+    if(index % 7 == 0)
+    {
+        hipcub::ThreadStore<hipcub::STORE_DEFAULT>(device_output + index, device_input[index]);
+    }
+    else if(index % 7 == 1)
+    {
+        hipcub::ThreadStore<hipcub::STORE_WB>(device_output + index, device_input[index]);
+    }
+    else if(index % 7 == 2)
+    {
+        hipcub::ThreadStore<hipcub::STORE_CG>(device_output + index, device_input[index]);
+    }
+    else if(index % 7 == 3)
+    {
+        hipcub::ThreadStore<hipcub::STORE_CS>(device_output + index, device_input[index]);
+    }
+    else if(index % 7 == 4)
+    {
+        hipcub::ThreadStore<hipcub::STORE_WT>(device_output + index, device_input[index]);
+    }
+    else if(index % 7 == 5)
+    {
+        hipcub::ThreadStore<hipcub::STORE_VOLATILE>(device_output + index, device_input[index]);
+    }
+    else // index % 7 == 6
+    {
+        hipcub::ThreadStoreVolatilePtr(device_output + index,
+                                       device_input[index],
+                                       hipcub::Int2Type<std::is_fundamental<Type>::value>());
+    }
 }
 
 TYPED_TEST(HipcubThreadOperationTests, Store)
@@ -185,7 +322,6 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
     using T        = typename TestFixture::type;
     using native_T = test_utils::convert_to_native_t<T>;
 
-    constexpr hipcub::CacheStoreModifier Modifier = TestFixture::store_modifier;
     constexpr uint32_t block_size = 256;
     constexpr uint32_t grid_size = 128;
     constexpr uint32_t size = block_size * grid_size;
@@ -224,7 +360,7 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
             )
         );
 
-        thread_store_kernel<T, Modifier><<<grid_size, block_size>>>(device_input, device_output);
+        thread_store_kernel<T><<<grid_size, block_size>>>(device_input, device_output);
 
         // Reading results back
         HIP_CHECK(
@@ -240,6 +376,86 @@ TYPED_TEST(HipcubThreadOperationTests, Store)
         {
             ASSERT_EQ(static_cast<native_T>(output[i]), static_cast<native_T>(expected[i]));
         }
+
+        HIP_CHECK(hipFree(device_input));
+        HIP_CHECK(hipFree(device_output));
+    }
+}
+
+template<class Type, int ItemsPerThread>
+__global__
+void iterate_thread_kernel(Type* const device_input, Type* device_output)
+{
+    size_t id    = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    size_t index = id * ItemsPerThread;
+
+    if(id % 2 == 0)
+    {
+        hipcub::IterateThreadStore<0, ItemsPerThread>::Dereference(device_output + index,
+                                                                   device_input + index);
+    }
+    else
+    {
+        hipcub::IterateThreadStore<0, ItemsPerThread>::template Store<hipcub::STORE_DEFAULT>(
+            device_output + index,
+            device_input + index);
+    }
+}
+
+TYPED_TEST(HipcubThreadOperationTests, IterateStore)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T        = typename TestFixture::type;
+    using native_T = test_utils::convert_to_native_t<T>;
+
+    constexpr uint32_t block_size = 256;
+    constexpr uint32_t grid_size  = 128;
+    constexpr uint32_t ipt        = 4;
+    constexpr uint32_t size       = block_size * grid_size * ipt;
+
+    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<native_T> input_native
+            = test_utils::get_random_data<native_T>(size, 2, 100, seed_value);
+        std::vector<T> input(size);
+
+        for(size_t i = 0; i < size; i++)
+        {
+            input[i] = test_utils::convert_to_device<T>(input_native[i]);
+        }
+
+        std::vector<T> output(size);
+
+        // Calculate expected results on host
+        std::vector<T> expected = input;
+
+        // Preparing device
+        T* device_input;
+        HIP_CHECK(hipMalloc(&device_input, input.size() * sizeof(T)));
+        T* device_output;
+        HIP_CHECK(hipMalloc(&device_output, output.size() * sizeof(T)));
+
+        HIP_CHECK(
+            hipMemcpy(device_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+
+        iterate_thread_kernel<T, ipt><<<grid_size, block_size>>>(device_input, device_output);
+
+        // Reading results back
+        HIP_CHECK(hipMemcpy(output.data(),
+                            device_output,
+                            output.size() * sizeof(T),
+                            hipMemcpyDeviceToHost));
+
+        // Verifying results dereference
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
 
         HIP_CHECK(hipFree(device_input));
         HIP_CHECK(hipFree(device_output));

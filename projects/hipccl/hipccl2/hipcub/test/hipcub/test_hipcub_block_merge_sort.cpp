@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -53,7 +53,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1>,
     params<int, int, 128U, 1>,
@@ -71,8 +71,7 @@ typedef ::testing::Types<
 
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values
-    params<unsigned char, int, 512U, 2, test_utils::less, true>>
-    Params;
+    params<unsigned char, int, 512U, 2, test_utils::less, true>>;
 
 TYPED_TEST_SUITE(HipcubBlockMergeSort, Params);
 

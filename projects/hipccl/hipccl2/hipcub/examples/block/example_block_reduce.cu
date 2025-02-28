@@ -80,7 +80,7 @@ __global__ void BlockSumKernel(
     clock_t     *d_elapsed)     // Elapsed cycle count of block reduction
 {
     // Specialize BlockReduce type for our thread block
-    typedef BlockReduce<int, BLOCK_THREADS, ALGORITHM> BlockReduceT;
+    using BlockReduceT = BlockReduce<int, BLOCK_THREADS, ALGORITHM>;
 
     // Shared memory
     __shared__ typename BlockReduceT::TempStorage temp_storage;
@@ -149,9 +149,9 @@ void Test()
     int h_aggregate = Initialize(h_in, TILE_SIZE);
 
     // Initialize device arrays
-    int *d_in           = NULL;
-    int *d_out          = NULL;
-    clock_t *d_elapsed  = NULL;
+    int*     d_in      = nullptr;
+    int*     d_out     = nullptr;
+    clock_t* d_elapsed = nullptr;
     cudaMalloc((void**)&d_in,          sizeof(int) * TILE_SIZE);
     cudaMalloc((void**)&d_out,         sizeof(int) * 1);
     cudaMalloc((void**)&d_elapsed,     sizeof(clock_t));

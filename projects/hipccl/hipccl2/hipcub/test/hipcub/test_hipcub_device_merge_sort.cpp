@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,23 +51,22 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params<signed char, double, test_utils::greater>,
-                         params<int, short>,
-                         params<short, int, test_utils::greater>,
-                         params<long long, char>,
-                         params<double, unsigned int>,
-                         params<double, int, test_utils::greater>,
-                         params<float, int>,
-                         params<test_utils::half, int>,
-                         params<test_utils::half, int, test_utils::greater>,
-                         params<test_utils::bfloat16, int>,
-                         params<test_utils::bfloat16, int, test_utils::greater>,
-                         params<int, test_utils::custom_test_type<float>>,
-                         params<int, short, test_utils::less, false, true>,
+using Params = ::testing::Types<params<signed char, double, test_utils::greater>,
+                                params<int, short>,
+                                params<short, int, test_utils::greater>,
+                                params<long long, char>,
+                                params<double, unsigned int>,
+                                params<double, int, test_utils::greater>,
+                                params<float, int>,
+                                params<test_utils::half, int>,
+                                params<test_utils::half, int, test_utils::greater>,
+                                params<test_utils::bfloat16, int>,
+                                params<test_utils::bfloat16, int, test_utils::greater>,
+                                params<int, test_utils::custom_test_type<float>>,
+                                params<int, short, test_utils::less, false, true>,
 
-                         // huge sizes to check correctness of more than 1 block per batch
-                         params<float, char, test_utils::greater, true>>
-    Params;
+                                // huge sizes to check correctness of more than 1 block per batch
+                                params<float, char, test_utils::greater, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceMergeSort, Params);
 

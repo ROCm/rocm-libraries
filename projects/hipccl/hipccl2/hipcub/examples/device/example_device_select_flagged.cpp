@@ -183,8 +183,8 @@ int main(int argc, char** argv)
     fflush(stdout);
 
     // Allocate problem device arrays
-    int             *d_in = NULL;
-    unsigned char   *d_flags = NULL;
+    int*           d_in    = nullptr;
+    unsigned char* d_flags = nullptr;
 
     HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_in, sizeof(int) * num_items));
     HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_flags, sizeof(unsigned char) * num_items));
@@ -195,13 +195,13 @@ int main(int argc, char** argv)
         hipMemcpy(d_flags, h_flags, sizeof(unsigned char) * num_items, hipMemcpyHostToDevice));
 
     // Allocate device output array and num selected
-    int     *d_out            = NULL;
-    int     *d_num_selected_out   = NULL;
+    int* d_out              = nullptr;
+    int* d_num_selected_out = nullptr;
     HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_out, sizeof(int) * num_items));
     HIP_CHECK(g_allocator.DeviceAllocate((void**)&d_num_selected_out, sizeof(int)));
 
     // Allocate temporary storage
-    void            *d_temp_storage = NULL;
+    void*           d_temp_storage     = nullptr;
     size_t          temp_storage_bytes = 0;
     HIP_CHECK(hipcub::DeviceSelect::Flagged(d_temp_storage,
                                             temp_storage_bytes,

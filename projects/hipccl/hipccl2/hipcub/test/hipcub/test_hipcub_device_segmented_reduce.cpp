@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,18 +58,17 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params1<unsigned int, unsigned int, hipcub::Sum>,
-    params1<int, int, hipcub::Sum, -100, 0, 10000>,
-    params1<double, double, hipcub::Min, 1000, 0, 10000>,
-    params1<int, short, hipcub::Max, 10, 1000, 10000>,
-    params1<short, double, hipcub::Sum, 5, 1, 1000>,
-    params1<float, double, hipcub::Max, 50, 2, 10>,
-    params1<float, float, hipcub::Sum, 123, 100, 200>,
-    params1<test_utils::half, test_utils::half, hipcub::Max, 50, 2, 10>,
-    params1<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 50, 2, 10>,
-    params1<unsigned int, unsigned int, hipcub::Sum, 0, 1000, true>>
-    Params1;
+using Params1
+    = ::testing::Types<params1<unsigned int, unsigned int, hipcub::Sum>,
+                       params1<int, int, hipcub::Sum, -100, 0, 10000>,
+                       params1<double, double, hipcub::Min, 1000, 0, 10000>,
+                       params1<int, short, hipcub::Max, 10, 1000, 10000>,
+                       params1<short, double, hipcub::Sum, 5, 1, 1000>,
+                       params1<float, double, hipcub::Max, 50, 2, 10>,
+                       params1<float, float, hipcub::Sum, 123, 100, 200>,
+                       params1<test_utils::half, test_utils::half, hipcub::Max, 50, 2, 10>,
+                       params1<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 50, 2, 10>,
+                       params1<unsigned int, unsigned int, hipcub::Sum, 0, 1000, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
@@ -256,20 +255,20 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<params2<unsigned int, unsigned int>,
-                         params2<int, int, 0, 10000>,
-                         params2<double, double, 0, 10000>,
-                         params2<int, long long, 1000, 10000>,
-                         params2<float, double, 2, 10>,
-                         params2<float, float, 100, 200>,
-                         params2<unsigned int, unsigned int, 0, 1000, true>
+using Params2
+    = ::testing::Types<params2<unsigned int, unsigned int>,
+                       params2<int, int, 0, 10000>,
+                       params2<double, double, 0, 10000>,
+                       params2<int, long long, 1000, 10000>,
+                       params2<float, double, 2, 10>,
+                       params2<float, float, 100, 200>,
+                       params2<unsigned int, unsigned int, 0, 1000, true>
 #ifdef __HIP_PLATFORM_AMD__
-                         ,
-                         params2<test_utils::half, float>, // Doesn't work on NVIDIA / CUB
-                         params2<test_utils::bfloat16, float> // Doesn't work on NVIDIA / CUB
+                       ,
+                       params2<test_utils::half, float>, // Doesn't work on NVIDIA / CUB
+                       params2<test_utils::bfloat16, float> // Doesn't work on NVIDIA / CUB
 #endif
-                         >
-    Params2;
+                       >;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduce, Params2);
 
@@ -950,8 +949,9 @@ void test_argminmax_allinf(TypeParam value, TypeParam empty_value)
 }
 
 // TODO: enable for NVIDIA platform once CUB backend incorporates fix
+// Tests failed with CUB_VERSION = 200500 CUB::DeviceSegmentedReduce::Max(Min)
 #ifdef __HIP_PLATFORM_AMD__
-/// ArgMin with all +Inf should result in +Inf.
+// ArgMin with all +Inf should result in +Inf.
 TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMinInf)
 {
     test_argminmax_allinf<TypeParam, ArgMinDispatch>(
@@ -959,7 +959,7 @@ TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMinInf)
         test_utils::numeric_limits<TypeParam>::max());
 }
 
-/// ArgMax with all -Inf should result in -Inf.
+// ArgMax with all -Inf should result in -Inf.
 TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
 {
     test_argminmax_allinf<TypeParam, ArgMaxDispatch>(
@@ -1006,7 +1006,6 @@ TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
             const size_t min_segment_length = size_t{1} << 31;
             const size_t max_segment_length = std::max(min_segment_length, size);
 
-            std::random_device                    rd;
             std::default_random_engine            gen(seed_value);
             std::uniform_int_distribution<size_t> segment_length_dis(min_segment_length,
                                                                      max_segment_length);

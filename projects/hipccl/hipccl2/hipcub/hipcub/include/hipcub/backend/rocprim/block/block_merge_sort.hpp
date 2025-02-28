@@ -1,6 +1,6 @@
 /******************************************************************************
 * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -671,7 +671,6 @@ private:
   }
 };
 
-
 /**
  * @brief The BlockMergeSort class provides methods for sorting items
  *        partitioned across a CUDA thread block using a merge sorting method.
@@ -724,7 +723,7 @@ private:
  * __global__ void ExampleKernel(...)
  * {
  *     // Specialize BlockMergeSort for a 1D block of 128 threads owning 4 integer items each
- *     typedef hipcub::BlockMergeSort<int, 128, 4> BlockMergeSort;
+ *     using BlockMergeSort = hipcub::BlockMergeSort<int, 128, 4>;
  *
  *     // Allocate shared memory for BlockMergeSort
  *     __shared__ typename BlockMergeSort::TempStorage temp_storage_shuffle;
