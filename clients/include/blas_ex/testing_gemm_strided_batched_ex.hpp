@@ -25,7 +25,7 @@
 #include "frequency_monitor.hpp"
 #include "testing_common.hpp"
 
-#define DEBUG_PRINT 0
+#include <rocblas/internal/rocblas-beta.h>
 
 /* ============================================================================================ */
 template <typename Ti, typename To, typename Tc>
@@ -232,7 +232,7 @@ dD, d_type, ldd, stride_d, batch_count, compute_type, algo, solution_index, flag
 }
 
 template <typename Ti, typename To, typename Tc>
-void testing_gemm_strided_batched_ex(const Arguments& arg)
+void testing_gemm_strided_batched_ex_run(const Arguments& arg)
 {
     auto rocblas_gemm_strided_batched_ex_fn    = arg.api & c_API_FORTRAN
                                                      ? rocblas_gemm_strided_batched_ex_fortran
@@ -681,4 +681,70 @@ void testing_gemm_strided_batched_ex(const Arguments& arg)
                           rocblas_error);
         // clang-format on
     }
+}
+
+template <typename Ti, typename To, typename Tc>
+void testing_gemm_strided_batched_ex(const Arguments& arg)
+{
+    bool                     compare_solutions = arg.solution_index == -2;
+    const Arguments*         arguments         = &arg;
+    Arguments                run_arg(arg);
+    std::vector<rocblas_int> solutions_that_solve(1, 0);
+
+    rocblas_gemm_algo algo = rocblas_gemm_algo(arg.algo);
+
+    if(compare_solutions && algo == rocblas_gemm_algo_solution_index)
+    {
+        arguments = &run_arg; // override
+
+        rocblas_local_handle handle{arg};
+        CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+
+        // fetch all solutions
+        rocblas_int             solution_count = 0;
+        const rocblas_operation transA         = char2rocblas_operation(arg.transA);
+        const rocblas_operation transB         = char2rocblas_operation(arg.transB);
+        if(!arg.outofplace)
+        {
+            run_arg.ldd      = arg.ldc;
+            run_arg.d_type   = arg.c_type;
+            run_arg.stride_d = arg.stride_c;
+        }
+
+        Tc h_alpha_Tc = arg.get_alpha<Tc>();
+        Tc h_beta_Tc  = arg.get_beta<Tc>();
+
+#define GEMM_EX_SOL_ARGS                                                                           \
+    handle, transA, transB, arg.M, arg.N, arg.K, &h_alpha_Tc, nullptr, arg.a_type, arg.lda,        \
+        arg.stride_a, nullptr, arg.b_type, arg.ldb, arg.stride_b, &h_beta_Tc, nullptr, arg.c_type, \
+        arg.ldc, arg.stride_c, nullptr, run_arg.d_type, run_arg.ldd, run_arg.stride_d,             \
+        run_arg.batch_count, arg.compute_type, algo
+
+        CHECK_ROCBLAS_ERROR(rocblas_gemm_strided_batched_ex_get_solutions(
+            GEMM_EX_SOL_ARGS, rocblas_gemm_flags_none, nullptr, &solution_count));
+        solutions_that_solve.resize(solution_count);
+        if(solution_count > 0)
+        {
+            CHECK_ROCBLAS_ERROR(
+                rocblas_gemm_strided_batched_ex_get_solutions(GEMM_EX_SOL_ARGS,
+                                                              rocblas_gemm_flags_none,
+                                                              solutions_that_solve.data(),
+                                                              &solution_count));
+
+            // append default
+            solutions_that_solve.push_back(0);
+        }
+    }
+
+    for(auto sol : solutions_that_solve)
+    {
+        if(compare_solutions)
+        {
+            run_arg.solution_index = sol;
+        }
+
+        testing_gemm_strided_batched_ex_run<Ti, To, Tc>(*arguments);
+    }
+
+#undef GEMM_EX_SOL_ARGS
 }

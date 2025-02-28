@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,7 +91,8 @@ rocblas_status rocblas_gemm_strided_batched_ex_get_solutions(rocblas_handle    h
                                                    d_type,
                                                    ldd,
                                                    compute_type,
-                                                   batch_count);
+                                                   batch_count,
+                                                   true); // get_solutions
 
         if(validArgs != rocblas_status_continue)
         {

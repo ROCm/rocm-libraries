@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -87,6 +87,12 @@ public:
         // Print total number of hot iterations
         name_line << ",hot_iters";
         val_line << ", " << arg.iters;
+
+        if(arg.solution_index || arg.algo != 0)
+        {
+            name_line << ",solution_index";
+            val_line << ", " << arg.solution_index;
+        }
 
         // append performance fields
         if(gflops != ArgumentLogging::NA_value)

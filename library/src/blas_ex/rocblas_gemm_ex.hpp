@@ -224,7 +224,8 @@ inline rocblas_status rocblas_gemm_ex_arg_check(rocblas_handle    handle,
                                                 rocblas_datatype  d_type,
                                                 API_INT           ld_d,
                                                 rocblas_datatype  compute_type,
-                                                API_INT           batch_count = 1)
+                                                API_INT           batch_count   = 1,
+                                                bool              get_solutions = false)
 {
     // handle must be valid
     if(!handle)
@@ -255,11 +256,11 @@ inline rocblas_status rocblas_gemm_ex_arg_check(rocblas_handle    handle,
         return rocblas_status_continue;
 
     // pointers must be valid
-    if((k && !alpha) || !beta || !d)
+    if((k && !alpha) || !beta || (!d && !get_solutions))
         return rocblas_status_invalid_pointer;
 
     // If C is nullptr, beta must be zero
-    if(!c)
+    if(!c && !get_solutions)
     {
         switch(compute_type)
         {
@@ -293,7 +294,7 @@ inline rocblas_status rocblas_gemm_ex_arg_check(rocblas_handle    handle,
     }
 
     // If k != 0 and either A or B is nullptr, alpha must be zero
-    if(k && (!a || !b))
+    if(k && (!a || !b) && !get_solutions)
     {
         switch(compute_type)
         {

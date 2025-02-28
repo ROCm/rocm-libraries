@@ -72,4 +72,26 @@ Tests:
   transA_transB: *transA_transB_range
   outofplace: [false, true]
 
+# special form of get_solutions testing via gemm_ex harness
+- name: gemm_ex_get_solutions_custom
+  category: pre_checkin
+  function:
+  - gemm_ex
+  - gemm_batched_ex
+  - gemm_strided_batched_ex
+  M: 16
+  N: 16
+  K: 1
+  lda: 16
+  ldb: 16
+  ldc: 16
+  ldd: 16
+  batch_count: 2
+  alpha_beta: { alpha:  1, beta:  1 }
+  transA: N
+  transB: T
+  precision : *real_precisions
+  solution_index: -2 # do get solutions and repeat for all
+  algo: 1
+
 ...
