@@ -19,7 +19,6 @@
 // THE SOFTWARE.
 
 #pragma once
-#include "../../device/kernels/bank_shift.h"
 #include "stockham_gen.h"
 #include <cmath>
 
@@ -349,8 +348,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                      unsigned int width,
                                      unsigned int dt,
                                      Expression   guard,
-                                     Component    component,
-                                     bool         bank_shift)
+                                     Component    component)
     {
         if(hr == 0)
             hr = h;
@@ -361,9 +359,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             const auto tid = Parens{thread + dt + h * threads_per_transform};
             const auto idx = offset_lds + (tid + w * length / width) * lstride;
             work += Assign(l_offset, idx);
-
-            if(bank_shift)
-                work += Assign(l_offset, l_offset + l_offset / LDS_BANK_SHIFT);
 
             switch(component)
             {
@@ -388,8 +383,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                       unsigned int dt,
                                       Expression   guard,
                                       Component    component,
-                                      unsigned int cumheight,
-                                      bool         bank_shift)
+                                      unsigned int cumheight)
     {
         if(hr == 0)
             hr = h;
@@ -403,9 +397,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                 + w * cumheight)
                                    * lstride;
             work += Assign(l_offset, idx);
-
-            if(bank_shift)
-                work += Assign(l_offset, l_offset + l_offset / LDS_BANK_SHIFT);
 
             switch(component)
             {
@@ -601,7 +592,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
         body += SyncThreads();
-        body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH, false),
+        body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
                          width,
                          height,
                          ThreadGuardMode::NO_GUARD);
@@ -631,11 +622,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         float        height    = static_cast<float>(length) / width / threads_per_transform;
         unsigned int cumheight = product(factors.begin(), factors.end() - 1);
         body += SyncThreads();
-        body += add_work(
-            std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight, false),
-            width,
-            height,
-            ThreadGuardMode::GUARD_BY_IF);
+        body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
+                         width,
+                         height,
+                         ThreadGuardMode::GUARD_BY_IF);
         return f;
     }
 
@@ -688,12 +678,12 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                 // internal full lds2reg (both linear/nonlinear variants)
                 StatementList lds2reg_full;
                 lds2reg_full += SyncThreads();
-                lds2reg_full += add_work(
-                    std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH, false),
-                    width,
-                    height,
-                    ThreadGuardMode::GUARD_BY_IF,
-                    true);
+                lds2reg_full
+                    += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
+                                width,
+                                height,
+                                ThreadGuardMode::GUARD_BY_IF,
+                                true);
                 body += If{Not{lds_is_real}, lds2reg_full};
 
                 auto apply_twiddle = std::mem_fn(&StockhamKernel::apply_twiddle_generator);
@@ -729,7 +719,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                     if(!isFirstStore)
                         reg2lds_half += SyncThreads();
                     reg2lds_half += add_work(
-                        std::bind(store_lds, this, _1, _2, _3, _4, _5, component, cumheight, false),
+                        std::bind(store_lds, this, _1, _2, _3, _4, _5, component, cumheight),
                         half_width,
                         half_height,
                         ThreadGuardMode::GUARD_BY_IF);
@@ -738,7 +728,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                     half_height = static_cast<float>(length) / half_width / threads_per_transform;
                     reg2lds_half += SyncThreads();
                     reg2lds_half
-                        += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component, false),
+                        += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component),
                                     half_width,
                                     half_height,
                                     ThreadGuardMode::GUARD_BY_IF);
@@ -750,8 +740,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                 else
                     reg2lds_full += SyncThreads();
                 reg2lds_full += add_work(
-                    std::bind(
-                        store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight, false),
+                    std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                     width,
                     height,
                     ThreadGuardMode::GUARD_BY_IF);

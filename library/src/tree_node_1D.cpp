@@ -21,7 +21,6 @@
 #include "tree_node_1D.h"
 #include "../../shared/arithmetic.h"
 #include "../../shared/precision_type.h"
-#include "../device/kernels/bank_shift.h"
 #include "function_pool.h"
 #include "fuse_shim.h"
 #include "node_factory.h"
@@ -933,15 +932,7 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
         lds = 0;
     else
     {
-        // NB:
-        //   When lds conflict becomes significant enough, we can apply lds bank shift to reduce it.
-        //   One of the costs is extra lds allocation. We enable it for small pow of 2 cases on all
-        //   supported archs for now.
-        //   Bank-shift not supported in partial pass mode.
-        if(length[0] == 64 && !applyPartialPass)
-            lds = (length[0] + lds_padding) * bwd + length[0] * bwd / LDS_BANK_SHIFT;
-        else
-            lds = (length[0] + lds_padding) * bwd;
+        lds = (length[0] + lds_padding) * bwd;
     }
 }
 
