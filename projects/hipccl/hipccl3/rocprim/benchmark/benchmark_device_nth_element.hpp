@@ -32,12 +32,13 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_nth_element.hpp>
-
-#include <string>
-#include <vector>
+#include <rocprim/functional.hpp>
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 template<typename Key = int, typename Config = rocprim::default_config>
 struct device_nth_element_benchmark : public config_autotune_interface
@@ -67,9 +68,9 @@ struct device_nth_element_benchmark : public config_autotune_interface
     {
         using key_type = Key;
 
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(key_type);
-        size_t nth = 10;
+        size_t nth  = 10;
 
         if(!small_n)
         {
@@ -110,7 +111,7 @@ struct device_nth_element_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(rocprim::nth_element(d_temporary_storage,
                                            temporary_storage_bytes,
@@ -134,7 +135,7 @@ struct device_nth_element_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(rocprim::nth_element(d_temporary_storage,
                                                temporary_storage_bytes,

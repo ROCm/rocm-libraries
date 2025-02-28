@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,7 +41,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// * And the decrement operators on the reverse iterators are mapped to increments on the wrapped iterator.
 /// * Use it to iterate over the elements of a container in reverse.
 ///
-/// \tparam SourceIterator - type of the wrapped iterator.
+/// \tparam SourceIterator type of the wrapped iterator.
 template<class SourceIterator>
 class reverse_iterator;
 
@@ -241,9 +241,9 @@ constexpr reverse_iterator<SourceIterator>
 
 /// make_reverse_iterator creates a \p reverse_iterator wrapping \p source_iterator.
 ///
-/// \tparam SourceIterator - type of \p source_iterator.
+/// \tparam SourceIterator type of \p source_iterator.
 ///
-/// \param source_iterator - the iterator to wrap in the created \p reverse_iterator.
+/// \param source_iterator the iterator to wrap in the created \p reverse_iterator.
 /// \return A \p reverse_iterator that wraps \p source_iterator.
 template<class SourceIterator>
 ROCPRIM_HOST_DEVICE

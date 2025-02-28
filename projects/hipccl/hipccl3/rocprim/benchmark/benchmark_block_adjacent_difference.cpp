@@ -34,83 +34,85 @@
 #include <rocprim/block/block_adjacent_difference.hpp>
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/types.hpp>
 
-#include <algorithm>
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <stdint.h>
 #include <string>
+#include <type_traits>
 #include <vector>
-
-#include <cstdio>
-#include <cstdlib>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
-namespace rp = rocprim;
-
-template <class Benchmark,
-          unsigned int BlockSize,
-          unsigned int ItemsPerThread,
-          bool         WithTile,
-          typename... Args>
-__global__ __launch_bounds__(BlockSize) void kernel(Args ...args)
+template<typename Benchmark,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         bool         WithTile,
+         typename... Args>
+__global__ __launch_bounds__(BlockSize)
+void kernel(Args... args)
 {
     Benchmark::template run<BlockSize, ItemsPerThread, WithTile>(args...);
 }
 
 struct subtract_left
 {
-    template <unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
-    __device__ static void run(const T* d_input, T* d_output, unsigned int trials)
+    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    __device__
+    static void run(const T* d_input, T* d_output, unsigned int trials)
     {
-        const unsigned int lid = threadIdx.x;
+        const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rp::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
         __shared__ typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < trials; ++trial)
         {
             T output[ItemsPerThread];
             if(WithTile)
             {
-                adjacent_diff_t().subtract_left(input, output, rp::minus<>{}, T(123), storage);
+                adjacent_diff_t().subtract_left(input, output, rocprim::minus<>{}, T(123), storage);
             }
             else
             {
-                adjacent_diff_t().subtract_left(input, output, rp::minus<>{}, storage);
+                adjacent_diff_t().subtract_left(input, output, rocprim::minus<>{}, storage);
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
                 input[i] += output[i];
             }
-            rp::syncthreads();
+            rocprim::syncthreads();
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+        rocprim::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
 struct subtract_left_partial
 {
-    template <unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
-    __device__ static void
+    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    __device__
+    static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
     {
-        const unsigned int lid = threadIdx.x;
+        const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rp::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
         __shared__ typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
@@ -119,16 +121,25 @@ struct subtract_left_partial
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < trials; ++trial)
         {
             T output[ItemsPerThread];
             if(WithTile)
             {
-                adjacent_diff_t().subtract_left_partial(input, output, rp::minus<>{}, T(123), tile_size, storage);
+                adjacent_diff_t().subtract_left_partial(input,
+                                                        output,
+                                                        rocprim::minus<>{},
+                                                        T(123),
+                                                        tile_size,
+                                                        storage);
             }
             else
             {
-                adjacent_diff_t().subtract_left_partial(input, output, rp::minus<>{}, tile_size, storage);
+                adjacent_diff_t().subtract_left_partial(input,
+                                                        output,
+                                                        rocprim::minus<>{},
+                                                        tile_size,
+                                                        storage);
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
@@ -138,66 +149,69 @@ struct subtract_left_partial
 
             // Change the tile_size to even out the distribution
             tile_size = (tile_size + tile_size_diff) % (BlockSize * ItemsPerThread);
-            rp::syncthreads();
+            rocprim::syncthreads();
         }
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+        rocprim::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
 struct subtract_right
 {
-    template <unsigned int BlockSize,
-              unsigned int ItemsPerThread,
-              bool         WithTile,
-              typename T>
-    __device__ static void run(const T* d_input, T* d_output, unsigned int trials)
+    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    __device__
+    static void run(const T* d_input, T* d_output, unsigned int trials)
     {
-        const unsigned int lid = threadIdx.x;
+        const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rp::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
         __shared__ typename adjacent_diff_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < trials; ++trial)
         {
             T output[ItemsPerThread];
             if(WithTile)
             {
-                adjacent_diff_t().subtract_right(input, output, rp::minus<>{}, T(123), storage);
+                adjacent_diff_t().subtract_right(input,
+                                                 output,
+                                                 rocprim::minus<>{},
+                                                 T(123),
+                                                 storage);
             }
             else
             {
-                adjacent_diff_t().subtract_right(input, output, rp::minus<>{}, storage);
+                adjacent_diff_t().subtract_right(input, output, rocprim::minus<>{}, storage);
             }
 
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
                 input[i] += output[i];
             }
-            rp::syncthreads();
+            rocprim::syncthreads();
         }
 
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+        rocprim::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
 struct subtract_right_partial
 {
-    template <unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
-    __device__ static void
+    template<unsigned int BlockSize, unsigned int ItemsPerThread, bool WithTile, typename T>
+    __device__
+    static void
         run(const T* d_input, const unsigned int* tile_sizes, T* d_output, unsigned int trials)
     {
-        const unsigned int lid = threadIdx.x;
+        const unsigned int lid          = threadIdx.x;
         const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
         T input[ItemsPerThread];
-        rp::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
+        rocprim::block_load_direct_striped<BlockSize>(lid, d_input + block_offset, input);
 
-        using adjacent_diff_t = rp::block_adjacent_difference<T, BlockSize>;
+        using adjacent_diff_t = rocprim::block_adjacent_difference<T, BlockSize>;
         __shared__ typename adjacent_diff_t::storage_type storage;
 
         unsigned int tile_size = tile_sizes[blockIdx.x];
@@ -205,10 +219,14 @@ struct subtract_right_partial
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int trial = 0; trial < trials; trial++)
+        for(unsigned int trial = 0; trial < trials; ++trial)
         {
             T output[ItemsPerThread];
-            adjacent_diff_t().subtract_right_partial(input, output, rp::minus<>{}, tile_size, storage);
+            adjacent_diff_t().subtract_right_partial(input,
+                                                     output,
+                                                     rocprim::minus<>{},
+                                                     tile_size,
+                                                     storage);
 
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
@@ -216,27 +234,30 @@ struct subtract_right_partial
             }
             // Change the tile_size to even out the distribution
             tile_size = (tile_size + tile_size_diff) % (BlockSize * ItemsPerThread);
-            rp::syncthreads();
+            rocprim::syncthreads();
         }
-        rp::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
+        rocprim::block_store_direct_striped<BlockSize>(lid, d_output + block_offset, input);
     }
 };
 
-template<class Benchmark,
-         class T,
+template<typename Benchmark,
+         typename T,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
+auto run_benchmark(benchmark::State&   state,
+                   size_t              bytes,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
     -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial>::value
                         && !std::is_same<Benchmark, subtract_right_partial>::value>
 {
     // Calculate the number of elements N
     size_t N = bytes / sizeof(T);
-    
+
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto num_blocks = (N + items_per_block - 1) / items_per_block;
+    const auto     num_blocks      = (N + items_per_block - 1) / items_per_block;
     // Round up size to the next multiple of items_per_block
     const auto size = num_blocks * items_per_block;
 
@@ -249,12 +270,7 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
     HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
     HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
     HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            input.size() * sizeof(input[0]),
-            hipMemcpyHostToDevice
-        )
-    );
+        hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
 
     // HIP events creation
     hipEvent_t start, stop;
@@ -266,11 +282,14 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-            dim3(num_blocks), dim3(BlockSize), 0, stream,
-            d_input, d_output, Trials
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                           dim3(num_blocks),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           d_input,
+                           d_output,
+                           Trials);
         HIP_CHECK(hipGetLastError());
 
         // Record stop event and wait until it completes
@@ -293,13 +312,16 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
     HIP_CHECK(hipFree(d_output));
 }
 
-template<class Benchmark,
-         class T,
+template<typename Benchmark,
+         typename T,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
+auto run_benchmark(benchmark::State&   state,
+                   size_t              bytes,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
     -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial>::value
                         || std::is_same<Benchmark, subtract_right_partial>::value>
 {
@@ -307,7 +329,7 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
     size_t N = bytes / sizeof(T);
 
     static constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto num_blocks = (N + items_per_block - 1) / items_per_block;
+    const auto            num_blocks      = (N + items_per_block - 1) / items_per_block;
     // Round up size to the next multiple of items_per_block
     const auto size = num_blocks * items_per_block;
 
@@ -330,19 +352,11 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
     HIP_CHECK(hipMalloc(&d_tile_sizes, tile_sizes.size() * sizeof(tile_sizes[0])));
     HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(input[0])));
     HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            input.size() * sizeof(input[0]),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(
-        hipMemcpy(
-            d_tile_sizes, tile_sizes.data(),
-            tile_sizes.size() * sizeof(tile_sizes[0]),
-            hipMemcpyHostToDevice
-        )
-    );
+        hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_tile_sizes,
+                        tile_sizes.data(),
+                        tile_sizes.size() * sizeof(tile_sizes[0]),
+                        hipMemcpyHostToDevice));
 
     // HIP events creation
     hipEvent_t start, stop;
@@ -354,11 +368,15 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
-            dim3(num_blocks), dim3(BlockSize), 0, stream,
-            d_input, d_tile_sizes, d_output, Trials
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
+                           dim3(num_blocks),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           d_input,
+                           d_tile_sizes,
+                           d_output,
+                           Trials);
         HIP_CHECK(hipGetLastError());
 
         // Record stop event and wait until it completes
@@ -389,50 +407,49 @@ auto run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
                                     ",with_tile:" #WITH_TILE "}}")                      \
             .c_str(),                                                                   \
         run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>,                                \
-        bytes,                                                                           \
+        bytes,                                                                          \
         seed,                                                                           \
         stream)
 
-#define BENCHMARK_TYPE(type, block, with_tile)    \
-    CREATE_BENCHMARK(type, block, 1,  with_tile), \
-    CREATE_BENCHMARK(type, block, 3,  with_tile), \
-    CREATE_BENCHMARK(type, block, 4,  with_tile), \
-    CREATE_BENCHMARK(type, block, 8,  with_tile), \
-    CREATE_BENCHMARK(type, block, 16, with_tile), \
-    CREATE_BENCHMARK(type, block, 32, with_tile)
+#define BENCHMARK_TYPE(type, block, with_tile)                                                    \
+    CREATE_BENCHMARK(type, block, 1, with_tile), CREATE_BENCHMARK(type, block, 3, with_tile),     \
+        CREATE_BENCHMARK(type, block, 4, with_tile), CREATE_BENCHMARK(type, block, 8, with_tile), \
+        CREATE_BENCHMARK(type, block, 16, with_tile), CREATE_BENCHMARK(type, block, 32, with_tile)
 
-template<class Benchmark>
+template<typename Benchmark>
 void add_benchmarks(const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     size_t                                        bytes,
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
-    std::vector<benchmark::internal::Benchmark*> bs =
-    {
-        BENCHMARK_TYPE(int, 256, false),
-        BENCHMARK_TYPE(float, 256, false),
-        BENCHMARK_TYPE(int8_t, 256, false),
-        BENCHMARK_TYPE(rocprim::half, 256, false),
-        BENCHMARK_TYPE(long long, 256, false),
-        BENCHMARK_TYPE(double, 256, false)
-    };
+    std::vector<benchmark::internal::Benchmark*> bs
+        = {BENCHMARK_TYPE(int, 256, false),
+           BENCHMARK_TYPE(float, 256, false),
+           BENCHMARK_TYPE(int8_t, 256, false),
+           BENCHMARK_TYPE(rocprim::half, 256, false),
+           BENCHMARK_TYPE(long long, 256, false),
+           BENCHMARK_TYPE(double, 256, false),
+           BENCHMARK_TYPE(rocprim::int128_t, 256, false),
+           BENCHMARK_TYPE(rocprim::uint128_t, 256, false)};
 
-    if(!std::is_same<Benchmark, subtract_right_partial>::value) {
-        bs.insert(bs.end(), {
-            BENCHMARK_TYPE(int, 256, true),
-            BENCHMARK_TYPE(float, 256, true),
-            BENCHMARK_TYPE(int8_t, 256, true),
-            BENCHMARK_TYPE(rocprim::half, 256, true),
-            BENCHMARK_TYPE(long long, 256, true),
-            BENCHMARK_TYPE(double, 256, true)
-        });
+    if(!std::is_same<Benchmark, subtract_right_partial>::value)
+    {
+        bs.insert(bs.end(),
+                  {BENCHMARK_TYPE(int, 256, true),
+                   BENCHMARK_TYPE(float, 256, true),
+                   BENCHMARK_TYPE(int8_t, 256, true),
+                   BENCHMARK_TYPE(rocprim::half, 256, true),
+                   BENCHMARK_TYPE(long long, 256, true),
+                   BENCHMARK_TYPE(double, 256, true),
+                   BENCHMARK_TYPE(rocprim::int128_t, 256, true),
+                   BENCHMARK_TYPE(rocprim::uint128_t, 256, true)});
     }
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
@@ -446,8 +463,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
     const managed_seed seed(seed_type);

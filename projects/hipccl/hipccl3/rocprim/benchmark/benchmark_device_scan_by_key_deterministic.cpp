@@ -31,24 +31,28 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include <string>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
 
 #include <cstddef>
+#include <stdint.h>
+#include <string>
+#include <vector>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-#define CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, MAX_SEGMENT_LENGTH) \
-    {                                                                 \
-        const device_scan_by_key_benchmark<EXCL,                      \
-                                           int,                       \
-                                           T,                         \
-                                           SCAN_OP,                   \
-                                           rocprim::equal_to<int>,    \
-                                           MAX_SEGMENT_LENGTH,        \
-                                           true>                      \
-            instance;                                                 \
+#define CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, MAX_SEGMENT_LENGTH)  \
+    {                                                                  \
+        const device_scan_by_key_benchmark<EXCL,                       \
+                                           int,                        \
+                                           T,                          \
+                                           SCAN_OP,                    \
+                                           rocprim::equal_to<int>,     \
+                                           MAX_SEGMENT_LENGTH,         \
+                                           true>                       \
+            instance;                                                  \
         REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
@@ -77,7 +81,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -107,6 +111,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
     CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
     CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
 
     // Use manual timing
     for(auto& b : benchmarks)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,20 +60,20 @@ template<select_method SelectMethod,
          class OffsetLookbackScanState,
          class... UnaryPredicates>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().kernel_config.block_size) void partition_kernel(
-        KeyIterator             keys_input,
-        ValueIterator           values_input,
-        FlagIterator            flags,
-        OutputKeyIterator       keys_output,
-        OutputValueIterator     values_output,
-        size_t*                 selected_count,
-        size_t*                 prev_selected_count,
-        size_t                  prev_processed,
-        const size_t            total_size,
-        InequalityOp            inequality_op,
-        OffsetLookbackScanState offset_scan_state,
-        const unsigned int      number_of_blocks,
-        UnaryPredicates... predicates)
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    partition_kernel(KeyIterator             keys_input,
+                     ValueIterator           values_input,
+                     FlagIterator            flags,
+                     OutputKeyIterator       keys_output,
+                     OutputValueIterator     values_output,
+                     size_t*                 selected_count,
+                     size_t*                 prev_selected_count,
+                     size_t                  prev_processed,
+                     const size_t            total_size,
+                     InequalityOp            inequality_op,
+                     OffsetLookbackScanState offset_scan_state,
+                     const unsigned int      number_of_blocks,
+                     UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(keys_input,
                                                               values_input,
@@ -89,18 +89,6 @@ ROCPRIM_KERNEL
                                                               number_of_blocks,
                                                               predicates...);
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
-    { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::steady_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
-
 
 template<partition_subalgo SubAlgo,
          class Config,
@@ -344,9 +332,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     return hipSuccess;
 }
 
-
-#undef ROCPRIM_DETAIL_HIP_SYNC
-
 } // end of detail namespace
 
 /// \brief Two-way parallel select primitive for device level using selection predicate.
@@ -365,31 +350,31 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Relative order is preserved.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. It can be a simple
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `select_config`.
+/// \tparam InputIterator random-access iterator type of the input range. It can be a simple
 /// pointer type.
-/// \tparam SelectedOutputIterator - random-access iterator type of the selected output range. It
+/// \tparam SelectedOutputIterator random-access iterator type of the selected output range. It
 /// can be a simple pointer type.
-/// \tparam RejectedOutputIterator - random-access iterator type of the rejected output range. It
+/// \tparam RejectedOutputIterator random-access iterator type of the rejected output range. It
 /// can be a simple pointer type.
-/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam Predicate - type of the selection predicate.
+/// \tparam Predicate type of the selection predicate.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When a null
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When a null
 /// pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the select operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to select values from.
-/// \param [out] output_selected - iterator to the first element in the selected output range.
-/// \param [out] output_rejected - iterator to the first element in the rejected output range.
-/// \param [out] selected_count_output - iterator to the total number of selected values (length of
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to select values from.
+/// \param [out] output_selected iterator to the first element in the selected output range.
+/// \param [out] output_rejected iterator to the first element in the rejected output range.
+/// \param [out] selected_count_output iterator to the total number of selected values (length of
 /// \p output_selected ).
-/// \param [in] size - number of elements in the input range.
-/// \param [in] predicate - the unary selection predicate to select values into the select and reject
+/// \param [in] size number of elements in the input range.
+/// \param [in] predicate the unary selection predicate to select values into the select and reject
 /// outputs.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel launch is
 /// forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example
@@ -512,32 +497,32 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// * Values of \p flag range should be implicitly convertible to `bool` type.
 /// * The relative order of elements in both output ranges matches the input range.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `select_config`.
+/// \tparam InputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// \tparam FlagIterator random-access iterator type of the flag range. It can be
 /// a simple pointer type.
-/// \tparam SelectedOutputIterator - random-access iterator type of the selected output range. It
+/// \tparam SelectedOutputIterator random-access iterator type of the selected output range. It
 /// can be a simple pointer type.
-/// \tparam RejectedOutputIterator - random-access iterator type of the rejected output range. It
+/// \tparam RejectedOutputIterator random-access iterator type of the rejected output range. It
 /// can be a simple pointer type
-/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the select operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to select values from.
-/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to select values from.
+/// \param [in] flags iterator to the selection flag corresponding to the first element from \p
 /// input range.
-/// \param [out] output_selected - iterator to the first element in the selected output range.
-/// \param [out] output_rejected - iterator to the first element in the rejected output range.
-/// \param [out] selected_count_output - iterator to the total number of selected values (length of
+/// \param [out] output_selected iterator to the first element in the selected output range.
+/// \param [out] output_rejected iterator to the first element in the rejected output range.
+/// \param [out] selected_count_output iterator to the total number of selected values (length of
 /// \p output_selected).
-/// \param [in] size - number of elements in the input range.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] size number of elements in the input range.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example
@@ -647,27 +632,27 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// * Relative order is preserved for the elements for which the corresponding values from \p flags
 /// are \p true. Other elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `select_config`.
+/// \tparam InputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// \tparam FlagIterator random-access iterator type of the flag range. It can be
 /// a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// \tparam OutputIterator random-access iterator type of the output range. It can be
 /// a simple pointer type.
-/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the select operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to select values from.
-/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p input range.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
-/// \param [in] size - number of elements in the input range.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to select values from.
+/// \param [in] flags iterator to the selection flag corresponding to the first element from \p input range.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [out] selected_count_output iterator to the total number of selected values (length of \p output).
+/// \param [in] size number of elements in the input range.
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example
@@ -768,30 +753,30 @@ hipError_t partition(void * temporary_storage,
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `select_config`.
+/// \tparam InputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. It can be
+/// \tparam OutputIterator random-access iterator type of the output range. It can be
 /// a simple pointer type.
-/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam UnaryPredicate - type of a unary selection predicate.
+/// \tparam UnaryPredicate type of a unary selection predicate.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the select operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to select values from.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
-/// \param [in] size - number of elements in the input range.
-/// \param [in] predicate - unary function object which returns \p true if the element should be
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to select values from.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [out] selected_count_output iterator to the total number of selected values (length of \p output).
+/// \param [in] size number of elements in the input range.
+/// \param [in] predicate unary function object which returns \p true if the element should be
 /// ordered before other elements.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example
@@ -913,43 +898,43 @@ hipError_t partition(void * temporary_storage,
 /// minus the number of elements written to \p output_first_part minus the number of elements written
 /// to \p output_second_part.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `select_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `select_config`.
+/// \tparam InputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam FirstOutputIterator - random-access iterator type of the first output range. It can be
+/// \tparam FirstOutputIterator random-access iterator type of the first output range. It can be
 /// a simple pointer type.
-/// \tparam SecondOutputIterator - random-access iterator type of the second output range. It can be
+/// \tparam SecondOutputIterator random-access iterator type of the second output range. It can be
 /// a simple pointer type.
-/// \tparam UnselectedOutputIterator - random-access iterator type of the unselected output range.
+/// \tparam UnselectedOutputIterator random-access iterator type of the unselected output range.
 /// It can be a simple pointer type.
-/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
-/// \tparam FirstUnaryPredicate - type of the first unary selection predicate.
-/// \tparam SecondUnaryPredicate - type of the second unary selection predicate.
+/// \tparam FirstUnaryPredicate type of the first unary selection predicate.
+/// \tparam SecondUnaryPredicate type of the second unary selection predicate.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the select operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to select values from.
-/// \param [out] output_first_part - iterator to the first element in the first output range.
-/// \param [out] output_second_part - iterator to the first element in the second output range.
-/// \param [out] output_unselected - iterator to the first element in the unselected output range.
-/// \param [out] selected_count_output - iterator to the total number of selected values in
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to select values from.
+/// \param [out] output_first_part iterator to the first element in the first output range.
+/// \param [out] output_second_part iterator to the first element in the second output range.
+/// \param [out] output_unselected iterator to the first element in the unselected output range.
+/// \param [out] selected_count_output iterator to the total number of selected values in
 /// \p output_first_part and \p output_second_part respectively.
-/// \param [in] size - number of elements in the input range.
-/// \param [in] select_first_part_op - unary function object which returns \p true if the element
+/// \param [in] size number of elements in the input range.
+/// \param [in] select_first_part_op unary function object which returns \p true if the element
 /// should be in \p output_first_part range
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] select_second_part_op - unary function object which returns \p true if the element
+/// \param [in] select_second_part_op unary function object which returns \p true if the element
 /// should be in \p output_second_part range (given that \p select_first_part_op returned \p false)
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example

@@ -193,7 +193,7 @@ struct [[deprecated("To store non default-constructible types in local memory, u
                     "rocprim::uninitialized_array instead")]] raw_storage
 {
     // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename detail::match_fundamental_type<T>::type device_word;
+    using device_word = typename detail::match_fundamental_type<T>::type;
 
     // Backing storage
     alignas(device_word) unsigned char storage[sizeof(T)];

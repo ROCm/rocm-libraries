@@ -32,12 +32,14 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_find_end.hpp>
+#include <rocprim/functional.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
-
-#include <cstddef>
 
 template<typename Key = int, typename Config = rocprim::default_config>
 struct device_find_end_benchmark : public config_autotune_interface
@@ -87,7 +89,7 @@ struct device_find_end_benchmark : public config_autotune_interface
         {
             // Repeating similar pattern without early exits.
             keys_input[0] = 0;
-            for(size_t i = 0; i < size; i++)
+            for(size_t i = 0; i < size; ++i)
             {
                 input[i] = keys_input[i % key_size];
             }
@@ -134,7 +136,7 @@ struct device_find_end_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(rocprim::find_end(d_temporary_storage,
                                         temporary_storage_bytes,
@@ -159,7 +161,7 @@ struct device_find_end_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(rocprim::find_end(d_temporary_storage,
                                             temporary_storage_bytes,

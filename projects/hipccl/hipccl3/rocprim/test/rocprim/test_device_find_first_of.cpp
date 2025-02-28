@@ -26,6 +26,7 @@
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 #include "../common_test_header.hpp"
@@ -147,7 +148,7 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
     constexpr bool debug_synchronous     = TestFixture::debug_synchronous;
     constexpr bool use_indirect_iterator = TestFixture::use_indirect_iterator;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -205,43 +206,27 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                     }
                 }
 
-                type*        d_input;
-                key_type*    d_keys;
-                output_type* d_output;
-                HIP_CHECK(
-                    test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(*d_input)));
-                HIP_CHECK(
-                    test_common_utils::hipMallocHelper(&d_keys, keys.size() * sizeof(*d_keys)));
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, sizeof(*d_output)));
-
-                HIP_CHECK(hipMemcpy(d_input,
-                                    input.data(),
-                                    input.size() * sizeof(*d_input),
-                                    hipMemcpyHostToDevice));
-                HIP_CHECK(hipMemcpy(d_keys,
-                                    keys.data(),
-                                    keys.size() * sizeof(*d_keys),
-                                    hipMemcpyHostToDevice));
+                test_utils::device_ptr<type>        d_input(input);
+                test_utils::device_ptr<key_type>    d_keys(keys);
+                test_utils::device_ptr<output_type> d_output(1);
 
                 const auto input_it
                     = test_utils::wrap_in_indirect_iterator<use_indirect_iterator, const type>(
-                        d_input);
+                        d_input.get());
                 const auto keys_it
                     = test_utils::wrap_in_indirect_iterator<use_indirect_iterator, const key_type>(
-                        d_keys);
+                        d_keys.get());
 
                 // compare function
                 compare_function compare_op;
 
-                // temp storage
-                size_t temp_storage_size_bytes;
-                void*  d_temp_storage = nullptr;
                 // Get size of d_temp_storage
-                HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage,
+                size_t temp_storage_size_bytes;
+                HIP_CHECK(rocprim::find_first_of<config>(nullptr,
                                                          temp_storage_size_bytes,
                                                          input_it,
                                                          keys_it,
-                                                         d_output,
+                                                         d_output.get(),
                                                          input.size(),
                                                          keys.size(),
                                                          compare_op,
@@ -252,8 +237,7 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
                 // allocate temporary storage
-                HIP_CHECK(
-                    test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+                test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
                 test_utils::GraphHelper gHelper;
                 if(TestFixture::use_graphs)
@@ -262,11 +246,11 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                 }
 
                 // Run
-                HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage,
+                HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage.get(),
                                                          temp_storage_size_bytes,
                                                          input_it,
                                                          keys_it,
-                                                         d_output,
+                                                         d_output.get(),
                                                          input.size(),
                                                          keys.size(),
                                                          compare_op,
@@ -281,10 +265,8 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                 HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
-                output_type output;
-
                 // Copy output to host
-                HIP_CHECK(hipMemcpy(&output, d_output, sizeof(*d_output), hipMemcpyDeviceToHost));
+                const auto output = d_output.load()[0];
 
                 // Check
                 auto expected = std::find_first_of(input.begin(),
@@ -295,11 +277,6 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
                                 - input.begin();
 
                 ASSERT_EQ(output, expected);
-
-                HIP_CHECK(hipFree(d_input));
-                HIP_CHECK(hipFree(d_keys));
-                HIP_CHECK(hipFree(d_output));
-                HIP_CHECK(hipFree(d_temp_storage));
 
                 if(TestFixture::use_graphs)
                 {
@@ -334,8 +311,7 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 
             hipStream_t stream = 0; // default
 
-            output_type* d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, sizeof(*d_output)));
+            test_utils::device_ptr<output_type> d_output(1);
 
             const output_type expected
                 = std::min(size, static_cast<output_type>(starting_point * size));
@@ -345,15 +321,13 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 
             rocprim::equal_to<size_t> compare_op;
 
-            // temp storage
-            size_t temp_storage_size_bytes;
-            void*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage,
+            size_t temp_storage_size_bytes;
+            HIP_CHECK(rocprim::find_first_of<config>(nullptr,
                                                      temp_storage_size_bytes,
                                                      input_it,
                                                      keys_it,
-                                                     d_output,
+                                                     d_output.get(),
                                                      size,
                                                      keys_size,
                                                      compare_op,
@@ -364,14 +338,14 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             // Run
-            HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage,
+            HIP_CHECK(rocprim::find_first_of<config>(d_temp_storage.get(),
                                                      temp_storage_size_bytes,
                                                      input_it,
                                                      keys_it,
-                                                     d_output,
+                                                     d_output.get(),
                                                      size,
                                                      keys_size,
                                                      compare_op,
@@ -382,12 +356,8 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host and check
-            output_type output;
-            HIP_CHECK(hipMemcpy(&output, d_output, sizeof(*d_output), hipMemcpyDeviceToHost));
+            const auto output = d_output.load()[0];
             ASSERT_EQ(output, expected);
-
-            HIP_CHECK(hipFree(d_output));
-            HIP_CHECK(hipFree(d_temp_storage));
         }
     }
 }

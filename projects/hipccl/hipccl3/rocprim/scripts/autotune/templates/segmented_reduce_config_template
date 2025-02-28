@@ -1,0 +1,19 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEGMENTED_REDUCE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+reduce_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, ::rocprim::block_reduce_algorithm::{{ measurement['cfg']['method'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class key_type, class enable = void> struct default_segmented_reduce_config :
+default_reduce_config_base<key_type>::type { };
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class key_type> struct default_segmented_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

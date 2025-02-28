@@ -106,6 +106,9 @@ hipError_t search_n(void*          temporary_storage,
                                          debug_synchronous);
 }
 
+/// @}
+// end of group devicemodule
+
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEARCH_N_HPP_

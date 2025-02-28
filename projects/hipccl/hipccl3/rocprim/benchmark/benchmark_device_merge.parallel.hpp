@@ -33,18 +33,21 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM HIP API
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_merge.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
 #include <string>
+#include <type_traits>
 #include <vector>
-
-#include <cstdio>
-#include <cstdlib>
-
-namespace rp = rocprim;
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <memory>
+#endif
 
 template<typename Config>
 std::string config_name()
@@ -128,32 +131,32 @@ struct device_merge_benchmark : public config_autotune_interface
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                    temporary_storage_bytes,
-                                    d_keys_input1,
-                                    d_keys_input2,
-                                    d_keys_output,
-                                    size1,
-                                    size2,
-                                    compare_op,
-                                    stream,
-                                    false));
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                         temporary_storage_bytes,
+                                         d_keys_input1,
+                                         d_keys_input2,
+                                         d_keys_output,
+                                         size1,
+                                         size2,
+                                         compare_op,
+                                         stream,
+                                         false));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                        temporary_storage_bytes,
-                                        d_keys_input1,
-                                        d_keys_input2,
-                                        d_keys_output,
-                                        size1,
-                                        size2,
-                                        compare_op,
-                                        stream,
-                                        false));
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_keys_input1,
+                                             d_keys_input2,
+                                             d_keys_output,
+                                             size1,
+                                             size2,
+                                             compare_op,
+                                             stream,
+                                             false));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -167,18 +170,18 @@ struct device_merge_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                            temporary_storage_bytes,
-                                            d_keys_input1,
-                                            d_keys_input2,
-                                            d_keys_output,
-                                            size1,
-                                            size2,
-                                            compare_op,
-                                            stream,
-                                            false));
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input1,
+                                                 d_keys_input2,
+                                                 d_keys_output,
+                                                 size1,
+                                                 size2,
+                                                 compare_op,
+                                                 stream,
+                                                 false));
             }
 
             // Record stop event and wait until it completes
@@ -267,39 +270,39 @@ struct device_merge_benchmark : public config_autotune_interface
 
         void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                    temporary_storage_bytes,
-                                    d_keys_input1,
-                                    d_keys_input2,
-                                    d_keys_output,
-                                    d_values_input1,
-                                    d_values_input2,
-                                    d_values_output,
-                                    size1,
-                                    size2,
-                                    compare_op,
-                                    stream,
-                                    false));
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                         temporary_storage_bytes,
+                                         d_keys_input1,
+                                         d_keys_input2,
+                                         d_keys_output,
+                                         d_values_input1,
+                                         d_values_input2,
+                                         d_values_output,
+                                         size1,
+                                         size2,
+                                         compare_op,
+                                         stream,
+                                         false));
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                        temporary_storage_bytes,
-                                        d_keys_input1,
-                                        d_keys_input2,
-                                        d_keys_output,
-                                        d_values_input1,
-                                        d_values_input2,
-                                        d_values_output,
-                                        size1,
-                                        size2,
-                                        compare_op,
-                                        stream,
-                                        false));
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_keys_input1,
+                                             d_keys_input2,
+                                             d_keys_output,
+                                             d_values_input1,
+                                             d_values_input2,
+                                             d_values_output,
+                                             size1,
+                                             size2,
+                                             compare_op,
+                                             stream,
+                                             false));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -313,21 +316,21 @@ struct device_merge_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rp::merge<Config>(d_temporary_storage,
-                                            temporary_storage_bytes,
-                                            d_keys_input1,
-                                            d_keys_input2,
-                                            d_keys_output,
-                                            d_values_input1,
-                                            d_values_input2,
-                                            d_values_output,
-                                            size1,
-                                            size2,
-                                            compare_op,
-                                            stream,
-                                            false));
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input1,
+                                                 d_keys_input2,
+                                                 d_keys_output,
+                                                 d_values_input1,
+                                                 d_values_input2,
+                                                 d_values_output,
+                                                 size1,
+                                                 size2,
+                                                 compare_op,
+                                                 stream,
+                                                 false));
             }
 
             // Record stop event and wait until it completes

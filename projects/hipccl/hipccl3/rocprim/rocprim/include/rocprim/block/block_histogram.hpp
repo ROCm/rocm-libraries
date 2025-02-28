@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,11 +86,11 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 /// \brief The block_histogram class is a block level parallel primitive which provides methods
 /// for constructing block-wide histograms from items partitioned across threads in a block.
 ///
-/// \tparam T - the input/output type.
-/// \tparam BlockSize - the number of threads in a block.
-/// \tparam ItemsPerThread - the number of items to be processed by each thread.
-/// \tparam Bins - the number of bins within the histogram.
-/// \tparam Algorithm - selected histogram algorithm, block_histogram_algorithm::default_algorithm by default.
+/// \tparam T the input/output type.
+/// \tparam BlockSize the number of threads in a block.
+/// \tparam ItemsPerThread the number of items to be processed by each thread.
+/// \tparam Bins the number of bins within the histogram.
+/// \tparam Algorithm selected histogram algorithm, block_histogram_algorithm::default_algorithm by default.
 ///
 /// \par Overview
 /// * block_histogram has two alternative implementations: \p block_histogram_algorithm::using_atomic
@@ -152,9 +152,9 @@ public:
 
     /// \brief Initialize histogram counters to zero.
     ///
-    /// \tparam Counter - [inferred] counter type of histogram.
+    /// \tparam Counter [inferred] counter type of histogram.
     ///
-    /// \param [out] hist - histogram bin count.
+    /// \param [out] hist histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void init_histogram(Counter hist[Bins])
@@ -175,11 +175,11 @@ public:
     /// \brief Update an existing block-wide histogram. Each thread composites an array of
     /// input elements.
     ///
-    /// \tparam Counter - [inferred] counter type of histogram.
+    /// \tparam Counter [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
-    /// \param [out] hist - histogram bin count.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
+    /// \param [out] hist histogram bin count.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -235,10 +235,10 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is
     /// allocated by the method itself.
     ///
-    /// \tparam Counter - [inferred] counter type of histogram.
+    /// \tparam Counter [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
-    /// \param [out] hist - histogram bin count.
+    /// \param [in] input reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
+    /// \param [out] hist histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void composite(T (&input)[ItemsPerThread],
@@ -250,11 +250,11 @@ public:
     /// \brief Construct a new block-wide histogram. Each thread contributes an array of
     /// input elements.
     ///
-    /// \tparam Counter - [inferred] counter type of histogram.
+    /// \tparam Counter [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
-    /// \param [out] hist - histogram bin count.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
+    /// \param [out] hist histogram bin count.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -305,10 +305,10 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is
     /// allocated by the method itself.
     ///
-    /// \tparam Counter - [inferred] counter type of histogram.
+    /// \tparam Counter [inferred] counter type of histogram.
     ///
-    /// \param [in] input - reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
-    /// \param [out] hist - histogram bin count.
+    /// \param [in] input reference to an array containing thread input values. The function expects each value to satisfy 0 <= input[i] < BINS.
+    /// \param [out] hist histogram bin count.
     template<class Counter>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void histogram(T (&input)[ItemsPerThread],

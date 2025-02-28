@@ -22,6 +22,7 @@
 
 #include "rocprim/iterator/transform_iterator.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_device_ptr.hpp"
 
 #include <common_test_header.hpp>
 
@@ -43,7 +44,8 @@ struct is_odd
     // While this can be "constexpr T(const T&) const", we want to verify that
     // it compiles without the constness.
     template<class T>
-    __device__ __host__ bool operator()(T& a)
+    __device__ __host__
+    bool operator()(T& a)
     {
         return a % 2;
     }
@@ -53,7 +55,9 @@ template<int V>
 struct set_to
 {
     template<class T>
-    __device__ __host__ constexpr T operator()(const T&) const
+    __device__ __host__
+    constexpr T
+        operator()(const T&) const
     {
         return V;
     }
@@ -63,7 +67,9 @@ template<int V>
 struct increment_by
 {
     template<class T>
-    __device__ __host__ T constexpr operator()(const T& a) const
+    __device__ __host__
+    T constexpr
+        operator()(const T& a) const
     {
         return a + V;
     }
@@ -72,7 +78,9 @@ struct increment_by
 struct identity
 {
     template<class T>
-    __device__ __host__ constexpr T operator()(const T& a) const
+    __device__ __host__
+    constexpr T
+        operator()(const T& a) const
     {
         return a;
     }
@@ -215,22 +223,17 @@ TEST(RocprimPredicateIteratorTests, DeviceInplace)
     using predicate = is_odd;
     using transform = increment_by<5>;
 
-    constexpr size_t size      = 100;
-    constexpr size_t data_size = sizeof(T) * size;
+    constexpr size_t size = 100;
 
     std::vector<T> h_data(size);
     std::iota(h_data.begin(), h_data.end(), 0);
 
-    T* d_data;
-    HIP_CHECK(hipMalloc(&d_data, data_size));
-    HIP_CHECK(hipMemcpy(d_data, h_data.data(), data_size, hipMemcpyHostToDevice));
+    test_utils::device_ptr<T> d_data(h_data);
 
-    auto w_it = rocprim::make_predicate_iterator(d_data, predicate{});
+    auto w_it = rocprim::make_predicate_iterator(d_data.get(), predicate{});
 
-    HIP_CHECK(rocprim::transform(d_data, w_it, size, transform{}));
-
-    HIP_CHECK(hipMemcpy(h_data.data(), d_data, data_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(d_data));
+    HIP_CHECK(rocprim::transform(d_data.get(), w_it, size, transform{}));
+    h_data = d_data.load();
 
     for(T i = 0; i < T{size}; ++i)
     {
@@ -252,26 +255,20 @@ TEST(RocprimPredicateIteratorTests, DeviceRead)
     using predicate = is_odd;
     using transform = increment_by<5>;
 
-    constexpr size_t size      = 100;
-    constexpr size_t data_size = sizeof(T) * size;
+    constexpr size_t size = 100;
 
     std::vector<T> h_data(size);
     std::iota(h_data.begin(), h_data.end(), 0);
 
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(&d_input, data_size));
-    HIP_CHECK(hipMalloc(&d_output, data_size));
-    HIP_CHECK(hipMemcpy(d_input, h_data.data(), data_size, hipMemcpyHostToDevice));
+    test_utils::device_ptr<T> d_input(h_data);
+    test_utils::device_ptr<T> d_output(size);
 
-    auto t_it = rocprim::make_transform_iterator(d_input, transform{});
-    auto r_it = rocprim::make_predicate_iterator(t_it, d_input, predicate{});
+    auto t_it = rocprim::make_transform_iterator(d_input.get(), transform{});
+    auto r_it = rocprim::make_predicate_iterator(t_it, d_input.get(), predicate{});
 
-    HIP_CHECK(rocprim::transform(r_it, d_output, size, identity{}));
+    HIP_CHECK(rocprim::transform(r_it, d_output.get(), size, identity{}));
 
-    HIP_CHECK(hipMemcpy(h_data.data(), d_output, data_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    h_data = d_output.load();
 
     for(T i = 0; i < T{size}; ++i)
     {

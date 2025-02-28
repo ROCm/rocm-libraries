@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -364,7 +364,7 @@ private:
     /// Permuting the input by the output gives the merged ranges:
     /// | 1 3 6 7 | 0 2 4 5 |
     ///
-    /// \param m - The size of each subsequence to merge. The output consists of indices
+    /// \param m The size of each subsequence to merge. The output consists of indices
     /// for sorted ranges of 2 * m elements.
     template<bool is_incomplete, typename BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE int merge_rank(const unsigned int m,

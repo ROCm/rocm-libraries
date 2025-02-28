@@ -28,17 +28,22 @@
 
 #include <benchmark/benchmark.h>
 
-#include <rocprim/rocprim.hpp>
-
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
-#include <limits>
-#include <memory>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_partition.hpp>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/device/detail/device_config_helper.hpp>
+#endif // BENCHMARK_CONFIG_TUNING
+
+#include <array>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <algorithm>
+    #include <memory>
+#endif // BENCHMARK_CONFIG_TUNING
 
 enum class partition_probability
 {
@@ -114,9 +119,9 @@ inline const char* get_probability_name(partition_three_way_probability probabil
 constexpr int warmup_iter = 5;
 constexpr int batch_size  = 10;
 
-template<class DataType,
-         class Config                      = rocprim::default_config,
-         class FlagType                    = char,
+template<typename DataType,
+         typename Config                   = rocprim::default_config,
+         typename FlagType                 = char,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_flag_benchmark : public config_autotune_interface
 {
@@ -135,7 +140,7 @@ struct device_partition_flag_benchmark : public config_autotune_interface
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         std::vector<DataType> input = get_random_data<DataType>(size,
@@ -262,8 +267,8 @@ struct device_partition_flag_benchmark : public config_autotune_interface
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
 };
 
-template<class DataType,
-         class Config                      = rocprim::default_config,
+template<typename DataType,
+         typename Config                   = rocprim::default_config,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_predicate_benchmark : public config_autotune_interface
 {
@@ -281,7 +286,7 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         // all data types can represent [0, 127], -1 so a predicate can select all
@@ -375,9 +380,9 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
 };
 
-template<class DataType,
-         class Config                      = rocprim::default_config,
-         class FlagType                    = char,
+template<typename DataType,
+         typename Config                   = rocprim::default_config,
+         typename FlagType                 = char,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_two_way_flag_benchmark : public config_autotune_interface
 {
@@ -396,9 +401,9 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
-        
+
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 generate_limits<DataType>::min(),
                                                                 generate_limits<DataType>::max(),
@@ -528,8 +533,8 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
 };
 
-template<class DataType,
-         class Config                      = rocprim::default_config,
+template<typename DataType,
+         typename Config                   = rocprim::default_config,
          partition_probability Probability = partition_probability::tuning>
 struct device_partition_two_way_predicate_benchmark : public config_autotune_interface
 {
@@ -547,7 +552,7 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         // all data types can represent [0, 127], -1 so a predicate can select all
@@ -645,8 +650,8 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
 };
 
-template<class DataType,
-         class Config                                = rocprim::default_config,
+template<typename DataType,
+         typename Config                             = rocprim::default_config,
          partition_three_way_probability Probability = partition_three_way_probability::tuning>
 struct device_partition_three_way_benchmark : public config_autotune_interface
 {
@@ -664,7 +669,7 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
              const managed_seed& seed,
              const hipStream_t   stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         // all data types can represent [0, 127], -1 so a predicate can select all

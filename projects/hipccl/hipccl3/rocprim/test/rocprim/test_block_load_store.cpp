@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 
 // required test headers
 #include "test_utils.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 // kernel definitions
@@ -52,11 +53,11 @@ TYPED_TEST(RocprimVectorizationTests, IsVectorizable)
 
 TYPED_TEST(RocprimVectorizationTests, MatchVectorType)
 {
-    using T = typename TestFixture::params::type;
-    using U = typename TestFixture::params::vector_type;
+    using T                           = typename TestFixture::params::type;
+    using U                           = typename TestFixture::params::vector_type;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    typedef typename rocprim::detail::match_vector_type<T, items_per_thread>::type Vector;
-    bool input = std::is_same<Vector, U>::value;
+    using Vector = typename rocprim::detail::match_vector_type<T, items_per_thread>::type;
+    bool input   = std::is_same<Vector, U>::value;
     ASSERT_TRUE(input);
 }
 

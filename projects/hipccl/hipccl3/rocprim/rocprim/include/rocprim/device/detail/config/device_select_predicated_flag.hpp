@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,9 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SELECT_PREDICATED_FLAG_HPP_
 #define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SELECT_PREDICATED_FLAG_HPP_
 
-#include "../../../type_traits.hpp"
+#include "../../../config.hpp"
+#include "../../../type_traits_interface.hpp"
+#include "../../config_types.hpp"
 #include "../device_config_helper.hpp"
 
 #include <type_traits>
@@ -41,6 +43,17 @@ namespace detail
 
 template<unsigned int arch, class data_type, class flag_type, class enable = void>
 struct default_select_predicated_flag_config : default_partition_config_base<data_type, false>::type
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<256, 4>
 {};
 
 // Based on data_type = double, flag_type = int64_t
@@ -87,6 +100,17 @@ struct default_select_predicated_flag_config<
     : select_config<512, 4>
 {};
 
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<256, 4>
+{};
+
 // Based on data_type = float, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -131,6 +155,17 @@ struct default_select_predicated_flag_config<
     : select_config<512, 4>
 {};
 
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -139,7 +174,7 @@ struct default_select_predicated_flag_config<
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
-    : select_config<512, 4>
+    : select_config<512, 8>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int
@@ -161,7 +196,7 @@ struct default_select_predicated_flag_config<
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<512, 8>
+    : select_config<192, 25>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int8_t
@@ -172,6 +207,77 @@ struct default_select_predicated_flag_config<
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 16>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
@@ -221,6 +327,18 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 4>
 {};
 
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -266,6 +384,18 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 4>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
@@ -315,6 +445,17 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 16>
 {};
 
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1030),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<256, 4>
+{};
+
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -357,6 +498,17 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
     : select_config<512, 16>
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<512, 4>
 {};
 
 // Based on data_type = double, flag_type = int64_t
@@ -403,6 +555,17 @@ struct default_select_predicated_flag_config<
     : select_config<512, 8>
 {};
 
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<512, 4>
+{};
+
 // Based on data_type = float, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -447,6 +610,17 @@ struct default_select_predicated_flag_config<
     : select_config<192, 12>
 {};
 
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<512, 4>
+{};
+
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -477,7 +651,7 @@ struct default_select_predicated_flag_config<
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<384, 18>
+    : select_config<512, 16>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int8_t
@@ -487,7 +661,78 @@ struct default_select_predicated_flag_config<
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
-                      && (sizeof(flag_type) <= 1))>> : select_config<512, 20>
+                      && (sizeof(flag_type) <= 1))>> : select_config<192, 22>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<512, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<512, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<512, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<512, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<512, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<512, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
@@ -537,6 +782,18 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 8>
 {};
 
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<512, 4>
+{};
+
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -582,6 +839,18 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<192, 12>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<512, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
@@ -631,6 +900,17 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<512, 20>
 {};
 
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx1100),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<512, 4>
+{};
+
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -673,6 +953,17 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
     : select_config<512, 20>
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
 {};
 
 // Based on data_type = double, flag_type = int64_t
@@ -719,6 +1010,17 @@ struct default_select_predicated_flag_config<
     : select_config<256, 7>
 {};
 
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = float, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -763,6 +1065,17 @@ struct default_select_predicated_flag_config<
     : select_config<256, 11>
 {};
 
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -804,6 +1117,77 @@ struct default_select_predicated_flag_config<
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 3>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
@@ -853,6 +1237,18 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 7>
 {};
 
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -898,6 +1294,18 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 11>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
@@ -947,6 +1355,17 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
 {};
 
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx906),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -991,6 +1410,17 @@ struct default_select_predicated_flag_config<
     : select_config<192, 24>
 {};
 
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = double, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1033,6 +1463,17 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                       && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1))>>
     : select_config<128, 7>
+{};
+
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
 {};
 
 // Based on data_type = float, flag_type = int64_t
@@ -1079,6 +1520,17 @@ struct default_select_predicated_flag_config<
     : select_config<256, 11>
 {};
 
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1119,7 +1571,78 @@ struct default_select_predicated_flag_config<
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
-                      && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 24>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<128, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
@@ -1169,6 +1692,18 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<128, 7>
 {};
 
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1214,6 +1749,18 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 11>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
@@ -1263,6 +1810,17 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
 {};
 
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx908),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1305,6 +1863,472 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
     : select_config<256, 24>
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<128, 4>
+{};
+
+// Based on data_type = double, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
+                      && (sizeof(flag_type) > 4))>> : select_config<192, 4>
+{};
+
+// Based on data_type = double, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
+                      && (sizeof(flag_type) > 2))>> : select_config<512, 5>
+{};
+
+// Based on data_type = double, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
+                      && (sizeof(flag_type) > 1))>> : select_config<192, 4>
+{};
+
+// Based on data_type = double, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
+// Based on data_type = float, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
+                      && (sizeof(flag_type) > 4))>> : select_config<192, 5>
+{};
+
+// Based on data_type = float, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
+                      && (sizeof(flag_type) > 2))>> : select_config<256, 6>
+{};
+
+// Based on data_type = float, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
+                      && (sizeof(flag_type) > 1))>> : select_config<192, 10>
+{};
+
+// Based on data_type = float, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1))>>
+    : select_config<256, 7>
+{};
+
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = rocprim::half, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<256, 6>
+{};
+
+// Based on data_type = rocprim::half, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<256, 10>
+{};
+
+// Based on data_type = rocprim::half, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<256, 20>
+{};
+
+// Based on data_type = rocprim::half, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 20>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<128, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 1))>> : select_config<192, 5>
+{};
+
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = int, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<192, 5>
+{};
+
+// Based on data_type = int, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<256, 6>
+{};
+
+// Based on data_type = int, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<192, 10>
+{};
+
+// Based on data_type = int, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 1))>> : select_config<192, 10>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
+// Based on data_type = short, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<256, 6>
+{};
+
+// Based on data_type = short, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<256, 10>
+{};
+
+// Based on data_type = short, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<256, 20>
+{};
+
+// Based on data_type = short, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 20>
+{};
+
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
+// Based on data_type = int8_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 8)
+                      && (sizeof(flag_type) > 4))>> : select_config<192, 5>
+{};
+
+// Based on data_type = int8_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 4)
+                      && (sizeof(flag_type) > 2))>> : select_config<256, 12>
+{};
+
+// Based on data_type = int8_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 2)
+                      && (sizeof(flag_type) > 1))>> : select_config<192, 20>
+{};
+
+// Based on data_type = int8_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
+    : select_config<256, 24>
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
 {};
 
 // Based on data_type = double, flag_type = int64_t
@@ -1351,6 +2375,17 @@ struct default_select_predicated_flag_config<
     : select_config<128, 7>
 {};
 
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = float, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1395,6 +2430,17 @@ struct default_select_predicated_flag_config<
     : select_config<256, 11>
 {};
 
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1435,7 +2481,78 @@ struct default_select_predicated_flag_config<
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
-                      && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
+                      && (sizeof(flag_type) <= 1))>> : select_config<256, 24>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<256, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<128, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<128, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
@@ -1485,6 +2602,18 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<128, 7>
 {};
 
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
+{};
+
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1530,6 +2659,18 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 11>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<192, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
@@ -1579,6 +2720,17 @@ struct default_select_predicated_flag_config<
                       && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
 {};
 
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::unknown),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<192, 4>
+{};
+
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
@@ -1621,322 +2773,461 @@ struct default_select_predicated_flag_config<
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
     : select_config<256, 24>
+{};
+
+// Based on data_type = double, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
+                      && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<384, 4>
 {};
 
 // Based on data_type = double, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                       && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 8)
-                      && (sizeof(flag_type) > 4))>> : select_config<128, 6>
+                      && (sizeof(flag_type) > 4))>> : select_config<512, 7>
 {};
 
 // Based on data_type = double, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                       && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 4)
-                      && (sizeof(flag_type) > 2))>> : select_config<128, 6>
+                      && (sizeof(flag_type) > 2))>> : select_config<512, 7>
 {};
 
 // Based on data_type = double, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                       && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 2)
-                      && (sizeof(flag_type) > 1))>> : select_config<128, 6>
+                      && (sizeof(flag_type) > 1))>> : select_config<512, 7>
 {};
 
 // Based on data_type = double, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 8)
                       && (sizeof(data_type) > 4) && (sizeof(flag_type) <= 1))>>
-    : select_config<128, 7>
+    : select_config<512, 7>
+{};
+
+// Based on data_type = float, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
+                      && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<384, 4>
 {};
 
 // Based on data_type = float, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                       && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 8)
-                      && (sizeof(flag_type) > 4))>> : select_config<256, 6>
+                      && (sizeof(flag_type) > 4))>> : select_config<512, 7>
 {};
 
 // Based on data_type = float, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                       && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 4)
-                      && (sizeof(flag_type) > 2))>> : select_config<128, 11>
+                      && (sizeof(flag_type) > 2))>> : select_config<512, 15>
 {};
 
 // Based on data_type = float, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                       && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 2)
-                      && (sizeof(flag_type) > 1))>> : select_config<256, 10>
+                      && (sizeof(flag_type) > 1))>> : select_config<512, 15>
 {};
 
 // Based on data_type = float, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 4)
                       && (sizeof(data_type) > 2) && (sizeof(flag_type) <= 1))>>
-    : select_config<256, 11>
+    : select_config<512, 15>
+{};
+
+// Based on data_type = rocprim::half, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<384, 4>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
-    : select_config<256, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
-    : select_config<256, 12>
+    : select_config<512, 14>
 {};
 
 // Based on data_type = rocprim::half, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<512, 18>
+    : select_config<512, 30>
 {};
 
 // Based on data_type = rocprim::half, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) <= 2)
-                      && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
+                      && (sizeof(flag_type) <= 1))>> : select_config<512, 28>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<384, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int64_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
+    : select_config<384, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
+    : select_config<384, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = short
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
+    : select_config<384, 4>
+{};
+
+// Based on data_type = rocprim::int128_t, flag_type = int8_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 16) && (sizeof(data_type) > 8)
+                      && (sizeof(flag_type) <= 1))>> : select_config<384, 4>
+{};
+
+// Based on data_type = int64_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<384, 4>
 {};
 
 // Based on data_type = int64_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
                       && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
-    : select_config<128, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = int64_t, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
                       && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
-    : select_config<128, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = int64_t, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<128, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = int64_t, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 8) && (sizeof(data_type) > 4)
-                      && (sizeof(flag_type) <= 1))>> : select_config<128, 7>
+                      && (sizeof(flag_type) <= 1))>> : select_config<512, 7>
+{};
+
+// Based on data_type = int, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<384, 4>
 {};
 
 // Based on data_type = int, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
-    : select_config<256, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = int, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
-    : select_config<128, 11>
+    : select_config<512, 15>
 {};
 
 // Based on data_type = int, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<256, 10>
+    : select_config<512, 14>
 {};
 
 // Based on data_type = int, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 4) && (sizeof(data_type) > 2)
-                      && (sizeof(flag_type) <= 1))>> : select_config<256, 11>
+                      && (sizeof(flag_type) <= 1))>> : select_config<512, 15>
+{};
+
+// Based on data_type = short, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
+                      && (sizeof(flag_type) <= 16) && (sizeof(flag_type) > 8))>>
+    : select_config<384, 4>
 {};
 
 // Based on data_type = short, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
                       && (sizeof(flag_type) <= 8) && (sizeof(flag_type) > 4))>>
-    : select_config<256, 6>
+    : select_config<512, 7>
 {};
 
 // Based on data_type = short, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
                       && (sizeof(flag_type) <= 4) && (sizeof(flag_type) > 2))>>
-    : select_config<256, 12>
+    : select_config<512, 14>
 {};
 
 // Based on data_type = short, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
                       && (sizeof(flag_type) <= 2) && (sizeof(flag_type) > 1))>>
-    : select_config<512, 18>
+    : select_config<512, 30>
 {};
 
 // Based on data_type = short, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 2) && (sizeof(data_type) > 1)
-                      && (sizeof(flag_type) <= 1))>> : select_config<256, 18>
+                      && (sizeof(flag_type) <= 1))>> : select_config<512, 28>
+{};
+
+// Based on data_type = int8_t, flag_type = rocprim::int128_t
+template<class data_type, class flag_type>
+struct default_select_predicated_flag_config<
+    static_cast<unsigned int>(target_arch::gfx942),
+    data_type,
+    flag_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
+                      && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 16)
+                      && (sizeof(flag_type) > 8))>> : select_config<384, 4>
 {};
 
 // Based on data_type = int8_t, flag_type = int64_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 8)
-                      && (sizeof(flag_type) > 4))>> : select_config<256, 6>
+                      && (sizeof(flag_type) > 4))>> : select_config<512, 7>
 {};
 
 // Based on data_type = int8_t, flag_type = int
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 4)
-                      && (sizeof(flag_type) > 2))>> : select_config<256, 11>
+                      && (sizeof(flag_type) > 2))>> : select_config<512, 15>
 {};
 
 // Based on data_type = int8_t, flag_type = short
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 2)
-                      && (sizeof(flag_type) > 1))>> : select_config<256, 24>
+                      && (sizeof(flag_type) > 1))>> : select_config<512, 28>
 {};
 
 // Based on data_type = int8_t, flag_type = int8_t
 template<class data_type, class flag_type>
 struct default_select_predicated_flag_config<
-    static_cast<unsigned int>(target_arch::gfx90a),
+    static_cast<unsigned int>(target_arch::gfx942),
     data_type,
     flag_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<data_type>::value)
                       && (sizeof(data_type) <= 1) && (sizeof(flag_type) <= 1))>>
-    : select_config<256, 24>
+    : select_config<512, 24>
 {};
 
 } // end namespace detail

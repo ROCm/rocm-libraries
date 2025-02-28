@@ -30,9 +30,17 @@
 // HIP
 #include <hip/hip_runtime.h>
 
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/types.hpp>
+#endif
+
 // C++ Standard Library
+#include <cstddef>
 #include <string>
 #include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
@@ -115,6 +123,8 @@ int main(int argc, char* argv[])
     CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::half)
     CREATE_ADJACENT_FIND_BENCHMARKS(float)
     CREATE_ADJACENT_FIND_BENCHMARKS(double)
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::int128_t)
+    CREATE_ADJACENT_FIND_BENCHMARKS(rocprim::uint128_t)
     // Custom types
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_float2)
     CREATE_ADJACENT_FIND_BENCHMARKS(custom_double2)

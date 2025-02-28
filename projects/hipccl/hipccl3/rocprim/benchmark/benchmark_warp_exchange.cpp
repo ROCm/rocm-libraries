@@ -29,16 +29,17 @@
 
 // HIP API
 #include <hip/hip_runtime.h>
+
+#include <rocprim/config.hpp>
 #include <rocprim/device/config_types.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/types.hpp>
 #include <rocprim/warp/warp_exchange.hpp>
 
-#include <iostream>
-#include <limits>
+#include <cstddef>
 #include <string>
+#include <type_traits>
 #include <vector>
-
-#include <cstdio>
-#include <cstdlib>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
@@ -47,8 +48,8 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 struct BlockedToStripedOp
 {
     template<
-        class warp_exchange_type,
-        class T,
+        typename warp_exchange_type,
+        typename T,
         unsigned int ItemsPerThread
     >
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -63,8 +64,8 @@ struct BlockedToStripedOp
 struct StripedToBlockedOp
 {
     template<
-        class warp_exchange_type,
-        class T,
+        typename warp_exchange_type,
+        typename T,
         unsigned int ItemsPerThread
     >
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -79,8 +80,8 @@ struct StripedToBlockedOp
 struct BlockedToStripedShuffleOp
 {
     template<
-        class warp_exchange_type,
-        class T,
+        typename warp_exchange_type,
+        typename T,
         unsigned int ItemsPerThread
     >
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -95,8 +96,8 @@ struct BlockedToStripedShuffleOp
 struct StripedToBlockedShuffleOp
 {
     template<
-        class warp_exchange_type,
-        class T,
+        typename warp_exchange_type,
+        typename T,
         unsigned int ItemsPerThread
     >
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
@@ -110,12 +111,7 @@ struct StripedToBlockedShuffleOp
 
 struct ScatterToStripedOp
 {
-    template<
-        class T,
-        class OffsetT,
-        class warp_exchange_type,
-        unsigned int ItemsPerThread
-    >
+    template<typename T, typename OffsetT, typename warp_exchange_type, unsigned int ItemsPerThread>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void operator()(warp_exchange_type warp_exchange,
                     T (&thread_data)[ItemsPerThread],
@@ -129,16 +125,17 @@ struct ScatterToStripedOp
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
-         class Op,
-         class T>
-__device__ auto warp_exchange_benchmark(T* d_output, unsigned int trials)
+         typename Op,
+         typename T>
+__device__
+auto warp_exchange_benchmark(T* d_output, unsigned int trials)
     -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
                         && !std::is_same<Op, ScatterToStripedOp>::value>
 {
     T thread_data[ItemsPerThread];
 
     ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         // generate unique value each data-element
         thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
@@ -146,103 +143,105 @@ __device__ auto warp_exchange_benchmark(T* d_output, unsigned int trials)
 
     using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
     constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
+    const unsigned int warp_id = threadIdx.x / LogicalWarpSize;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
-    for(unsigned int i = 0; i < trials; i++)
+    for(unsigned int i = 0; i < trials; ++i)
     {
         Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
         ::rocprim::wave_barrier();
     }
 
     ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
-        d_output[global_idx] = thread_data[i];
+        d_output[global_idx]          = thread_data[i];
     }
 }
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
-         class Op,
-         class T>
-__device__ auto warp_exchange_benchmark(T* d_output, unsigned int trials)
+         typename Op,
+         typename T>
+__device__
+auto warp_exchange_benchmark(T* d_output, unsigned int trials)
     -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
                         && std::is_same<Op, ScatterToStripedOp>::value>
 {
-    T thread_data[ItemsPerThread];
-    unsigned int thread_ranks[ItemsPerThread];
+    T                      thread_data[ItemsPerThread];
+    unsigned int           thread_ranks[ItemsPerThread];
     constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
     const unsigned int     warp_id        = threadIdx.x / LogicalWarpSize;
     const unsigned int     lane_id        = threadIdx.x % LogicalWarpSize;
 
     ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         // generate unique value each data-element
         thread_data[i] = static_cast<T>(threadIdx.x * ItemsPerThread + i);
         // generate unique destination location for each data-element
         const unsigned int s_lane_id = i % 2 == 0 ? LogicalWarpSize - 1 - lane_id : lane_id;
-        thread_ranks[i] = s_lane_id*ItemsPerThread+i; // scatter values in warp across whole storage
+        thread_ranks[i]
+            = s_lane_id * ItemsPerThread + i; // scatter values in warp across whole storage
     }
 
     using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
 
     ROCPRIM_NO_UNROLL
-    for(unsigned int i = 0; i < trials; i++)
+    for(unsigned int i = 0; i < trials; ++i)
     {
         Op{}(warp_exchange_type(), thread_data, thread_ranks, storage[warp_id]);
         ::rocprim::wave_barrier();
     }
 
     ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         const unsigned int global_idx = (BlockSize * blockIdx.x + threadIdx.x) * ItemsPerThread + i;
-        d_output[global_idx] = thread_data[i];
+        d_output[global_idx]          = thread_data[i];
     }
 }
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
-         class Op,
-         class T>
-__device__ auto warp_exchange_benchmark(T* /*d_output*/, unsigned int /*trials*/)
+         typename Op,
+         typename T>
+__device__
+auto warp_exchange_benchmark(T* /*d_output*/, unsigned int /*trials*/)
     -> std::enable_if_t<!device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
-         class Op,
-         class T>
-__global__ __launch_bounds__(BlockSize) void warp_exchange_kernel(T* d_output, unsigned int trials)
+         typename Op,
+         typename T>
+__global__ __launch_bounds__(BlockSize)
+void warp_exchange_kernel(T* d_output, unsigned int trials)
 {
     warp_exchange_benchmark<BlockSize, ItemsPerThread, LogicalWarpSize, Op>(d_output, trials);
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
+template<typename T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int LogicalWarpSize,
+         typename Op>
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
-    // Calculate the number of elements 
+    // Calculate the number of elements
     size_t N = bytes / sizeof(T);
 
-    constexpr unsigned int trials = 200;
+    constexpr unsigned int trials          = 200;
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int size = items_per_block * ((N + items_per_block - 1) / items_per_block);
+    const unsigned int     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-    T * d_output;
+    T* d_output;
     HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
 
     // HIP events creation
@@ -288,7 +287,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
                                  stream,                                                          \
                                  bytes)
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
@@ -301,8 +300,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
@@ -351,7 +350,77 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(int, 256, 4, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(int, 256, 4, 32, ScatterToStripedOp),
         CREATE_BENCHMARK(int, 256, 16, 16, ScatterToStripedOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, ScatterToStripedOp)};
+        CREATE_BENCHMARK(int, 256, 16, 32, ScatterToStripedOp),
+
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, BlockedToStripedOp),
+
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, StripedToBlockedOp),
+
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, BlockedToStripedShuffleOp),
+
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, StripedToBlockedShuffleOp),
+
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, ScatterToStripedOp),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, BlockedToStripedOp),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, StripedToBlockedOp),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, BlockedToStripedShuffleOp),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, StripedToBlockedShuffleOp),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, ScatterToStripedOp)};
 
     int hip_device = 0;
     HIP_CHECK(::rocprim::detail::get_device_from_stream(stream, hip_device));
@@ -380,12 +449,50 @@ int main(int argc, char *argv[])
 
             CREATE_BENCHMARK(int, 256, 1, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(int, 256, 4, 64, ScatterToStripedOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, ScatterToStripedOp)};
-        benchmarks.insert(
-            benchmarks.end(),
-            additional_benchmarks.begin(),
-            additional_benchmarks.end()
-        );
+            CREATE_BENCHMARK(int, 256, 16, 64, ScatterToStripedOp),
+
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, BlockedToStripedOp),
+
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, StripedToBlockedOp),
+
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, BlockedToStripedShuffleOp),
+
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, StripedToBlockedShuffleOp),
+
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, ScatterToStripedOp),
+
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, BlockedToStripedOp),
+
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, StripedToBlockedOp),
+
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, BlockedToStripedShuffleOp),
+
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, StripedToBlockedShuffleOp),
+
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, ScatterToStripedOp)};
+        benchmarks.insert(benchmarks.end(),
+                          additional_benchmarks.begin(),
+                          additional_benchmarks.end());
     }
 
     // Use manual timing
@@ -398,7 +505,7 @@ int main(int argc, char *argv[])
     // Force number of iterations
     if(trials > 0)
     {
-        for (auto& b : benchmarks)
+        for(auto& b : benchmarks)
         {
             b->Iterations(trials);
         }

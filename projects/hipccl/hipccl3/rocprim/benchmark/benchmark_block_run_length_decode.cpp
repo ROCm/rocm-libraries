@@ -28,26 +28,30 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_run_length_decode.hpp>
 #include <rocprim/block/block_store_func.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
 
 #include <chrono>
-#include <random>
+#include <cstddef>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-template<class ItemT,
-         class OffsetT,
+template<typename ItemT,
+         typename OffsetT,
          unsigned BlockSize,
          unsigned RunsPerThread,
          unsigned DecodedItemsPerThread,
          unsigned Trials>
-__global__
-    __launch_bounds__(BlockSize) void block_run_length_decode_kernel(const ItemT*   d_run_items,
-                                                                     const OffsetT* d_run_offsets,
-                                                                     ItemT*         d_decoded_items,
-                                                                     bool enable_store = false)
+__global__ __launch_bounds__(BlockSize)
+void block_run_length_decode_kernel(const ItemT*   d_run_items,
+                                    const OffsetT* d_run_offsets,
+                                    ItemT*         d_decoded_items,
+                                    bool           enable_store = false)
 {
     using BlockRunLengthDecodeT
         = rocprim::block_run_length_decode<ItemT, BlockSize, RunsPerThread, DecodedItemsPerThread>;
@@ -86,18 +90,21 @@ __global__
     }
 }
 
-template<class ItemT,
-         class OffsetT,
+template<typename ItemT,
+         typename OffsetT,
          unsigned MinRunLength,
          unsigned MaxRunLength,
          unsigned BlockSize,
          unsigned RunsPerThread,
          unsigned DecodedItemsPerThread,
          unsigned Trials = 100>
-void run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
+void run_benchmark(benchmark::State&   state,
+                   size_t              bytes,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     // Calculate the number of elements N
-    size_t N = bytes / sizeof(ItemT);
+    size_t         N               = bytes / sizeof(ItemT);
     constexpr auto runs_per_block  = BlockSize * RunsPerThread;
     const auto     target_num_runs = 2 * N / (MinRunLength + MaxRunLength);
     const auto     num_runs
@@ -107,11 +114,11 @@ void run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
     std::vector<OffsetT> run_offsets(num_runs + 1);
 
     engine_type prng(seed.get_0());
-    using ItemDistribution = std::conditional_t<std::is_integral<ItemT>::value,
-                                                std::uniform_int_distribution<ItemT>,
+    using ItemDistribution = std::conditional_t<rocprim::is_integral<ItemT>::value,
+                                                uniform_int_distribution<ItemT>,
                                                 std::uniform_real_distribution<ItemT>>;
-    ItemDistribution                       run_item_dist(0, 100);
-    std::uniform_int_distribution<OffsetT> run_length_dist(MinRunLength, MaxRunLength);
+    ItemDistribution                  run_item_dist(0, 100);
+    uniform_int_distribution<OffsetT> run_length_dist(MinRunLength, MaxRunLength);
 
     for(size_t i = 0; i < num_runs; ++i)
     {
@@ -182,7 +189,7 @@ void run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
                                   ",run_per_thread:" #RPT ",decoded_items_per_thread:" #DIPT "}}") \
             .c_str(),                                                                              \
         &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>,                                       \
-        bytes,                                                                                      \
+        bytes,                                                                                     \
         seed,                                                                                      \
         stream)
 
@@ -200,7 +207,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -230,7 +237,23 @@ int main(int argc, char* argv[])
         CREATE_BENCHMARK(double, long long, 1, 100, 128, 2, 4),
         CREATE_BENCHMARK(double, long long, 1, 500, 128, 2, 4),
         CREATE_BENCHMARK(double, long long, 1, 1000, 128, 2, 4),
-        CREATE_BENCHMARK(double, long long, 1, 5000, 128, 2, 4)};
+        CREATE_BENCHMARK(double, long long, 1, 5000, 128, 2, 4),
+
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 10, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 50, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 100, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 500, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 1000, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t, 1, 5000, 128, 2, 4),
+
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 10, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 50, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 100, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 500, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 1000, 128, 2, 4),
+        CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t, 1, 5000, 128, 2, 4)};
 
     // Use manual timing
     for(auto& b : benchmarks)

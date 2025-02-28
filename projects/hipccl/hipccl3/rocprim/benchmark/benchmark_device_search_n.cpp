@@ -21,6 +21,19 @@
 // SOFTWARE.
 
 #include "benchmark_device_search_n.parallel.hpp"
+#include "benchmark_utils.hpp"
+// CmdParser
+#include "cmdparser.hpp"
+
+// Google Benchmark
+#include <benchmark/benchmark.h>
+
+// HIP API
+#include <hip/hip_runtime.h>
+
+#include <cstddef>
+#include <string>
+#include <vector>
 
 int main(int argc, char* argv[])
 {

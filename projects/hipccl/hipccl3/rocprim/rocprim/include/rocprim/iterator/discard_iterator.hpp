@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -78,7 +78,7 @@ public:
 
     /// \brief Creates a new discard_iterator.
     ///
-    /// \param index - optional index of discard iterator (default = 0).
+    /// \param index optional index of discard iterator (default = 0).
     ROCPRIM_HOST_DEVICE inline
     discard_iterator(size_t index = 0)
         : index_(index)
@@ -226,7 +226,7 @@ operator+(typename discard_iterator::difference_type distance,
 /// make_discard_iterator creates a discard_iterator using optional
 /// index parameter \p index.
 ///
-/// \param index - optional index of discard iterator (default = 0).
+/// \param index optional index of discard iterator (default = 0).
 /// \return A new discard_iterator object.
 ROCPRIM_HOST_DEVICE inline
 discard_iterator

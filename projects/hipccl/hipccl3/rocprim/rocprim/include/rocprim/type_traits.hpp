@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,94 +23,18 @@
 
 #include "config.hpp"
 #include "functional.hpp"
-#include "types.hpp"
+
+#include "type_traits_interface.hpp"
 
 #include "types/tuple.hpp"
 
 #include <functional>
-#include <type_traits>
 #include <utility>
 
 /// \addtogroup utilsmodule_typetraits
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
-
-/// \brief Extension of `std::is_floating_point`, which includes support for \ref rocprim::half and \ref rocprim::bfloat16.
-template<class T>
-struct is_floating_point
-    : std::integral_constant<
-        bool,
-        std::is_floating_point<T>::value ||
-        std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value ||
-        std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-    > {};
-
-/// \brief Extension of `std::is_integral`, which includes support for 128-bit integers.
-template<class T>
-struct is_integral
-    : std::integral_constant<
-          bool,
-          std::is_integral<T>::value
-              || std::is_same<::rocprim::int128_t, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::uint128_t, typename std::remove_cv<T>::type>::value>
-{};
-
-/// \brief Extension of `std::is_arithmetic`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
-template<class T>
-struct is_arithmetic
-    : std::integral_constant<
-          bool,
-          std::is_arithmetic<T>::value
-              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::int128_t, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::uint128_t, typename std::remove_cv<T>::type>::value>
-{};
-
-/// \brief Extension of `std::is_fundamental`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
-template<class T>
-struct is_fundamental
-    : std::integral_constant<
-          bool,
-          std::is_fundamental<T>::value
-              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::int128_t, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::uint128_t, typename std::remove_cv<T>::type>::value>
-{};
-
-/// \brief Extension of `std::is_unsigned`, which includes support for 128-bit integers.
-template<class T>
-struct is_unsigned
-    : std::integral_constant<
-          bool,
-          std::is_unsigned<T>::value
-              || std::is_same<::rocprim::uint128_t, typename std::remove_cv<T>::type>::value>
-{};
-
-/// \brief Extension of `std::is_signed`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
-template<class T>
-struct is_signed
-    : std::integral_constant<
-          bool,
-          std::is_signed<T>::value
-              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::int128_t, typename std::remove_cv<T>::type>::value>
-{};
-
-/// \brief Extension of `std::is_scalar`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
-template<class T>
-struct is_scalar
-    : std::integral_constant<
-          bool,
-          std::is_scalar<T>::value
-              || std::is_same<::rocprim::half, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::bfloat16, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::int128_t, typename std::remove_cv<T>::type>::value
-              || std::is_same<::rocprim::uint128_t, typename std::remove_cv<T>::type>::value>
-{};
 
 /// \brief Extension of `std::make_unsigned`, which includes support for 128-bit integers.
 template<class T>
@@ -133,14 +57,6 @@ struct make_unsigned<::rocprim::uint128_t>
 
 static_assert(std::is_same<make_unsigned<::rocprim::int128_t>::type, ::rocprim::uint128_t>::value,
               "'rocprim::int128_t' needs to implement 'make_unsigned' trait.");
-
-/// \brief Extension of `std::is_compound`, which includes support for \ref rocprim::half , \ref rocprim::bfloat16 and 128-bit integers.
-template<class T>
-struct is_compound
-    : std::integral_constant<
-        bool,
-        !is_fundamental<T>::value
-    > {};
 
 /// \brief Extension of `std::numeric_limits`, which includes support for 128-bit integers.
 template<class T>
@@ -195,45 +111,44 @@ struct numeric_limits<rocprim::int128_t> : std::numeric_limits<int>
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Used to retrieve a type that can be treated as unsigned version of the template parameter.
-/// \tparam T - The signed type to find an unsigned equivalent for.
-/// \tparam size - the desired size (in bytes) of the unsigned type
+/// \tparam T The signed type to find an unsigned equivalent for.
+/// \tparam size the desired size (in bytes) of the unsigned type
 template<typename T, int size = 0>
 struct get_unsigned_bits_type
 {
-  typedef typename get_unsigned_bits_type<T,sizeof(T)>::unsigned_type unsigned_type; ///< Typedefed to the unsigned type.
+    using unsigned_type = typename get_unsigned_bits_type<T, sizeof(T)>::
+        unsigned_type; ///< Typedefed to the unsigned type.
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // skip specialized versions
 template<typename T>
-struct get_unsigned_bits_type<T,1>
+struct get_unsigned_bits_type<T, 1>
 {
-  typedef uint8_t unsigned_type;
-};
-
-
-template<typename T>
-struct get_unsigned_bits_type<T,2>
-{
-  typedef uint16_t unsigned_type;
-};
-
-
-template<typename T>
-struct get_unsigned_bits_type<T,4>
-{
-  typedef uint32_t unsigned_type;
+    using unsigned_type = uint8_t;
 };
 
 template<typename T>
-struct get_unsigned_bits_type<T,8>
+struct get_unsigned_bits_type<T, 2>
 {
-  typedef uint64_t unsigned_type;
+    using unsigned_type = uint16_t;
+};
+
+template<typename T>
+struct get_unsigned_bits_type<T, 4>
+{
+    using unsigned_type = uint32_t;
+};
+
+template<typename T>
+struct get_unsigned_bits_type<T, 8>
+{
+    using unsigned_type = uint64_t;
 };
 
 template<typename T>
 struct get_unsigned_bits_type<T, 16>
 {
-    typedef ::rocprim::uint128_t unsigned_type;
+    using unsigned_type = ::rocprim::uint128_t;
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
@@ -370,6 +285,35 @@ struct invoke_result_impl<decltype(void(INVOKE(std::declval<F>(), std::declval<A
 };
 
 template<class T>
+struct is_tuple
+{
+public:
+    static constexpr bool value = false;
+};
+
+template<class... Args>
+struct is_tuple<::rocprim::tuple<Args...>>
+{
+private:
+    template<size_t Index>
+    ROCPRIM_HOST_DEVICE
+    static constexpr bool is_tuple_impl()
+    {
+        return is_tuple_impl<Index + 1>();
+    }
+
+    template<>
+    ROCPRIM_HOST_DEVICE
+    static constexpr bool is_tuple_impl<sizeof...(Args)>()
+    {
+        return true;
+    }
+
+public:
+    static constexpr bool value = is_tuple_impl<0>();
+};
+
+template<class T>
 struct is_tuple_of_references
 {
     static_assert(sizeof(T) == 0, "is_tuple_of_references is only implemented for rocprim::tuple");
@@ -397,47 +341,40 @@ public:
     static constexpr bool value = is_tuple_of_references_impl<0>();
 };
 
-template<class Key>
-struct float_bit_mask;
+template<typename Iterator>
+using value_type_t = typename std::iterator_traits<Iterator>::value_type;
 
-template<>
-struct float_bit_mask<float>
+template<typename EqualityOp, int Ret = 0>
+struct guarded_inequality_wrapper
 {
-    static constexpr uint32_t sign_bit = 0x80000000;
-    static constexpr uint32_t exponent = 0x7F800000;
-    static constexpr uint32_t mantissa = 0x007FFFFF;
-    using bit_type                     = uint32_t;
-};
+    /// Wrapped equality operator
+    EqualityOp op;
 
-template<>
-struct float_bit_mask<double>
-{
-    static constexpr uint64_t sign_bit = 0x8000000000000000;
-    static constexpr uint64_t exponent = 0x7FF0000000000000;
-    static constexpr uint64_t mantissa = 0x000FFFFFFFFFFFFF;
-    using bit_type                     = uint64_t;
-};
+    /// Out-of-bounds limit
+    size_t guard;
 
-template<>
-struct float_bit_mask<rocprim::bfloat16>
-{
-    static constexpr uint16_t sign_bit = 0x8000;
-    static constexpr uint16_t exponent = 0x7F80;
-    static constexpr uint16_t mantissa = 0x007F;
-    using bit_type                     = uint16_t;
-};
+    /// Constructor
+    ROCPRIM_HOST_DEVICE inline guarded_inequality_wrapper(EqualityOp op, size_t guard)
+        : op(op), guard(guard)
+    {}
 
-template<>
-struct float_bit_mask<rocprim::half>
-{
-    static constexpr uint16_t sign_bit = 0x8000;
-    static constexpr uint16_t exponent = 0x7C00;
-    static constexpr uint16_t mantissa = 0x03FF;
-    using bit_type                     = uint16_t;
+    /// \brief Guarded boolean inequality operator.
+    ///
+    /// \tparam T Type of the operands compared by the equality operator
+    /// \param a Left hand-side operand
+    /// \param b Right hand-side operand
+    /// \param idx Index of the thread calling to this operator. This is used to determine which
+    /// operations are out-of-bounds
+    /// \returns <tt>!op(a, b)</tt> for a certain equality operator \p op when in-bounds.
+    template<typename T>
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator()(const T& a, const T& b, size_t idx) const
+    {
+        // In-bounds return operation result, out-of-bounds return ret.
+        return (idx < guard) ? !op(a, b) : Ret;
+    }
 };
-
-template<class...>
-using void_t = void;
 
 } // end namespace detail
 
@@ -557,6 +494,66 @@ struct is_binary_functional<minimum<T>>
 {
     static constexpr bool value = true;
 };
+
+} // namespace detail
+
+/// \brief Helper struct it has the Type and the number of aligned bytes.
+///
+/// \tparam T is the Type used to get the number of aligned bytes.
+template<typename T>
+struct align_bytes
+{
+    /// Number of aligned bytes for type T
+    static constexpr unsigned value = alignof(T);
+    /// Type defined by T
+    using Type = T;
+};
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // skip specialized versions
+template<typename T>
+struct align_bytes<volatile T> : align_bytes<T>
+{};
+template<typename T>
+struct align_bytes<const T> : align_bytes<T>
+{};
+template<typename T>
+struct align_bytes<const volatile T> : align_bytes<T>
+{};
+#endif
+
+namespace detail
+{
+
+template<typename T>
+struct word_type
+{
+    static constexpr auto align_bytes_value = align_bytes<T>::value;
+
+    template<typename Unit>
+    struct IsMultiple
+    {
+        static constexpr auto unit_align_bytes = align_bytes<Unit>::value;
+        static constexpr bool is_multiple
+            = (sizeof(T) % sizeof(Unit) == 0)
+              && (int(align_bytes_value) % int(unit_align_bytes) == 0);
+    };
+
+    using type = typename std::conditional<IsMultiple<int>::is_multiple,
+                                           unsigned int,
+                                           typename std::conditional<IsMultiple<short>::is_multiple,
+                                                                     unsigned short,
+                                                                     unsigned char>::type>::type;
+};
+
+template<typename T>
+struct word_type<volatile T> : word_type<T>
+{};
+template<typename T>
+struct word_type<const T> : word_type<T>
+{};
+template<typename T>
+struct word_type<const volatile T> : word_type<T>
+{};
 
 } // namespace detail
 

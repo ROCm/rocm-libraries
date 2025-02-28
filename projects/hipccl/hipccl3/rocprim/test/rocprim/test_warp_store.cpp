@@ -23,6 +23,7 @@
 #include "../common_test_header.hpp"
 #include "rocprim/types.hpp"
 #include "test_utils.hpp"
+#include "test_utils_device_ptr.hpp"
 
 #include <rocprim/warp/warp_store.hpp>
 #include <type_traits>
@@ -232,22 +233,15 @@ TYPED_TEST(WarpStoreTest, WarpLoad)
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
 
-    T* d_input{};
-    HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
-    T* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
+    test_utils::device_ptr<T> d_input(input);
+    test_utils::device_ptr<T> d_output(items_count);
 
     warp_store_kernel<block_size, items_per_thread, warp_size, method>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output);
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<T> output(items_count);
-    HIP_CHECK(hipMemcpy(output.data(), d_output, items_count * sizeof(T), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    std::vector<T> output = d_output.load();
 
     auto expected = input;
     if(method == ::rocprim::warp_store_method::warp_store_striped)
@@ -274,23 +268,16 @@ TYPED_TEST(WarpStoreTest, WarpStoreGuarded)
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
 
-    T* d_input{};
-    HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
-    T* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
-    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
+    test_utils::device_ptr<T> d_input(input);
+    test_utils::device_ptr<T> d_output(items_count);
+    HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
     warp_store_guarded_kernel<block_size, items_per_thread, warp_size, method>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, valid_items);
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get(), valid_items);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<T> output(items_count);
-    HIP_CHECK(hipMemcpy(output.data(), d_output, items_count * sizeof(T), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    std::vector<T> output = d_output.load();
 
     auto expected = input;
     if(method == ::rocprim::warp_store_method::warp_store_striped)

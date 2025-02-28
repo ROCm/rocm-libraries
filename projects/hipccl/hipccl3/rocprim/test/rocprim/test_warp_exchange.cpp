@@ -23,6 +23,7 @@
 #include "../common_test_header.hpp"
 #include "rocprim/types.hpp"
 #include "test_utils.hpp"
+#include "test_utils_device_ptr.hpp"
 
 #include <rocprim/warp/warp_exchange.hpp>
 
@@ -182,6 +183,14 @@ using WarpExchangeTestParams = ::testing::Types<
     //Params<rocprim::half, 8U,  8U, BlockedToStripedShuffleOp>,
     Params<rocprim::bfloat16, 8U, 8U, BlockedToStripedShuffleOp>,
 
+    Params<float, 16U, 64U, BlockedToStripedShuffleOp>,
+    Params<double, 8U, 32U, BlockedToStripedShuffleOp>,
+    Params<int8_t, 32U, 64U, BlockedToStripedShuffleOp>,
+    Params<int, 32U, 8U, BlockedToStripedShuffleOp>,
+    Params<int64_t, 64U, 8U, BlockedToStripedShuffleOp>,
+    Params<rocprim::bfloat16, 64U, 16U, BlockedToStripedShuffleOp>,
+    Params<float, 2U, 16U, StripedToBlockedShuffleOp>,
+
     Params<int, 4U, 8U, StripedToBlockedOp>,
     Params<int8_t, 4U, 16U, StripedToBlockedOp>,
     Params<int16_t, 2U, 32U, StripedToBlockedOp>,
@@ -207,7 +216,15 @@ using WarpExchangeTestParams = ::testing::Types<
     Params<float, 32U, 32U, StripedToBlockedShuffleOp>,
     Params<double, 64U, 64U, StripedToBlockedShuffleOp>,
     //Params<rocprim::half, 8U,  8U, StripedToBlockedShuffleOp>,
-    Params<rocprim::bfloat16, 8U, 8U, StripedToBlockedShuffleOp>>;
+    Params<rocprim::bfloat16, 8U, 8U, StripedToBlockedShuffleOp>,
+
+    Params<float, 16U, 64U, StripedToBlockedShuffleOp>,
+    Params<double, 8U, 32U, StripedToBlockedShuffleOp>,
+    Params<int8_t, 32U, 64U, StripedToBlockedShuffleOp>,
+    Params<int, 32U, 8U, StripedToBlockedShuffleOp>,
+    Params<int64_t, 64U, 8U, StripedToBlockedShuffleOp>,
+    Params<rocprim::bfloat16, 64U, 16U, StripedToBlockedShuffleOp>,
+    Params<float, 2U, 16U, StripedToBlockedShuffleOp>>;
 
 template<unsigned int ItemsPerThread, unsigned int LogicalWarpSize, class Op, class T>
 __device__ auto warp_exchange_test(T* d_input, T* d_output)
@@ -324,23 +341,16 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
         input = stripe_vector(input, warp_size, items_per_thread);
     }
 
-    T* d_input{};
-    HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
-    T* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
-    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
+    test_utils::device_ptr<T> d_input(input);
+    test_utils::device_ptr<T> d_output(items_count);
+    HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
     warp_exchange_kernel<items_per_thread, warp_size, exchange_op>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output);
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<T> output(items_count);
-    HIP_CHECK(hipMemcpy(output.data(), d_output, items_count * sizeof(T), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    auto output = d_output.load();
 
     if(std::is_same<exchange_op, BlockedToStripedOp>::value
        || std::is_same<exchange_op, BlockedToStripedShuffleOp>::value)
@@ -377,23 +387,16 @@ TYPED_TEST(WarpExchangeTest, WarpExchangeNotInplace)
         input = stripe_vector(input, warp_size, items_per_thread);
     }
 
-    T* d_input{};
-    HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
-    T* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
-    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
+    test_utils::device_ptr<T> d_input(input);
+    test_utils::device_ptr<T> d_output(items_count);
+    HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
     warp_exchange_kernel<items_per_thread, warp_size, exchange_op>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, false);
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get(), false);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<T> output(items_count);
-    HIP_CHECK(hipMemcpy(output.data(), d_output, items_count * sizeof(T), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
+    auto output = d_output.load();
 
     if(std::is_same<exchange_op, BlockedToStripedOp>::value
         || std::is_same<exchange_op, BlockedToStripedShuffleOp>::value)
@@ -489,27 +492,17 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
                    [](const T input_val)
                    { return static_cast<OffsetT>(input_val) % (warp_size * items_per_thread); });
 
-    T* d_input{};
-    HIP_CHECK(hipMalloc(&d_input, items_count * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), items_count * sizeof(T), hipMemcpyHostToDevice));
-    T* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, items_count * sizeof(T)));
-    HIP_CHECK(hipMemset(d_output, 0, items_count * sizeof(T)));
-    OffsetT* d_ranks{};
-    HIP_CHECK(hipMalloc(&d_ranks, items_count * sizeof(OffsetT)));
-    HIP_CHECK(hipMemcpy(d_ranks, ranks.data(), items_count * sizeof(OffsetT), hipMemcpyHostToDevice));
+    test_utils::device_ptr<OffsetT> d_ranks(ranks);
+    test_utils::device_ptr<T>       d_input(input);
+    test_utils::device_ptr<T>       d_output(items_count);
+    HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
     warp_exchange_scatter_kernel<items_per_thread, warp_size>
-        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input, d_output, d_ranks);
+        <<<dim3(1), dim3(block_size), 0, 0>>>(d_input.get(), d_output.get(), d_ranks.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    std::vector<T> output(items_count);
-    HIP_CHECK(hipMemcpy(output.data(), d_output, items_count * sizeof(T), hipMemcpyDeviceToHost));
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_ranks));
+    auto output = d_output.load();
 
     ASSERT_EQ(expected, output);
 }

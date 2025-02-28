@@ -71,7 +71,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -93,53 +93,40 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
             expected[i] = static_cast<T>(value);
         }
 
-        T* device_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_input(input);
+        test_utils::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_output));
     }
 }
 
@@ -190,7 +177,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -216,53 +203,40 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
             }
         }
 
-        T* device_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_input(input);
+        test_utils::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_output));
     }
 }
 
@@ -314,7 +288,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -336,53 +310,42 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
             expected[i] = static_cast<T>(value);
         }
 
-        T* device_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_input(input);
+        test_utils::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_output, valid
-            );
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_output.get(),
+                valid);
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_output, valid
-            );
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_output.get(),
+                valid);
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         test_utils::assert_near(output, expected, test_utils::precision<T> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -435,7 +398,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -461,53 +424,42 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
             }
         }
 
-        T* device_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_input(input);
+        test_utils::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_output, valid
-            );
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_output.get(),
+                valid);
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_allreduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_output, valid
-            );
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_output.get(),
+                valid);
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         test_utils::assert_near(output, expected, test_utils::precision<T> * valid);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -557,7 +509,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -588,55 +540,42 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
             expected[i] = static_cast<T>(value);
         }
 
-        T* device_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_input(input);
+        test_utils::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_reduce_sum_kernel<T, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_output
-            );
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_output.get());
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         test_utils::assert_near(output,
                                 expected,
                                 test_utils::precision<base_type> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -689,7 +628,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -703,27 +642,9 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         }
         std::vector<T> output(input.size());
 
-        T* device_input;
-        flag_type* device_flags;
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                device_flags, flags.data(),
-                flags.size() * sizeof(flag_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<T>         device_input(input);
+        test_utils::device_ptr<flag_type> device_flags(flags);
+        test_utils::device_ptr<T>         device_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
@@ -748,32 +669,39 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_flags, device_output
-            );
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T,
+                                                                  flag_type,
+                                                                  block_size_ws32,
+                                                                  logical_warp_size>),
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_flags.get(),
+                device_output.get());
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T, flag_type, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_flags, device_output
-            );
+                HIP_KERNEL_NAME(head_segmented_warp_reduce_kernel<T,
+                                                                  flag_type,
+                                                                  block_size_ws64,
+                                                                  logical_warp_size>),
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_flags.get(),
+                device_output.get());
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        output = device_output.load();
 
         std::vector<T> output_segment(output.size(), T(0));
         std::vector<T> expected_segment(output.size(), T(0));
@@ -788,10 +716,6 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         test_utils::assert_near(output_segment,
                                 expected_segment,
                                 test_utils::precision<T> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_flags));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -844,7 +768,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         GTEST_SKIP();
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -858,27 +782,9 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         }
         std::vector<T> output(input.size());
 
-        T* device_input;
-        flag_type* device_flags;
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_flags, flags.size() * sizeof(typename decltype(flags)::value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                device_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(
-            hipMemcpy(
-                device_flags, flags.data(),
-                flags.size() * sizeof(flag_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<T>         device_input(input);
+        test_utils::device_ptr<flag_type> device_flags(flags);
+        test_utils::device_ptr<T>         device_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
@@ -914,32 +820,39 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         if (current_device_warp_size == ws32)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_ws32, logical_warp_size>),
-                dim3(size/block_size_ws32), dim3(block_size_ws32), 0, 0,
-                device_input, device_flags, device_output
-            );
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T,
+                                                                  flag_type,
+                                                                  block_size_ws32,
+                                                                  logical_warp_size>),
+                dim3(size / block_size_ws32),
+                dim3(block_size_ws32),
+                0,
+                0,
+                device_input.get(),
+                device_flags.get(),
+                device_output.get());
         }
         else if (current_device_warp_size == ws64)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T, flag_type, block_size_ws64, logical_warp_size>),
-                dim3(size/block_size_ws64), dim3(block_size_ws64), 0, 0,
-                device_input, device_flags, device_output
-            );
+                HIP_KERNEL_NAME(tail_segmented_warp_reduce_kernel<T,
+                                                                  flag_type,
+                                                                  block_size_ws64,
+                                                                  logical_warp_size>),
+                dim3(size / block_size_ws64),
+                dim3(block_size_ws64),
+                0,
+                0,
+                device_input.get(),
+                device_flags.get(),
+                device_output.get());
         }
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        output = device_output.load();
 
         std::vector<T> output_segment(segment_indexes.size());
         std::vector<T> expected_segment(segment_indexes.size());
@@ -952,10 +865,6 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         test_utils::assert_near(output_segment,
                                 expected_segment,
                                 test_utils::precision<T> * logical_warp_size);
-
-        HIP_CHECK(hipFree(device_input));
-        HIP_CHECK(hipFree(device_flags));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }

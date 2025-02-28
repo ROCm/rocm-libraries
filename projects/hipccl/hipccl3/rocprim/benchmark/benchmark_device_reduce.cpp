@@ -31,21 +31,29 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include <string>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/functional.hpp>
+    #include <rocprim/types.hpp>
+#endif
 
 #include <cstddef>
+#include <string>
+#include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
-#define CREATE_BENCHMARK(T, REDUCE_OP)                                \
-    {                                                                 \
-        const device_reduce_benchmark<T, REDUCE_OP> instance;         \
+#define CREATE_BENCHMARK(T, REDUCE_OP)                                 \
+    {                                                                  \
+        const device_reduce_benchmark<T, REDUCE_OP> instance;          \
         REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
@@ -70,8 +78,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
     const managed_seed seed(seed_type);
@@ -87,7 +95,7 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
 #ifdef BENCHMARK_CONFIG_TUNING
-    const int parallel_instance = parser.get<int>("parallel_instance");
+    const int parallel_instance  = parser.get<int>("parallel_instance");
     const int parallel_instances = parser.get<int>("parallel_instances");
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
@@ -96,7 +104,7 @@ int main(int argc, char *argv[])
                                                         seed,
                                                         stream);
 #else
-    using custom_float2 = custom_type<float, float>;
+    using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
 
     CREATE_BENCHMARK(int, rocprim::plus<int>)
@@ -111,6 +119,9 @@ int main(int argc, char *argv[])
 
     CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
     CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
+
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
 #endif
 
     // Use manual timing

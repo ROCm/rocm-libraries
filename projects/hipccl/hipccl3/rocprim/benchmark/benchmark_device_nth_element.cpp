@@ -32,23 +32,26 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+#include <rocprim/types.hpp>
+
 #include <cstddef>
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-#define CREATE_BENCHMARK_NTH_ELEMENT(TYPE, SMALL_N)                   \
-    {                                                                 \
-        const device_nth_element_benchmark<TYPE> instance(SMALL_N);   \
+#define CREATE_BENCHMARK_NTH_ELEMENT(TYPE, SMALL_N)                    \
+    {                                                                  \
+        const device_nth_element_benchmark<TYPE> instance(SMALL_N);    \
         REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
-#define CREATE_BENCHMARK(TYPE)                    \
-    {                                             \
-        CREATE_BENCHMARK_NTH_ELEMENT(TYPE, true)  \
-        CREATE_BENCHMARK_NTH_ELEMENT(TYPE, false) \
+#define CREATE_BENCHMARK(TYPE)                                                             \
+    {                                                                                      \
+        CREATE_BENCHMARK_NTH_ELEMENT(TYPE, true) CREATE_BENCHMARK_NTH_ELEMENT(TYPE, false) \
     }
 
 int main(int argc, char* argv[])
@@ -65,7 +68,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -88,6 +91,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::half)
     CREATE_BENCHMARK(short)
     CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_float2          = custom_type<float, float>;
     using custom_double2         = custom_type<double, double>;

@@ -1,4 +1,4 @@
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,13 +31,13 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief
 ///
-/// \tparam NonBlevBlockSize - number of threads per block for thread- and warp-level copy.
-/// \tparam NonBlevBuffersPerThreaed - number of buffers processed per thread.
-/// \tparam TlevBytesPerThread - number of bytes per thread for thread-level copy.
-/// \tparam BlevBlockSize - number of thread per block for block-level copy.
-/// \tparam BlevBytesPerThread - number of bytes per thread for block-level copy.
-/// \tparam WlevSizeThreshold - minimum size to use warp-level copy instead of thread-level.
-/// \tparam BlevSizeThreshold - minimum size to use block-level copy instead of warp-level.
+/// \tparam NonBlevBlockSize number of threads per block for thread- and warp-level copy.
+/// \tparam NonBlevBuffersPerThreaed number of buffers processed per thread.
+/// \tparam TlevBytesPerThread number of bytes per thread for thread-level copy.
+/// \tparam BlevBlockSize number of thread per block for block-level copy.
+/// \tparam BlevBytesPerThread number of bytes per thread for block-level copy.
+/// \tparam WlevSizeThreshold minimum size to use warp-level copy instead of thread-level.
+/// \tparam BlevSizeThreshold minimum size to use block-level copy instead of warp-level.
 template<unsigned int NonBlevBlockSize         = 256,
          unsigned int NonBlevBuffersPerThreaed = 2,
          unsigned int TlevBytesPerThread       = 8,

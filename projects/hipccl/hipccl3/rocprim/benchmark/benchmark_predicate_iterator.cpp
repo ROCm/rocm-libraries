@@ -31,14 +31,12 @@
 #include <rocprim/device/device_transform.hpp>
 #include <rocprim/iterator/predicate_iterator.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <vector>
-
-#include <cstdio>
-#include <cstdlib>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
@@ -47,34 +45,37 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
 
-template<class T>
+template<typename T>
 struct identity
 {
-    __device__ T operator()(T value)
+    __device__
+    T operator()(T value)
     {
         return value;
     }
 };
 
-template<class T, int C>
+template<typename T, int C>
 struct less_than
 {
-    __device__ bool operator()(T value) const
+    __device__
+    bool operator()(T value) const
     {
         return value < T{C};
     }
 };
 
-template<class T, int I>
+template<typename T, int I>
 struct increment
 {
-    __device__ T operator()(T value) const
+    __device__
+    T operator()(T value) const
     {
         return value + T{I};
     }
 };
 
-template<class T, class Predicate, class Transform>
+template<typename T, typename Predicate, typename Transform>
 struct transform_op
 {
     __device__
@@ -84,7 +85,7 @@ struct transform_op
     }
 };
 
-template<class T, class Predicate, class Transform>
+template<typename T, typename Predicate, typename Transform>
 struct transform_it
 {
     using value_type = T;
@@ -97,7 +98,7 @@ struct transform_it
     }
 };
 
-template<class T, class Predicate, class Transform>
+template<typename T, typename Predicate, typename Transform>
 struct read_predicate_it
 {
     using value_type = T;
@@ -110,7 +111,7 @@ struct read_predicate_it
     }
 };
 
-template<class T, class Predicate, class Transform>
+template<typename T, typename Predicate, typename Transform>
 struct write_predicate_it
 {
     using value_type = T;
@@ -123,7 +124,7 @@ struct write_predicate_it
     }
 };
 
-template<class IteratorBenchmark>
+template<typename IteratorBenchmark>
 void run_benchmark(benchmark::State&   state,
                    size_t              bytes,
                    const managed_seed& seed,
@@ -131,21 +132,21 @@ void run_benchmark(benchmark::State&   state,
 {
     using T = typename IteratorBenchmark::value_type;
 
-    // Calculate the number of elements 
+    // Calculate the number of elements
     size_t size = bytes / sizeof(T);
 
     const auto     random_range = limit_random_range<T>(0, 99);
     std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-    T*             d_input;
-    T*             d_output;
+    T* d_input;
+    T* d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
     HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
         IteratorBenchmark{}(d_input, d_output, size, stream);
     }
@@ -161,7 +162,7 @@ void run_benchmark(benchmark::State&   state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
             IteratorBenchmark{}(d_input, d_output, size, stream);
         }
@@ -191,7 +192,7 @@ void run_benchmark(benchmark::State&   state,
                                                            ",key_type:" #T ",cfg:default_config}") \
                                      .c_str(),                                                     \
                                  run_benchmark<B<T, less_than<T, C>, increment<T, 5>>>,            \
-                                 bytes,                                                             \
+                                 bytes,                                                            \
                                  seed,                                                             \
                                  stream)
 
@@ -228,7 +229,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -245,11 +246,14 @@ int main(int argc, char* argv[])
     using custom_128 = custom_type<int64_t, int64_t>;
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks = {CREATE_TYPED_BENCHMARK(int8_t),
-                                                               CREATE_TYPED_BENCHMARK(int16_t),
-                                                               CREATE_TYPED_BENCHMARK(int32_t),
-                                                               CREATE_TYPED_BENCHMARK(int64_t),
-                                                               CREATE_TYPED_BENCHMARK(custom_128)};
+    std::vector<benchmark::internal::Benchmark*> benchmarks
+        = {CREATE_TYPED_BENCHMARK(int8_t),
+           CREATE_TYPED_BENCHMARK(int16_t),
+           CREATE_TYPED_BENCHMARK(int32_t),
+           CREATE_TYPED_BENCHMARK(int64_t),
+           CREATE_TYPED_BENCHMARK(custom_128),
+           CREATE_TYPED_BENCHMARK(rocprim::int128_t),
+           CREATE_TYPED_BENCHMARK(rocprim::uint128_t)};
 
     // Use manual timing
     for(auto& b : benchmarks)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -100,7 +100,7 @@ T warp_move_dpp(const T& input)
 /// Each thread in warp obtains \p input from <tt>src_lane</tt>-th thread
 /// in warp, where <tt>src_lane</tt> is current lane with a <tt>mask</tt> applied.
 ///
-/// \param input - input to pass to other threads
+/// \param input input to pass to other threads
 template<class T, int mask>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_swizzle(const T& input)
@@ -127,9 +127,9 @@ T warp_swizzle(const T& input)
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param input - input to pass to other threads
-/// \param src_lane - warp if of a thread whose \p input should be returned
-/// \param width - logical warp width
+/// \param input input to pass to other threads
+/// \param src_lane warp if of a thread whose \p input should be returned
+/// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_shuffle(const T& input, const int src_lane, const int width = device_warp_size())
@@ -152,9 +152,9 @@ T warp_shuffle(const T& input, const int src_lane, const int width = device_warp
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param input - input to pass to other threads
-/// \param delta - offset for calculating source lane id
-/// \param width - logical warp width
+/// \param input input to pass to other threads
+/// \param delta offset for calculating source lane id
+/// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_shuffle_up(const T& input, const unsigned int delta, const int width = device_warp_size())
@@ -177,9 +177,9 @@ T warp_shuffle_up(const T& input, const unsigned int delta, const int width = de
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param input - input to pass to other threads
-/// \param delta - offset for calculating source lane id
-/// \param width - logical warp width
+/// \param input input to pass to other threads
+/// \param delta offset for calculating source lane id
+/// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_shuffle_down(const T& input, const unsigned int delta, const int width = device_warp_size())
@@ -201,9 +201,9 @@ T warp_shuffle_down(const T& input, const unsigned int delta, const int width = 
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param input - input to pass to other threads
-/// \param lane_mask - mask used for calculating source lane id
-/// \param width - logical warp width
+/// \param input input to pass to other threads
+/// \param lane_mask mask used for calculating source lane id
+/// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_shuffle_xor(const T& input, const int lane_mask, const int width = device_warp_size())
@@ -229,9 +229,9 @@ namespace detail
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param v - input to pass to other threads
-/// \param mask - mask used for calculating source lane id
-/// \param width - logical warp width
+/// \param v input to pass to other threads
+/// \param mask mask used for calculating source lane id
+/// \param width logical warp width
 template<class V>
 ROCPRIM_DEVICE ROCPRIM_INLINE V warp_swizzle_shuffle(V&        v,
                                                      const int mask,
@@ -262,9 +262,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE V warp_swizzle_shuffle(V&        v,
 /// Note: The optional \p width parameter must be a power of 2; results are
 /// undefined if it is not a power of 2, or it is greater than device_warp_size().
 ///
-/// \param input - input to pass to other threads
-/// \param dst_lane - the destination lane to which the value from this thread is written.
-/// \param width - logical warp width
+/// \param input input to pass to other threads
+/// \param dst_lane the destination lane to which the value from this thread is written.
+/// \param width logical warp width
 template<typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
                                              const int dst_lane,
@@ -298,7 +298,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
 ///
 /// \remark This operation is significantly faster than \p warp_shuffle.
 ///
-/// \param input - the value to broadcast
+/// \param input the value to broadcast
 template<typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readfirstlane(const T& input)
 {
@@ -316,8 +316,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readfirstlane(const T& input)
 ///
 /// \remark This operation is significantly faster than \p warp_shuffle.
 ///
-/// \param input - the value to broadcast
-/// \param src_lane - the lane whose value to broadcast to other threads in the warp
+/// \param input the value to broadcast
+/// \param src_lane the lane whose value to broadcast to other threads in the warp
 template<typename T>
 ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readlane(const T& input, const int src_lane)
 {

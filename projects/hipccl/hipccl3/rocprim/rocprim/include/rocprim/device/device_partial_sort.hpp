@@ -99,7 +99,9 @@ struct SortImpl
             compare_function,
             stream,
             debug_synchronous,
-            keys_buffer);
+            keys_buffer,
+            static_cast<empty_type*>(nullptr),
+            true);
     }
 };
 
@@ -148,6 +150,7 @@ struct SortImpl<true,
             0,
             sizeof(typename std::iterator_traits<KeysInputIterator>::value_type) * 8,
             stream,
+            false,
             debug_synchronous);
     }
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +21,46 @@
 #ifndef ROCPRIM_CONFIG_HPP_
 #define ROCPRIM_CONFIG_HPP_
 
-#define BEGIN_ROCPRIM_NAMESPACE \
-    namespace rocprim {
-
-#define END_ROCPRIM_NAMESPACE \
-    } /* rocprim */
-
 #include <limits>
 
-#include <hip/hip_runtime.h>
-#include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_runtime.h>
+
+#include "rocprim_version.hpp"
+
+// Inline namespace (e.g. ROCPRIM_300400_NS where 300400 is the rocPRIM version) is used to
+// eliminate issues when shared libraries are built with different versions of rocPRIM so they may
+// have symbols with the same name but different content.
+// ROCPRIM_DISABLE_INLINE_NAMESPACE can be defined to disable inline namespaces (the old behavior).
+// ROCPRIM_INLINE_NAMESPACE can be defined to override the standard inline namespace name.
+// Additionally, all kernels have hidden visibility (see ROCPRIM_KERNEL).
+#if defined(DOXYGEN_DOCUMENTATION_BUILD) || defined(ROCPRIM_DISABLE_INLINE_NAMESPACE)
+    #define ROCPRIM_INLINE_NAMESPACE
+    #define BEGIN_ROCPRIM_INLINE_NAMESPACE
+    #define END_ROCPRIM_INLINE_NAMESPACE
+#else
+    #define ROCPRIM_CONCAT_(SEP, A, B) A##SEP##B
+    #define ROCPRIM_CONCAT(SEP, A, B) ROCPRIM_CONCAT_(SEP, A, B)
+
+    #ifndef ROCPRIM_INLINE_NAMESPACE
+        #define ROCPRIM_INLINE_NAMESPACE \
+            ROCPRIM_CONCAT(_, ROCPRIM, ROCPRIM_CONCAT(_, ROCPRIM_VERSION, NS))
+    #endif
+    #define BEGIN_ROCPRIM_INLINE_NAMESPACE        \
+        inline namespace ROCPRIM_INLINE_NAMESPACE \
+        {
+    #define END_ROCPRIM_INLINE_NAMESPACE } /* inline namespace */
+#endif
+
+#define BEGIN_ROCPRIM_NAMESPACE \
+    namespace rocprim           \
+    {                           \
+    BEGIN_ROCPRIM_INLINE_NAMESPACE
+
+#define END_ROCPRIM_NAMESPACE    \
+    END_ROCPRIM_INLINE_NAMESPACE \
+    } /* namespace rocprim */
 
 #if __cplusplus < 201402L
     #error "rocPRIM requires at least C++14"
@@ -42,11 +71,6 @@
     #define ROCPRIM_HOST __host__
     #define ROCPRIM_HOST_DEVICE __host__ __device__
     #define ROCPRIM_SHARED_MEMORY __shared__
-    #ifdef _WIN32
-        #define ROCPRIM_KERNEL __global__ static
-    #else
-        #define ROCPRIM_KERNEL __global__
-    #endif
     // TODO: These parameters should be tuned for NAVI in the close future.
     #ifndef ROCPRIM_DEFAULT_MAX_BLOCK_SIZE
         #define ROCPRIM_DEFAULT_MAX_BLOCK_SIZE 256
@@ -56,16 +80,51 @@
     #endif
 
     #ifndef DOXYGEN_DOCUMENTATION_BUILD
+        #define ROCPRIM_FORCE_INLINE __attribute__((always_inline))
         #define ROCPRIM_INLINE inline
+        #define ROCPRIM_KERNEL __global__ __attribute__((__visibility__("hidden")))
         #define ROCPRIM_LAUNCH_BOUNDS(...) __launch_bounds__(__VA_ARGS__)
     #else
         // Prefer simpler signatures to let Sphinx/Breathe parse them
         #define ROCPRIM_FORCE_INLINE inline
         #define ROCPRIM_INLINE inline
+        #define ROCPRIM_KERNEL __global__
         // Ignore __launch_bounds__ for doxygen builds
         #define ROCPRIM_LAUNCH_BOUNDS(...)
     #endif
-    #define ROCPRIM_FORCE_INLINE __attribute__((always_inline))
+#endif
+
+#undef ROCPRIM_TARGET_GCN3
+#undef ROCPRIM_TARGET_GCN5
+#undef ROCPRIM_TARGET_RDNA1
+#undef ROCPRIM_TARGET_RDNA2
+#undef ROCPRIM_TARGET_RDNA3
+#undef ROCPRIM_TARGET_RDNA4
+#undef ROCPRIM_TARGET_CDNA1
+#undef ROCPRIM_TARGET_CDNA2
+#undef ROCPRIM_TARGET_CDNA3
+
+// See https://llvm.org/docs/AMDGPUUsage.html#instructions
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+    #define ROCPRIM_TARGET_CDNA3 1
+#elif defined(__gfx90a__)
+    #define ROCPRIM_TARGET_CDNA2 1
+#elif defined(__gfx908__)
+    #define ROCPRIM_TARGET_CDNA1 1
+#elif defined(__gfx900__) || defined(__gfx902__) || defined(__gfx904__) || defined(__gfx906__) \
+    || defined(__gfx90c__)
+    #define ROCPRIM_TARGET_GCN5 1
+#elif defined(__GFX12__)
+    #define ROCPRIM_TARGET_RDNA4 1
+#elif defined(__GFX11__)
+    #define ROCPRIM_TARGET_RDNA3 1
+#elif defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__) || defined(__gfx1033__) \
+    || defined(__gfx1034__) || defined(__gfx1035__) || defined(__gfx1036__)
+    #define ROCPRIM_TARGET_RDNA2 1
+#elif defined(__gfx1010__) || defined(__gfx1011__) || defined(__gfx1012__) || defined(__gfx1013__)
+    #define ROCPRIM_TARGET_RDNA1 1
+#elif defined(__GFX8__)
+    #define ROCPRIM_TARGET_GCN3 1
 #endif
 
 // DPP is supported only after Volcanic Islands (GFX8+)
@@ -98,19 +157,9 @@
     #define ROCPRIM_THREAD_STORE_USE_CACHE_MODIFIERS 1
 #endif
 
-
-// Defines targeted AMD architecture. Supported values:
-// * 803 (gfx803)
-// * 900 (gfx900)
-// * 906 (gfx906)
-// * 908 (gfx908)
-// * 910 (gfx90a)
-#ifndef ROCPRIM_TARGET_ARCH
-    #define ROCPRIM_TARGET_ARCH 0
-#endif
-
 #ifndef ROCPRIM_NAVI
-    #if defined(__HIP_DEVICE_COMPILE__) && (defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__))
+    #if defined(__HIP_DEVICE_COMPILE__) \
+        && (defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__))
         #define ROCPRIM_NAVI 1
     #else
         #define ROCPRIM_NAVI 0
@@ -123,22 +172,25 @@
 #define ROCPRIM_WARP_SIZE_64 64u
 #define ROCPRIM_MAX_WARP_SIZE ROCPRIM_WARP_SIZE_64
 
-#if (defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
-#define ROCPRIM_UNROLL
-#define ROCPRIM_NO_UNROLL
+/// Quad size (group of 4 threads)
+#define ROCPRIM_QUAD_SIZE 4u
+
+#if(defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
+    #define ROCPRIM_UNROLL
+    #define ROCPRIM_NO_UNROLL
 #else
-#define ROCPRIM_UNROLL _Pragma("unroll")
-#define ROCPRIM_NO_UNROLL _Pragma("nounroll")
+    #define ROCPRIM_UNROLL _Pragma("unroll")
+    #define ROCPRIM_NO_UNROLL _Pragma("nounroll")
 #endif
 
 #ifndef ROCPRIM_GRID_SIZE_LIMIT
-#define ROCPRIM_GRID_SIZE_LIMIT std::numeric_limits<unsigned int>::max()
+    #define ROCPRIM_GRID_SIZE_LIMIT std::numeric_limits<unsigned int>::max()
 #endif
 
 #if __cpp_if_constexpr >= 201606
-#define ROCPRIM_IF_CONSTEXPR constexpr
+    #define ROCPRIM_IF_CONSTEXPR constexpr
 #else
-#define ROCPRIM_IF_CONSTEXPR
+    #define ROCPRIM_IF_CONSTEXPR
 #endif
 
 //  Copyright 2001 John Maddock.

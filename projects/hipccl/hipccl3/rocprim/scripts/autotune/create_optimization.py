@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -461,6 +461,14 @@ class AlgorithmDeviceReduce(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceSegmentedReduce(Algorithm):
+    algorithm_name = "device_segmented_reduce"
+    config_selection_params = [
+        SelectionType(name="key_type", is_optional=False, select_on_size_only=False)]
+    cpp_configuration_template_name = "segmented_reduce_config_template"
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceScan(Algorithm):
     algorithm_name = "device_scan"
     cpp_configuration_template_name = "scan_config_template"
@@ -647,14 +655,26 @@ class AlgorithmDeviceFindFirstOf(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceRunLengthEncode(Algorithm):
+    algorithm_name = 'device_run_length_encode'
+    cpp_configuration_template_name = 'run_length_encode_config_template'
+    config_selection_params = [SelectionType(name='key_type', is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceRunLengthEncodeNonTrivial(Algorithm):
+    algorithm_name = 'device_run_length_encode_non_trivial'
+    cpp_configuration_template_name = 'run_length_encode_non_trivial_runs_config_template'
+    config_selection_params = [SelectionType(name='key_type', is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceMerge(Algorithm):
     algorithm_name = "device_merge"
     cpp_configuration_template_name = "merge_config_template"
     config_selection_params = [
         SelectionType(name="key_type", is_optional=False, select_on_size_only=False),
         SelectionType(name="value_type", is_optional=True, select_on_size_only=True)]
-    def __init__(self, fallback_entries):
-        Algorithm.__init__(self, fallback_entries)
 
 def filt_algo_regex(e: FallbackCase, algorithm_name):
     if e.algo_regex:
@@ -675,6 +695,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceRadixSortOnesweep(fallback_entries)
     elif algorithm_name == 'device_reduce':
         return AlgorithmDeviceReduce(fallback_entries)
+    elif algorithm_name == 'device_segmented_reduce':
+        return AlgorithmDeviceSegmentedReduce(fallback_entries)
     elif algorithm_name == 'device_scan':
         return AlgorithmDeviceScan(fallback_entries)
     elif algorithm_name == 'device_scan_by_key':
@@ -719,6 +741,10 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDeviceReduceByKey(fallback_entries)
     elif algorithm_name == 'device_find_first_of':
         return AlgorithmDeviceFindFirstOf(fallback_entries)
+    elif algorithm_name == 'device_run_length_encode':
+        return AlgorithmDeviceRunLengthEncode(fallback_entries)
+    elif algorithm_name == 'device_run_length_encode_non_trivial':
+        return AlgorithmDeviceRunLengthEncodeNonTrivial(fallback_entries)
     elif algorithm_name == 'device_merge':
         return AlgorithmDeviceMerge(fallback_entries)
     else:

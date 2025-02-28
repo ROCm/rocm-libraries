@@ -30,6 +30,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
+#include "test_utils_device_ptr.hpp"
 
 // kernel definitions
 #include "test_block_discontinuity.kernels.hpp"

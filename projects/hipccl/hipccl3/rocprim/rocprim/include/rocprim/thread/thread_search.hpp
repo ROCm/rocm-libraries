@@ -45,7 +45,9 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \addtogroup thread_search
 /// @{
 
-/// \brief Computes the begin offsets into A and B for the specific diagonal
+/// \brief Computes the begin offsets into A and B for the specific \p diagonal. If the \p diagonal
+/// is larger than the sum of the two lengths the first component of the result will be clamped to
+/// be no larger than \p a_len and the sum of the two components will be equal to \p diagonal.
 template<class AIteratorT,
          class BIteratorT,
          class OffsetT,

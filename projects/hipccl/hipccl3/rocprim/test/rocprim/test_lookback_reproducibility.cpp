@@ -27,7 +27,10 @@
 #include <rocprim/device/device_scan_by_key.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
 
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
+
+#include <vector>
 
 template<typename T>
 std::vector<size_t> get_sizes(T seed_value)
@@ -78,8 +81,8 @@ TYPED_TEST_SUITE(RocprimLookbackReproducibilityTests, Suite);
 template<typename S, typename F>
 void test_reproducibility(S scan_op, F run_test)
 {
-    bool* d_enable_sleep;
-    HIP_CHECK(hipMalloc(&d_enable_sleep, sizeof(*d_enable_sleep)));
+    test_utils::device_ptr<int> d_enable_sleep_ptr(1);
+    int*                        d_enable_sleep = d_enable_sleep_ptr.get();
 
     // Delay the operator by a semi-random amount to increase the likelyhood
     // of changing the number of lookback steps between the runs.
@@ -95,19 +98,16 @@ void test_reproducibility(S scan_op, F run_test)
         return scan_op(a, b);
     };
 
-    bool enable_sleep = false;
-    HIP_CHECK(
-        hipMemcpy(d_enable_sleep, &enable_sleep, sizeof(enable_sleep), hipMemcpyHostToDevice));
+    std::vector<int> enable_sleep = {0};
+    d_enable_sleep_ptr.store(enable_sleep);
     auto first = run_test(eepy_scan_op);
 
-    enable_sleep = true;
-    HIP_CHECK(
-        hipMemcpy(d_enable_sleep, &enable_sleep, sizeof(enable_sleep), hipMemcpyHostToDevice));
+    enable_sleep[0] = 1;
+    d_enable_sleep_ptr.store(enable_sleep);
     auto second = run_test(eepy_scan_op);
+
     // We want the result to be bitwise equal, even if the inputs/outputs are floats.
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(first, second));
-
-    HIP_CHECK(hipFree(d_enable_sleep));
 }
 
 template<typename T>
@@ -146,7 +146,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
 
     const hipStream_t stream = 0;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -159,13 +159,8 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, -1000, 1000, seed_value);
 
-            T* d_input;
-            T* d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(T)));
-            HIP_CHECK(
-                hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
-
+            test_utils::device_ptr<T> d_input(input);
+            test_utils::device_ptr<T> d_output(input.size());
             scan_op_type scan_op;
 
             test_reproducibility(
@@ -173,40 +168,31 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
                 [&](auto test_scan_op)
                 {
                     size_t temp_storage_size_bytes;
-                    void*  d_temp_storage = nullptr;
-                    HIP_CHECK(rocprim::deterministic_inclusive_scan<Config>(d_temp_storage,
+                    test_utils::device_ptr<void> d_temp_storage;
+                    HIP_CHECK(rocprim::deterministic_inclusive_scan<Config>(nullptr,
                                                                             temp_storage_size_bytes,
-                                                                            d_input,
-                                                                            d_output,
+                                                                            d_input.get(),
+                                                                            d_output.get(),
                                                                             input.size(),
                                                                             scan_op,
                                                                             stream,
                                                                             debug_synchronous));
 
-                    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage,
-                                                                 temp_storage_size_bytes));
+                    d_temp_storage.resize(temp_storage_size_bytes);
 
-                    HIP_CHECK(rocprim::deterministic_inclusive_scan<Config>(d_temp_storage,
+                    HIP_CHECK(rocprim::deterministic_inclusive_scan<Config>(d_temp_storage.get(),
                                                                             temp_storage_size_bytes,
-                                                                            d_input,
-                                                                            d_output,
+                                                                            d_input.get(),
+                                                                            d_output.get(),
                                                                             input.size(),
                                                                             test_scan_op,
                                                                             stream,
                                                                             debug_synchronous));
                     HIP_CHECK(hipGetLastError());
 
-                    std::vector<T> output(input.size());
-                    HIP_CHECK(hipMemcpy(output.data(),
-                                        d_output,
-                                        output.size() * sizeof(T),
-                                        hipMemcpyDeviceToHost));
-                    HIP_CHECK(hipFree(d_temp_storage));
+                    std::vector<T> output = d_output.load();
                     return output;
                 });
-
-            HIP_CHECK(hipFree(d_input));
-            HIP_CHECK(hipFree(d_output));
         }
     }
 }
@@ -230,7 +216,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
 
     const hipStream_t stream = 0;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -244,66 +230,48 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
             std::vector<K> keys
                 = generate_segments<K>(seed_value, size, min_segment_length, max_segment_length);
 
-            K* d_keys;
-            V* d_input;
-            V* d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, keys.size() * sizeof(K)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(V)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(V)));
-            HIP_CHECK(
-                hipMemcpy(d_keys, keys.data(), keys.size() * sizeof(K), hipMemcpyHostToDevice));
-            HIP_CHECK(
-                hipMemcpy(d_input, input.data(), input.size() * sizeof(V), hipMemcpyHostToDevice));
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<K> d_keys(keys);
+            test_utils::device_ptr<V> d_input(input);
+            test_utils::device_ptr<V> d_output(input.size());
 
             scan_op_type    scan_op;
             compare_op_type compare_op;
 
-            test_reproducibility(
-                scan_op,
-                [&](auto test_scan_op)
-                {
-                    size_t temp_storage_size_bytes;
-                    void*  d_temp_storage = nullptr;
-                    HIP_CHECK(rocprim::deterministic_inclusive_scan_by_key<Config>(
-                        d_temp_storage,
-                        temp_storage_size_bytes,
-                        d_keys,
-                        d_input,
-                        d_output,
-                        input.size(),
-                        scan_op,
-                        compare_op,
-                        stream,
-                        debug_synchronous));
+            test_reproducibility(scan_op,
+                                 [&](auto test_scan_op)
+                                 {
+                                     size_t                       temp_storage_size_bytes;
+                                     test_utils::device_ptr<void> d_temp_storage;
+                                     HIP_CHECK(rocprim::deterministic_inclusive_scan_by_key<Config>(
+                                         nullptr,
+                                         temp_storage_size_bytes,
+                                         d_keys.get(),
+                                         d_input.get(),
+                                         d_output.get(),
+                                         input.size(),
+                                         scan_op,
+                                         compare_op,
+                                         stream,
+                                         debug_synchronous));
 
-                    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage,
-                                                                 temp_storage_size_bytes));
+                                     d_temp_storage.resize(temp_storage_size_bytes);
 
-                    HIP_CHECK(rocprim::deterministic_inclusive_scan_by_key<Config>(
-                        d_temp_storage,
-                        temp_storage_size_bytes,
-                        d_keys,
-                        d_input,
-                        d_output,
-                        input.size(),
-                        test_scan_op,
-                        compare_op,
-                        stream,
-                        debug_synchronous));
-                    HIP_CHECK(hipGetLastError());
+                                     HIP_CHECK(rocprim::deterministic_inclusive_scan_by_key<Config>(
+                                         d_temp_storage.get(),
+                                         temp_storage_size_bytes,
+                                         d_keys.get(),
+                                         d_input.get(),
+                                         d_output.get(),
+                                         input.size(),
+                                         test_scan_op,
+                                         compare_op,
+                                         stream,
+                                         debug_synchronous));
+                                     HIP_CHECK(hipGetLastError());
 
-                    std::vector<V> output(input.size());
-                    HIP_CHECK(hipMemcpy(output.data(),
-                                        d_output,
-                                        output.size() * sizeof(V),
-                                        hipMemcpyDeviceToHost));
-                    HIP_CHECK(hipFree(d_temp_storage));
-                    return output;
-                });
-
-            HIP_CHECK(hipFree(d_output));
-            HIP_CHECK(hipFree(d_input));
+                                     std::vector<V> output = d_output.load();
+                                     return output;
+                                 });
         }
     }
 }
@@ -328,7 +296,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
 
     const hipStream_t stream = 0;
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -342,20 +310,10 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
             std::vector<K> keys
                 = generate_segments<K>(seed_value, size, min_segment_length, max_segment_length);
 
-            K*      d_keys;
-            V*      d_input;
-            V*      d_output;
-            size_t* d_unique_count_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, keys.size() * sizeof(K)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(V)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, input.size() * sizeof(V)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output,
-                                                         sizeof(*d_unique_count_output)));
-            HIP_CHECK(
-                hipMemcpy(d_keys, keys.data(), keys.size() * sizeof(K), hipMemcpyHostToDevice));
-            HIP_CHECK(
-                hipMemcpy(d_input, input.data(), input.size() * sizeof(V), hipMemcpyHostToDevice));
-            HIP_CHECK(hipDeviceSynchronize());
+            test_utils::device_ptr<K>      d_keys(keys);
+            test_utils::device_ptr<V>      d_input(input);
+            test_utils::device_ptr<V>      d_output(input.size());
+            test_utils::device_ptr<size_t> d_unique_count_output(1);
 
             scan_op_type    scan_op;
             compare_op_type compare_op;
@@ -368,57 +326,43 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
                 scan_op,
                 [&](auto test_scan_op)
                 {
-                    size_t temp_storage_size_bytes;
-                    void*  d_temp_storage = nullptr;
-                    HIP_CHECK(rocprim::deterministic_reduce_by_key<Config>(d_temp_storage,
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys,
-                                                                           d_input,
-                                                                           input.size(),
-                                                                           d_discard_unique_output,
-                                                                           d_output,
-                                                                           d_unique_count_output,
-                                                                           test_scan_op,
-                                                                           compare_op,
-                                                                           stream,
-                                                                           debug_synchronous));
+                    size_t                       temp_storage_size_bytes;
+                    test_utils::device_ptr<void> d_temp_storage;
+                    HIP_CHECK(
+                        rocprim::deterministic_reduce_by_key<Config>(nullptr,
+                                                                     temp_storage_size_bytes,
+                                                                     d_keys.get(),
+                                                                     d_input.get(),
+                                                                     input.size(),
+                                                                     d_discard_unique_output,
+                                                                     d_output.get(),
+                                                                     d_unique_count_output.get(),
+                                                                     test_scan_op,
+                                                                     compare_op,
+                                                                     stream,
+                                                                     debug_synchronous));
+                    d_temp_storage.resize(temp_storage_size_bytes);
 
-                    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage,
-                                                                 temp_storage_size_bytes));
-
-                    HIP_CHECK(rocprim::deterministic_reduce_by_key<Config>(d_temp_storage,
-                                                                           temp_storage_size_bytes,
-                                                                           d_keys,
-                                                                           d_input,
-                                                                           input.size(),
-                                                                           d_discard_unique_output,
-                                                                           d_output,
-                                                                           d_unique_count_output,
-                                                                           test_scan_op,
-                                                                           compare_op,
-                                                                           stream,
-                                                                           debug_synchronous));
+                    HIP_CHECK(
+                        rocprim::deterministic_reduce_by_key<Config>(d_temp_storage.get(),
+                                                                     temp_storage_size_bytes,
+                                                                     d_keys.get(),
+                                                                     d_input.get(),
+                                                                     input.size(),
+                                                                     d_discard_unique_output,
+                                                                     d_output.get(),
+                                                                     d_unique_count_output.get(),
+                                                                     test_scan_op,
+                                                                     compare_op,
+                                                                     stream,
+                                                                     debug_synchronous));
                     HIP_CHECK(hipGetLastError());
 
-                    size_t unique_count_output;
-                    HIP_CHECK(hipMemcpy(&unique_count_output,
-                                        d_unique_count_output,
-                                        sizeof(unique_count_output),
-                                        hipMemcpyDeviceToHost));
+                    [[maybe_unused]] size_t unique_count_output = d_unique_count_output.load()[0];
 
-                    std::vector<V> output(unique_count_output);
-                    HIP_CHECK(hipMemcpy(output.data(),
-                                        d_output,
-                                        output.size() * sizeof(V),
-                                        hipMemcpyDeviceToHost));
-                    HIP_CHECK(hipFree(d_temp_storage));
+                    std::vector<V> output = d_output.load();
                     return output;
                 });
-
-            HIP_CHECK(hipFree(d_keys));
-            HIP_CHECK(hipFree(d_input));
-            HIP_CHECK(hipFree(d_output));
-            HIP_CHECK(hipFree(d_unique_count_output));
         }
     }
 }

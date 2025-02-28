@@ -16,4 +16,5 @@
 * :ref:`thread-index` 
 * :ref:`iterators` 
 * :ref:`intrinsics` 
+* :ref:`type_traits` 
 * :ref:`types`

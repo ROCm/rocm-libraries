@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -46,15 +46,14 @@ template<class Config,
          class KeysInputIterator1,
          class KeysInputIterator2,
          class BinaryFunction>
-ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-void partition_kernel(IndexIterator      index,
-                      KeysInputIterator1 keys_input1,
-                      KeysInputIterator2 keys_input2,
-                      const size_t       input1_size,
-                      const size_t       input2_size,
-                      const unsigned int spacing,
-                      BinaryFunction     compare_function)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    partition_kernel(IndexIterator      index,
+                     KeysInputIterator1 keys_input1,
+                     KeysInputIterator2 keys_input2,
+                     const size_t       input1_size,
+                     const size_t       input2_size,
+                     const unsigned int spacing,
+                     BinaryFunction     compare_function)
 {
     partition_kernel_impl(
         index, keys_input1, keys_input2, input1_size, input2_size,
@@ -71,18 +70,17 @@ template<class Config,
          class ValuesInputIterator2,
          class ValuesOutputIterator,
          class BinaryFunction>
-ROCPRIM_KERNEL
-__launch_bounds__(device_params<Config>().kernel_config.block_size)
-void merge_kernel(IndexIterator        index,
-                  KeysInputIterator1   keys_input1,
-                  KeysInputIterator2   keys_input2,
-                  KeysOutputIterator   keys_output,
-                  ValuesInputIterator1 values_input1,
-                  ValuesInputIterator2 values_input2,
-                  ValuesOutputIterator values_output,
-                  const size_t         input1_size,
-                  const size_t         input2_size,
-                  BinaryFunction       compare_function)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    merge_kernel(IndexIterator        index,
+                 KeysInputIterator1   keys_input1,
+                 KeysInputIterator2   keys_input2,
+                 KeysOutputIterator   keys_output,
+                 ValuesInputIterator1 values_input1,
+                 ValuesInputIterator2 values_input2,
+                 ValuesOutputIterator values_output,
+                 const size_t         input1_size,
+                 const size_t         input2_size,
+                 BinaryFunction       compare_function)
 {
     static constexpr merge_config_params params = device_params<Config>();
     merge_kernel_impl<params.kernel_config.block_size, params.kernel_config.items_per_thread>(
@@ -223,30 +221,30 @@ hipError_t merge_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for merging across the device.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_config`.
-/// \tparam InputIterator1 - random-access iterator type of the first input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `merge_config`.
+/// \tparam InputIterator1 random-access iterator type of the first input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam InputIterator2 - random-access iterator type of the second input range. Must meet the
+/// \tparam InputIterator2 random-access iterator type of the second input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input1 - iterator to the first element in the first range to merge.
-/// \param [in] input2 - iterator to the first element in the second range to merge.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] input1_size - number of element in the first input range.
-/// \param [in] input2_size - number of element in the second input range.
-/// \param [in] compare_function - binary operation function object that will be used for comparison.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input1 iterator to the first element in the first range to merge.
+/// \param [in] input2 iterator to the first element in the second range to merge.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] input1_size number of element in the first input range.
+/// \param [in] input2_size number of element in the second input range.
+/// \param [in] compare_function binary operation function object that will be used for comparison.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -327,39 +325,39 @@ hipError_t merge(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for merging across the device.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_config`.
-/// \tparam KeysInputIterator1 - random-access iterator type of the first keys input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `merge_config`.
+/// \tparam KeysInputIterator1 random-access iterator type of the first keys input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysInputIterator2 - random-access iterator type of the second keys input range. Must meet the
+/// \tparam KeysInputIterator2 random-access iterator type of the second keys input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the keys output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the keys output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator1 - random-access iterator type of the first values input range. Must meet the
+/// \tparam ValuesInputIterator1 random-access iterator type of the first values input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator2 - random-access iterator type of the second values input range. Must meet the
+/// \tparam ValuesInputIterator2 random-access iterator type of the second values input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the values output range. Must meet the
+/// \tparam ValuesOutputIterator random-access iterator type of the values output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input1 - iterator to the first key in the first range to merge.
-/// \param [in] keys_input2 - iterator to the first key in the second range to merge.
-/// \param [out] keys_output - iterator to the first key in the output range.
-/// \param [in] values_input1 - iterator to the first value in the first range to merge.
-/// \param [in] values_input2 - iterator to the first value in the second range to merge.
-/// \param [out] values_output - iterator to the first value in the output range.
-/// \param [in] input1_size - number of element in the first input range.
-/// \param [in] input2_size - number of element in the second input range.
-/// \param [in] compare_function - binary operation function object that will be used for key comparison.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input1 iterator to the first key in the first range to merge.
+/// \param [in] keys_input2 iterator to the first key in the second range to merge.
+/// \param [out] keys_output iterator to the first key in the output range.
+/// \param [in] values_input1 iterator to the first value in the first range to merge.
+/// \param [in] values_input2 iterator to the first value in the second range to merge.
+/// \param [out] values_output iterator to the first value in the output range.
+/// \param [in] input1_size number of element in the first input range.
+/// \param [in] input2_size number of element in the second input range.
+/// \param [in] compare_function binary operation function object that will be used for key comparison.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of

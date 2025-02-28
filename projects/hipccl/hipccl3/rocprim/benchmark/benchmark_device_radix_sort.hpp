@@ -32,13 +32,15 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_radix_sort.hpp>
+#include <rocprim/types.hpp>
 
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include <cstddef>
 
 namespace rp = rocprim;
 
@@ -67,7 +69,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
     {
         using key_type = Key;
 
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(key_type);
 
         std::vector<key_type> keys_input
@@ -101,7 +103,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                         temporary_storage_bytes,
@@ -124,7 +126,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                             temporary_storage_bytes,
@@ -168,7 +170,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         using key_type   = Key;
         using value_type = Value;
 
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(key_type);
 
         std::vector<key_type> keys_input
@@ -178,7 +180,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
                                         seed.get_0());
 
         std::vector<value_type> values_input(size);
-        for(size_t i = 0; i < size; i++)
+        for(size_t i = 0; i < size; ++i)
         {
             values_input[i] = value_type(i);
         }
@@ -216,7 +218,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                         temporary_storage_bytes,
@@ -239,7 +241,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(invoke_radix_sort(d_temporary_storage,
                                             temporary_storage_bytes,
@@ -379,9 +381,9 @@ private:
     }
 };
 
-#define CREATE_RADIX_SORT_BENCHMARK(...)                              \
-    {                                                                 \
-        const device_radix_sort_benchmark<__VA_ARGS__> instance;      \
+#define CREATE_RADIX_SORT_BENCHMARK(...)                               \
+    {                                                                  \
+        const device_radix_sort_benchmark<__VA_ARGS__> instance;       \
         REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
@@ -399,6 +401,8 @@ inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*
     CREATE_RADIX_SORT_BENCHMARK(rocprim::half)
     CREATE_RADIX_SORT_BENCHMARK(short)
     CREATE_RADIX_SORT_BENCHMARK(custom_key)
+    CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t)
+    CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t)
 }
 
 inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -427,6 +431,8 @@ inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark
     CREATE_RADIX_SORT_BENCHMARK(uint8_t, uint8_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::half, rocprim::half)
     CREATE_RADIX_SORT_BENCHMARK(custom_key, double)
+    CREATE_RADIX_SORT_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
+    CREATE_RADIX_SORT_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 }
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_PARALLEL_HPP_

@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -104,10 +104,10 @@ private:
         digit_counter_type                     counters[counters];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE digit_counter_type&
-        get_digit_counter(const unsigned int digit, const unsigned int warp, storage_type_& storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int get_digit_counter(const unsigned int digit, const unsigned int warp)
     {
-        return storage.counters[digit * warps + warp];
+        return digit * warps + warp;
     }
 
     template<typename Key, unsigned int ItemsPerThread, typename DigitExtractor>
@@ -136,7 +136,7 @@ private:
             const unsigned int digit = digit_extractor(keys[i]);
 
             // Get the digit counter for this key on the current warp.
-            digit_counters[i] = &get_digit_counter(digit, warp_id, storage);
+            digit_counters[i] = &storage.counters[get_digit_counter(digit, warp_id)];
 
             // Read the prefix sum of that digit. We already know it's 0 on the first iteration. So
             // we can skip a read-after-write dependency. The conditional gets optimized out due to
@@ -233,12 +233,12 @@ private:
             if(radix_digits % block_size == 0 || digit < radix_digits)
             {
                 // The counter for warp 0 holds the prefix of all the digits at this point.
-                prefix[i] = get_digit_counter(digit, 0, storage);
+                prefix[i] = storage.counters[get_digit_counter(digit, 0)];
                 // To find the count, subtract the prefix of the next digit with that of the
                 // current digit.
-                const unsigned int next_prefix = digit + 1 == radix_digits
-                                                     ? block_size * ItemsPerThread
-                                                     : get_digit_counter(digit + 1, 0, storage);
+                const unsigned int next_prefix
+                    = digit + 1 == radix_digits ? block_size * ItemsPerThread
+                                                : storage.counters[get_digit_counter(digit + 1, 0)];
                 counts[i]                      = next_prefix - prefix[i];
             }
         }

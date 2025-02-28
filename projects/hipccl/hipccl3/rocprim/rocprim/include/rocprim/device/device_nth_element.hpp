@@ -77,7 +77,7 @@ hipError_t
     const unsigned int     num_blocks            = ceiling_div(size, num_items_per_block);
 
     key_type*                            tree             = nullptr;
-    size_t*                              buckets          = nullptr;
+    unsigned int*                        buckets          = nullptr;
     n_th_element_iteration_data*         nth_element_data = nullptr;
     bool*                                equality_buckets = nullptr;
     nth_element_onesweep_lookback_state* lookback_states  = nullptr;
@@ -248,14 +248,15 @@ template<class Config = default_config,
          class KeysIterator,
          class BinaryFunction
          = ::rocprim::less<typename std::iterator_traits<KeysIterator>::value_type>>
-ROCPRIM_INLINE hipError_t nth_element(void*          temporary_storage,
-                                      size_t&        storage_size,
-                                      KeysIterator   keys,
-                                      size_t         nth,
-                                      size_t         size,
-                                      BinaryFunction compare_function  = BinaryFunction(),
-                                      hipStream_t    stream            = 0,
-                                      bool           debug_synchronous = false)
+ROCPRIM_INLINE
+hipError_t nth_element(void*          temporary_storage,
+                       size_t&        storage_size,
+                       KeysIterator   keys,
+                       size_t         nth,
+                       size_t         size,
+                       BinaryFunction compare_function  = BinaryFunction(),
+                       hipStream_t    stream            = 0,
+                       bool           debug_synchronous = false)
 {
     return detail::nth_element_impl<Config>(temporary_storage,
                                             storage_size,
@@ -358,15 +359,16 @@ template<class Config = default_config,
          class KeysOutputIterator,
          class BinaryFunction
          = ::rocprim::less<typename std::iterator_traits<KeysInputIterator>::value_type>>
-ROCPRIM_INLINE hipError_t nth_element(void*              temporary_storage,
-                                      size_t&            storage_size,
-                                      KeysInputIterator  keys_input,
-                                      KeysOutputIterator keys_output,
-                                      size_t             nth,
-                                      size_t             size,
-                                      BinaryFunction     compare_function  = BinaryFunction(),
-                                      hipStream_t        stream            = 0,
-                                      bool               debug_synchronous = false)
+ROCPRIM_INLINE
+hipError_t nth_element(void*              temporary_storage,
+                       size_t&            storage_size,
+                       KeysInputIterator  keys_input,
+                       KeysOutputIterator keys_output,
+                       size_t             nth,
+                       size_t             size,
+                       BinaryFunction     compare_function  = BinaryFunction(),
+                       hipStream_t        stream            = 0,
+                       bool               debug_synchronous = false)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     static_assert(

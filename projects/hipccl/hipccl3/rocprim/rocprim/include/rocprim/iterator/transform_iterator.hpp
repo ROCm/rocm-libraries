@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,10 +42,10 @@ BEGIN_ROCPRIM_NAMESPACE
 /// * Using it for simulating a range filled with results of applying functor of type
 /// \p UnaryFunction to another range saves memory capacity and/or bandwidth.
 ///
-/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// \tparam InputIterator type of the underlying random-access input iterator. Must be
 /// a random-access iterator.
-/// \tparam UnaryFunction - type of the transform functor.
-/// \tparam ValueType - type of value that can be obtained by dereferencing the iterator.
+/// \tparam UnaryFunction type of the transform functor.
+/// \tparam ValueType type of value that can be obtained by dereferencing the iterator.
 /// By default it is the return type of \p UnaryFunction.
 template<class InputIterator,
          class UnaryFunction,
@@ -236,11 +236,11 @@ operator+(typename transform_iterator<InputIterator, UnaryFunction, ValueType>::
 /// make_transform_iterator creates a transform_iterator using \p iterator as
 /// the underlying iterator and \p transform as the unary function.
 ///
-/// \tparam InputIterator - type of the underlying random-access input iterator.
-/// \tparam UnaryFunction - type of the transform functor.
+/// \tparam InputIterator type of the underlying random-access input iterator.
+/// \tparam UnaryFunction type of the transform functor.
 ///
-/// \param iterator - input iterator.
-/// \param transform - transform functor to use in created transform_iterator.
+/// \param iterator input iterator.
+/// \param transform transform functor to use in created transform_iterator.
 /// \return A new transform_iterator object which transforms the range pointed
 /// by \p iterator using \p transform functor.
 template<

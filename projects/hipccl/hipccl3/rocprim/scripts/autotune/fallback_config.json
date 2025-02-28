@@ -19,8 +19,7 @@
             "is_floating_point": true
         },
         {
-            "algo_regex": "^device_merge_sort",
-            "based_on_type": "custom_type<char,double>",
+            "based_on_type": "rocprim::int128_t",
             "sizeof_max_inclusive": 16,
             "sizeof_min_exclusive": 8,
             "is_floating_point": false

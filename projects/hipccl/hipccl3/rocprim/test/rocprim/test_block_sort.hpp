@@ -53,7 +53,7 @@ void TestSortKeyValue()
         GTEST_SKIP();
     }
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -87,22 +87,8 @@ void TestSortKeyValue()
         }
 
         // Preparing device
-        key_type* device_key_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output,
-                                                     output_key.size() * sizeof(key_type)));
-        value_type* device_value_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_value_output,
-                                                     output_value.size() * sizeof(value_type)));
-
-        HIP_CHECK(hipMemcpy(device_key_output,
-                            output_key.data(),
-                            output_key.size() * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-
-        HIP_CHECK(hipMemcpy(device_value_output,
-                            output_value.data(),
-                            output_value.size() * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        test_utils::device_ptr<key_type>   device_key_output(output_key);
+        test_utils::device_ptr<value_type> device_value_output(output_value);
 
         // Running kernel, ignored if invalid size
         if(size > 0)
@@ -117,22 +103,15 @@ void TestSortKeyValue()
                                dim3(block_size),
                                0,
                                stream,
-                               device_key_output,
-                               device_value_output,
+                               device_key_output.get(),
+                               device_value_output.get(),
                                size);
             HIP_CHECK(hipGetLastError());
         }
 
         // Reading results back
-        HIP_CHECK(hipMemcpy(output_key.data(),
-                            device_key_output,
-                            output_key.size() * sizeof(key_type),
-                            hipMemcpyDeviceToHost));
-
-        HIP_CHECK(hipMemcpy(output_value.data(),
-                            device_value_output,
-                            output_value.size() * sizeof(value_type),
-                            hipMemcpyDeviceToHost));
+        output_key   = device_key_output.load();
+        output_value = device_value_output.load();
 
         std::vector<key_type>   expected_key(expected.size());
         std::vector<value_type> expected_value(expected.size());
@@ -160,9 +139,6 @@ void TestSortKeyValue()
 
         test_utils::assert_eq(output_key, expected_key);
         test_utils::assert_eq(output_value, expected_value);
-
-        HIP_CHECK(hipFree(device_value_output));
-        HIP_CHECK(hipFree(device_key_output));
     }
 }
 
@@ -186,7 +162,7 @@ void TestSortKey(std::vector<size_t> sizes)
         GTEST_SKIP();
     }
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -215,14 +191,7 @@ void TestSortKey(std::vector<size_t> sizes)
             }
 
             // Preparing device
-            key_type* device_key_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output,
-                                                         output.size() * sizeof(key_type)));
-
-            HIP_CHECK(hipMemcpy(device_key_output,
-                                output.data(),
-                                output.size() * sizeof(key_type),
-                                hipMemcpyHostToDevice));
+            test_utils::device_ptr<key_type> device_key_output(output);
 
             const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
             // Running kernel, ignored if invalid size
@@ -237,19 +206,14 @@ void TestSortKey(std::vector<size_t> sizes)
                                    dim3(block_size),
                                    0,
                                    stream,
-                                   device_key_output,
+                                   device_key_output.get(),
                                    size);
             }
 
             // Reading results back
-            HIP_CHECK(hipMemcpy(output.data(),
-                                device_key_output,
-                                output.size() * sizeof(key_type),
-                                hipMemcpyDeviceToHost));
+            output = device_key_output.load();
 
             test_utils::assert_eq(output, expected);
-
-            HIP_CHECK(hipFree(device_key_output));
         }
     }
 }
@@ -283,7 +247,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
         GTEST_SKIP();
     }
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -314,14 +278,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
             }
 
             // Preparing device
-            tuple_type* device_tuples_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&device_tuples_output,
-                                                         tuples.size() * sizeof(tuple_type)));
-
-            HIP_CHECK(hipMemcpy(device_tuples_output,
-                                tuples.data(),
-                                tuples.size() * sizeof(tuple_type),
-                                hipMemcpyHostToDevice));
+            test_utils::device_ptr<tuple_type> device_tuples_output(tuples);
 
             const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
 
@@ -335,14 +292,11 @@ void TestSortStableKey(std::vector<size_t> sizes)
                                dim3(block_size),
                                0,
                                stream,
-                               device_tuples_output,
+                               device_tuples_output.get(),
                                size);
 
             // Reading results back
-            HIP_CHECK(hipMemcpy(tuples.data(),
-                                device_tuples_output,
-                                tuples.size() * sizeof(tuple_type),
-                                hipMemcpyDeviceToHost));
+            tuples = device_tuples_output.load();
 
             // Calculate expected results on host
             binary_op_type binary_op;
@@ -355,8 +309,6 @@ void TestSortStableKey(std::vector<size_t> sizes)
             }
 
             test_utils::assert_eq(tuples, expected);
-
-            HIP_CHECK(hipFree(device_tuples_output));
         }
     }
 }

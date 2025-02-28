@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -72,6 +72,33 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(T input, T& output, BinaryFunction scan_op, T init)
+    {
+        output = input;
+
+        T                  value;
+        const unsigned int id = detail::logical_lane_id<WarpSize>();
+        ROCPRIM_UNROLL
+        for(unsigned int offset = 1; offset < WarpSize; offset *= 2)
+        {
+            value = warp_shuffle_up(output, offset, WarpSize);
+            if(id >= offset)
+                output = scan_op(value, output);
+        }
+        // Include init value in scan results
+        output = scan_op(init, output);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(T input, T& output, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        (void)storage; // disables unused parameter warning
+        inclusive_scan(input, output, scan_op, init);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction,
                         BinaryFunction scan_op)
     {
@@ -87,6 +114,26 @@ public:
     {
         (void) storage;
         inclusive_scan(input, output, reduction, scan_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(T input, T& output, T& reduction, BinaryFunction scan_op, T init)
+    {
+        inclusive_scan(input, output, scan_op);
+        // Include init value in scan results
+        output = scan_op(init, output);
+        // Broadcast value from the last thread in warp
+        reduction = warp_shuffle(output, WarpSize - 1, WarpSize);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(
+        T input, T& output, T& reduction, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        (void)storage;
+        inclusive_scan(input, output, reduction, scan_op, init);
     }
 
     template<class BinaryFunction>

@@ -11,7 +11,7 @@ Find end
 Configuring the kernel
 ~~~~~~~~~~~~~~~~~~~~~~
 
-.. doxygenstruct::  rocprim::search_config
+See :ref:`Configuring the kernel of Search <dev-search>`.
 
 find_end
 ~~~~~~~~

@@ -215,9 +215,9 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 /// * Streams in graph capture mode are supported.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `adjacent_find_config`.
-/// \tparam InputIteratorType [inferred] Random-access iterator type of the input range. Must meet the
+/// \tparam InputIterator [inferred] Random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIteratorType [inferred] Random-access iterator type of the output index. Must meet the
+/// \tparam OutputIterator [inferred] Random-access iterator type of the output index. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 /// \tparam BinaryPred [inferred] Boolean binary operation function object that will be applied to
 /// consecutive items to check whether they are equal or not. The signature of the function should be equivalent
@@ -226,7 +226,7 @@ hipError_t adjacent_find_impl(void* const       temporary_storage,
 /// <tt>const &</tt>, but the function object must not modify the object passed to it.
 /// The operator must meet the C++ named requirement \p BinaryPredicate.
 /// The default operation used is <tt>rocprim::equal_to<T></tt>, where \p T is the type of the elements
-/// in the input range obtained with <tt>std::iterator_traits<InputIteratorType>::value_type</tt>>.
+/// in the input range obtained with <tt>std::iterator_traits<InputIterator>::value_type</tt>>.
 ///
 /// \param [in] temporary_storage Pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
