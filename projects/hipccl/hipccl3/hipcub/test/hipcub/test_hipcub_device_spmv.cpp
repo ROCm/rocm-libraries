@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -66,9 +66,8 @@ public:
     static constexpr bool    use_graphs = Params::use_graphs;
 };
 
-typedef ::testing::Types<DeviceSpmvParams<float, 4, 0, 0, 0>,
-                         DeviceSpmvParams<float, 4, 0, 0, 0, true>>
-    HipcubDeviceSpmvTestsParams;
+using HipcubDeviceSpmvTestsParams = ::testing::Types<DeviceSpmvParams<float, 4, 0, 0, 0>,
+                                                     DeviceSpmvParams<float, 4, 0, 0, 0, true>>;
 
 template<typename T, typename OffsetType>
 static void
@@ -197,7 +196,7 @@ TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
 
     // Allocate temporary storage
     size_t temp_storage_bytes = 0;
-    void *d_temp_storage = NULL;
+    void*  d_temp_storage     = nullptr;
 
     // Get amount of temporary storage needed
     HIP_CHECK(hipcub::DeviceSpmv::CsrMV(d_temp_storage,

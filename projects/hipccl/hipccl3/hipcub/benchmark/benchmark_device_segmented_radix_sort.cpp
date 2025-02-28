@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,17 +44,17 @@ void run_sort_keys_benchmark(benchmark::State& state,
 {
     using offset_type = int;
     using key_type    = Key;
-    typedef hipError_t (*sort_func)(void*,
-                                    size_t&,
-                                    const key_type*,
-                                    key_type*,
-                                    int,
-                                    int,
-                                    offset_type*,
-                                    offset_type*,
-                                    int,
-                                    int,
-                                    hipStream_t);
+    using sort_func   = hipError_t (*)(void*,
+                                     size_t&,
+                                     const key_type*,
+                                     key_type*,
+                                     int,
+                                     int,
+                                     offset_type*,
+                                     offset_type*,
+                                     int,
+                                     int,
+                                     hipStream_t);
 
     sort_func func_ascending = &hipcub::DeviceSegmentedRadixSort::SortKeys<key_type, offset_type*>;
     sort_func func_descending
@@ -180,19 +180,19 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     using offset_type = int;
     using key_type    = Key;
     using value_type  = Value;
-    typedef hipError_t (*sort_func)(void*,
-                                    size_t&,
-                                    const key_type*,
-                                    key_type*,
-                                    const value_type*,
-                                    value_type*,
-                                    int,
-                                    int,
-                                    offset_type*,
-                                    offset_type*,
-                                    int,
-                                    int,
-                                    hipStream_t);
+    using sort_func   = hipError_t (*)(void*,
+                                     size_t&,
+                                     const key_type*,
+                                     key_type*,
+                                     const value_type*,
+                                     value_type*,
+                                     int,
+                                     int,
+                                     offset_type*,
+                                     offset_type*,
+                                     int,
+                                     int,
+                                     hipStream_t);
 
     sort_func func_ascending
         = &hipcub::DeviceSegmentedRadixSort::SortPairs<key_type, value_type, offset_type*>;

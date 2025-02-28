@@ -12,8 +12,26 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
   * `ScanTileState`
   * `ReduceByKeyScanTileState`
   * `TilePrefixCallbackOp`
-  
-* gfx950 support
+* Added gfx950 support.
+* Added an overload of `BlockScan::InclusiveScan` that accepts an initial value to seed the scan.
+* Added an overload of `WarpScan::InclusiveScan` that accepts an initial value to seed the scan.
+* `UnrolledThreadLoad`, `UnrolledCopy`, and `ThreadLoadVolatilePointer` were added to align hipCUB with CUB.
+* `ThreadStoreVolatilePtr` and the `IterateThreadStore` struct were added to align hipCUB with CUB.
+
+### Changed
+
+* The NVIDIA backend now requires CUB, Thrust, and libcu++ 2.6.0. If they aren't found, they will be downloaded from the NVIDIA CCCL repository.
+* Updated `thread_load` and `thread_store` to align hipCUB with CUB.
+* All kernels now have hidden symbol visibility. All symbols now have inline namespaces that include the library version, (for example, hipcub::HIPCUB_300400_NS::symbol instead of hipcub::symbol), letting the user link multiple libraries built with different versions of hipCUB.
+
+### Known issues
+
+* `BlockAdjacentDifference::FlagHeads`, `BlockAdjacentDifference::FlagTails` and `BlockAdjacentDifference::FlagHeadsAndTails` have been removed from hipCUB's CUB backend. They were already deprecated as of version 2.12.0 of hipCUB and they were removed from CCCL (CUB) as of CCCL's 2.6.0 release.
+* `BlockScan::InclusiveScan` for the NVIDIA backend does not compute the block aggregate correctly when passing an initial value parameter. This behavior is not matched by the AMD backend.
+
+### Upcoming Changes
+
+* `BlockAdjacentDifference::FlagHeads`, `BlockAdjacentDifference::FlagTails` and `BlockAdjacentDifference::FlagHeadsAndTails` were deprecated as of version 2.12.0 of hipCUB, and will be removed from the rocPRIM backend in a future release for the next ROCm major version (ROCm 7.0.0).
 
 ## hipCUB-3.4.0 for ROCm 6.4.0
 

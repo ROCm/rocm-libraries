@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,10 +31,10 @@
 #define HIPCUB_COUNTING_INPUT_ITERATOR_HPP_
 
 #ifdef __HIP_PLATFORM_AMD__
-    #include "../backend/rocprim/iterator/counting_input_iterator.hpp"
+    #include "../backend/rocprim/iterator/counting_input_iterator.hpp" // IWYU pragma: export
 #elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
-    #include <cub/iterator/counting_input_iterator.cuh>
+    #include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
 #endif
 
 #endif // HIPCUB_ITERATOR_DISCARD_OUTPUT__HPP_

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,7 @@ struct DeviceBatchMemcpyTests : public ::testing::Test
     static constexpr uint32_t max_size    = Params::max_size;
 };
 
-typedef ::testing::Types<
+using DeviceBatchMemcpyTestsParams = ::testing::Types<
     // Ignore copy/move
 
     // Unshuffled inputs and outputs
@@ -91,8 +91,7 @@ typedef ::testing::Types<
     DeviceBatchMemcpyParams<uint8_t, uint16_t, true, 1024, 1024>,
     // size_type: int64_t
     DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 64 * 1024>,
-    DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 128 * 1024>>
-    DeviceBatchMemcpyTestsParams;
+    DeviceBatchMemcpyParams<uint8_t, int64_t, true, 1024, 128 * 1024>>;
 
 TYPED_TEST_SUITE(DeviceBatchMemcpyTests, DeviceBatchMemcpyTestsParams);
 

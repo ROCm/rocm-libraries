@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2024, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -65,17 +65,17 @@ typename std::enable_if<(N > 0), hipError_t>::type
 } // namespace detail
 
 /// \brief Alias temporaries to externally-allocated device storage (or simply return the amount of storage needed).
-/// \tparam ALLOCATIONS - The number of allocations that are needed.
-/// \param d_temp_storage - [in] Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-/// \param temp_storage_bytes - [in,out] Size in bytes of \t d_temp_storage allocation.
-/// \param allocations - [out] Pointers to device allocations needed.
-/// \param allocation_sizes - [in] Sizes in bytes of device allocations needed.
+/// \tparam ALLOCATIONS The number of allocations that are needed.
+/// \param d_temp_storage [in] Device-accessible allocation of temporary storage.  When nullptr, the required allocation size is written to \p temp_storage_bytes and no work is done.
+/// \param temp_storage_bytes [in,out] Size in bytes of \t d_temp_storage allocation.
+/// \param allocations [out] Pointers to device allocations needed.
+/// \param allocation_sizes [in] Sizes in bytes of device allocations needed.
 template<int ALLOCATIONS>
 HIPCUB_HOST_DEVICE
 HIPCUB_FORCEINLINE hipError_t AliasTemporaries(void*   d_temp_storage,
                                                size_t& temp_storage_bytes,
                                                void* (&allocations)[ALLOCATIONS],
-                                               size_t (&allocation_sizes)[ALLOCATIONS])
+                                               const size_t (&allocation_sizes)[ALLOCATIONS])
 {
     auto generator = [&](int i)
     { return rocprim::detail::temp_storage::make_partition(&allocations[i], allocation_sizes[i]); };

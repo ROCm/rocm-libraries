@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,18 +51,17 @@ using custom_short2  = test_utils::custom_test_type<short>;
 using custom_int2    = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
-typedef ::testing::Types<DeviceForParams<int>,
-                         DeviceForParams<int8_t>,
-                         DeviceForParams<uint8_t>,
-                         DeviceForParams<unsigned long>,
-                         DeviceForParams<short>,
-                         DeviceForParams<custom_short2>,
-                         DeviceForParams<float>,
-                         DeviceForParams<custom_double2>,
-                         DeviceForParams<test_utils::half>,
-                         DeviceForParams<test_utils::bfloat16>,
-                         DeviceForParams<int, true>>
-    HipcubDeviceForTestsParams;
+using HipcubDeviceForTestsParams = ::testing::Types<DeviceForParams<int>,
+                                                    DeviceForParams<int8_t>,
+                                                    DeviceForParams<uint8_t>,
+                                                    DeviceForParams<unsigned long>,
+                                                    DeviceForParams<short>,
+                                                    DeviceForParams<custom_short2>,
+                                                    DeviceForParams<float>,
+                                                    DeviceForParams<custom_double2>,
+                                                    DeviceForParams<test_utils::half>,
+                                                    DeviceForParams<test_utils::bfloat16>,
+                                                    DeviceForParams<int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceForTests, HipcubDeviceForTestsParams);
 

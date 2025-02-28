@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -179,8 +179,7 @@ struct CooMatrix
     //---------------------------------------------------------------------
 
     // Constructor
-    CooMatrix() : num_rows(0), num_cols(0), num_nonzeros(0), coo_tuples(NULL) {}
-
+    CooMatrix() : num_rows(0), num_cols(0), num_nonzeros(0), coo_tuples(nullptr) {}
 
     /**
      * Clear
@@ -188,7 +187,7 @@ struct CooMatrix
     void Clear()
     {
         if (coo_tuples) delete[] coo_tuples;
-        coo_tuples = NULL;
+        coo_tuples = nullptr;
     }
 
 
@@ -346,9 +345,9 @@ struct CooMatrix
                 if (line[1] == '%')
                 {
                     // Banner
-                    symmetric   = (strstr(line, "symmetric") != NULL);
-                    skew        = (strstr(line, "skew") != NULL);
-                    array       = (strstr(line, "array") != NULL);
+                    symmetric = (strstr(line, "symmetric") != nullptr);
+                    skew      = (strstr(line, "skew") != nullptr);
+                    array     = (strstr(line, "array") != nullptr);
 
                     if (verbose) {
                         printf("(symmetric: %d, skew: %d, array: %d) ", symmetric, skew, array); fflush(stdout);
@@ -411,7 +410,7 @@ struct CooMatrix
                 {
                     // Parse nonzero (note: using strtol and strtod is 2x faster than sscanf or istream parsing)
                     char *l = line;
-                    char *t = NULL;
+                    char* t = nullptr;
 
                     // parse row
                     row = strtol(l, &t, 0);
@@ -756,7 +755,13 @@ struct CsrMatrix
     /**
      * Constructor
      */
-    CsrMatrix() : num_rows(0), num_cols(0), num_nonzeros(0), row_offsets(NULL), column_indices(NULL), values(NULL) 
+    CsrMatrix()
+        : num_rows(0)
+        , num_cols(0)
+        , num_nonzeros(0)
+        , row_offsets(nullptr)
+        , column_indices(nullptr)
+        , values(nullptr)
     {
 #ifdef CUB_MKL
         numa_malloc = ((numa_available() >= 0) && (numa_num_task_nodes() > 1));
@@ -791,9 +796,9 @@ struct CsrMatrix
         if (values)         delete[] values;
 #endif
 
-        row_offsets = NULL;
-        column_indices = NULL;
-        values = NULL;
+        row_offsets    = nullptr;
+        column_indices = nullptr;
+        values         = nullptr;
     }
 
     /**
@@ -1124,8 +1129,8 @@ void RcmRelabel(
         row_degrees_in[matrix.column_indices[nonzero]]++;
     }
 
-    // Initialize unlabeled set 
-    typedef std::set<OffsetT, OrderByLow<OffsetT> > UnlabeledSet;
+    // Initialize unlabeled set
+    using UnlabeledSet = std::set<OffsetT, OrderByLow<OffsetT>>;
     typename UnlabeledSet::key_compare  unlabeled_comp(row_degrees_in);
     UnlabeledSet                        unlabeled(unlabeled_comp);
     for (OffsetT row = 0; row < matrix.num_rows; ++row)

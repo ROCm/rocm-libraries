@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -53,19 +53,7 @@ using NullType = ::rocprim::empty_type;
 #endif
 
 #ifndef HIPCUB_IS_INT128_ENABLED
-    #if defined(__HIPCC_RTC__)
-        #if defined(__HIPCC_RTC_INT128__)
-            #define HIPCUB_IS_INT128_ENABLED 1
-        #endif // !defined(__HIPCC_RTC_INT128__)
-    #else // !defined(__HIPCC_RTC__)
-        #if HIP_VERSION >= 50400000
-            #if(HIPCUB_HOST_COMPILER == HIPCUB_HOST_COMPILER_GCC)                         \
-                || (HIPCUB_HOST_COMPILER == HIPCUB_HOST_COMPILER_CLANG) || defined(__ICC) \
-                || defined(__GNUC__) || defined(__clang__)
-                #define HIPCUB_IS_INT128_ENABLED 1
-            #endif // GCC || CLANG || ICC
-        #endif // VER >= 5.4
-    #endif // !defined(__HIPCC_RTC__)
+    #define HIPCUB_IS_INT128_ENABLED 1
 #endif // !defined(HIPCUB_IS_INT128_ENABLED)
 
 template<bool B, typename T, typename F> struct
@@ -242,7 +230,7 @@ struct AlignBytes
     };
 
     /// The "truly aligned" type
-    typedef T Type;
+    using Type = T;
 };
 
 // Specializations where host C++ compilers (e.g., 32-bit Windows) may disagree
@@ -255,9 +243,9 @@ struct AlignBytes
         {                                               \
             enum                                        \
             {                                           \
-                ALIGN_BYTES = b,                        \
+                ALIGN_BYTES = b                         \
             };                                          \
-            typedef __attribute__((aligned(b))) t Type; \
+            using Type = __attribute__((aligned(b))) t; \
         };
 
 __HIPCUB_ALIGN_BYTES(short4, 8)
@@ -310,28 +298,26 @@ struct UnitWord
     };
 
     /// Biggest shuffle word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename std::conditional<IsMultiple<int>::IS_MULTIPLE,
-        unsigned int,
-        typename std::conditional<IsMultiple<short>::IS_MULTIPLE,
-            unsigned short,
-            unsigned char>::type>::type         ShuffleWord;
+    using ShuffleWord =
+        typename std::conditional<IsMultiple<int>::IS_MULTIPLE,
+                                  unsigned int,
+                                  typename std::conditional<IsMultiple<short>::IS_MULTIPLE,
+                                                            unsigned short,
+                                                            unsigned char>::type>::type;
 
     /// Biggest volatile word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename std::conditional<IsMultiple<long long>::IS_MULTIPLE,
-        unsigned long long,
-        ShuffleWord>::type                      VolatileWord;
+    using VolatileWord = typename std::
+        conditional<IsMultiple<long long>::IS_MULTIPLE, unsigned long long, ShuffleWord>::type;
 
     /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename std::conditional<IsMultiple<longlong2>::IS_MULTIPLE,
-        ulonglong2,
-        VolatileWord>::type                     DeviceWord;
+    using DeviceWord = typename std::
+        conditional<IsMultiple<longlong2>::IS_MULTIPLE, ulonglong2, VolatileWord>::type;
 
     /// Biggest texture reference word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename std::conditional<IsMultiple<int4>::IS_MULTIPLE,
+    using TextureWord = typename std::conditional<
+        IsMultiple<int4>::IS_MULTIPLE,
         uint4,
-        typename std::conditional<IsMultiple<int2>::IS_MULTIPLE,
-            uint2,
-            ShuffleWord>::type>::type           TextureWord;
+        typename std::conditional<IsMultiple<int2>::IS_MULTIPLE, uint2, ShuffleWord>::type>::type;
 };
 
 
@@ -339,20 +325,20 @@ struct UnitWord
 template <>
 struct UnitWord <float2>
 {
-    typedef int         ShuffleWord;
-    typedef unsigned long long   VolatileWord;
-    typedef unsigned long long   DeviceWord;
-    typedef float2      TextureWord;
+    using ShuffleWord  = int;
+    using VolatileWord = unsigned long long;
+    using DeviceWord   = unsigned long long;
+    using TextureWord  = float2;
 };
 
 // float4 specialization workaround (for SM10-SM13)
 template <>
 struct UnitWord <float4>
 {
-    typedef int         ShuffleWord;
-    typedef unsigned long long  VolatileWord;
-    typedef ulonglong2          DeviceWord;
-    typedef float4              TextureWord;
+    using ShuffleWord  = int;
+    using VolatileWord = unsigned long long;
+    using DeviceWord   = ulonglong2;
+    using TextureWord  = float4;
 };
 
 
@@ -360,10 +346,10 @@ struct UnitWord <float4>
 template <>
 struct UnitWord <char2>
 {
-    typedef unsigned short      ShuffleWord;
-    typedef unsigned short      VolatileWord;
-    typedef unsigned short      DeviceWord;
-    typedef unsigned short      TextureWord;
+    using ShuffleWord  = unsigned short;
+    using VolatileWord = unsigned short;
+    using DeviceWord   = unsigned short;
+    using TextureWord  = unsigned short;
 };
 
 
@@ -475,7 +461,7 @@ template <typename T>
 struct Uninitialized
 {
     /// Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename UnitWord<T>::DeviceWord DeviceWord;
+    using DeviceWord = typename UnitWord<T>::DeviceWord;
 
     static constexpr std::size_t DATA_SIZE = sizeof(T);
     static constexpr std::size_t WORD_SIZE = sizeof(DeviceWord);
@@ -491,13 +477,12 @@ struct Uninitialized
     }
 };
 
-
 /******************************************************************************
  * Simple type traits utilities.
  *
  * For example:
  *     Traits<int>::CATEGORY             // SIGNED_INTEGER
- *     Traits<NullType>::NULL_TYPE       // true
+ *     Traits<NullType>::nullptr_TYPE       // true
  *     Traits<uint4>::CATEGORY           // NOT_A_NUMBER
  *     Traits<uint4>::PRIMITIVE;         // false
  *
@@ -520,15 +505,19 @@ enum Category
 /**
  * \brief Basic type traits
  */
-template <Category _CATEGORY, bool _PRIMITIVE, bool _NULL_TYPE, typename _UnsignedBits, typename T>
+template<Category _CATEGORY,
+         bool     _PRIMITIVE,
+         bool     _nullptr_TYPE,
+         typename _UnsignedBits,
+         typename T>
 struct BaseTraits
 {
     /// Category
     static const Category CATEGORY      = _CATEGORY;
     enum
     {
-        PRIMITIVE       = _PRIMITIVE,
-        NULL_TYPE       = _NULL_TYPE,
+        PRIMITIVE    = _PRIMITIVE,
+        nullptr_TYPE = _nullptr_TYPE,
     };
 };
 
@@ -539,7 +528,7 @@ struct BaseTraits
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
 {
-    typedef _UnsignedBits       UnsignedBits;
+    using UnsignedBits = _UnsignedBits;
 
     static const Category       CATEGORY    = UNSIGNED_INTEGER;
     static const UnsignedBits   LOWEST_KEY  = UnsignedBits(0);
@@ -547,8 +536,8 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
 
     enum
     {
-        PRIMITIVE       = true,
-        NULL_TYPE       = false,
+        PRIMITIVE    = true,
+        nullptr_TYPE = false,
     };
 
     using key_codec = rocprim::radix_key_codec<T>;
@@ -587,7 +576,7 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
 {
-    typedef _UnsignedBits       UnsignedBits;
+    using UnsignedBits = _UnsignedBits;
 
     static const Category       CATEGORY    = SIGNED_INTEGER;
     static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
@@ -596,8 +585,8 @@ struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
 
     enum
     {
-        PRIMITIVE       = true,
-        NULL_TYPE       = false,
+        PRIMITIVE    = true,
+        nullptr_TYPE = false,
     };
 
     using key_codec = rocprim::radix_key_codec<T>;
@@ -686,7 +675,7 @@ struct FpLimits<hip_bfloat16>
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
 {
-    typedef _UnsignedBits       UnsignedBits;
+    using UnsignedBits = _UnsignedBits;
 
     static const Category       CATEGORY    = FLOATING_POINT;
     static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
@@ -697,8 +686,8 @@ struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
 
     enum
     {
-        PRIMITIVE       = true,
-        NULL_TYPE       = false,
+        PRIMITIVE    = true,
+        nullptr_TYPE = false,
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
@@ -755,7 +744,7 @@ struct NumericTraits<__uint128_t>
     static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1);
 
     static constexpr bool PRIMITIVE = false;
-    static constexpr bool NULL_TYPE = false;
+    static constexpr bool nullptr_TYPE = false;
 
     using key_codec = rocprim::radix_key_codec<T>;
 
@@ -792,7 +781,7 @@ struct NumericTraits<__int128_t>
     static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1) ^ HIGH_BIT;
 
     static constexpr bool PRIMITIVE = false;
-    static constexpr bool NULL_TYPE = false;
+    static constexpr bool nullptr_TYPE = false;
 
     using key_codec = rocprim::radix_key_codec<T>;
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,7 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
     return flag_op(b, a);
 }
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1, hipcub::Equality>,
     params<int, bool, 128U, 1, hipcub::Inequality>,
@@ -126,8 +126,7 @@ typedef ::testing::Types<
     params<test_utils::bfloat16, int, 37U, 3, test_utils::greater>,
 #endif
     params<unsigned short, int, 100U, 3, test_utils::greater>,
-    params<short, bool, 234U, 9, custom_flag_op1<short>>>
-    Params;
+    params<short, bool, 234U, 9, custom_flag_op1<short>>>;
 
 TYPED_TEST_SUITE(HipcubBlockAdjacentDifference, Params);
 
@@ -297,28 +296,28 @@ struct custom_op2
     }
 };
 
-typedef ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
-                         params_subtract<int, bool, custom_op1, 128U, 1>,
-                         params_subtract<float, int, custom_op2, 256U, 1>,
-                         params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
-                         params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
-                         params_subtract<int, bool, custom_op1, 256U, 1>,
+using ParamsSubtract
+    = ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
+                       params_subtract<int, bool, custom_op1, 128U, 1>,
+                       params_subtract<float, int, custom_op2, 256U, 1>,
+                       params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
+                       params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
+                       params_subtract<int, bool, custom_op1, 256U, 1>,
 
-                         params_subtract<float, int, hipcub::Sum, 37U, 1>,
-                         params_subtract<long long, char, custom_op1, 510U, 1>,
-                         params_subtract<unsigned int, long long, custom_op2, 162U, 1>,
-                         params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
+                       params_subtract<float, int, hipcub::Sum, 37U, 1>,
+                       params_subtract<long long, char, custom_op1, 510U, 1>,
+                       params_subtract<unsigned int, long long, custom_op2, 162U, 1>,
+                       params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
 
-                         params_subtract<int, char, custom_op1, 64U, 2>,
-                         params_subtract<int, short, custom_op2, 128U, 4>,
-                         params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
-                         params_subtract<short, short, custom_op1, 512U, 8>,
+                       params_subtract<int, char, custom_op1, 64U, 2>,
+                       params_subtract<int, short, custom_op2, 128U, 4>,
+                       params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
+                       params_subtract<short, short, custom_op1, 512U, 8>,
 
-                         params_subtract<double, int, custom_op2, 33U, 5>,
-                         params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
-                         params_subtract<unsigned short, int, custom_op1, 100U, 3>,
-                         params_subtract<short, bool, custom_op2, 234U, 9>>
-    ParamsSubtract;
+                       params_subtract<double, int, custom_op2, 33U, 5>,
+                       params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
+                       params_subtract<unsigned short, int, custom_op1, 100U, 3>,
+                       params_subtract<short, bool, custom_op2, 234U, 9>>;
 
 TYPED_TEST_SUITE(HipcubBlockAdjacentDifferenceSubtract, ParamsSubtract);
 
@@ -469,6 +468,8 @@ void subtract_right_partial_tile_kernel(const T* input, int* tile_sizes, Storage
     hipcub::StoreDirectBlocked(lid, output + block_offset, thread_output);
 }
 
+// Don't test FlagHeads, FlagTails nor FlagHeadsAndTails for CCCL >= 2.6.0, as they were removed
+#if defined(__HIP_PLATFORM_AMD__) || CUB_VERSION < 200600
 TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeads)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -807,6 +808,7 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeadsAndTails)
     }
 
 }
+#endif // defined(__HIP_PLATFORM_AMD__) || CUB_VERSION < 200600
 
 TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
 {

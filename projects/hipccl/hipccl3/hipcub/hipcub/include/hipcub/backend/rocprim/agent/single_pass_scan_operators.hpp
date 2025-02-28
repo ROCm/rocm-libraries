@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -185,10 +185,20 @@ struct ScanTileStateConverter<ScanTileState<T, SINGLE_WORD>>
 // line up with CUB.
 enum ScanTileStatus
 {
-    SCAN_TILE_OOB       = static_cast<int>(rocprim::detail::prefix_flag::INVALID),
-    SCAN_TILE_INVALID   = static_cast<int>(rocprim::detail::prefix_flag::EMPTY),
-    SCAN_TILE_PARTIAL   = static_cast<int>(rocprim::detail::prefix_flag::PARTIAL),
-    SCAN_TILE_INCLUSIVE = static_cast<int>(rocprim::detail::prefix_flag::COMPLETE),
+    SCAN_TILE_OOB       = static_cast<int>(rocprim::detail::lookback_scan_prefix_flag::invalid),
+    SCAN_TILE_INVALID   = static_cast<int>(rocprim::detail::lookback_scan_prefix_flag::empty),
+    SCAN_TILE_PARTIAL   = static_cast<int>(rocprim::detail::lookback_scan_prefix_flag::partial),
+    SCAN_TILE_INCLUSIVE = static_cast<int>(rocprim::detail::lookback_scan_prefix_flag::complete),
+};
+
+/**
+ * Enum class used in CUB for specifying the memory order that shall be enforced while reading
+ * and writing the tile status. Not used in rocPRIM backend, but it's present for compatibility.
+ */
+enum class MemoryOrder
+{
+    relaxed,
+    acquire_release
 };
 
 /**
@@ -217,7 +227,7 @@ private:
 
 public:
     using StatusValueT = T;
-    using StatusWord   = rocprim::detail::prefix_flag;
+    using StatusWord   = rocprim::detail::lookback_scan_prefix_flag;
 
     enum
     {
@@ -246,7 +256,7 @@ public:
     /// \param[in] temp_storage_bytes
     /// Size in bytes of \t d_temp_storage allocation
     HIPCUB_FORCEINLINE
-    HIPCUB_HOST
+    HIPCUB_HOST_DEVICE
     hipError_t Init(int num_tiles, void* d_temp_storage, size_t /* temp_storage_bytes */)
     {
         // rocprim::detail::lookback_scan_state::create(...) is host only, so this function
@@ -262,7 +272,7 @@ public:
     /// \param[out] temp_storage_bytes
     ///   Size in bytes of \t d_temp_storage allocation
     HIPCUB_FORCEINLINE
-    HIPCUB_HOST
+    HIPCUB_HOST_DEVICE
     static hipError_t AllocationSize(int num_tiles, size_t& temp_storage_bytes)
     {
         // rocprim::detail::lookback_scan_state::create(...) is host only, so this function
@@ -364,7 +374,7 @@ private:
 
 public:
     using TempStorage = typename NativeT::storage_type;
-    using StatusWord  = rocprim::detail::prefix_flag;
+    using StatusWord  = rocprim::detail::lookback_scan_prefix_flag;
 
     // 'tile_idx' and 'scan_op' are exposed by CUB as non-const and *technically*
     // available through rocPRIM, but they're protected/private and it's not

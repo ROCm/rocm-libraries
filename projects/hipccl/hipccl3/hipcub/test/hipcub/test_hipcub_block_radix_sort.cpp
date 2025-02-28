@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,7 +59,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
 // Power of 2 BlockSize
 #if HIPCUB_IS_INT128_ENABLED
     params<__int128_t, __int128_t, 64U, 1>,
@@ -103,8 +103,7 @@ typedef ::testing::Types<
     // Sorting keys of a custom type with a custom decomposer
     params<test_utils::custom_test_type<int16_t>, int, 128, 4>,
     params<test_utils::custom_test_type<float>, int, 129, 2, true, false>,
-    params<test_utils::custom_test_type<uint8_t>, float, 255, 1, false, true, 1, 12>>
-    Params;
+    params<test_utils::custom_test_type<uint8_t>, float, 255, 1, false, true, 1, 12>>;
 
 TYPED_TEST_SUITE(HipcubBlockRadixSort, Params);
 

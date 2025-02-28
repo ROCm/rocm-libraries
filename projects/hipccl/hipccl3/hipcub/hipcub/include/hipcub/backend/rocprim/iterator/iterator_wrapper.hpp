@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,8 @@ namespace detail
 /// \class IteratorWrapper
 /// \brief A wrapper for iterators to be able to make iterator_traits overwritable
 ///
-/// \tparam WrappedIterator - the iterator that is wrapped
-/// \tparam DerivedIterator - the iterator that this base class inherits
+/// \tparam WrappedIterator the iterator that is wrapped
+/// \tparam DerivedIterator the iterator that this base class inherits
 template<class WrappedIterator, class DerivedIterator>
 class IteratorWrapper
 {

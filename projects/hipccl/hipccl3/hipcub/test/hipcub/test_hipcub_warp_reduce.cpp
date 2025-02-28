@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ public:
     static constexpr unsigned int warp_size = Params::warp_size;
 };
 
-typedef ::testing::Types<
+using HipcubWarpReduceTestParams = ::testing::Types<
     // shuffle based reduce
     // Integer
     params<int, 1U>,
@@ -103,8 +103,7 @@ typedef ::testing::Types<
     params<float, 37U>,
     params<float, 61U>
 #endif
-    >
-    HipcubWarpReduceTestParams;
+    >;
 
 TYPED_TEST_SUITE(HipcubWarpReduceTests, HipcubWarpReduceTestParams);
 

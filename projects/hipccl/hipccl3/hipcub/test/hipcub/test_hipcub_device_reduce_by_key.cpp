@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     params<int, int, hipcub::Sum, 1, 1>,
     params<double, int, hipcub::Sum, 3, 5>,
     params<float, int, hipcub::Sum, 1, 10>,
@@ -68,8 +68,7 @@ typedef ::testing::Types<
     // Sum for half and bfloat will result in values too big due to limited range.
     params<test_utils::half, test_utils::half, hipcub::Max, 3, 100>,
     params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>,
-    params<int, int, hipcub::Sum, 1, 1, int, true>>
-    Params;
+    params<int, int, hipcub::Sum, 1, 1, int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);
 

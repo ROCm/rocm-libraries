@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -95,11 +95,8 @@ public:
         return sizeof(OffsetT) * 2;
     }
 
-
     /// Constructs an invalid GridQueue descriptor
-    __host__ __device__ __forceinline__ GridQueue()
-    :
-        d_counters(NULL)
+    __host__ __device__ __forceinline__ GridQueue() : d_counters(nullptr)
     {}
 
 
@@ -209,15 +206,11 @@ public:
 /**
  * Reset grid queue (call with 1 block of 1 thread)
  */
-template <typename OffsetT>
-__global__ void FillAndResetDrainKernel(
-    GridQueue<OffsetT>   grid_queue,
-    OffsetT              num_items)
+template<typename OffsetT>
+ROCPRIM_KERNEL void FillAndResetDrainKernel(GridQueue<OffsetT> grid_queue, OffsetT num_items)
 {
     grid_queue.FillAndResetDrain(num_items);
 }
-
-
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 

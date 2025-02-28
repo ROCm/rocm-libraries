@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -64,15 +64,15 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-typedef ::testing::Types<DeviceScanParams<int, long>,
-                         DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
-                         DeviceScanParams<unsigned long>,
-                         DeviceScanParams<short, float, hipcub::Max>,
-                         DeviceScanParams<int, double>,
-                         DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max>,
-                         DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>,
-                         DeviceScanParams<int, long, hipcub::Sum, int, true>>
-    HipcubDeviceScanTestsParams;
+using HipcubDeviceScanTestsParams
+    = ::testing::Types<DeviceScanParams<int, long>,
+                       DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
+                       DeviceScanParams<unsigned long>,
+                       DeviceScanParams<short, float, hipcub::Max>,
+                       DeviceScanParams<int, double>,
+                       DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max>,
+                       DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>,
+                       DeviceScanParams<int, long, hipcub::Sum, int, true>>;
 
 // use float for accumulation of bfloat16 and half inputs if operator is plus
 template<typename input_type, typename input_op_type>

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -76,7 +76,7 @@ bool apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
     return flag_op(a, b);
 }
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1, hipcub::Equality>,
     params<int, bool, 128U, 1, hipcub::Inequality>,
@@ -107,8 +107,7 @@ typedef ::testing::Types<
     params<test_utils::half, unsigned int, 464U, 2, test_utils::greater>,
     params<test_utils::bfloat16, unsigned int, 464U, 2, test_utils::greater>,
     params<unsigned short, int, 100U, 3, test_utils::greater>,
-    params<short, bool, 234U, 9, custom_flag_op1<short>>>
-    Params;
+    params<short, bool, 234U, 9, custom_flag_op1<short>>>;
 
 TYPED_TEST_SUITE(HipcubBlockDiscontinuity, Params);
 

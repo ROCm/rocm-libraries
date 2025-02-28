@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -235,114 +235,114 @@ struct CustomTestOp
 template<typename OpT, typename T, typename U>
 struct EqualitySelector
 {
-    typedef OpT type;
+    using type = OpT;
 };
 
 template<typename OpT, typename U>
 struct EqualitySelector<OpT, test_utils::half, U>
 {
-    typedef ExtendedFloatBoolOp<OpT> type;
+    using type = ExtendedFloatBoolOp<OpT>;
 };
 
 template<typename OpT, typename U>
 struct EqualitySelector<OpT, test_utils::bfloat16, U>
 {
-    typedef ExtendedFloatBoolOp<OpT> type;
+    using type = ExtendedFloatBoolOp<OpT>;
 };
 
 // Algebraic functor selector.
 template<typename OpT, typename T, typename U>
 struct AlgebraicSelector
 {
-    typedef OpT type;
+    using type = OpT;
 };
 
 template<typename OpT, typename T, typename U>
 struct AlgebraicSelector<OpT, test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    typedef CustomTestOp<OpT> type;
+    using type = CustomTestOp<OpT>;
 };
 
 template<typename OpT, typename U>
 struct AlgebraicSelector<OpT, test_utils::half, U>
 {
-    typedef ExtendedFloatBinOp<OpT> type;
+    using type = ExtendedFloatBinOp<OpT>;
 };
 
 template<typename OpT, typename U>
 struct AlgebraicSelector<OpT, test_utils::bfloat16, U>
 {
-    typedef ExtendedFloatBinOp<OpT> type;
+    using type = ExtendedFloatBinOp<OpT>;
 };
 
 // Max functor selector.
 template<typename T, typename U>
 struct MaxSelector
 {
-    typedef hipcub::Max type;
+    using type = hipcub::Max;
 };
 
 template<typename T, typename U>
 struct MaxSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    typedef CustomTestOp<hipcub::Max> type;
+    using type = CustomTestOp<hipcub::Max>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::half, U>
 {
-    typedef ExtendedFloatBinOp<hipcub::Max> type;
+    using type = ExtendedFloatBinOp<hipcub::Max>;
 };
 
 template<typename U>
 struct MaxSelector<test_utils::bfloat16, U>
 {
-    typedef ExtendedFloatBinOp<hipcub::Max> type;
+    using type = ExtendedFloatBinOp<hipcub::Max>;
 };
 
 // Min functor selector.
 template<typename T, typename U>
 struct MinSelector
 {
-    typedef hipcub::Min type;
+    using type = hipcub::Min;
 };
 
 template<typename T, typename U>
 struct MinSelector<test_utils::custom_test_type<T>, test_utils::custom_test_type<U>>
 {
-    typedef CustomTestOp<hipcub::Min> type;
+    using type = CustomTestOp<hipcub::Min>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::half, U>
 {
-    typedef ExtendedFloatBinOp<hipcub::Min> type;
+    using type = ExtendedFloatBinOp<hipcub::Min>;
 };
 
 template<typename U>
 struct MinSelector<test_utils::bfloat16, U>
 {
-    typedef ExtendedFloatBinOp<hipcub::Min> type;
+    using type = ExtendedFloatBinOp<hipcub::Min>;
 };
 
 // ArgMax functor selector
 template<typename T>
 struct ArgMaxSelector
 {
-    typedef hipcub::ArgMax type;
+    using type = hipcub::ArgMax;
 };
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 template<>
 struct ArgMaxSelector<test_utils::half>
 {
-    typedef ArgMax type;
+    using type = ArgMax;
 };
 
 template<>
 struct ArgMaxSelector<test_utils::bfloat16>
 {
-    typedef ArgMax type;
+    using type = ArgMax;
 };
 #endif
 
@@ -350,20 +350,20 @@ struct ArgMaxSelector<test_utils::bfloat16>
 template<typename T>
 struct ArgMinSelector
 {
-    typedef hipcub::ArgMin type;
+    using type = hipcub::ArgMin;
 };
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 template<>
 struct ArgMinSelector<test_utils::half>
 {
-    typedef ArgMin type;
+    using type = ArgMin;
 };
 
 template<>
 struct ArgMinSelector<test_utils::bfloat16>
 {
-    typedef ArgMin type;
+    using type = ArgMin;
 };
 #endif
 

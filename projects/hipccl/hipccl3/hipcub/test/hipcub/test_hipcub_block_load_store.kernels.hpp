@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,21 +63,21 @@ struct class_params
         class_param_block_size(load_algo, store_algo, test_utils::custom_test_type<int>), \
         class_param_block_size(load_algo, store_algo, test_utils::custom_test_type<double>)
 
-typedef ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_DIRECT,
-                                          hipcub::BlockStoreAlgorithm::BLOCK_STORE_DIRECT)>
-    LoadStoreParamsDirect;
+using LoadStoreParamsDirect
+    = ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_DIRECT,
+                                        hipcub::BlockStoreAlgorithm::BLOCK_STORE_DIRECT)>;
 
-typedef ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_STRIPED,
-                                          hipcub::BlockStoreAlgorithm::BLOCK_STORE_STRIPED)>
-    LoadStoreParamsStriped;
+using LoadStoreParamsStriped
+    = ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_STRIPED,
+                                        hipcub::BlockStoreAlgorithm::BLOCK_STORE_STRIPED)>;
 
-typedef ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_VECTORIZE,
-                                          hipcub::BlockStoreAlgorithm::BLOCK_STORE_VECTORIZE)>
-    LoadStoreParamsVectorize;
+using LoadStoreParamsVectorize
+    = ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_VECTORIZE,
+                                        hipcub::BlockStoreAlgorithm::BLOCK_STORE_VECTORIZE)>;
 
-typedef ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_TRANSPOSE,
-                                          hipcub::BlockStoreAlgorithm::BLOCK_STORE_TRANSPOSE)>
-    LoadStoreParamsTranspose;
+using LoadStoreParamsTranspose
+    = ::testing::Types<class_param_type(hipcub::BlockLoadAlgorithm::BLOCK_LOAD_TRANSPOSE,
+                                        hipcub::BlockStoreAlgorithm::BLOCK_STORE_TRANSPOSE)>;
 
 template<class Type,
          hipcub::BlockLoadAlgorithm  LoadMethod,
@@ -148,20 +148,20 @@ __launch_bounds__(BlockSize) __global__
     };
 
     // The input value type
-    typedef typename std::iterator_traits<InputIteratorT>::value_type InputT;
+    using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
 
     // The output value type
-    typedef typename std::conditional<
+    using OutputT = typename std::conditional<
         (std::is_same<typename std::iterator_traits<OutputIteratorT>::value_type,
-                      void>::value),  // OutputT =  (if output iterator's value type is void) ?
-        typename std::iterator_traits<InputIteratorT>::value_type,  // ... then the input iterator's
-                                                                    // value type,
-        typename std::iterator_traits<OutputIteratorT>::value_type>::type
-        OutputT;  // ... else the output iterator's value type
+                      void>::value), // OutputT =  (if output iterator's value type is void) ?
+        typename std::iterator_traits<InputIteratorT>::value_type, // ... then the input iterator's
+        // value type,
+        typename std::iterator_traits<OutputIteratorT>::value_type>::
+        type; // ... else the output iterator's value type
 
     // Threadblock load/store abstraction types
-    typedef hipcub::BlockLoad<InputT, BlockSize, ItemsPerThread, LoadMethod>    BlockLoad;
-    typedef hipcub::BlockStore<OutputT, BlockSize, ItemsPerThread, StoreMethod> BlockStore;
+    using BlockLoad  = hipcub::BlockLoad<InputT, BlockSize, ItemsPerThread, LoadMethod>;
+    using BlockStore = hipcub::BlockStore<OutputT, BlockSize, ItemsPerThread, StoreMethod>;
 
     // Shared memory type for this thread block
     union TempStorage

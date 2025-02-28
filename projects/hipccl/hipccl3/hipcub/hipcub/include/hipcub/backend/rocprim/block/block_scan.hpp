@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -185,11 +185,37 @@ public:
     }
 
     template<int ITEMS_PER_THREAD, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScan(T (&input)[ITEMS_PER_THREAD],
+                              T (&output)[ITEMS_PER_THREAD],
+                              T      initial_value,
+                              ScanOp scan_op)
+    {
+        base_type::inclusive_scan(input, initial_value, output, temp_storage_, scan_op);
+    }
+
+    template<int ITEMS_PER_THREAD, typename ScanOp>
     HIPCUB_DEVICE inline
     void InclusiveScan(T(&input)[ITEMS_PER_THREAD], T(&output)[ITEMS_PER_THREAD],
                        ScanOp scan_op, T& block_aggregate)
     {
         base_type::inclusive_scan(input, output, block_aggregate, temp_storage_, scan_op);
+    }
+
+    template<int ITEMS_PER_THREAD, typename ScanOp>
+    HIPCUB_DEVICE
+    inline void InclusiveScan(T (&input)[ITEMS_PER_THREAD],
+                              T (&output)[ITEMS_PER_THREAD],
+                              T      initial_value,
+                              ScanOp scan_op,
+                              T&     block_aggregate)
+    {
+        base_type::inclusive_scan(input,
+                                  initial_value,
+                                  output,
+                                  block_aggregate,
+                                  temp_storage_,
+                                  scan_op);
     }
 
     template<int ITEMS_PER_THREAD, typename ScanOp, typename BlockPrefixCallbackOp>

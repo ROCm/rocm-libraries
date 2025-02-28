@@ -2,7 +2,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -62,7 +62,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, 64U, 1>,
     params<test_utils::half, 128U, 1>,
@@ -98,8 +98,7 @@ typedef ::testing::Types<
     // RadixBits < MaxRadixBits
     params<unsigned int, 162U, 2, true, 3, 6, 2>,
     params<test_utils::half, 193U, 2, true, 1, 4, 3>,
-    params<test_utils::bfloat16, 193U, 2, true, 1, 4, 3>>
-    Params;
+    params<test_utils::bfloat16, 193U, 2, true, 1, 4, 3>>;
 
 TYPED_TEST_SUITE(HipcubBlockRadixRank, Params);
 

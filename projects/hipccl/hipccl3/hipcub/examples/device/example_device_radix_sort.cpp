@@ -173,7 +173,7 @@ int main(int argc, char** argv)
 
     // Allocate temporary storage
     size_t  temp_storage_bytes  = 0;
-    void    *d_temp_storage     = NULL;
+    void*   d_temp_storage      = nullptr;
 
     HIP_CHECK(hipcub::DeviceRadixSort::SortPairs(d_temp_storage,
                                                  temp_storage_bytes,

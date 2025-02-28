@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,14 +57,14 @@ public:
     static constexpr bool use_graphs            = Params::use_graphs;
 };
 
-typedef ::testing::Types<DevicePartitionParams<int, int, unsigned char, true>,
-                         DevicePartitionParams<unsigned int, unsigned long>,
-                         DevicePartitionParams<unsigned char, float>,
-                         DevicePartitionParams<int8_t, int8_t>,
-                         DevicePartitionParams<uint8_t, uint8_t>,
-                         DevicePartitionParams<test_utils::custom_test_type<long long>>,
-                         DevicePartitionParams<int, int, unsigned char, false, true>>
-    HipcubDevicePartitionTestsParams;
+using HipcubDevicePartitionTestsParams
+    = ::testing::Types<DevicePartitionParams<int, int, unsigned char, true>,
+                       DevicePartitionParams<unsigned int, unsigned long>,
+                       DevicePartitionParams<unsigned char, float>,
+                       DevicePartitionParams<int8_t, int8_t>,
+                       DevicePartitionParams<uint8_t, uint8_t>,
+                       DevicePartitionParams<test_utils::custom_test_type<long long>>,
+                       DevicePartitionParams<int, int, unsigned char, false, true>>;
 
 TYPED_TEST_SUITE(HipcubDevicePartitionTests, HipcubDevicePartitionTestsParams);
 

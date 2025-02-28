@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -87,26 +87,25 @@ public:
     static constexpr unsigned int logical_warp_size = Params::logical_warp_size;
 };
 
-typedef ::testing::Types<params<int, 32>,
-                         params<int, 16>,
-                         params<int, 8>,
-                         params<int, 4>,
-                         params<int, 2>,
-                         params<float, HIPCUB_WARP_SIZE_32>,
-                         params<double, HIPCUB_WARP_SIZE_32>,
-                         params<test_utils::half, HIPCUB_WARP_SIZE_32>,
-                         params<test_utils::bfloat16, HIPCUB_WARP_SIZE_32>,
-                         params<unsigned char, HIPCUB_WARP_SIZE_32>
+using UtilPtxTestParams = ::testing::Types<params<int, 32>,
+                                           params<int, 16>,
+                                           params<int, 8>,
+                                           params<int, 4>,
+                                           params<int, 2>,
+                                           params<float, HIPCUB_WARP_SIZE_32>,
+                                           params<double, HIPCUB_WARP_SIZE_32>,
+                                           params<test_utils::half, HIPCUB_WARP_SIZE_32>,
+                                           params<test_utils::bfloat16, HIPCUB_WARP_SIZE_32>,
+                                           params<unsigned char, HIPCUB_WARP_SIZE_32>
 #ifdef __HIP_PLATFORM_AMD__
-                         ,
-                         params<float, HIPCUB_WARP_SIZE_64>,
-                         params<double, HIPCUB_WARP_SIZE_64>,
-                         params<unsigned char, HIPCUB_WARP_SIZE_64>,
-                         params<test_utils::half, HIPCUB_WARP_SIZE_64>,
-                         params<test_utils::bfloat16, HIPCUB_WARP_SIZE_64>
+                                           ,
+                                           params<float, HIPCUB_WARP_SIZE_64>,
+                                           params<double, HIPCUB_WARP_SIZE_64>,
+                                           params<unsigned char, HIPCUB_WARP_SIZE_64>,
+                                           params<test_utils::half, HIPCUB_WARP_SIZE_64>,
+                                           params<test_utils::bfloat16, HIPCUB_WARP_SIZE_64>
 #endif
-                         >
-    UtilPtxTestParams;
+                                           >;
 
 TYPED_TEST_SUITE(HipcubUtilPtxTests, UtilPtxTestParams);
 

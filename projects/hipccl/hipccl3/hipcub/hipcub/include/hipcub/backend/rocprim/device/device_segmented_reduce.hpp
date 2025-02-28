@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -55,15 +55,15 @@ template<class Config,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-__global__ __launch_bounds__(
-    ::rocprim::detail::device_params<Config>()
-        .reduce_config.block_size) void segmented_arg_minmax_kernel(InputIterator  input,
-                                                                    OutputIterator output,
-                                                                    OffsetIterator begin_offsets,
-                                                                    OffsetIterator end_offsets,
-                                                                    BinaryFunction reduce_op,
-                                                                    ResultType     initial_value,
-                                                                    ResultType     empty_value)
+ROCPRIM_KERNEL __launch_bounds__(::rocprim::detail::device_params<Config>()
+                                     .reduce_config.block_size)
+    void segmented_arg_minmax_kernel(InputIterator  input,
+                                     OutputIterator output,
+                                     OffsetIterator begin_offsets,
+                                     OffsetIterator end_offsets,
+                                     BinaryFunction reduce_op,
+                                     ResultType     initial_value,
+                                     ResultType     empty_value)
 {
     // each block processes one segment
     ::rocprim::detail::segmented_reduce<Config>(input,

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,13 +55,13 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-typedef ::testing::Types<DeviceSelectParams<int, long>,
-                         DeviceSelectParams<float, float>,
-                         DeviceSelectParams<unsigned char, float>,
-                         DeviceSelectParams<test_utils::half, test_utils::half>,
-                         DeviceSelectParams<test_utils::bfloat16, test_utils::bfloat16>,
-                         DeviceSelectParams<int, long, unsigned int, true>>
-    HipcubDeviceSelectTestsParams;
+using HipcubDeviceSelectTestsParams
+    = ::testing::Types<DeviceSelectParams<int, long>,
+                       DeviceSelectParams<float, float>,
+                       DeviceSelectParams<unsigned char, float>,
+                       DeviceSelectParams<test_utils::half, test_utils::half>,
+                       DeviceSelectParams<test_utils::bfloat16, test_utils::bfloat16>,
+                       DeviceSelectParams<int, long, unsigned int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceSelectTests, HipcubDeviceSelectTestsParams);
 
@@ -1017,15 +1017,14 @@ struct TestUniqueEqualityOp
     }
 };
 
-typedef ::testing::Types<
+using HipcubDeviceUniqueByKeyTestsParams = ::testing::Types<
     DeviceUniqueByKeyParams<int, int>,
     DeviceUniqueByKeyParams<size_t, int, TestUniqueEqualityOp, double, long long, size_t>,
     DeviceUniqueByKeyParams<double, float, hipcub::Equality, double, double, size_t>,
     DeviceUniqueByKeyParams<uint8_t, long long>,
     DeviceUniqueByKeyParams<test_utils::custom_test_type<double>,
                             test_utils::custom_test_type<int>>,
-    DeviceUniqueByKeyParams<int, int, hipcub::Equality, int, int, unsigned int, true>>
-    HipcubDeviceUniqueByKeyTestsParams;
+    DeviceUniqueByKeyParams<int, int, hipcub::Equality, int, int, unsigned int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceUniqueByKeyTests, HipcubDeviceUniqueByKeyTestsParams);
 

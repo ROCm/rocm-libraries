@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -60,7 +60,7 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     params<unsigned int, int, 2u>,
     params<float, char, 16u, 1u, 64u>,
     params<double, int, 32u, 1u, 32u>,
@@ -72,8 +72,7 @@ typedef ::testing::Types<
     params<test_utils::custom_test_type<float>, int, 32u, 4u>,
     params<test_utils::custom_test_type<float>, int, 32u, 8u>,
     params<long long, short, 8u, 4u, 256u, test_utils::less, true>,
-    params<int, test_utils::custom_test_type<short>, 32u, 7u, 256u, test_utils::greater>>
-    Params;
+    params<int, test_utils::custom_test_type<short>, 32u, 7u, 256u, test_utils::greater>>;
 
 TYPED_TEST_SUITE(HipcubWarpMergeSort, Params);
 
