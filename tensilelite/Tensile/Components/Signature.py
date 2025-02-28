@@ -171,7 +171,7 @@ class SignatureDefault(Signature):
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
         if kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0:
-            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+            signature.addArg("AddressWS", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
             signature.addArg("AddressFlags", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
 
         for i in range(0, writer.states.d.numSgprStrides):
