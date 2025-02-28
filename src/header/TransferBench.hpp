@@ -22,11 +22,13 @@ THE SOFTWARE.
 
 /// @cond
 #pragma once
+#include <algorithm>
 #include <cstring>
 #include <future>
 #include <map>
 #include <numa.h> // If not found, try installing libnuma-dev (e.g apt-get install libnuma-dev)
 #include <numaif.h>
+#include <random>
 #include <set>
 #include <sstream>
 #include <stdarg.h>
@@ -64,7 +66,7 @@ namespace TransferBench
   using std::set;
   using std::vector;
 
-  constexpr char VERSION[] = "1.60";
+  constexpr char VERSION[] = "1.61";
 
   /**
    * Enumeration of supported Executor types
@@ -173,6 +175,7 @@ namespace TransferBench
    */
   struct GfxOptions
   {
+    int                 blockOrder     = 0;     ///< Determines how threadblocks are ordered (0=sequential, 1=interleaved, 2=random)
     int                 blockSize      = 256;   ///< Size of each threadblock (must be multiple of 64)
     vector<uint32_t>    cuMask         = {};    ///< Bit-vector representing the CU mask
     vector<vector<int>> prefXccTable   = {};    ///< 2D table with preferred XCD to use for a specific [src][dst] GPU device
@@ -181,6 +184,7 @@ namespace TransferBench
     int                 useMultiStream = 0;     ///< Use multiple streams for GFX
     int                 useSingleTeam  = 0;     ///< Team all subExecutors across the data array
     int                 waveOrder      = 0;     ///< GFX-kernel wavefront ordering
+    int                 wordSize       = 4;     ///< GFX-kernel packed data size (4=dwordx4, 2=dwordx2, 1=dwordx1)
   };
 
   /**
@@ -231,6 +235,31 @@ namespace TransferBench
     ERR_NONE  = 0,                              ///< No errors
     ERR_WARN  = 1,                              ///< Warning - results may not be accurate
     ERR_FATAL = 2,                              ///< Fatal error - results are invalid
+  };
+
+  /**
+   * Enumeration of GID priority
+   *
+   * @note These are the GID types ordered in priority from lowest (0) to highest
+   */
+  enum GidPriority
+  {
+    UNKNOWN           = -1,                      ///< Default
+    ROCEV1_LINK_LOCAL = 0,                       ///< RoCEv1 Link-local
+    ROCEV2_LINK_LOCAL = 1,                       ///< RoCEv2 Link-local fe80::/10
+    ROCEV1_IPV6       = 2,                       ///< RoCEv1 IPv6
+    ROCEV2_IPV6       = 3,                       ///< RoCEv2 IPv6
+    ROCEV1_IPV4       = 4,                       ///< RoCEv1 IPv4-mapped IPv6
+    ROCEV2_IPV4       = 5,                       ///< RoCEv2 IPv4-mapped IPv6 ::ffff:192.168.x.x
+  };
+
+  const char* GidPriorityStr[] = {
+    "RoCEv1 Link-local",
+    "RoCEv2 Link-local",
+    "RoCEv1 IPv6",
+    "RoCEv2 IPv6",
+    "RoCEv1 IPv4-mapped IPv6",
+    "RoCEv2 IPv4-mapped IPv6"
   };
 
   /**
@@ -462,6 +491,14 @@ namespace TransferBench
   #define hipStreamCreate                                    cudaStreamCreate
   #define hipStreamDestroy                                   cudaStreamDestroy
   #define hipStreamSynchronize                               cudaStreamSynchronize
+
+  // Define float2 addition operator for NVIDIA platform
+  __device__ inline float2& operator +=(float2& a, const float2& b)
+  {
+    a.x += b.x;
+    a.y += b.y;
+    return a;
+  }
 
   // Define float4 addition operator for NVIDIA platform
   __device__ inline float4& operator +=(float4& a, const float4& b)
@@ -924,6 +961,13 @@ namespace {
       errors.push_back({ERR_FATAL, "[data.byteOffset] must be positive multiple of %lu", sizeof(float)});
 
     // Check GFX options
+    if (cfg.gfx.blockOrder < 0 || cfg.gfx.blockOrder > 2)
+      errors.push_back({ERR_FATAL,
+          "[gfx.blockOrder] must be 0 for sequential, 1 for interleaved, or 2 for random"});
+
+    if (cfg.gfx.useMultiStream && cfg.gfx.blockOrder > 0)
+      errors.push_back({ERR_WARN, "[gfx.blockOrder] will be ignored when running in multi-stream mode"});
+
     int gfxMaxBlockSize = GetIntAttribute(ATR_GFX_MAX_BLOCKSIZE);
     if (cfg.gfx.blockSize < 0 || cfg.gfx.blockSize % 64 || cfg.gfx.blockSize > gfxMaxBlockSize)
       errors.push_back({ERR_FATAL,
@@ -938,6 +982,9 @@ namespace {
     if (cfg.gfx.waveOrder < 0 || cfg.gfx.waveOrder >= 6)
       errors.push_back({ERR_FATAL,
                         "[gfx.waveOrder] must be non-negative and less than 6"});
+
+    if (!(cfg.gfx.wordSize == 1 || cfg.gfx.wordSize == 2 || cfg.gfx.wordSize == 4))
+      errors.push_back({ERR_FATAL, "[gfx.wordSize] must be either 1, 2 or 4"});
 
     int numGpus = GetNumExecutors(EXE_GPU_GFX);
     int numXccs = GetNumExecutorSubIndices({EXE_GPU_GFX, 0});
@@ -1395,12 +1442,122 @@ namespace {
     std::string busId;
     bool        hasActivePort;
     int         numaNode;
+    int         gidIndex;
+    std::string gidDescriptor;
+    bool        isRoce;
   };
 #endif
 
 #ifdef NIC_EXEC_ENABLED
 // Function to collect information about IBV devices
 //========================================================================================
+static bool IsConfiguredGid(union ibv_gid const& gid)
+  {
+    const struct in6_addr *a = (struct in6_addr *) gid.raw;
+    int trailer = (a->s6_addr32[1] | a->s6_addr32[2] | a->s6_addr32[3]);
+    if (((a->s6_addr32[0] | trailer) == 0UL) ||
+        ((a->s6_addr32[0] == htonl(0xfe800000)) && (trailer == 0UL))) {
+      return false;
+    }
+    return true;
+  }
+
+  static bool LinkLocalGid(union ibv_gid const& gid)
+  {
+    const struct in6_addr *a = (struct in6_addr *) gid.raw;
+    if (a->s6_addr32[0] == htonl(0xfe800000) && a->s6_addr32[1] == 0UL) {
+      return true;
+    }
+    return false;
+  }
+
+  static ErrResult GetRoceVersionNumber(struct ibv_context* const& context,
+                                        int const&  portNum,
+                                        int const&  gidIndex,
+                                        int&        version)
+  {
+    char const* deviceName = ibv_get_device_name(context->device);
+    char gidRoceVerStr[16]      = {};
+    char roceTypePath[PATH_MAX] = {};
+    sprintf(roceTypePath, "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
+            deviceName, portNum, gidIndex);
+
+    int fd = open(roceTypePath, O_RDONLY);
+    if (fd == -1)
+      return {ERR_FATAL, "Failed while opening RoCE file path (%s)", roceTypePath};
+
+    int ret = read(fd, gidRoceVerStr, 15);
+    close(fd);
+
+    if (ret == -1)
+      return {ERR_FATAL, "Failed while reading RoCE version"};
+
+    if (strlen(gidRoceVerStr)) {
+      if (strncmp(gidRoceVerStr, "IB/RoCE v1", strlen("IB/RoCE v1")) == 0
+          || strncmp(gidRoceVerStr, "RoCE v1", strlen("RoCE v1")) == 0) {
+        version = 1;
+      }
+      else if (strncmp(gidRoceVerStr, "RoCE v2", strlen("RoCE v2")) == 0) {
+        version = 2;
+      }
+    }
+    return ERR_NONE;
+  }
+
+  static bool IsIPv4MappedIPv6(const union ibv_gid &gid)
+  {
+    // look for ::ffff:x.x.x.x format
+    // From Broadcom documentation
+    // https://techdocs.broadcom.com/us/en/storage-and-ethernet-connectivity/ethernet-nic-controllers/bcm957xxx/adapters/frequently-asked-questions1.html
+    // "The IPv4 address is really an IPv4 address mapped into the IPv6 address space.
+    // This can be identified by 80 “0” bits, followed by 16 “1” bits (“FFFF” in hexadecimal)
+    // followed by the original 32-bit IPv4 address."
+    return (gid.global.subnet_prefix == 0    &&
+            gid.raw[8]               == 0    &&
+            gid.raw[9]               == 0    &&
+            gid.raw[10]              == 0xff &&
+            gid.raw[11]              == 0xff);
+  }
+
+  static ErrResult GetGidIndex(struct ibv_context*          context,
+                               int const&                   gidTblLen,
+                               int const&                   portNum,
+                               std::pair<int, std::string>& gidInfo)
+  {
+    if(gidInfo.first >= 0) return ERR_NONE; // honor user choice
+    union ibv_gid gid;
+
+    GidPriority highestPriority = GidPriority::UNKNOWN;
+    int gidIndex = -1;
+
+    for (int i = 0; i < gidTblLen; ++i) {
+      IBV_CALL(ibv_query_gid, context, portNum, i, &gid);
+      if (!IsConfiguredGid(gid)) continue;
+      int gidCurrRoceVersion;
+      if(GetRoceVersionNumber(context, portNum, i, gidCurrRoceVersion).errType != ERR_NONE) continue;
+      GidPriority currPriority;
+      if (IsIPv4MappedIPv6(gid)) {
+        currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_IPV4 : GidPriority::ROCEV1_IPV4;
+      } else if (!LinkLocalGid(gid)) {
+        currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_IPV6 : GidPriority::ROCEV1_IPV6;
+      } else {
+        currPriority = (gidCurrRoceVersion == 2) ? GidPriority::ROCEV2_LINK_LOCAL : GidPriority::ROCEV1_LINK_LOCAL;
+      }
+      if(currPriority > highestPriority) {
+        highestPriority = currPriority;
+        gidIndex = i;
+      }
+    }
+
+    if (highestPriority == GidPriority::UNKNOWN) {
+      gidInfo.first = -1;
+      return {ERR_FATAL, "Failed to auto-detect a valid GID index. Try setting it manually through IB_GID_INDEX"};
+    }
+    gidInfo.first = gidIndex;
+    gidInfo.second = GidPriorityStr[highestPriority];
+    return ERR_NONE;
+  }
+
   static vector<IbvDevice>& GetIbvDeviceList()
   {
     static bool isInitialized = false;
@@ -1425,12 +1582,25 @@ namespace {
             if (context) {
               struct ibv_device_attr deviceAttr;
               if (!ibv_query_device(context, &deviceAttr)) {
+                int activePort;
+                ibvDevice.gidIndex = -1;
                 for (int port = 1; port <= deviceAttr.phys_port_cnt; ++port) {
                   struct ibv_port_attr portAttr;
                   if (ibv_query_port(context, port, &portAttr)) continue;
-                  if (portAttr.state == IBV_PORT_ACTIVE)
+                  if (portAttr.state == IBV_PORT_ACTIVE) {
+                    activePort = port;
                     ibvDevice.hasActivePort = true;
-                  break;
+                    if(portAttr.link_layer == IBV_LINK_LAYER_ETHERNET) {
+                      ibvDevice.isRoce = true;
+                      std::pair<int, std::string> gidInfo (-1, "");
+                      auto res = GetGidIndex(context, portAttr.gid_tbl_len, activePort, gidInfo);
+                      if (res.errType == ERR_NONE) {
+                        ibvDevice.gidIndex = gidInfo.first;
+                        ibvDevice.gidDescriptor = gidInfo.second;
+                      }
+                    }
+                    break;
+                  }
                 }
               }
               ibv_close_device(context);
@@ -1781,164 +1951,6 @@ namespace {
     return ERR_NONE;
   }
 
-  static bool IsConfiguredGid(union ibv_gid* gid)
-  {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    int trailer = (a->s6_addr32[1] | a->s6_addr32[2] | a->s6_addr32[3]);
-    if (((a->s6_addr32[0] | trailer) == 0UL) ||
-        ((a->s6_addr32[0] == htonl(0xfe800000)) && (trailer == 0UL))) {
-      return false;
-    }
-    return true;
-  }
-
-  static bool LinkLocalGid(union ibv_gid* gid)
-  {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    if (a->s6_addr32[0] == htonl(0xfe800000) && a->s6_addr32[1] == 0UL) {
-      return true;
-    }
-    return false;
-  }
-
-  static bool IsValidGid(union ibv_gid* gid)
-  {
-    return (IsConfiguredGid(gid) && !LinkLocalGid(gid));
-  }
-
-  static sa_family_t GetGidAddressFamily(union ibv_gid* gid)
-  {
-    const struct in6_addr *a = (struct in6_addr *)gid->raw;
-    bool isIpV4Mapped = ((a->s6_addr32[0] | a->s6_addr32[1]) |
-                         (a->s6_addr32[2] ^ htonl(0x0000ffff))) == 0UL;
-    bool isIpV4MappedMulticast = (a->s6_addr32[0] == htonl(0xff0e0000) &&
-                                  ((a->s6_addr32[1] |
-                                    (a->s6_addr32[2] ^ htonl(0x0000ffff))) == 0UL));
-    return (isIpV4Mapped || isIpV4MappedMulticast) ? AF_INET : AF_INET6;
-  }
-
-  static bool MatchGidAddressFamily(sa_family_t const& af,
-                                    void*              prefix,
-                                    int                prefixLen,
-                                    union ibv_gid*     gid)
-  {
-    struct in_addr  *base  = NULL;
-    struct in6_addr *base6 = NULL;
-    struct in6_addr *addr6 = NULL;;
-    if (af == AF_INET) {
-      base = (struct in_addr *)prefix;
-    } else {
-      base6 = (struct in6_addr *)prefix;
-    }
-    addr6 = (struct in6_addr *)gid->raw;
-#define NETMASK(bits) (htonl(0xffffffff ^ ((1 << (32 - bits)) - 1)))
-    int i = 0;
-    while (prefixLen > 0 && i < 4) {
-      if (af == AF_INET) {
-        int mask = NETMASK(prefixLen);
-        if ((base->s_addr & mask) ^ (addr6->s6_addr32[3] & mask))
-          break;
-        prefixLen = 0;
-        break;
-      } else {
-        if (prefixLen >= 32) {
-          if (base6->s6_addr32[i] ^ addr6->s6_addr32[i])
-            break;
-          prefixLen -= 32;
-          ++i;
-        } else {
-          int mask = NETMASK(prefixLen);
-          if ((base6->s6_addr32[i] & mask) ^ (addr6->s6_addr32[i] & mask))
-            break;
-          prefixLen = 0;
-        }
-      }
-    }
-    return (prefixLen == 0) ? true : false;
-#undef NETMASK
-  }
-
-  static ErrResult GetRoceVersionNumber(struct ibv_context* const& context,
-                                        int const&  portNum,
-                                        int const&  gidIndex,
-                                        int*        version)
-  {
-    char const* deviceName = ibv_get_device_name(context->device);
-    char gidRoceVerStr[16]      = {};
-    char roceTypePath[PATH_MAX] = {};
-    sprintf(roceTypePath, "/sys/class/infiniband/%s/ports/%d/gid_attrs/types/%d",
-            deviceName, portNum, gidIndex);
-
-    int fd = open(roceTypePath, O_RDONLY);
-    if (fd == -1)
-      return {ERR_FATAL, "Failed while opening RoCE file path (%s)", roceTypePath};
-
-    int ret = read(fd, gidRoceVerStr, 15);
-    close(fd);
-
-    if (ret == -1)
-      return {ERR_FATAL, "Failed while reading RoCE version"};
-
-    if (strlen(gidRoceVerStr)) {
-      if (strncmp(gidRoceVerStr, "IB/RoCE v1", strlen("IB/RoCE v1")) == 0
-          || strncmp(gidRoceVerStr, "RoCE v1", strlen("RoCE v1")) == 0) {
-        *version = 1;
-      }
-      else if (strncmp(gidRoceVerStr, "RoCE v2", strlen("RoCE v2")) == 0) {
-        *version = 2;
-      }
-    }
-    return ERR_NONE;
-  }
-
-  static ErrResult GetGidIndex(ConfigOptions const& cfg,
-                               struct ibv_context*  context,
-                               int const&           gidTblLen,
-                               int&                 gidIndex)
-  {
-    // Use GID index if user specified
-    if (gidIndex >= 0) return ERR_NONE;
-
-    // Try to find the best GID index
-    int         port          = cfg.nic.ibPort;
-    sa_family_t targetAddrFam = (cfg.nic.ipAddressFamily == 6)? AF_INET6 : AF_INET;
-    int         targetRoCEVer = cfg.nic.roceVersion;
-
-    // Initially assume gidIndex = 0
-    int gidIndexCurr = 0;
-    union ibv_gid gidCurr;
-    IBV_CALL(ibv_query_gid, context, port, gidIndexCurr, &gidCurr);
-    sa_family_t gidCurrFam = GetGidAddressFamily(&gidCurr);
-    bool gidCurrIsValid = IsValidGid(&gidCurr);
-    int  gidCurrRoceVersion;
-    ERR_CHECK(GetRoceVersionNumber(context, port, gidIndexCurr, &gidCurrRoceVersion));
-
-    // Loop over GID table to find the best match
-    for (int gidIndexTest = 1; gidIndexTest < gidTblLen; ++gidIndexTest) {
-      union ibv_gid gidTest;
-      IBV_CALL(ibv_query_gid, context, cfg.nic.ibPort, gidIndexTest, &gidTest);
-      if (!IsValidGid(&gidTest)) continue;
-
-      sa_family_t gidTestFam = GetGidAddressFamily(&gidTest);
-      bool gidTestMatchSubnet = MatchGidAddressFamily(targetAddrFam, NULL, 0, &gidTest);
-      int  gidTestRoceVersion;
-      ERR_CHECK(GetRoceVersionNumber(context, port, gidIndexTest, &gidTestRoceVersion));
-
-      if (!gidCurrIsValid ||
-          (gidTestFam == targetAddrFam && gidTestMatchSubnet &&
-           (gidCurrFam != targetAddrFam || gidTestRoceVersion == targetRoCEVer))) {
-        // Switch to better match
-        gidIndexCurr       = gidIndexTest;
-        gidCurrFam         = gidTestFam;
-        gidCurrIsValid     = true;
-        gidCurrRoceVersion = gidTestRoceVersion;
-      }
-    }
-
-    gidIndex = gidIndexCurr;
-    return ERR_NONE;
-  }
-
   static ErrResult PrepareNicTransferResources(ConfigOptions const& cfg,
                                                ExeDevice     const& srcExeDevice,
                                                Transfer      const& t,
@@ -2012,8 +2024,12 @@ namespace {
     bool isRoCE = (rss.srcPortAttr.link_layer == IBV_LINK_LAYER_ETHERNET);
     if (isRoCE) {
       // Try to auto-detect the GID index
-      ERR_CHECK(GetGidIndex(cfg, rss.srcContext, rss.srcPortAttr.gid_tbl_len, srcGidIndex));
-      ERR_CHECK(GetGidIndex(cfg, rss.dstContext, rss.dstPortAttr.gid_tbl_len, dstGidIndex));
+      std::pair<int, std::string> srcGidInfo (srcGidIndex, "");
+      std::pair<int, std::string> dstGidInfo (dstGidIndex, "");
+      ERR_CHECK(GetGidIndex(rss.srcContext, rss.srcPortAttr.gid_tbl_len, cfg.nic.ibPort, srcGidInfo));
+      ERR_CHECK(GetGidIndex(rss.dstContext, rss.dstPortAttr.gid_tbl_len, cfg.nic.ibPort, dstGidInfo));
+      srcGidIndex = srcGidInfo.first;
+      dstGidIndex = dstGidInfo.first;
       IBV_CALL(ibv_query_gid, rss.srcContext, port, srcGidIndex, &rss.srcGid);
       IBV_CALL(ibv_query_gid, rss.dstContext, port, dstGidIndex, &rss.dstGid);
     }
@@ -2396,13 +2412,47 @@ namespace {
                                       exeDevice.exeIndex));
 #endif
       int transferOffset = 0;
-      for (auto& rss : exeInfo.resources) {
-        Transfer const& t = transfers[rss.transferIdx];
-        rss.subExecParamGpuPtr = exeInfo.subExecParamGpu + transferOffset;
-        for (auto p : rss.subExecParamCpu) {
+      if (cfg.gfx.useMultiStream || cfg.gfx.blockOrder == 0) {
+        // Threadblocks are ordered sequentially one transfer at a time
+        for (auto& rss : exeInfo.resources) {
+          Transfer const& t = transfers[rss.transferIdx];
+          rss.subExecParamGpuPtr = exeInfo.subExecParamGpu + transferOffset;
+          for (auto p : rss.subExecParamCpu) {
+            rss.subExecIdx.push_back(exeInfo.subExecParamCpu.size());
+            exeInfo.subExecParamCpu.push_back(p);
+            transferOffset++;
+          }
+        }
+      } else if (cfg.gfx.blockOrder == 1) {
+        // Interleave threadblocks of different Transfers
+        for (int subExecIdx = 0; exeInfo.subExecParamCpu.size() < exeInfo.totalSubExecs; ++subExecIdx) {
+          for (auto& rss : exeInfo.resources) {
+            Transfer const& t = transfers[rss.transferIdx];
+            if (subExecIdx < t.numSubExecs) {
+              rss.subExecIdx.push_back(exeInfo.subExecParamCpu.size());
+              exeInfo.subExecParamCpu.push_back(rss.subExecParamCpu[subExecIdx]);
+            }
+          }
+        }
+      } else if (cfg.gfx.blockOrder == 2) {
+        // Build randomized threadblock list
+        std::vector<std::pair<int,int>> indices;
+        for (int i = 0; i < exeInfo.resources.size(); i++) {
+          auto const& rss = exeInfo.resources[i];
+          Transfer const& t = transfers[rss.transferIdx];
+          for (int j = 0; j < t.numSubExecs; j++)
+            indices.push_back(std::make_pair(i,j));
+        }
+
+        std::random_device rd;
+        std::default_random_engine gen(rd());
+        std::shuffle(indices.begin(), indices.end(), gen);
+
+        // Build randomized threadblock list
+        for (auto p : indices) {
+          auto& rss = exeInfo.resources[p.first];
           rss.subExecIdx.push_back(exeInfo.subExecParamCpu.size());
-          exeInfo.subExecParamCpu.push_back(p);
-          transferOffset++;
+          exeInfo.subExecParamCpu.push_back(rss.subExecParamCpu[p.second]);
         }
       }
 
@@ -2595,50 +2645,15 @@ namespace {
                                       int           const  exeIndex,
                                       TransferResources&   rss)
   {
-    auto cpuStart = std::chrono::high_resolution_clock::now();
 
-    // Switch to the closest NUMA node to this NIC
-    if (cfg.nic.useNuma) {
-      int numaNode = GetIbvDeviceList()[exeIndex].numaNode;
-      if (numaNode != -1)
-        numa_run_on_node(numaNode);
-    }
 
-    int subIteration = 0;
-    do {
-      // Loop over each of the queue pairs and post the send
-      ibv_send_wr* badWorkReq;
-      for (int qpIndex = 0; qpIndex < rss.qpCount; qpIndex++) {
-        int error = ibv_post_send(rss.srcQueuePairs[qpIndex], &rss.sendWorkRequests[qpIndex], &badWorkReq);
-        if (error)
-          return {ERR_FATAL, "Transfer %d: Error when calling ibv_post_send for QP %d Error code %d\n",
-            rss.transferIdx, qpIndex, error};
-      }
-
-      // Poll the completion queue until all queue pairs are complete
-      // The order of completion doesn't matter because this completion queue is dedicated to this Transfer
-      int numComplete = 0;
-      ibv_wc wc;
-      while (numComplete < rss.qpCount) {
-        int nc = ibv_poll_cq(rss.srcCompQueue, 1, &wc);
-        if (nc > 0) {
-          numComplete++;
-          if (wc.status != IBV_WC_SUCCESS) {
-            return {ERR_FATAL, "Transfer %d: Received unsuccessful work completion", rss.transferIdx};
-          }
-        } else if (nc < 0) {
-          return {ERR_FATAL, "Transfer %d: Received negative work completion", rss.transferIdx};
-        }
-      }
-    } while (++subIteration != cfg.general.numSubIterations);
-
-    auto cpuDelta = std::chrono::high_resolution_clock::now() - cpuStart;
-    double deltaMsec = std::chrono::duration_cast<std::chrono::duration<double>>(cpuDelta).count() * 1000.0;
-
-    if (iteration >= 0) {
-      rss.totalDurationMsec += deltaMsec;
-      if (cfg.general.recordPerIteration)
-        rss.perIterMsec.push_back(deltaMsec);
+    // Loop over each of the queue pairs and post the send
+    ibv_send_wr* badWorkReq;
+    for (int qpIndex = 0; qpIndex < rss.qpCount; qpIndex++) {
+      int error = ibv_post_send(rss.srcQueuePairs[qpIndex], &rss.sendWorkRequests[qpIndex], &badWorkReq);
+      if (error)
+        return {ERR_FATAL, "Transfer %d: Error when calling ibv_post_send for QP %d Error code %d\n",
+          rss.transferIdx, qpIndex, error};
     }
     return ERR_NONE;
   }
@@ -2649,26 +2664,59 @@ namespace {
                                   int           const  exeIndex,
                                   ExeInfo&             exeInfo)
   {
-    vector<std::future<ErrResult>> asyncTransfers;
-
-    auto cpuStart = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < exeInfo.resources.size(); i++) {
-      asyncTransfers.emplace_back(std::async(std::launch::async,
-                                             ExecuteNicTransfer,
-                                             iteration,
-                                             std::cref(cfg),
-                                             exeIndex,
-                                             std::ref(exeInfo.resources[i])));
+    // Switch to the closest NUMA node to this NIC
+    if (cfg.nic.useNuma) {
+      int numaNode = GetIbvDeviceList()[exeIndex].numaNode;
+      if (numaNode != -1)
+        numa_run_on_node(numaNode);
     }
-    for (auto& asyncTransfer : asyncTransfers)
-      ERR_CHECK(asyncTransfer.get());
-
-    auto cpuDelta = std::chrono::high_resolution_clock::now() - cpuStart;
-    double deltaMsec = std::chrono::duration_cast<std::chrono::duration<double>>(cpuDelta).count() * 1000.0;
-
-    if (iteration >= 0)
-      exeInfo.totalDurationMsec += deltaMsec;
-
+    int subIterations = 0;
+    do {
+      auto cpuStart = std::chrono::high_resolution_clock::now();
+      size_t completedTransfers = 0;
+      auto transferCount = exeInfo.resources.size();
+      std::vector<uint8_t> receivedQPs(transferCount);
+      std::vector<std::chrono::high_resolution_clock::time_point> transferTimers(transferCount);
+      // post the sends
+      for (auto i = 0; i < transferCount; i++) {
+        transferTimers[i] = std::chrono::high_resolution_clock::now();
+        ERR_CHECK(ExecuteNicTransfer(iteration, cfg, exeIndex, exeInfo.resources[i]));
+      }
+      // poll for completions
+      do {
+        for (auto i = 0; i < transferCount; i++) {
+          if(receivedQPs[i] < exeInfo.resources[i].qpCount) {
+            auto& rss = exeInfo.resources[i];
+            // Poll the completion queue until all queue pairs are complete
+            // The order of completion doesn't matter because this completion queue is dedicated to this Transfer
+            ibv_wc wc;
+            int nc = ibv_poll_cq(rss.srcCompQueue, 1, &wc);
+            if (nc > 0) {
+              receivedQPs[i]++;
+              if (wc.status != IBV_WC_SUCCESS) {
+                return {ERR_FATAL, "Transfer %d: Received unsuccessful work completion", rss.transferIdx};
+              }
+            } else if (nc < 0) {
+              return {ERR_FATAL, "Transfer %d: Received negative work completion", rss.transferIdx};
+            }
+            if(receivedQPs[i] == rss.qpCount) {
+              auto cpuDelta = std::chrono::high_resolution_clock::now() - transferTimers[i];
+              double deltaMsec = std::chrono::duration_cast<std::chrono::duration<double>>(cpuDelta).count() * 1000.0;
+              if (iteration >= 0) {
+                rss.totalDurationMsec += deltaMsec;
+                if (cfg.general.recordPerIteration)
+                  rss.perIterMsec.push_back(deltaMsec);
+              }
+              completedTransfers++;
+            }
+          }
+        }
+      } while(completedTransfers < transferCount);
+      auto cpuDelta = std::chrono::high_resolution_clock::now() - cpuStart;
+      double deltaMsec = std::chrono::duration_cast<std::chrono::duration<double>>(cpuDelta).count() * 1000.0;
+      if (iteration >= 0)
+        exeInfo.totalDurationMsec += deltaMsec;
+    } while(++subIterations < cfg.general.numSubIterations);
     return ERR_NONE;
   }
 #endif
@@ -2704,13 +2752,16 @@ namespace {
   // Helper function for memset
   template <typename T> __device__ __forceinline__ T      MemsetVal();
   template <>           __device__ __forceinline__ float  MemsetVal(){ return MEMSET_VAL; };
+  template <>           __device__ __forceinline__ float2 MemsetVal(){ return make_float2(MEMSET_VAL,
+                                                                                          MEMSET_VAL); };
   template <>           __device__ __forceinline__ float4 MemsetVal(){ return make_float4(MEMSET_VAL,
                                                                                           MEMSET_VAL,
                                                                                           MEMSET_VAL,
                                                                                           MEMSET_VAL); }
 
-  // Kernel for GFX execution
-  template <int BLOCKSIZE, int UNROLL>
+
+// Kernel for GFX execution
+  template <typename PACKED_FLOAT, int BLOCKSIZE, int UNROLL>
   __global__ void __launch_bounds__(BLOCKSIZE)
     GpuReduceKernel(SubExecParam* params, int waveOrder, int numSubIterations)
   {
@@ -2729,10 +2780,10 @@ namespace {
     // Collect data information
     int32_t const  numSrcs  = p.numSrcs;
     int32_t const  numDsts  = p.numDsts;
-    float4  const* __restrict__ srcFloat4[MAX_SRCS];
-    float4*        __restrict__ dstFloat4[MAX_DSTS];
-    for (int i = 0; i < numSrcs; i++) srcFloat4[i] = (float4*)p.src[i];
-    for (int i = 0; i < numDsts; i++) dstFloat4[i] = (float4*)p.dst[i];
+    PACKED_FLOAT const* __restrict__ srcFloatPacked[MAX_SRCS];
+    PACKED_FLOAT*       __restrict__ dstFloatPacked[MAX_DSTS];
+    for (int i = 0; i < numSrcs; i++) srcFloatPacked[i] = (PACKED_FLOAT const*)p.src[i];
+    for (int i = 0; i < numDsts; i++) dstFloatPacked[i] = (PACKED_FLOAT*)p.dst[i];
 
     // Operate on wavefront granularity
     int32_t const nTeams   = p.teamSize;             // Number of threadblocks working together on this subarray
@@ -2741,7 +2792,7 @@ namespace {
     int32_t const waveIdx  = threadIdx.x / warpSize; // Index of this wavefront within the threadblock
     int32_t const tIdx     = threadIdx.x % warpSize; // Thread index within wavefront
 
-    size_t  const numFloat4 = p.N / 4;
+    size_t  const numPackedFloat = p.N / (sizeof(PACKED_FLOAT)/sizeof(float));
 
     int32_t teamStride, waveStride, unrlStride, teamStride2, waveStride2;
     switch (waveOrder) {
@@ -2755,64 +2806,64 @@ namespace {
 
     int subIterations = 0;
     while (1) {
-      // First loop: Each wavefront in the team works on UNROLL float4s per thread
+      // First loop: Each wavefront in the team works on UNROLL PACKED_FLOAT per thread
       size_t const loop1Stride = nTeams * nWaves * UNROLL * warpSize;
-      size_t const loop1Limit  = numFloat4 / loop1Stride * loop1Stride;
+      size_t const loop1Limit  = numPackedFloat / loop1Stride * loop1Stride;
       {
-        float4 val[UNROLL];
+        PACKED_FLOAT val[UNROLL];
         if (numSrcs == 0) {
           #pragma unroll
           for (int u = 0; u < UNROLL; u++)
-            val[u] = MemsetVal<float4>();
+            val[u] = MemsetVal<PACKED_FLOAT>();
         }
 
         for (size_t idx = (teamIdx * teamStride + waveIdx * waveStride) * warpSize + tIdx; idx < loop1Limit; idx += loop1Stride) {
           // Read sources into memory and accumulate in registers
           if (numSrcs) {
             for (int u = 0; u < UNROLL; u++)
-              val[u] = srcFloat4[0][idx + u * unrlStride * warpSize];
+              val[u] = srcFloatPacked[0][idx + u * unrlStride * warpSize];
             for (int s = 1; s < numSrcs; s++)
               for (int u = 0; u < UNROLL; u++)
-                val[u] += srcFloat4[s][idx + u * unrlStride * warpSize];
+                val[u] += srcFloatPacked[s][idx + u * unrlStride * warpSize];
           }
 
           // Write accumulation to all outputs
           for (int d = 0; d < numDsts; d++) {
             #pragma unroll
             for (int u = 0; u < UNROLL; u++)
-              dstFloat4[d][idx + u * unrlStride * warpSize] = val[u];
+              dstFloatPacked[d][idx + u * unrlStride * warpSize] = val[u];
           }
         }
       }
 
-      // Second loop: Deal with remaining float4s
+      // Second loop: Deal with remaining PACKED_FLOAT
       {
-        if (loop1Limit < numFloat4) {
-          float4 val;
-          if (numSrcs == 0) val = MemsetVal<float4>();
+        if (loop1Limit < numPackedFloat) {
+          PACKED_FLOAT val;
+          if (numSrcs == 0) val = MemsetVal<PACKED_FLOAT>();
 
           size_t const loop2Stride = nTeams * nWaves * warpSize;
           for (size_t idx = loop1Limit + (teamIdx * teamStride2 + waveIdx * waveStride2) * warpSize + tIdx;
-               idx < numFloat4; idx += loop2Stride) {
+               idx < numPackedFloat; idx += loop2Stride) {
             if (numSrcs) {
-              val = srcFloat4[0][idx];
+              val = srcFloatPacked[0][idx];
               for (int s = 1; s < numSrcs; s++)
-                val += srcFloat4[s][idx];
+                val += srcFloatPacked[s][idx];
             }
             for (int d = 0; d < numDsts; d++)
-              dstFloat4[d][idx] = val;
+              dstFloatPacked[d][idx] = val;
           }
         }
       }
 
       // Third loop; Deal with remaining floats
       {
-        if (numFloat4 * 4 < p.N) {
+        if (numPackedFloat * (sizeof(PACKED_FLOAT)/sizeof(float)) < p.N) {
           float val;
           if (numSrcs == 0) val = MemsetVal<float>();
 
           size_t const loop3Stride = nTeams * nWaves * warpSize;
-          for ( size_t idx = numFloat4 * 4 + (teamIdx * teamStride2 + waveIdx * waveStride2) * warpSize + tIdx; idx < p.N; idx += loop3Stride) {
+          for (size_t idx = numPackedFloat * (sizeof(PACKED_FLOAT)/sizeof(float)) + (teamIdx * teamStride2 + waveIdx * waveStride2) * warpSize + tIdx; idx < p.N; idx += loop3Stride) {
             if (numSrcs) {
               val = p.src[0][idx];
               for (int s = 1; s < numSrcs; s++)
@@ -2839,19 +2890,24 @@ namespace {
     }
   }
 
-#define GPU_KERNEL_UNROLL_DECL(BLOCKSIZE)   \
-    {GpuReduceKernel<BLOCKSIZE, 1>,         \
-     GpuReduceKernel<BLOCKSIZE, 2>,         \
-     GpuReduceKernel<BLOCKSIZE, 3>,         \
-     GpuReduceKernel<BLOCKSIZE, 4>,         \
-     GpuReduceKernel<BLOCKSIZE, 5>,         \
-     GpuReduceKernel<BLOCKSIZE, 6>,         \
-     GpuReduceKernel<BLOCKSIZE, 7>,         \
-     GpuReduceKernel<BLOCKSIZE, 8>}
+#define GPU_KERNEL_DWORD_DECL(BLOCKSIZE, UNROLL) \
+  {GpuReduceKernel<float,  BLOCKSIZE, UNROLL>,   \
+   GpuReduceKernel<float2, BLOCKSIZE, UNROLL>,   \
+   GpuReduceKernel<float4, BLOCKSIZE, UNROLL>}
 
-  // Table of all GPU Reduction kernel functions (templated blocksize / unroll)
+#define GPU_KERNEL_UNROLL_DECL(BLOCKSIZE)    \
+  {GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 1),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 2),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 3),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 4),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 5),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 6),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 7),      \
+   GPU_KERNEL_DWORD_DECL(BLOCKSIZE, 8)}
+
+  // Table of all GPU Reduction kernel functions (templated blocksize / unroll / dword size)
   typedef void (*GpuKernelFuncPtr)(SubExecParam*, int, int);
-  GpuKernelFuncPtr GpuKernelTable[MAX_WAVEGROUPS][MAX_UNROLL] =
+  GpuKernelFuncPtr GpuKernelTable[MAX_WAVEGROUPS][MAX_UNROLL][3] =
   {
     GPU_KERNEL_UNROLL_DECL(64),
     GPU_KERNEL_UNROLL_DECL(128),
@@ -2879,18 +2935,19 @@ namespace {
     dim3 const gridSize(xccDim, numSubExecs, 1);
     dim3 const blockSize(cfg.gfx.blockSize, 1);
 
+    int wordSizeIdx = cfg.gfx.wordSize == 1 ? 0 :
+                      cfg.gfx.wordSize == 2 ? 1 :
+                                              2;
+    auto gpuKernel = GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1][wordSizeIdx];
+
 #if defined(__NVCC__)
     if (startEvent != NULL)
       ERR_CHECK(hipEventRecord(startEvent, stream));
-
-    GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1]
-      <<<gridSize, blockSize, 0, stream>>>
-      (rss.subExecParamGpuPtr, cfg.gfx.waveOrder, cfg.general.numSubIterations);
+    gpuKernel<<<gridSize, blockSize, 0, stream>>>(rss.subExecParamGpuPtr, cfg.gfx.waveOrder, cfg.general.numSubIterations);
     if (stopEvent != NULL)
       ERR_CHECK(hipEventRecord(stopEvent, stream));
 #else
-    hipExtLaunchKernelGGL(GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1],
-                          gridSize, blockSize, 0, stream, startEvent, stopEvent,
+    hipExtLaunchKernelGGL(gpuKernel, gridSize, blockSize, 0, stream, startEvent, stopEvent,
                           0, rss.subExecParamGpuPtr, cfg.gfx.waveOrder, cfg.general.numSubIterations);
 #endif
 
@@ -2954,19 +3011,19 @@ namespace {
       dim3 const blockSize(cfg.gfx.blockSize, 1);
       hipStream_t stream = exeInfo.streams[0];
 
+      int wordSizeIdx = cfg.gfx.wordSize == 1 ? 0 :
+                        cfg.gfx.wordSize == 2 ? 1 :
+                                                2;
+      auto gpuKernel = GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1][wordSizeIdx];
+
 #if defined(__NVCC__)
       if (cfg.gfx.useHipEvents)
         ERR_CHECK(hipEventRecord(exeInfo.startEvents[0], stream));
-
-      GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1]
-        <<<gridSize, blockSize, 0 , stream>>>
-        (exeInfo.subExecParamGpu, cfg.gfx.waveOrder, cfg.general.numSubIterations);
-
+      gpuKernel<<<gridSize, blockSize, 0 , stream>>>(exeInfo.subExecParamGpu, cfg.gfx.waveOrder, cfg.general.numSubIterations);
       if (cfg.gfx.useHipEvents)
         ERR_CHECK(hipEventRecord(exeInfo.stopEvents[0], stream));
 #else
-      hipExtLaunchKernelGGL(GpuKernelTable[cfg.gfx.blockSize/64 - 1][cfg.gfx.unrollFactor - 1],
-                            gridSize, blockSize, 0, stream,
+      hipExtLaunchKernelGGL(gpuKernel, gridSize, blockSize, 0, stream,
                             cfg.gfx.useHipEvents ? exeInfo.startEvents[0] : NULL,
                             cfg.gfx.useHipEvents ? exeInfo.stopEvents[0] : NULL, 0,
                             exeInfo.subExecParamGpu, cfg.gfx.waveOrder, cfg.general.numSubIterations);
