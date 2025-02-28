@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,17 +32,19 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_histogram.hpp>
 
+#include <algorithm>
+#include <cstddef>
+#include <map>
+#include <memory>
 #include <string>
-#include <thread>
+#include <type_traits>
 #include <vector>
 
-#include <chrono>
-#include <cstddef>
-
-template<class T>
+template<typename T>
 std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int upper_level)
 {
     if(entropy_reduction >= 5)
@@ -52,9 +54,9 @@ std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int
 
     const size_t max_random_size = 1024 * 1024 + 4321;
 
-    const unsigned int         seed = 123;
-    engine_type                gen(seed);
-    std::vector<T>             data(size);
+    const unsigned int seed = 123;
+    engine_type        gen(seed);
+    std::vector<T>     data(size);
     std::generate(data.begin(),
                   data.begin() + std::min(size, max_random_size),
                   [&]()
@@ -63,7 +65,7 @@ std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int
                       // "An Improved Supercomputer Sorting Benchmark", 1992
                       // Kurt Thearling & Stephen Smith
                       auto v = gen();
-                      for(int e = 0; e < entropy_reduction; e++)
+                      for(int e = 0; e < entropy_reduction; ++e)
                       {
                           v &= gen();
                       }
@@ -93,6 +95,7 @@ public:
         {
             HIP_CHECK(hipFree(i.second));
         }
+        total_cache_size = 0;
         cache.clear();
     }
 
@@ -105,6 +108,7 @@ public:
                        size_t             size,
                        F                  gen)
     {
+        static constexpr short max_default_bytes_count = 176;
         if(this->main_key != main_key)
         {
             // The main key (for example, data type) has been changed, clear the cache
@@ -121,7 +125,18 @@ public:
         // Generate a new buffer
         std::vector<T> data = gen();
         T*             d_buffer;
-        HIP_CHECK(hipMalloc(&d_buffer, size * sizeof(T)));
+        if(total_cache_size >= max_default_bytes_count)
+        {
+            auto iter = cache.end();
+            --iter;
+            d_buffer = reinterpret_cast<T*>(iter->second);
+            cache.erase(iter);
+        }
+        else
+        {
+            HIP_CHECK(hipMalloc(&d_buffer, size * sizeof(T)));
+            total_cache_size += sizeof(T);
+        }
         HIP_CHECK(hipMemcpy(d_buffer, data.data(), size * sizeof(T), hipMemcpyHostToDevice));
         cache[additional_key] = d_buffer;
         return d_buffer;
@@ -136,6 +151,7 @@ public:
 private:
     std::string                  main_key;
     std::map<std::string, void*> cache;
+    short                        total_cache_size = 0;
 };
 
 template<typename Config>
@@ -185,10 +201,19 @@ struct device_histogram_benchmark : public config_autotune_interface
 
         struct case_data
         {
-            level_type   lower_level[ActiveChannels];
-            level_type   upper_level[ActiveChannels];
-            unsigned int num_levels[ActiveChannels];
-            T*           d_input;
+            unsigned int bins;
+            int          entropy_reduction;
+            level_type   lower_level[ActiveChannels]{};
+            level_type   upper_level[ActiveChannels]{};
+            unsigned int num_levels[ActiveChannels]{};
+            T*           get_d_input(size_t full_size)
+            {
+                return input_cache::instance().get_or_generate<T>(
+                    std::string(Traits<T>::name()),
+                    std::to_string(bins) + "_" + std::to_string(entropy_reduction),
+                    full_size,
+                    [&]() { return generate<T>(full_size, entropy_reduction, 0, bins); });
+            };
         };
 
         const std::size_t size = full_size / Channels;
@@ -199,23 +224,18 @@ struct device_histogram_benchmark : public config_autotune_interface
         unsigned int  max_bins = 0;
 
         std::vector<case_data> cases_data;
-        for(auto& bins : cases)
+        for(const auto& bins : cases)
         {
             for(int entropy_reduction : {0, 2, 4, 6})
             {
-                case_data data;
+                case_data data = {bins, entropy_reduction};
 
                 // Reuse inputs for the same sample type. This autotune uses multipe inputs for all
                 // combinations of bins and entropy, but the inputs do not depend on autotuned
                 // params (bs, ipt, shared_impl_max_bins) and can be reused saving time needed for
                 // generating and copying to device.
-                data.d_input = input_cache::instance().get_or_generate<T>(
-                    std::string(Traits<T>::name()),
-                    std::to_string(bins) + "_" + std::to_string(entropy_reduction),
-                    full_size,
-                    [&]() { return generate<T>(full_size, entropy_reduction, 0, bins); });
 
-                for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+                for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
                 {
                     data.lower_level[channel] = 0;
                     data.upper_level[channel] = bins;
@@ -227,7 +247,7 @@ struct device_histogram_benchmark : public config_autotune_interface
                 HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                     d_temporary_storage,
                     current_temporary_storage_bytes,
-                    data.d_input,
+                    data.get_d_input(full_size),
                     size,
                     d_histogram,
                     data.num_levels,
@@ -243,21 +263,21 @@ struct device_histogram_benchmark : public config_autotune_interface
         }
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
-        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+        for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
         {
             HIP_CHECK(hipMalloc(&d_histogram[channel], max_bins * sizeof(counter_type)));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             for(auto& data : cases_data)
             {
                 HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                     d_temporary_storage,
                     temporary_storage_bytes,
-                    data.d_input,
+                    data.get_d_input(full_size),
                     size,
                     d_histogram,
                     data.num_levels,
@@ -276,17 +296,20 @@ struct device_histogram_benchmark : public config_autotune_interface
 
         for(auto _ : state)
         {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
+            float elapsed_mseconds = 0;
             for(auto& data : cases_data)
             {
-                for(size_t i = 0; i < batch_size; i++)
+                T*    d_input = data.get_d_input(full_size);
+                float partial_elapsed_mseconds;
+                // Record start event
+                HIP_CHECK(hipEventRecord(start, stream));
+
+                for(size_t i = 0; i < batch_size; ++i)
                 {
                     HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                         d_temporary_storage,
                         temporary_storage_bytes,
-                        data.d_input,
+                        d_input,
                         size,
                         d_histogram,
                         data.num_levels,
@@ -295,14 +318,14 @@ struct device_histogram_benchmark : public config_autotune_interface
                         stream,
                         false)));
                 }
+
+                // Record stop event and wait until it completes
+                HIP_CHECK(hipEventRecord(stop, stream));
+                HIP_CHECK(hipEventSynchronize(stop));
+
+                HIP_CHECK(hipEventElapsedTime(&partial_elapsed_mseconds, start, stop));
+                elapsed_mseconds += partial_elapsed_mseconds;
             }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
             state.SetIterationTime(elapsed_mseconds / 1000);
         }
 
@@ -316,7 +339,7 @@ struct device_histogram_benchmark : public config_autotune_interface
                                 * Channels);
 
         HIP_CHECK(hipFree(d_temporary_storage));
-        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+        for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
         {
             HIP_CHECK(hipFree(d_histogram[channel]));
         }

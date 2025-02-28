@@ -30,6 +30,7 @@
 
 // required test headers
 #include "../common_test_header.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 #include <algorithm>
@@ -126,7 +127,7 @@ void test_block_histogram_input_arrays()
         GTEST_SKIP() << "Temporary skipped test";
     }
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -153,48 +154,25 @@ void test_block_histogram_input_arrays()
         }
 
         // Preparing device
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        BinType* device_output_bin;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_bin, output_bin.size() * sizeof(BinType)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output_bin, output_bin.data(),
-                output_bin.size() * sizeof(BinType),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T>       device_output(output);
+        test_utils::device_ptr<BinType> device_output_bin(output_bin);
 
         // Running kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, device_output_bin
-        );
+            HIP_KERNEL_NAME(
+                histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output.get(),
+            device_output_bin.get());
         HIP_CHECK(hipGetLastError());
 
         // Reading results back
-        HIP_CHECK(
-            hipMemcpy(
-                output_bin.data(), device_output_bin,
-                output_bin.size() * sizeof(BinType),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output_bin = device_output_bin.load();
 
         test_utils::assert_eq(output_bin, expected_bin);
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_bin));
     }
 
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -127,10 +127,9 @@ struct radix_digit_count_helper
     };
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int&
-        get_counter(const unsigned stripe, const unsigned int digit, storage_type& storage)
+    unsigned int get_counter(const unsigned stripe, const unsigned int digit)
     {
-        return storage.digit_counters[digit * atomic_stripes + stripe];
+        return digit * atomic_stripes + stripe;
     }
 
     template<
@@ -197,7 +196,7 @@ struct radix_digit_count_helper
 
                 if(IsFull || pos < valid_count)
                 {
-                    atomic_add(&get_counter(stripe, digit, storage), 1);
+                    atomic_add(&storage.digit_counters[get_counter(stripe, digit)], 1);
                 }
             }
         }
@@ -211,7 +210,7 @@ struct radix_digit_count_helper
             ROCPRIM_UNROLL
             for(unsigned int stripe = 0; stripe < atomic_stripes; ++stripe)
             {
-                digit_count += get_counter(stripe, flat_id, storage);
+                digit_count += storage.digit_counters[get_counter(stripe, flat_id)];
             }
         }
     }
@@ -373,9 +372,9 @@ struct radix_sort_and_scatter_helper
              class ValuesInputIterator,
              class ValuesOutputIterator>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void sort_and_scatter(KeysInputIterator    keys_input,
-                          KeysOutputIterator   keys_output,
-                          ValuesInputIterator  values_input,
+    void sort_and_scatter(KeysInputIterator keys_input,
+                          KeysOutputIterator keys_output,
+                          ValuesInputIterator values_input,
                           ValuesOutputIterator values_output,
                           Offset               begin_offset,
                           Offset               end_offset,
@@ -621,8 +620,8 @@ auto compare_nan_sensitive(const T& a, const T& b)
     // Always check benchmark_device_segmented_radix_sort and benchmark_device_radix_sort
     // when making changes to this function.
 
-    using bit_key_type = typename float_bit_mask<T>::bit_type;
-    static constexpr auto sign_bit = float_bit_mask<T>::sign_bit;
+    static constexpr auto sign_bit = ::rocprim::traits::get<T>().float_bit_mask().sign_bit;
+    using bit_key_type             = decltype(sign_bit);
 
     auto a_bits = ::rocprim::detail::bit_cast<bit_key_type>(a);
     auto b_bits = ::rocprim::detail::bit_cast<bit_key_type>(b);
@@ -755,6 +754,7 @@ template<class KeyType,
 struct onesweep_histograms_helper
 {
     static constexpr unsigned int radix_size = 1u << RadixBits;
+    static constexpr unsigned int total_bits = sizeof(KeyType) * 8;
     // Upper bound, this value does not take into account the actual size of the number of bits
     // that are to be considered in the radix sort.
     static constexpr unsigned int max_digit_places
@@ -774,12 +774,11 @@ struct onesweep_histograms_helper
         counter_type histogram[histogram_counters];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE counter_type& get_counter(const unsigned     stripe_index,
-                                                            const unsigned int place,
-                                                            const unsigned int digit,
-                                                            storage_type&      storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int
+        get_counter(const unsigned stripe_index, const unsigned int place, const unsigned int digit)
     {
-        return storage.histogram[(place * radix_size + digit) * atomic_stripes + stripe_index];
+        return (place * radix_size + digit) * atomic_stripes + stripe_index;
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE void clear_histogram(const unsigned int flat_id,
@@ -791,38 +790,15 @@ struct onesweep_histograms_helper
         }
     }
 
-    template<bool IsFull>
-    ROCPRIM_DEVICE void count_digits_at_place(const unsigned int flat_id,
-                                              const unsigned int stripe,
-                                              const KeyType (&keys)[ItemsPerThread],
-                                              const unsigned int place,
-                                              Decomposer         decomposer,
-                                              const unsigned int start_bit,
-                                              const unsigned int current_radix_bits,
-                                              const unsigned int valid_count,
-                                              storage_type&      storage)
-    {
-        ROCPRIM_UNROLL
-        for(unsigned int i = 0; i < ItemsPerThread; ++i)
-        {
-            const unsigned int pos = i * BlockSize + flat_id;
-            if(IsFull || pos < valid_count)
-            {
-                const unsigned int digit
-                    = key_codec::extract_digit(keys[i], start_bit, current_radix_bits, decomposer);
-                ::rocprim::detail::atomic_add(&get_counter(stripe, place, digit, storage), 1);
-            }
-        }
-    }
-
-    template<bool IsFull, class KeysInputIterator, class Offset>
-    ROCPRIM_DEVICE void count_digits(KeysInputIterator  keys_input,
-                                     Offset*            global_digit_counts,
-                                     const unsigned int valid_count,
-                                     Decomposer         decomposer,
-                                     const unsigned int begin_bit,
-                                     const unsigned int end_bit,
-                                     storage_type&      storage)
+    template<bool IsFull, bool AllBits, class KeysInputIterator, class Offset>
+    ROCPRIM_DEVICE
+    void count_digits(KeysInputIterator  keys_input,
+                      Offset*            global_digit_counts,
+                      const unsigned int valid_count,
+                      Decomposer         decomposer,
+                      const unsigned int begin_bit,
+                      const unsigned int end_bit,
+                      storage_type&      storage)
     {
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
         const unsigned int stripe  = flat_id % atomic_stripes;
@@ -850,17 +826,48 @@ struct onesweep_histograms_helper
             key_codec::encode_inplace(keys[i], decomposer);
         }
 
-        for(unsigned int bit = begin_bit, place = 0; bit < end_bit; bit += RadixBits, ++place)
+        if ROCPRIM_IF_CONSTEXPR(AllBits)
         {
-            count_digits_at_place<IsFull>(flat_id,
-                                          stripe,
-                                          keys,
-                                          place,
-                                          decomposer,
-                                          bit,
-                                          min(RadixBits, end_bit - bit),
-                                          valid_count,
-                                          storage);
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                ROCPRIM_UNROLL
+                for(unsigned int bit = 0, place = 0; bit < sizeof(KeyType) * 8;
+                    bit += RadixBits, ++place)
+                {
+                    const unsigned int pos = i * BlockSize + flat_id;
+                    if(IsFull || pos < valid_count)
+                    {
+                        const unsigned int digit
+                            = key_codec::extract_digit(keys[i],
+                                                       bit,
+                                                       min(RadixBits, end_bit - bit),
+                                                       decomposer);
+                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                    }
+                }
+            }
+        }
+        else
+        {
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                for(unsigned int bit = begin_bit, place = 0; bit < end_bit;
+                    bit += RadixBits, ++place)
+                {
+                    const unsigned int pos = i * BlockSize + flat_id;
+                    if(IsFull || pos < valid_count)
+                    {
+                        const unsigned int digit
+                            = key_codec::extract_digit(keys[i],
+                                                       bit,
+                                                       min(RadixBits, end_bit - bit),
+                                                       decomposer);
+                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                    }
+                }
+            }
         }
 
         ::rocprim::syncthreads();
@@ -877,7 +884,7 @@ struct onesweep_histograms_helper
                 ROCPRIM_UNROLL
                 for(unsigned int stripe = 0; stripe < atomic_stripes; ++stripe)
                 {
-                    total += get_counter(stripe, place, digit, storage);
+                    total += storage.histogram[get_counter(stripe, place, digit)];
                 }
 
                 ::rocprim::detail::atomic_add(&global_digit_counts[place * radix_size + digit],
@@ -920,24 +927,37 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  
 
     if(block_id < full_blocks)
     {
-        count_helper_type{}.template count_digits<true>(keys_input + block_offset,
-                                                        global_digit_counts,
-                                                        items_per_block,
-                                                        decomposer,
-                                                        begin_bit,
-                                                        end_bit,
-                                                        storage);
+        if(begin_bit == 0 && end_bit == count_helper_type::total_bits)
+        {
+            count_helper_type{}.template count_digits<true, true>(keys_input + block_offset,
+                                                                  global_digit_counts,
+                                                                  items_per_block,
+                                                                  decomposer,
+                                                                  begin_bit,
+                                                                  end_bit,
+                                                                  storage);
+        }
+        else
+        {
+            count_helper_type{}.template count_digits<true, false>(keys_input + block_offset,
+                                                                   global_digit_counts,
+                                                                   items_per_block,
+                                                                   decomposer,
+                                                                   begin_bit,
+                                                                   end_bit,
+                                                                   storage);
+        }
     }
     else
     {
         const unsigned int valid_in_last_block = size - items_per_block * full_blocks;
-        count_helper_type{}.template count_digits<false>(keys_input + block_offset,
-                                                         global_digit_counts,
-                                                         valid_in_last_block,
-                                                         decomposer,
-                                                         begin_bit,
-                                                         end_bit,
-                                                         storage);
+        count_helper_type{}.template count_digits<false, false>(keys_input + block_offset,
+                                                                global_digit_counts,
+                                                                valid_in_last_block,
+                                                                decomposer,
+                                                                begin_bit,
+                                                                end_bit,
+                                                                storage);
     }
 }
 

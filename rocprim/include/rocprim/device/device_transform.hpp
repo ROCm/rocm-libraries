@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,8 +49,8 @@ template<class Config,
          class OutputIterator,
          class UnaryFunction>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().kernel_config.block_size) void transform_kernel(
-        InputIterator input, const size_t size, OutputIterator output, UnaryFunction transform_op)
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void transform_kernel(
+    InputIterator input, const size_t size, OutputIterator output, UnaryFunction transform_op)
 {
     transform_kernel_impl<device_params<Config>().kernel_config.block_size,
                           device_params<Config>().kernel_config.items_per_thread,
@@ -67,22 +67,22 @@ ROCPRIM_KERNEL
 /// \par Overview
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It has to be \p transform_config or a class derived from it.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] configuration of the primitive. It has to be \p transform_config or a class derived from it.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam UnaryFunction - type of unary function used for transform.
+/// \tparam UnaryFunction type of unary function used for transform.
 ///
-/// \param [in] input - iterator to the first element in the range to transform.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] transform_op - unary operation function object that will be used for transform.
+/// \param [in] input iterator to the first element in the range to transform.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] transform_op unary operation function object that will be used for transform.
 /// The signature of the function should be equivalent to the following:
 /// <tt>U f(const T &a);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \par Example
@@ -192,25 +192,25 @@ inline hipError_t transform(InputIterator     input,
 /// \par Overview
 /// * Ranges specified by \p input1, \p input2, and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
-/// \tparam InputIterator1 - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `transform_config`.
+/// \tparam InputIterator1 random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam InputIterator2 - random-access iterator type of the input range. Must meet the
+/// \tparam InputIterator2 random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for transform.
+/// \tparam BinaryFunction type of binary function used for transform.
 ///
-/// \param [in] input1 - iterator to the first element in the 1st range to transform.
-/// \param [in] input2 - iterator to the first element in the 2nd range to transform.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] transform_op - binary operation function object that will be used for transform.
+/// \param [in] input1 iterator to the first element in the 1st range to transform.
+/// \param [in] input2 iterator to the first element in the 2nd range to transform.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] transform_op binary operation function object that will be used for transform.
 /// The signature of the function should be equivalent to the following:
 /// <tt>U f(const T1& a, const T2& b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the object passed to it.
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced. Default value is \p false.
 ///
 /// \par Example

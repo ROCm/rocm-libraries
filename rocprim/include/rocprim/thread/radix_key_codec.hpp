@@ -113,9 +113,11 @@ struct radix_key_codec_floating
 {
     using bit_key_type = BitKey;
 
-    static constexpr bit_key_type sign_bit = ::rocprim::detail::float_bit_mask<Key>::sign_bit;
+    static constexpr bit_key_type sign_bit
+        = ::rocprim::traits::get<Key>().float_bit_mask().sign_bit;
 
-    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE static bit_key_type encode(Key key)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    static bit_key_type encode(Key key)
     {
         bit_key_type bit_key = ::rocprim::detail::bit_cast<bit_key_type>(key);
         bit_key ^= (sign_bit & bit_key) == 0 ? sign_bit : bit_key_type(-1);

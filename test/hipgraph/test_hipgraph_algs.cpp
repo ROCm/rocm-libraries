@@ -26,6 +26,7 @@
 // required rocprim headers
 #include "../rocprim/test_seed.hpp"
 #include "../rocprim/test_utils.hpp"
+#include "../rocprim/test_utils_device_ptr.hpp"
 
 #include <rocprim/device/device_binary_search.hpp>
 #include <rocprim/device/device_merge_sort.hpp>
@@ -96,14 +97,10 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     SCOPED_TRACE(testing::Message() << "with search_needle_size = " << search_needle_size);
 
     // Allocate device buffers and copy data into them
-    key_type* d_sort_input = nullptr;
-    key_type* d_sort_output = nullptr; // also used as search_input
-    key_type* d_search_output = nullptr;
-    key_type* d_search_needles = nullptr;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_sort_input, sort_data_size * sizeof(key_type)));
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_sort_output, sort_data_size * sizeof(key_type)));
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_search_output, search_needle_size * sizeof(key_type)));
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_search_needles, search_needle_size * sizeof(key_type)));
+    test_utils::device_ptr<key_type> d_sort_input(sort_data_size);
+    test_utils::device_ptr<key_type> d_sort_output(sort_data_size); // also used as search_input
+    test_utils::device_ptr<key_type> d_search_output(search_needle_size);
+    test_utils::device_ptr<key_type> d_search_needles(search_needle_size);
 
     // Default stream does not support hipGraph stream capture, so create a non-blocking one
     hipStream_t stream = 0;
@@ -116,27 +113,25 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     size_t sort_temp_storage_bytes = 0;
     HIP_CHECK(rocprim::merge_sort(nullptr,
                                   sort_temp_storage_bytes,
-                                  d_sort_input,
-                                  d_sort_output,
+                                  d_sort_input.get(),
+                                  d_sort_output.get(),
                                   sort_data_size,
                                   compare_op,
                                   stream,
-                                  debug_synchronous
-                                  ));
+                                  debug_synchronous));
 
     // Get size of temporary storage required for binary_search
     size_t search_temp_storage_bytes = 0;
     HIP_CHECK(rocprim::binary_search(nullptr,
                                      search_temp_storage_bytes,
-                                     d_sort_output,
-                                     d_search_needles,
-                                     d_search_output,
+                                     d_sort_output.get(),
+                                     d_search_needles.get(),
+                                     d_search_output.get(),
                                      sort_data_size,
                                      search_needle_size,
                                      compare_op,
                                      stream,
-                                     debug_synchronous
-                                     ));
+                                     debug_synchronous));
 
     // Allocate the temp storage
     // Note: a single store will be used for both the sort and search algorithms
@@ -144,41 +139,33 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     // temp_storage_size_bytes must be > 0
     ASSERT_GT(temp_storage_bytes, 0);
 
-    void* d_temp_storage = nullptr;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
+    test_utils::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
     // Begin graph capture
     test_utils::GraphHelper gHelper;
     gHelper.startStreamCapture(stream);
 
     // Launch merge_sort
-    HIP_CHECK(
-              rocprim::merge_sort(d_temp_storage,
+    HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
                                   sort_temp_storage_bytes,
-                                  d_sort_input,
-                                  d_sort_output,
+                                  d_sort_input.get(),
+                                  d_sort_output.get(),
                                   sort_data_size,
                                   compare_op,
                                   stream,
-                                  false
-                                  )
-              );
+                                  false));
 
     // Launch binary_search
-    HIP_CHECK(
-              rocprim::binary_search<rocprim::default_config>(d_temp_storage,
+    HIP_CHECK(rocprim::binary_search<rocprim::default_config>(d_temp_storage.get(),
                                                               search_temp_storage_bytes,
-                                                              d_sort_output,
-                                                              d_search_needles,
-                                                              d_search_output,
+                                                              d_sort_output.get(),
+                                                              d_search_needles.get(),
+                                                              d_search_output.get(),
                                                               sort_data_size,
                                                               search_needle_size,
                                                               compare_op,
                                                               stream,
-                                                              false
-                                                              );
-              );
+                                                              false););
 
     // End graph capture, but do not execute the graph yet.
     gHelper.endStreamCapture(stream);
@@ -200,25 +187,21 @@ TEST(TestHipGraphAlgs, SortAndSearch)
         computeExpectedSortAndSearchResult<key_type, compare_fcn_type>(sort_input, search_needles, expected_search_output, compare_op);
         
         // Copy input data to the device
-        HIP_CHECK(hipMemcpy(d_sort_input, sort_input.data(), sort_data_size * sizeof(key_type), hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_search_needles, search_needles.data(), search_needle_size * sizeof(key_type), hipMemcpyHostToDevice));
-        
+        d_sort_input.store(sort_input);
+        d_search_needles.store(search_needles);
+
         // Launch the graph
         gHelper.launchGraph(stream, true); 
 
         // Copy output back to host
-        HIP_CHECK(hipMemcpy(device_output.data(), d_search_output, search_needle_size * sizeof(key_type), hipMemcpyDeviceToHost));
-        
+        device_output = d_search_output.load();
+
         // Validate the results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(device_output, expected_search_output));
     }
 
     // Clean up
-    HIP_CHECK(hipFree(d_sort_input));
-    HIP_CHECK(hipFree(d_sort_output));
-    HIP_CHECK(hipFree(d_search_output));
-    HIP_CHECK(hipFree(d_search_needles));
-    HIP_CHECK(hipFree(d_temp_storage));
+
     gHelper.cleanupGraphHelper();
     HIP_CHECK(hipStreamDestroy(stream));
 }

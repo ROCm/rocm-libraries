@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,16 +45,16 @@ struct merge_sort_config_params
 
 /// \brief Configuration of device-level merge primitives.
 ///
-/// \tparam SortBlockSize - block size in the block-sort step
-/// \tparam SortItemsPerThread - ItemsPerThread in the block-sort step
-/// \tparam MergeOddevenBlockSize - block size in the block merge step using oddeven impl
+/// \tparam SortBlockSize block size in the block-sort step
+/// \tparam SortItemsPerThread ItemsPerThread in the block-sort step
+/// \tparam MergeOddevenBlockSize block size in the block merge step using oddeven impl
 ///         (used when input_size < MinInputSizeMergepath)
-/// \tparam MergeMergepathPartitionBlockSize - block size of the partition kernel in the block merge
+/// \tparam MergeMergepathPartitionBlockSize block size of the partition kernel in the block merge
 ///         step using mergepath impl
-/// \tparam MergeMergepathBlockSize - block size in the block merge step using mergepath impl
-/// \tparam MergeMergepathItemsPerThread - ItemsPerThread in the block merge step using
+/// \tparam MergeMergepathBlockSize block size in the block merge step using mergepath impl
+/// \tparam MergeMergepathItemsPerThread ItemsPerThread in the block merge step using
 ///         mergepath impl
-/// \tparam MinInputSizeMergepath - breakpoint of input-size to use mergepath impl for
+/// \tparam MinInputSizeMergepath breakpoint of input-size to use mergepath impl for
 ///         block merge step
 template<unsigned int MergeOddevenBlockSize            = 512,
          unsigned int SortBlockSize                    = MergeOddevenBlockSize,

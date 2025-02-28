@@ -62,15 +62,16 @@ template<typename Config,
          typename InputIt,
          typename OutputIt,
          typename BinaryFunction>
-void ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().adjacent_difference_kernel_config.block_size)
-        adjacent_difference_kernel(
-            const InputIt                                             input,
-            const OutputIt                                            output,
-            const std::size_t                                         size,
-            const BinaryFunction                                      op,
-            const typename std::iterator_traits<InputIt>::value_type* previous_values,
-            const std::size_t                                         starting_block)
+void ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(
+    device_params<Config>()
+        .adjacent_difference_kernel_config
+        .block_size) adjacent_difference_kernel(const InputIt        input,
+                                          const OutputIt       output,
+                                          const std::size_t    size,
+                                          const BinaryFunction op,
+                                          const typename std::iterator_traits<InputIt>::value_type*
+                                                            previous_values,
+                                          const std::size_t starting_block)
 {
     adjacent_difference_kernel_impl<Config, InPlace, Right>(input,
                                                             output,

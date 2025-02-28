@@ -32,21 +32,32 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/config.hpp>
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_scan.hpp>
-
-#include <string>
-#include <vector>
+#include <rocprim/functional.hpp>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/block/block_load.hpp>
+    #include <rocprim/block/block_scan.hpp>
+    #include <rocprim/block/block_store.hpp>
+#endif
 
 #include <cstddef>
+#include <string>
+#include <type_traits>
+#include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <memory>
+#endif
 
 template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::scan_config_params config = Config();
     return "{bs:" + std::to_string(config.kernel_config.block_size)
-           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
-           + ",method:" + std::string(get_block_scan_method_name(config.block_scan_method)) + "}";
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread) + ",method:"
+           + std::string(get_block_scan_algorithm_name(config.block_scan_method)) + "}";
 }
 
 template<>
@@ -56,10 +67,10 @@ inline std::string config_name<rocprim::default_config>()
 }
 
 template<bool Exclusive     = false,
-         class T            = int,
-         class ScanOp       = rocprim::plus<T>,
+         typename T         = int,
+         typename ScanOp    = rocprim::plus<T>,
          bool Deterministic = false,
-         class Config       = rocprim::default_config>
+         typename Config    = rocprim::default_config>
 struct device_scan_benchmark : public config_autotune_interface
 {
     std::string name() const override
@@ -150,16 +161,16 @@ struct device_scan_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(T);
 
         ScanOp         scan_op{};
         const auto     random_range = limit_random_range<T>(0, 1000);
         std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-        T              initial_value = T(123);
-        T*             d_input;
-        T*             d_output;
+        T  initial_value = T(123);
+        T* d_input;
+        T* d_output;
         HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
         HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
         HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
@@ -181,7 +192,7 @@ struct device_scan_benchmark : public config_autotune_interface
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < 5; i++)
+        for(size_t i = 0; i < 5; ++i)
         {
             HIP_CHECK((run_device_scan(d_temp_storage,
                                        temp_storage_size_bytes,
@@ -205,7 +216,7 @@ struct device_scan_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK((run_device_scan(d_temp_storage,
                                            temp_storage_size_bytes,
@@ -273,7 +284,7 @@ struct device_scan_benchmark_generator
             {
                 // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread
-                    = ::rocprim::min<size_t>(65536 / (block_size * sizeof(T)), 24);
+                    = ::rocprim::min<size_t>(65536 / (block_size * sizeof(T)) - 1, 24);
                 static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>,
                                 create_ipt>(storage);
             }

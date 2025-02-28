@@ -48,7 +48,7 @@ struct wrapped_search_n_config<default_config, Type>
     template<target_arch Arch>
     struct architecture_config
     {
-        static constexpr search_n_config_params params = {6, kernel_config<256, 4>()};
+        static constexpr search_n_config_params params = {8, kernel_config<256, 4>()};
     };
 };
 

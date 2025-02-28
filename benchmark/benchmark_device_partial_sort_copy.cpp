@@ -32,8 +32,12 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+#include <rocprim/types.hpp>
+
 #include <cstddef>
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
@@ -42,7 +46,7 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #define CREATE_BENCHMARK_PARTIAL_SORT_COPY(TYPE, SMALL_N)                 \
     {                                                                     \
         const device_partial_sort_copy_benchmark<TYPE> instance(SMALL_N); \
-        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);     \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);    \
     }
 
 #define CREATE_BENCHMARK(TYPE)                          \
@@ -65,7 +69,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -88,6 +92,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::half)
     CREATE_BENCHMARK(short)
     CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_float2          = custom_type<float, float>;
     using custom_double2         = custom_type<double, double>;

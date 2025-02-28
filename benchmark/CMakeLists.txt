@@ -82,10 +82,16 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       benchmark::benchmark
   )
 
-  target_link_libraries(${BENCHMARK_TARGET}
-    PRIVATE
+  if(USE_HIPCXX)
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
       $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
-  )
+    )
+  else()
+    target_link_libraries(${BENCHMARK_TARGET}
+      PRIVATE
+      hip::device)
+  endif()
 
   target_compile_options(${BENCHMARK_TARGET}
     PRIVATE
@@ -141,6 +147,7 @@ add_rocprim_benchmark(benchmark_device_find_first_of.cpp)
 add_rocprim_benchmark(benchmark_device_find_end.cpp)
 add_rocprim_benchmark(benchmark_device_histogram.cpp)
 add_rocprim_benchmark(benchmark_device_merge.cpp)
+add_rocprim_benchmark(benchmark_device_merge_inplace.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort_block_sort.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort_block_merge.cpp)
@@ -155,6 +162,7 @@ add_rocprim_benchmark(benchmark_device_reduce_by_key.cpp)
 add_rocprim_benchmark(benchmark_device_reduce_by_key_deterministic.cpp)
 add_rocprim_benchmark(benchmark_device_reduce.cpp)
 add_rocprim_benchmark(benchmark_device_run_length_encode.cpp)
+add_rocprim_benchmark(benchmark_device_run_length_encode_non_trivial_runs.cpp)
 add_rocprim_benchmark(benchmark_device_scan.cpp)
 add_rocprim_benchmark(benchmark_device_scan_deterministic.cpp)
 add_rocprim_benchmark(benchmark_device_scan_by_key.cpp)

@@ -27,6 +27,7 @@
 #include <rocprim/device/device_binary_search.hpp>
 
 // required test headers
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 template<class Haystack,
@@ -57,7 +58,7 @@ using custom_double2 = test_utils::custom_test_type<double>;
 struct use_custom_config
 {};
 
-typedef ::testing::Types<
+using Params = ::testing::Types<
     params<int, int>,
     params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long>>,
     params<float, double, unsigned int, rocprim::greater<double>>,
@@ -72,8 +73,7 @@ typedef ::testing::Types<
            use_custom_config>,
     params<custom_int2, custom_int2>,
     params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2>>,
-    params<int, int, size_t, rocprim::less<>, rocprim::default_config, true>>
-    Params;
+    params<int, int, size_t, rocprim::less<>, rocprim::default_config, true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
 
@@ -103,7 +103,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 
     compare_op_type compare_op;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -127,26 +127,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
                 needles_size, d, haystack_size + d, seed_value
             );
 
-            haystack_type * d_haystack;
-            needle_type * d_needles;
-            output_type * d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_haystack, haystack_size * sizeof(haystack_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_needles, needles_size * sizeof(needle_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, needles_size * sizeof(output_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_haystack, haystack.data(),
-                    haystack_size * sizeof(haystack_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_needles, needles.data(),
-                    needles_size * sizeof(needle_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<haystack_type> d_haystack(haystack);
+            test_utils::device_ptr<needle_type>   d_needles(needles);
+            test_utils::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -157,13 +140,12 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
                     haystack.begin();
             }
 
-            void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::lower_bound<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::lower_bound<config>(nullptr,
                                                    temporary_storage_bytes,
-                                                   d_haystack,
-                                                   d_needles,
-                                                   d_output,
+                                                   d_haystack.get(),
+                                                   d_needles.get(),
+                                                   d_output.get(),
                                                    haystack_size,
                                                    needles_size,
                                                    compare_op,
@@ -172,7 +154,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             test_utils::GraphHelper gHelper;;
             if(TestFixture::params::use_graphs)
@@ -180,11 +162,11 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
                 gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK(rocprim::lower_bound<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::lower_bound<config>(d_temporary_storage.get(),
                                                    temporary_storage_bytes,
-                                                   d_haystack,
-                                                   d_needles,
-                                                   d_output,
+                                                   d_haystack.get(),
+                                                   d_needles.get(),
+                                                   d_output.get(),
                                                    haystack_size,
                                                    needles_size,
                                                    compare_op,
@@ -196,19 +178,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            std::vector<output_type> output(needles_size);
-            HIP_CHECK(
-                hipMemcpy(
-                    output.data(), d_output,
-                    needles_size * sizeof(output_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-
-            HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_haystack));
-            HIP_CHECK(hipFree(d_needles));
-            HIP_CHECK(hipFree(d_output));
+            const auto output = d_output.load();
 
             if(TestFixture::params::use_graphs)
             {
@@ -249,7 +219,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 
     compare_op_type compare_op;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         seed_type seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -272,26 +242,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
                 needles_size, d, haystack_size + d, seed_value
             );
 
-            haystack_type * d_haystack;
-            needle_type * d_needles;
-            output_type * d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_haystack, haystack_size * sizeof(haystack_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_needles, needles_size * sizeof(needle_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, needles_size * sizeof(output_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_haystack, haystack.data(),
-                    haystack_size * sizeof(haystack_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_needles, needles.data(),
-                    needles_size * sizeof(needle_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<haystack_type> d_haystack(haystack);
+            test_utils::device_ptr<needle_type>   d_needles(needles);
+            test_utils::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -302,13 +255,12 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
                     haystack.begin();
             }
 
-            void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::upper_bound<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::upper_bound<config>(nullptr,
                                                    temporary_storage_bytes,
-                                                   d_haystack,
-                                                   d_needles,
-                                                   d_output,
+                                                   d_haystack.get(),
+                                                   d_needles.get(),
+                                                   d_output.get(),
                                                    haystack_size,
                                                    needles_size,
                                                    compare_op,
@@ -317,7 +269,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             test_utils::GraphHelper gHelper;;
             if(TestFixture::params::use_graphs)
@@ -325,11 +277,11 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
                 gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK(rocprim::upper_bound<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::upper_bound<config>(d_temporary_storage.get(),
                                                    temporary_storage_bytes,
-                                                   d_haystack,
-                                                   d_needles,
-                                                   d_output,
+                                                   d_haystack.get(),
+                                                   d_needles.get(),
+                                                   d_output.get(),
                                                    haystack_size,
                                                    needles_size,
                                                    compare_op,
@@ -341,19 +293,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            std::vector<output_type> output(needles_size);
-            HIP_CHECK(
-                hipMemcpy(
-                    output.data(), d_output,
-                    needles_size * sizeof(output_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-
-            HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_haystack));
-            HIP_CHECK(hipFree(d_needles));
-            HIP_CHECK(hipFree(d_output));
+            const auto output = d_output.load();
 
             if(TestFixture::params::use_graphs)
             {
@@ -396,7 +336,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
 
     compare_op_type compare_op;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -420,26 +360,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
                 needles_size, d, haystack_size + d, seed_value
             );
 
-            haystack_type * d_haystack;
-            needle_type * d_needles;
-            output_type * d_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_haystack, haystack_size * sizeof(haystack_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_needles, needles_size * sizeof(needle_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, needles_size * sizeof(output_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_haystack, haystack.data(),
-                    haystack_size * sizeof(haystack_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_needles, needles.data(),
-                    needles_size * sizeof(needle_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<haystack_type> d_haystack(haystack);
+            test_utils::device_ptr<needle_type>   d_needles(needles);
+            test_utils::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -448,13 +371,12 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
                 expected[i] = std::binary_search(haystack.begin(), haystack.end(), needles[i], compare_op);
             }
 
-            void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::binary_search<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::binary_search<config>(nullptr,
                                                      temporary_storage_bytes,
-                                                     d_haystack,
-                                                     d_needles,
-                                                     d_output,
+                                                     d_haystack.get(),
+                                                     d_needles.get(),
+                                                     d_output.get(),
                                                      haystack_size,
                                                      needles_size,
                                                      compare_op,
@@ -463,7 +385,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             test_utils::GraphHelper gHelper;;
             if(TestFixture::params::use_graphs)
@@ -471,11 +393,11 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
                 gHelper.startStreamCapture(stream);
             }
 
-            HIP_CHECK(rocprim::binary_search<config>(d_temporary_storage,
+            HIP_CHECK(rocprim::binary_search<config>(d_temporary_storage.get(),
                                                      temporary_storage_bytes,
-                                                     d_haystack,
-                                                     d_needles,
-                                                     d_output,
+                                                     d_haystack.get(),
+                                                     d_needles.get(),
+                                                     d_output.get(),
                                                      haystack_size,
                                                      needles_size,
                                                      compare_op,
@@ -487,19 +409,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            std::vector<output_type> output(needles_size);
-            HIP_CHECK(
-                hipMemcpy(
-                    output.data(), d_output,
-                    needles_size * sizeof(output_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-
-            HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_haystack));
-            HIP_CHECK(hipFree(d_needles));
-            HIP_CHECK(hipFree(d_output));
+            const auto output = d_output.load();
 
             if(TestFixture::params::use_graphs)
             {

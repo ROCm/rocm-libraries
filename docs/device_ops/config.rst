@@ -20,17 +20,5 @@ the GPU model
 
 .. doxygenstruct:: rocprim::default_config
 
-.. warning::
-
-   To provide information about the GPU you're targeting, you have to
-   set ``ROCPRIM_TARGET_ARCH``.
-
-   If the target is not supported by ``rocPRIM``, the templates will
-   use the configuration for the model ``900``.
-
-   If ``ROCPRIM_TARGET_TARGET`` is not defined, it defaults to ``0``,
-   which is not supported by ``rocPRIM`` and thus the configurations
-   will be for the model ``900``.
-
-
-
+The default configuration.  When used the dynamic dispatch will find an optimal configuration
+based on the type of the input data and the target architecture of the stream.

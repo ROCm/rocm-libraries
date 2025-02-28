@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// whose <tt>i</tt>-th bit is set if and only if \p predicate is <tt>true</tt>
 /// for the <tt>i</tt>-th thread of the warp and the <tt>i</tt>-th thread is active.
 ///
-/// \param predicate - input to be evaluated for all active lanes
+/// \param predicate input to be evaluated for all active lanes
 ROCPRIM_DEVICE ROCPRIM_INLINE
 lane_mask_type ballot(int predicate)
 {

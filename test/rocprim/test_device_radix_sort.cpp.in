@@ -72,6 +72,7 @@
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16>)
     INSTANTIATE(params<int,                 test_utils::custom_test_type<float>>)
     INSTANTIATE(params<test_utils::custom_float_type, int>)
+    INSTANTIATE(params<test_utils::custom_float_traits_type, int>)
     INSTANTIATE(params<unsigned int, test_utils::custom_test_array_type<int, 32>>)
 
     // start_bit and end_bit

@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -79,12 +79,12 @@ enum class warp_store_method
 /// \brief The \p warp_store class is a warp level parallel primitive which provides methods
 /// for storing an arrangement of items into a blocked/striped arrangement on continous memory.
 ///
-/// \tparam T - the output/output type.
-/// \tparam ItemsPerThread - the number of items to be processed by
+/// \tparam T the output/output type.
+/// \tparam ItemsPerThread the number of items to be processed by
 /// each thread.
-/// \tparam WarpSize - the number of threads in a warp. It must be a divisor of the
+/// \tparam WarpSize the number of threads in a warp. It must be a divisor of the
 /// kernel block size.
-/// \tparam Method - the method to store data.
+/// \tparam Method the method to store data.
 ///
 /// \par Overview
 /// * The \p warp_store class has a number of different methods to store data:
@@ -150,11 +150,11 @@ public:
     /// \brief Stores an arrangement of items from across the warp into an
     /// arrangement on continuous memory.
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] output - the output iterator to store to.
-    /// \param [in] items - array that data is read from.
+    /// \param [out] output the output iterator to store to.
+    /// \param [in] items array that data is read from.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p OutputIterator
@@ -181,12 +181,12 @@ public:
     /// arrangement on continuous memory, which is guarded by range \p valid,
     /// using temporary storage
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] output - the output iterator to store to.
-    /// \param [in] items - array that data is read from.
-    /// \param [in] valid - maximum range of valid numbers to read.
+    /// \param [out] output the output iterator to store to.
+    /// \param [in] items array that data is read from.
+    /// \param [in] valid maximum range of valid numbers to read.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p OutputIterator

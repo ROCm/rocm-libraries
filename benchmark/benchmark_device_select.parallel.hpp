@@ -28,16 +28,24 @@
 
 #include <benchmark/benchmark.h>
 
-#include <rocprim/rocprim.hpp>
-
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
-#include <limits>
-#include <memory>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_select.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/device/detail/device_config_helper.hpp>
+#endif
+
+#include <cstddef>
 #include <string>
 #include <type_traits>
 #include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <algorithm>
+    #include <memory>
+#endif
 
 enum class select_probability
 {
@@ -77,9 +85,9 @@ inline const char* get_probability_name(select_probability probability)
 constexpr int warmup_iter = 5;
 constexpr int batch_size  = 10;
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
-         class FlagType                 = char,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
+         typename FlagType              = char,
          select_probability Probability = select_probability::tuning>
 struct device_select_flag_benchmark : public config_autotune_interface
 {
@@ -98,7 +106,7 @@ struct device_select_flag_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         std::vector<DataType> input = get_random_data<DataType>(size,
@@ -179,7 +187,7 @@ struct device_select_flag_benchmark : public config_autotune_interface
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; i++)
+        for(int i = 0; i < warmup_iter; ++i)
         {
             dispatch(d_temp_storage, temp_storage_size_bytes);
         }
@@ -225,8 +233,8 @@ struct device_select_flag_benchmark : public config_autotune_interface
     static constexpr bool is_tuning = Probability == select_probability::tuning;
 };
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_predicate_benchmark : public config_autotune_interface
 {
@@ -244,7 +252,7 @@ struct device_select_predicate_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         // all data types can represent [0, 127], -1 so a predicate can select all
@@ -336,9 +344,9 @@ struct device_select_predicate_benchmark : public config_autotune_interface
     static constexpr bool is_tuning = Probability == select_probability::tuning;
 };
 
-template<class DataType,
-         class FlagType                 = int,
-         class Config                   = rocprim::default_config,
+template<typename DataType,
+         typename FlagType              = int,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_predicated_flag_benchmark : public config_autotune_interface
 {
@@ -440,7 +448,7 @@ struct device_select_predicated_flag_benchmark : public config_autotune_interfac
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; i++)
+        for(int i = 0; i < warmup_iter; ++i)
         {
             dispatch(d_temp_storage, temp_storage_size_bytes);
         }
@@ -497,7 +505,7 @@ inline std::vector<DataType> get_unique_input(size_t size, float probability, un
     auto                  input01 = get_random_data01<DataType>(size, probability, seed);
     auto                  acc     = input01[0];
     input[0]                      = acc;
-    for(size_t i = 1; i < input01.size(); i++)
+    for(size_t i = 1; i < input01.size(); ++i)
     {
         input[i] = op(acc, input01[i]);
     }
@@ -505,8 +513,8 @@ inline std::vector<DataType> get_unique_input(size_t size, float probability, un
     return input;
 }
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_unique_benchmark : public config_autotune_interface
 {
@@ -524,7 +532,7 @@ struct device_select_unique_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
         std::vector<DataType> input_0;
@@ -641,9 +649,9 @@ struct device_select_unique_benchmark : public config_autotune_interface
     static constexpr bool is_tuning = Probability == select_probability::tuning;
 };
 
-template<class KeyType,
-         class ValueType,
-         class Config                   = rocprim::default_config,
+template<typename KeyType,
+         typename ValueType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_unique_by_key_benchmark : public config_autotune_interface
 {
@@ -662,7 +670,7 @@ struct device_select_unique_by_key_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(KeyType);
 
         std::vector<KeyType> input_keys_0;

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,15 +40,15 @@ BEGIN_ROCPRIM_NAMESPACE
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
 template<
     class InputIterator,
     class T,
@@ -75,16 +75,16 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
 template<
     class InputIterator,
     class T,
@@ -116,18 +116,18 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
-/// \tparam Default - [inferred] The data type of the default value
+/// \tparam Default [inferred] The data type of the default value
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
-/// \param out_of_bounds - default value assigned to out-of-bound items
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
+/// \param out_of_bounds default value assigned to out-of-bound items
 template<
     class InputIterator,
     class T,
@@ -165,16 +165,16 @@ void block_load_direct_blocked(unsigned int flat_id,
 /// * The datatype \p T is not a primitive or a HIP vector type (e.g. int2,
 /// int4, etc.
 ///
-/// \tparam T - [inferred] the input data type
-/// \tparam U - [inferred] the output data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the input data type
+/// \tparam U [inferred] the output data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
 /// The type \p T must be such that it can be implicitly converted to \p U.
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
 template<
     class T,
     class U,
@@ -186,7 +186,7 @@ block_load_direct_blocked_vectorized(unsigned int flat_id,
                                      T* block_input,
                                      U (&items)[ItemsPerThread]) -> typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value>::type
 {
-    typedef typename detail::match_vector_type<T, ItemsPerThread>::type vector_type;
+    using vector_type = typename detail::match_vector_type<T, ItemsPerThread>::type;
     constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(vector_type);
     vector_type vector_items[vectors_per_thread];
 
@@ -227,16 +227,16 @@ block_load_direct_blocked_vectorized(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam BlockSize - the number of threads in a block
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam BlockSize the number of threads in a block
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
 template<
     unsigned int BlockSize,
     class InputIterator,
@@ -263,17 +263,17 @@ void block_load_direct_striped(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam BlockSize - the number of threads in a block
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam BlockSize the number of threads in a block
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
 template<
     unsigned int BlockSize,
     class InputIterator,
@@ -306,19 +306,19 @@ void block_load_direct_striped(unsigned int flat_id,
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
 ///
-/// \tparam BlockSize - the number of threads in a block
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam BlockSize the number of threads in a block
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
-/// \tparam Default - [inferred] The data type of the default value
+/// \tparam Default [inferred] The data type of the default value
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
-/// \param out_of_bounds - default value assigned to out-of-bound items
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
+/// \param out_of_bounds default value assigned to out-of-bound items
 template<
     unsigned int BlockSize,
     class InputIterator,
@@ -357,16 +357,16 @@ void block_load_direct_striped(unsigned int flat_id,
 /// * Using \p WarpSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
 template<
     unsigned int WarpSize = device_warp_size(),
     class InputIterator,
@@ -408,17 +408,17 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// * Using \p WarpSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
 template<
     unsigned int WarpSize = device_warp_size(),
     class InputIterator,
@@ -466,19 +466,19 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// * Using \p WarpSize smaller than hardware warpsize could result in lower
 ///   performance.
 ///
-/// \tparam WarpSize - [optional] the number of threads in a warp
-/// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+/// \tparam WarpSize [optional] the number of threads in a warp
+/// \tparam InputIterator [inferred] an iterator type for input (can be a simple
 /// pointer
-/// \tparam T - [inferred] the data type
-/// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+/// \tparam T [inferred] the data type
+/// \tparam ItemsPerThread [inferred] the number of items to be processed by
 /// each thread
-/// \tparam Default - [inferred] The data type of the default value
+/// \tparam Default [inferred] The data type of the default value
 ///
-/// \param flat_id - a local flat 1D thread id in a block (tile) for the calling thread
-/// \param block_input - the input iterator from the thread block to load from
-/// \param items - array that data is loaded to
-/// \param valid - maximum range of valid numbers to load
-/// \param out_of_bounds - default value assigned to out-of-bound items
+/// \param flat_id a local flat 1D thread id in a block (tile) for the calling thread
+/// \param block_input the input iterator from the thread block to load from
+/// \param items array that data is loaded to
+/// \param valid maximum range of valid numbers to load
+/// \param out_of_bounds default value assigned to out-of-bound items
 template<
     unsigned int WarpSize = device_warp_size(),
     class InputIterator,

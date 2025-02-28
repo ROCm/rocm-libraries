@@ -32,18 +32,21 @@
 
 // rocPRIM
 #include <rocprim/device/device_segmented_radix_sort.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
-#include <locale>
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <random>
 #include <string>
 #include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
-
-namespace rp = rocprim;
 
 namespace
 {
@@ -58,7 +61,7 @@ constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};
 // because the binary became too large to link. Runs into a "relocation R_X86_64_PC32 out of range" error.
 // This happens partially, because of the algorithm has 4 kernels, and decides at runtime which one to call.
 
-template<class Key>
+template<typename Key>
 void run_sort_keys_benchmark(benchmark::State&   state,
                              size_t              num_segments,
                              size_t              mean_segment_length,
@@ -69,7 +72,7 @@ void run_sort_keys_benchmark(benchmark::State&   state,
     using offset_type = int;
     using key_type    = Key;
 
-    // Calculate the number of elements 
+    // Calculate the number of elements
     size_t target_size = target_bytes / sizeof(key_type);
 
     std::vector<offset_type> offsets;
@@ -124,37 +127,37 @@ void run_sort_keys_benchmark(benchmark::State&   state,
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(rp::segmented_radix_sort_keys(d_temporary_storage,
-                                            temporary_storage_bytes,
-                                            d_keys_input,
-                                            d_keys_output,
-                                            size,
-                                            segments_count,
-                                            d_offsets,
-                                            d_offsets + 1,
-                                            0,
-                                            sizeof(key_type) * 8,
-                                            stream,
-                                            false));
+    HIP_CHECK(rocprim::segmented_radix_sort_keys(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 size,
+                                                 segments_count,
+                                                 d_offsets,
+                                                 d_offsets + 1,
+                                                 0,
+                                                 sizeof(key_type) * 8,
+                                                 stream,
+                                                 false));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
-        HIP_CHECK(rp::segmented_radix_sort_keys(d_temporary_storage,
-                                                temporary_storage_bytes,
-                                                d_keys_input,
-                                                d_keys_output,
-                                                size,
-                                                segments_count,
-                                                d_offsets,
-                                                d_offsets + 1,
-                                                0,
-                                                sizeof(key_type) * 8,
-                                                stream,
-                                                false));
+        HIP_CHECK(rocprim::segmented_radix_sort_keys(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_keys_input,
+                                                     d_keys_output,
+                                                     size,
+                                                     segments_count,
+                                                     d_offsets,
+                                                     d_offsets + 1,
+                                                     0,
+                                                     sizeof(key_type) * 8,
+                                                     stream,
+                                                     false));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -168,20 +171,20 @@ void run_sort_keys_benchmark(benchmark::State&   state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
-            HIP_CHECK(rp::segmented_radix_sort_keys(d_temporary_storage,
-                                                    temporary_storage_bytes,
-                                                    d_keys_input,
-                                                    d_keys_output,
-                                                    size,
-                                                    segments_count,
-                                                    d_offsets,
-                                                    d_offsets + 1,
-                                                    0,
-                                                    sizeof(key_type) * 8,
-                                                    stream,
-                                                    false));
+            HIP_CHECK(rocprim::segmented_radix_sort_keys(d_temporary_storage,
+                                                         temporary_storage_bytes,
+                                                         d_keys_input,
+                                                         d_keys_output,
+                                                         size,
+                                                         segments_count,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         0,
+                                                         sizeof(key_type) * 8,
+                                                         stream,
+                                                         false));
         }
 
         // Record stop event and wait until it completes
@@ -206,7 +209,7 @@ void run_sort_keys_benchmark(benchmark::State&   state,
     HIP_CHECK(hipFree(d_keys_output));
 }
 
-template<class KeyT>
+template<typename KeyT>
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                               size_t                                        max_bytes,
                               size_t                                        min_size,
@@ -214,7 +217,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benc
                               const managed_seed&                           seed,
                               hipStream_t                                   stream)
 {
-    // Calculate the number of elements 
+    // Calculate the number of elements
     size_t max_size = max_bytes / sizeof(KeyT);
 
     std::string key_name   = Traits<KeyT>::name();
@@ -274,7 +277,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -307,6 +310,18 @@ int main(int argc, char* argv[])
     add_sort_keys_benchmarks<uint8_t>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
     add_sort_keys_benchmarks<rocprim::half>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
     add_sort_keys_benchmarks<int>(benchmarks, bytes, min_size, bytes / 2, seed, stream);
+    add_sort_keys_benchmarks<rocprim::int128_t>(benchmarks,
+                                                bytes,
+                                                min_size,
+                                                bytes / 2,
+                                                seed,
+                                                stream);
+    add_sort_keys_benchmarks<rocprim::uint128_t>(benchmarks,
+                                                 bytes,
+                                                 min_size,
+                                                 bytes / 2,
+                                                 seed,
+                                                 stream);
 #endif
 
     // Use manual timing

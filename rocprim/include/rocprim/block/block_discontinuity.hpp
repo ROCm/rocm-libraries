@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,8 +38,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// methods for flagging items that are discontinued within an ordered set of items across
 /// threads in a block.
 ///
-/// \tparam T - the input type.
-/// \tparam BlockSize - the number of threads in a block.
+/// \tparam T the input type.
+/// \tparam BlockSize the number of threads in a block.
 ///
 /// \par Overview
 /// * There are two types of flags:
@@ -116,19 +116,19 @@ public:
     /// across the thread block, where the first item has no reference and is always
     /// flagged.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -185,21 +185,21 @@ public:
     /// across the thread block, where the first item of the first thread is compared against
     /// a \p tile_predecessor_item.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -264,19 +264,19 @@ public:
     /// across the thread block, where the last item has no reference and is always
     /// flagged.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -333,21 +333,21 @@ public:
     /// across the thread block, where the last item of the last thread is compared against
     /// a \p tile_successor_item.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -411,20 +411,20 @@ public:
     /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -498,22 +498,22 @@ public:
     /// between items partitioned across the thread block, where the last item of the
     /// last thread is compared against a \p tile_successor_item.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -595,22 +595,22 @@ public:
     /// between items partitioned across the thread block, where the first item of the
     /// first thread is compared against a \p tile_predecessor_item.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -693,24 +693,24 @@ public:
     /// the first and last thread is compared against a \p tile_predecessor_item and
     /// a \p tile_successor_item.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused

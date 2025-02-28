@@ -5,7 +5,30 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
 ### Added
-* gfx950 support
+
+* Added gfx950 support.
+* Added `rocprim::key_value_pair::operator==`.
+* Added the `rocprim::unrolled_copy` thread function to copy multiple items inside a thread.
+* Added the `rocprim::unrolled_thread_load` function to load multiple items inside a thread using `rocprim::thread_load`.
+* Added `rocprim::int128_t` and `rocprim::uint128_t` to benchmarks for improved performance evaluation on 128-bit integers.
+* Added `rocprim::int128_t` to the supported autotuning types to improve performance for 128-bit integers.
+* Added the `rocprim::merge_inplace` function for merging in-place.
+* Added initial value support for warp- and block-level inclusive scan.
+
+### Changed
+
+* A new version of `rocprim::thread_load` and `rocprim::thread_store` replace the deprecated `rocprim::thread_load` and `rocprim::thread_store` functions. The versions avoid inline assembly where possible, and don't hinder the optimizer as much as a result.
+* Renamed `rocprim::load_cs` to `rocprim::load_nontemporal` and `rocprim::store_cs` to `rocprim::store_nontemporal` to express the intent of these load and store methods better.
+* All kernels now have hidden symbol visibility. All symbols now have inline namespaces that include the library version, for example, `rocprim::ROCPRIM_300400_NS::symbol` instead of `rocPRIM::symbol`, letting the user link multiple libraries built with different versions of rocPRIM.
+
+### Resolved issues
+
+* Fixed device radix sort not returning the correct required temporary storage when a double buffer contains `nullptr`.
+* Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
+
+### Deprecations
+
+* `rocprim::load_cs` and `rocprim::store_cs` are deprecated. Use `rocprim::load_nontemporal` and `rocprim::store_nontemporal` now.
 
 ## rocPRIM 3.4.0 for ROCm 6.4.0
 
@@ -26,6 +49,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added the parallel `search` and `find_end` device functions similar to `std::search` and `std::find_end`, these functions search for the first and last occurrence of the sequence respectively.
 * Added a parallel device-level function, `rocprim::search_n`, similar to the C++ Standard Library `std::search_n` algorithm.
 * Added new constructors and a `base` function, and added `constexpr` specifier to all functions in `rocprim::reverse_iterator` to improve parity with the C++17 `std::reverse_iterator`.
+* Added hipGraph support to device run-length-encode for nontrivial runs (`rocprim::run_length_encode_non_trivial_runs`).
+* Added configuration autotuning to device run-length-encode for nontrivial runs (`rocprim::run_length_encode_non_trivial_runs`) for improved performance on selected architectures.
+* Added configuration autotuning to device run-length-encode for trivial runs (`rocprim::run_length_encode`) for improved performance on selected architectures.
+* Added a new type traits interface to enable users to provide additional type trait information to rocPRIM, facilitating better compatibility with custom types.
 
 ### Changed
 
@@ -36,6 +63,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Removed HIP-CPU support. HIP-CPU support was experimental and broken.
 * Changed the C++ version from 14 to 17. C++14 will be deprecated in the next major release.
+* You can use CMake HIP language support with CMake 3.18 and later. To use HIP language support, run `cmake` with `-DUSE_HIPCXX=ON` instead of setting the `CXX` variable to the path to a HIP-aware compiler.
 
 ### Resolved issues
 

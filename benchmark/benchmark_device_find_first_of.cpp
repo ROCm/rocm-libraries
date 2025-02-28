@@ -32,8 +32,16 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/types.hpp>
+#endif
+
 #include <cstddef>
 #include <string>
+#include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_BYTES
 constexpr size_t DEFAULT_BYTES = size_t{1} << 27; // 128 MiB
@@ -120,6 +128,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(float)
     CREATE_BENCHMARK(int64_t)
     CREATE_BENCHMARK(double)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_int2            = custom_type<int, int>;
     using custom_longlong_double = custom_type<long long, double>;

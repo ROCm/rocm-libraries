@@ -32,8 +32,12 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+#include <rocprim/types.hpp>
+
 #include <cstddef>
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
@@ -53,10 +57,9 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
         CREATE_BENCHMARK_SEARCH(TYPE, 10000, REPEATING) \
     }
 
-#define CREATE_BENCHMARK(TYPE)                \
-    {                                         \
-        CREATE_BENCHMARK_PATTERN(TYPE, true)  \
-        CREATE_BENCHMARK_PATTERN(TYPE, false) \
+#define CREATE_BENCHMARK(TYPE)                                                     \
+    {                                                                              \
+        CREATE_BENCHMARK_PATTERN(TYPE, true) CREATE_BENCHMARK_PATTERN(TYPE, false) \
     }
 
 int main(int argc, char* argv[])
@@ -96,6 +99,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::half)
     CREATE_BENCHMARK(short)
     CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_float2          = custom_type<float, float>;
     using custom_double2         = custom_type<double, double>;

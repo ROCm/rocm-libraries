@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,11 +32,11 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Configuration of device-level partial sort.
 ///
-/// \tparam NthElementConfig - configuration of device-level nth element operation.
+/// \tparam NthElementConfig configuration of device-level nth element operation.
 /// Must be \p nth_element_config or \p default_config.
-/// \tparam MergeSortConfig - configuration of device-level merge sort operation.
+/// \tparam MergeSortConfig configuration of device-level merge sort operation.
 /// Must be \p merge_sort_config or \p default_config.
-/// \tparam RadixSortConfig - configuration of device-level radix sort operation.
+/// \tparam RadixSortConfig configuration of device-level radix sort operation.
 /// Must be \p radix_sort_config or \p default_config.
 template<class NthElementConfig,
          class MergeSortConfig = default_config,

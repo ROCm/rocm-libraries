@@ -32,21 +32,32 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/config.hpp>
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_scan_by_key.hpp>
-
-#include <string>
-#include <vector>
+#include <rocprim/functional.hpp>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/block/block_load.hpp>
+    #include <rocprim/block/block_scan.hpp>
+    #include <rocprim/block/block_store.hpp>
+#endif
 
 #include <cstddef>
+#include <string>
+#include <type_traits>
+#include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <memory>
+#endif
 
 template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::scan_by_key_config_params config = Config();
     return "{bs:" + std::to_string(config.kernel_config.block_size)
-           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
-           + ",method:" + std::string(get_block_scan_method_name(config.block_scan_method)) + "}";
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread) + ",method:"
+           + std::string(get_block_scan_algorithm_name(config.block_scan_method)) + "}";
 }
 
 template<>
@@ -56,13 +67,13 @@ inline std::string config_name<rocprim::default_config>()
 }
 
 template<bool Exclusive                = false,
-         class Key                     = int,
-         class Value                   = int,
-         class ScanOp                  = rocprim::plus<Value>,
-         class CompareOp               = rocprim::equal_to<Key>,
+         typename Key                  = int,
+         typename Value                = int,
+         typename ScanOp               = rocprim::plus<Value>,
+         typename CompareOp            = rocprim::equal_to<Key>,
          unsigned int MaxSegmentLength = 1024,
          bool         Deterministic    = false,
-         class Config                  = rocprim::default_config>
+         typename Config               = rocprim::default_config>
 struct device_scan_by_key_benchmark : public config_autotune_interface
 {
     std::string name() const override
@@ -166,7 +177,7 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(Value);
 
         constexpr bool debug = false;
@@ -214,7 +225,7 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
         // Warm-up
-        for(size_t i = 0; i < 5; i++)
+        for(size_t i = 0; i < 5; ++i)
         {
             HIP_CHECK((run_device_scan_by_key(d_temp_storage,
                                               temp_storage_size_bytes,
@@ -241,7 +252,7 @@ struct device_scan_by_key_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK((run_device_scan_by_key(d_temp_storage,
                                                   temp_storage_size_bytes,
@@ -317,7 +328,10 @@ struct device_scan_by_key_benchmark_generator
             {
                 // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread = ::rocprim::min<size_t>(
-                    65536 / (block_size * (sizeof(KeyType) + sizeof(ValueType))),
+                    65536
+                        / (block_size
+                           * (sizeof(KeyType) + sizeof(ValueType)
+                              + (sizeof(KeyType) == 16 && sizeof(ValueType) == 1))),
                     24);
                 static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>,
                                 create_ipt>(storage);

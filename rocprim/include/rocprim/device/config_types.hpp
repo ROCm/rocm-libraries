@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,9 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Special type used to show that the given device-level operation
-/// will be executed with optimal configuration dependent on types of the function's parameters
-/// and the target device architecture specified by ROCPRIM_TARGET_ARCH.
-/// Algorithms supporting dynamic dispatch will ignore ROCPRIM_TARGET_ARCH and
-/// launch using optimal configuration based on the target architecture derived from the stream.
+/// will be executed with optimal configuration dependent on types of the function's parameters.
+/// With dynamic dispatch algorithms will launch using optimal configuration based on the target
+/// architecture derived from the stream.
 struct default_config
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -75,8 +74,8 @@ struct kernel_config_params
 
 /// \brief Configuration of particular kernels launched by device-level operation
 ///
-/// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
@@ -132,24 +131,6 @@ struct limit_block_size<MaxBlockSize, SharedMemoryPerThread, MinBlockSize, Extra
 
     static constexpr unsigned int value = MaxBlockSize;
 };
-
-template<unsigned int Arch, class T>
-struct select_arch_case
-{
-    static constexpr unsigned int arch = Arch;
-    using type = T;
-};
-
-template<unsigned int TargetArch, class Case, class... OtherCases>
-struct select_arch
-    : std::conditional<
-        Case::arch == TargetArch,
-        extract_type<typename Case::type>,
-        select_arch<TargetArch, OtherCases...>
-    >::type { };
-
-template<unsigned int TargetArch, class Universal>
-struct select_arch<TargetArch, Universal> : extract_type<Universal> { };
 
 template<class Config, class Default>
 using default_or_custom_config =
@@ -378,8 +359,8 @@ inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
 
 /// \brief Returns a number of threads in a hardware warp for the actual device.
 /// At host side this constant is available at runtime only.
-/// \param device_id - the device that should be queried.
-/// \param warp_size - out parameter for the warp size.
+/// \param device_id the device that should be queried.
+/// \param warp_size out parameter for the warp size.
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.
@@ -398,8 +379,8 @@ ROCPRIM_HOST inline hipError_t host_warp_size(const int device_id, unsigned int&
 
 /// \brief Returns the number of threads in a hardware warp for the device associated with the stream.
 /// At host side this constant is available at runtime only.
-/// \param stream - the stream, whose device should be queried.
-/// \param warp_size - out parameter for the warp size.
+/// \param stream the stream, whose device should be queried.
+/// \param warp_size out parameter for the warp size.
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.

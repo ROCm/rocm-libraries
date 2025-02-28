@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,6 +32,10 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../type_traits.hpp"
+#include "thread_copy.hpp"
+
+#include <utility>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -44,13 +48,14 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief These enum values are used to specify caching behaviour on load
 enum cache_load_modifier : int
 {
-    load_default,   ///< Default (no modifier)
-    load_ca,        ///< Cache at all levels
-    load_cg,        ///< Cache at global level
-    load_cs,        ///< Cache streaming (likely to be accessed once)
-    load_cv,        ///< Cache as volatile (including cached system lines)
-    load_ldg,       ///< Cache as texture
-    load_volatile,  ///< Volatile (any memory space)
+    load_default, ///< Default (no modifier)
+    load_ca, ///< Cache at all levels
+    load_cg, ///< Cache at global level
+    load_nontemporal, ///< Cache streaming (likely not to be accessed again after loading)
+    load_cv, ///< Cache as volatile (including cached system lines)
+    load_ldg, ///< Cache as texture
+    load_volatile, ///< Volatile (any memory space)
+    load_cs = load_nontemporal ///< Alias for load_nontemporal (will be deprecated in 7.0)
 };
 
 /// @}
@@ -59,8 +64,9 @@ enum cache_load_modifier : int
 namespace detail
 {
 
-template<cache_load_modifier MODIFIER = load_default, typename T>
-ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
+template<cache_load_modifier CacheLoadModifier = load_default, typename T>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+T asm_thread_load(void* ptr)
 {
     T retval{};
     __builtin_memcpy(&retval, ptr, sizeof(T));
@@ -71,26 +77,27 @@ ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 
     // Important for syncing. Check section 9.2.2 or 7.3 in the following document
     // http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
-    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                             \
-                                    llvm_cache_modifier,                                        \
-                                    type,                                                       \
-                                    interim_type,                                               \
-                                    asm_operator,                                               \
-                                    output_modifier,                                            \
-                                    wait_inst,                                                  \
-                                    wait_cmd)                                                   \
-        template<>                                                                              \
-        ROCPRIM_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void* ptr)      \
-        {                                                                                       \
-            interim_type retval;                                                                \
-            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t" wait_inst wait_cmd \
-                                       "(%2)"                                                   \
-                         : "=" #output_modifier(retval)                                         \
-                         : "v"(ptr), "I"(0x00));                                                \
-            return *bit_cast<type*>(&retval);                                                   \
+    #define ROCPRIM_ASM_THREAD_LOAD(cache_modifier,                                               \
+                                    llvm_cache_modifier,                                          \
+                                    type,                                                         \
+                                    interim_type,                                                 \
+                                    asm_operator,                                                 \
+                                    output_modifier,                                              \
+                                    wait_inst,                                                    \
+                                    wait_cmd)                                                     \
+        template<>                                                                                \
+        ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
+        {                                                                                         \
+            interim_type retval;                                                                  \
+            asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier "\n\t" wait_inst wait_cmd   \
+                                       "(%2)"                                                     \
+                         : "=" #output_modifier(retval)                                           \
+                         : "v"(ptr), "I"(0x00));                                                  \
+            return *bit_cast<type*>(&retval);                                                     \
         }
 
-// TODO Add specialization for custom larger data types
+    // TODO Add specialization for custom larger data types
+    // clang-format off
 #define ROCPRIM_ASM_THREAD_LOAD_GROUP(cache_modifier, llvm_cache_modifier, wait_inst, wait_cmd)                                  \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int8_t, int16_t, flat_load_sbyte, v, wait_inst, wait_cmd);      \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, int16_t, int16_t, flat_load_sshort, v, wait_inst, wait_cmd);    \
@@ -100,64 +107,152 @@ ROCPRIM_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, float, uint32_t, flat_load_dword, v, wait_inst, wait_cmd);      \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_load_dwordx2, v, wait_inst, wait_cmd); \
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_load_dwordx2, v, wait_inst, wait_cmd);
+    // clang-format on
 
-#if defined(__gfx940__) || defined(__gfx941__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
+    #if defined(__gfx940__) || defined(__gfx941__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc1", "s_waitcnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0 sc1", "s_waitcnt", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0 sc1", "s_waitcnt", "vmcnt");
-#elif defined(__gfx942__) || defined(__gfx950__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "sc0", "s_waitcnt", "");
+    #elif defined(__gfx942__) || defined(__gfx950__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc0 nt", "s_waitcnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "sc0", "s_waitcnt", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "sc0", "s_waitcnt", "vmcnt");
-#elif defined(__gfx1200__) ||  defined(__gfx1201__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
+    #elif defined(__gfx1200__) || defined(__gfx1201__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
-#else
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ca, "glc", "s_waitcnt", "");
+    #else
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "glc slc", "s_waitcnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cv, "glc", "s_waitcnt", "vmcnt");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_volatile, "glc", "s_waitcnt", "vmcnt");
-#endif
-
-// TODO find correct modifiers to match these
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_ldg, "", "s_waitcnt", "");
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cs, "", "s_waitcnt", "");
+    #endif
 
 #endif
 
-}
+} // namespace detail
 
 /// \addtogroup thread_load
 /// @{
 
-/// \brief Store data using the default load instruction. No support for cache modified stores yet
-/// \tparam MODIFIER Value in enum for determine which type of cache store modifier to be used
+/// \brief Load data using the load instruction specified by CacheLoadModifier.
+/// \tparam CacheLoadModifier Value in enum for determine which type of cache store modifier to be used
 /// \tparam InputIteratorT Type of Output Iterator
 /// \param itr [in] Iterator to location where data is to be stored
 /// \return Data that is loaded from memory
-template<cache_load_modifier MODIFIER = load_default, typename InputIteratorT>
-[[deprecated("Use a dereference instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE
-    typename std::iterator_traits<InputIteratorT>::value_type
-    thread_load(InputIteratorT itr)
+template<cache_load_modifier CacheLoadModifier = load_default, typename InputIteratorT>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+typename std::iterator_traits<InputIteratorT>::value_type thread_load(InputIteratorT itr)
 {
-    using T  = typename std::iterator_traits<InputIteratorT>::value_type;
-    T retval = thread_load<MODIFIER>(&(*itr));
-    return *itr;
+    using T = typename std::iterator_traits<InputIteratorT>::value_type;
+    return thread_load<CacheLoadModifier, T>(&(*itr));
 }
 
-/// \brief Load data using the default load instruction. No support for cache modified loads yet
-/// \tparam MODIFIER Value in enum for determine which type of cache store modifier to be used
+/// \brief Load data using the default load instruction.
+/// \tparam CacheLoadModifier Value in enum for determine which type of cache store modifier to be used
 /// \tparam T Type of Data to be loaded
-/// \param ptr [in] - Pointer to data to be loaded
+/// \tparam Alignment Explicit alignment of the source data.
+/// \param ptr [in] Pointer to data to be loaded
 /// \return Data that is loaded from memory
-template<cache_load_modifier MODIFIER = load_default, typename T>
-[[deprecated("Use a dereference instead.")]] ROCPRIM_DEVICE ROCPRIM_INLINE T thread_load(T* ptr)
+template<cache_load_modifier CacheLoadModifier = load_default,
+         typename T,
+         size_t Alignment = alignof(T)>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+std::enable_if_t<CacheLoadModifier == load_ca || CacheLoadModifier == load_default
+                     || CacheLoadModifier == load_ldg,
+                 T> thread_load(T* ptr)
 {
-    return detail::AsmThreadLoad<MODIFIER, T>(ptr);
+    alignas(Alignment) T result;
+    detail::thread_fused_copy<T, T, Alignment>(&result,
+                                               ptr,
+                                               [](auto& dst, const auto& src) { dst = src; });
+    return result;
+}
+
+/// \brief Global thread load.
+///
+/// \tparam CacheLoadModifier Value in enum for determine which type of cache store modifier to be used
+/// \tparam T Type of Data to be loaded
+/// \tparam Alignment (Unused)
+/// \param ptr [in] Input pointer for data that will be loaded
+/// \return returns loaded value
+template<cache_load_modifier CacheLoadModifier, typename T, size_t Alignment = alignof(T)>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+std::enable_if_t<CacheLoadModifier == load_cg, T> thread_load(T* ptr)
+{
+    return detail::asm_thread_load<CacheLoadModifier, typename std::remove_const<T>::type>(ptr);
+}
+
+/// \brief Volatile thread load.
+///
+/// \tparam CacheLoadModifier Value in enum for determine which type of cache store modifier to be used
+/// \tparam T Type of Data to be copied
+/// \tparam Alignment Explicit alignment of the source data.
+/// \param ptr [in] Input pointer for data that will be copied
+/// \return returns loaded value
+template<cache_load_modifier CacheLoadModifier, typename T, size_t Alignment = alignof(T)>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+std::enable_if_t<CacheLoadModifier == load_volatile || CacheLoadModifier == load_cv, T>
+    thread_load(T* ptr)
+{
+    alignas(Alignment) T result;
+    detail::thread_fused_copy<T, T, Alignment>(&result,
+                                               ptr,
+                                               [](auto& dst, const auto& src)
+                                               {
+                                                   using U = std::remove_reference_t<decltype(src)>;
+                                                   dst     = *static_cast<const volatile U*>(&src);
+                                               });
+    return result;
+}
+
+/// \brief Load with non-temporal hint.
+///
+/// Non-temporal loads help the compiler and hardware to optimize loading
+/// data which is not expected to be re-used, for example by bypassing
+/// the data cache.
+///
+/// \tparam CacheLoadModifier Value in enum for determine which type of cache store modifier to be used
+/// \tparam T Type of data to be loaded.
+/// \tparam Alignment Explicit alignment of the source data.
+/// \param ptr [in] Pointer to data to be loaded.
+/// \return Returns loaded value.
+template<cache_load_modifier CacheLoadModifier, typename T, size_t Alignment = alignof(T)>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+std::enable_if_t<CacheLoadModifier == load_nontemporal, T> thread_load(T* ptr)
+{
+#if __has_builtin(__builtin_nontemporal_load)
+    alignas(Alignment) T result;
+    detail::thread_fused_copy<T, T, Alignment>(&result,
+                                               ptr,
+                                               [](auto& dst, const auto& src)
+                                               { dst = __builtin_nontemporal_load(&src); });
+    return result;
+#else
+    return thread_load(ptr);
+#endif
+}
+
+namespace detail
+{
+
+template<cache_load_modifier CacheLoadModifier, typename T, int... Is>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void unrolled_thread_load_impl(T* src, T* dst, std::integer_sequence<int, Is...>)
+{
+    // Unroll multiple thread loads by unpacking an integer sequence
+    // into a dummy array. We assign the destination values inside the
+    // constructor of this dummy array.
+    int dummy[] = {(dst[Is] = thread_load<CacheLoadModifier>(src + Is), 0)...};
+    (void)dummy;
+}
+
+} // namespace detail
+
+/// \brief Load Count number of items from src to dst.
+/// \tparam Count number of items to load
+/// \tparam CacheLoadModifier the modifier used for the thread_load
+/// \tparam T Type of Data to be copied to
+/// \param src [in] Input iterator for data that will be loaded in
+/// \param dst [out] The pointer the data will be loaded to.
+template<int Count, cache_load_modifier CacheLoadModifier, typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void unrolled_thread_load(T* src, T* dst)
+{
+    detail::unrolled_thread_load_impl<CacheLoadModifier>(src,
+                                                         dst,
+                                                         std::make_integer_sequence<int, Count>{});
 }
 
 /// @}

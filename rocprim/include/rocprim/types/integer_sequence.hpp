@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -83,19 +83,19 @@ struct make_integer_sequence_impl<T, 0>
 } // end detail namespace
 
 /// \brief Generates a compile time integer sequence.
-/// \tparam T - the integer type to use
-/// \tparam N - the number of values to generate
+/// \tparam T the integer type to use
+/// \tparam N the number of values to generate
 template<class T, T N>
 using make_integer_sequence = typename detail::make_integer_sequence_impl<T, N>::type;
 
 /// \brief Generates a compile time index sequence using type size_t.
-/// \tparam N - the number of values to generate
+/// \tparam N the number of values to generate
 template<size_t N>
 using make_index_sequence = make_integer_sequence<size_t, N>;
 
 /// \brief Generates a compile time integer sequence whose length is equal
 /// to the length of the supplied template parameter pack.
-/// \tparam T - template parameter pack
+/// \tparam T template parameter pack
 template<class... T>
 using index_sequence_for = make_index_sequence<sizeof...(T)>;
 #endif

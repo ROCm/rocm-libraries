@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,13 +32,19 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_segmented_radix_sort.hpp>
 
-#include <string>
-#include <vector>
-
+#include <array>
+#include <cmath>
 #include <cstddef>
+#include <memory>
+#include <random>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 template<typename T>
 std::string warp_sort_config_name(T const& warp_sort_config)
@@ -188,7 +194,7 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temporary_storage,
                                                                   temporary_storage_bytes,
@@ -217,7 +223,7 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temporary_storage,
                                                                       temporary_storage_bytes,
@@ -264,9 +270,9 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(Key);
-        
+
         constexpr std::array<size_t, 8>
             segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
         constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};
@@ -306,7 +312,11 @@ template<unsigned int LongBits,
          bool UnpartitionWarpAllowed = true>
 struct device_segmented_radix_sort_benchmark_generator
 {
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    template<size_t key_size = sizeof(Key), size_t value_type = sizeof(Value)>
+    static auto __create(std::vector<std::unique_ptr<config_autotune_interface>>& storage) ->
+        typename std::enable_if<((key_size + value_type) * BlockSize * ItemsPerThread
+                                 <= TUNING_SHARED_MEMORY_MAX),
+                                void>::type
     {
         storage.emplace_back(std::make_unique<device_segmented_radix_sort_benchmark<
                                  Key,
@@ -323,6 +333,16 @@ struct device_segmented_radix_sort_benchmark_generator
                                                              WarpMediumIPT,
                                                              WarpMediumBS>,
                                      UnpartitionWarpAllowed>>>());
+    }
+    template<size_t key_size = sizeof(Key), size_t value_type = sizeof(Value)>
+    static auto __create(std::vector<std::unique_ptr<config_autotune_interface>>&) ->
+        typename std::enable_if<!((key_size + value_type) * BlockSize * ItemsPerThread
+                                  <= TUNING_SHARED_MEMORY_MAX),
+                                void>::type
+    {}
+    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    {
+        __create(storage);
     }
 };
 

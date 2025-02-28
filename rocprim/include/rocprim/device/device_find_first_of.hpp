@@ -51,18 +51,16 @@ struct find_first_of_impl_kernels
     }
 
     static ROCPRIM_KERNEL
-#ifndef DOXYGEN_DOCUMENTATION_BUILD
-    __launch_bounds__(device_params<Config>().kernel_config.block_size)
-#endif
-void find_first_of_kernel(InputIterator1           input,
-                          InputIterator2           keys,
-                          size_t*                  output,
-                          size_t                   size,
-                          size_t                   keys_size,
-                          ordered_block_id<size_t> ordered_bid,
-                          BinaryFunction           compare_function)
-{
-    constexpr find_first_of_config_params params = device_params<Config>();
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+        find_first_of_kernel(InputIterator1           input,
+                             InputIterator2           keys,
+                             size_t*                  output,
+                             size_t                   size,
+                             size_t                   keys_size,
+                             ordered_block_id<size_t> ordered_bid,
+                             BinaryFunction           compare_function)
+    {
+        constexpr find_first_of_config_params params = device_params<Config>();
 
         constexpr unsigned int block_size       = params.kernel_config.block_size;
         constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;

@@ -1,4 +1,4 @@
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,11 +23,26 @@
 
 #include <random>
 
-using engine_type = std::default_random_engine;
-using seed_type = typename engine_type::result_type;
+#include "../common_test_header.hpp"
 
-static constexpr size_t random_seeds_count = 1;
-static constexpr seed_type seeds [] = {0, 1997132004};
-static constexpr size_t seed_size = sizeof(seeds) / sizeof(seeds[0]);
+using engine_type = std::default_random_engine;
+using seed_type   = typename engine_type::result_type;
+
+static const char* env_p = test_common_utils::__get_env("ROCPRIM_TEST_RUNS");
+// "env_var" determines the number of iterations.
+// If undefined or incorrectly defined, it defaults to 0.
+static const size_t env_var = (env_p == nullptr) ? 0ul : std::atoi(env_p);
+
+// Predefined seeds.
+static constexpr seed_type seeds[]   = {0, 1997132004};
+static constexpr size_t    seed_size = sizeof(seeds) / sizeof(seeds[0]);
+
+// Calculate the number of random seeds.
+// Always at least 1, or (env_var - seed_size) if env_var exceeds seed_size.
+static const size_t random_seeds_count = (env_var > seed_size) ? (env_var - seed_size) : 1;
+
+// Calculate the total number of runs.
+// Default to random_seeds_count + seed_size if env_var is 0, otherwise use env_var.
+static const size_t number_of_runs = (env_var == 0) ? (random_seeds_count + seed_size) : env_var;
 
 #endif // TEST_SEED_HPP_

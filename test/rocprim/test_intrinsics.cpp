@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
+#include "../rocprim/test_utils_device_ptr.hpp"
 
 // required rocprim headers
 #include <rocprim/intrinsics/thread.hpp>
@@ -38,7 +39,8 @@ using max_lane_mask_type = uint64_t;
 constexpr static max_lane_mask_type all_lanes_active
     = std::numeric_limits<max_lane_mask_type>::max();
 
-ROCPRIM_HOST_DEVICE bool is_lane_active(const max_lane_mask_type mask, const unsigned int lane)
+ROCPRIM_HOST_DEVICE
+bool is_lane_active(const max_lane_mask_type mask, const unsigned int lane)
 {
     return (mask >> lane) & 1;
 }
@@ -46,9 +48,9 @@ ROCPRIM_HOST_DEVICE bool is_lane_active(const max_lane_mask_type mask, const uns
 // Custom structure
 struct custom_notaligned
 {
-    short i;
+    short  i;
     double d;
-    float f;
+    float  f;
     unsigned int u;
 
     ROCPRIM_HOST_DEVICE constexpr custom_notaligned() : i(123), d(1234), f(12345), u(12345){};
@@ -59,17 +61,16 @@ struct custom_notaligned
 };
 
 ROCPRIM_HOST_DEVICE
-inline bool operator==(const custom_notaligned& lhs,
-                       const custom_notaligned& rhs)
+inline bool
+    operator==(const custom_notaligned& lhs, const custom_notaligned& rhs)
 {
-    return lhs.i == rhs.i && lhs.d == rhs.d
-        && lhs.f == rhs.f &&lhs.u == rhs.u;
+    return lhs.i == rhs.i && lhs.d == rhs.d && lhs.f == rhs.f && lhs.u == rhs.u;
 }
 
 // Custom structure aligned to 16 bytes
 struct alignas(16) custom_16aligned
 {
-    int i;
+    int          i;
     unsigned int u;
     float        f;
 
@@ -92,7 +93,8 @@ struct test_type_helper
     /// Returns the 'zero' value for this type: In this representation, all of the type's
     /// bits should be initialized to 0. This function is here because some rocPRIM intrinsic operations
     /// zero-initialize a type like this.
-    ROCPRIM_HOST_DEVICE constexpr static T zero()
+    ROCPRIM_HOST_DEVICE
+    constexpr static T zero()
     {
         return 0;
     }
@@ -101,7 +103,8 @@ struct test_type_helper
     /// to touch inactive lanes. In the relevant test scenarios, an output value is first initialized with
     /// this 'initialized' value, so that these values can later be checked if they were really unaltered after
     /// the intrinsic operation.
-    ROCPRIM_HOST_DEVICE constexpr static T uninitialized()
+    ROCPRIM_HOST_DEVICE
+    constexpr static T uninitialized()
     {
         return 0xAA;
     }
@@ -119,12 +122,14 @@ struct test_type_helper
 template<>
 struct test_type_helper<custom_notaligned>
 {
-    ROCPRIM_HOST_DEVICE constexpr static custom_notaligned zero()
+    ROCPRIM_HOST_DEVICE
+    constexpr static custom_notaligned zero()
     {
         return {0, 0, 0, 0};
     }
 
-    ROCPRIM_HOST_DEVICE constexpr static custom_notaligned uninitialized()
+    ROCPRIM_HOST_DEVICE
+    constexpr static custom_notaligned uninitialized()
     {
         return custom_notaligned(0xAA, 0xAA, 0xAA, 0xAA);
     }
@@ -149,12 +154,14 @@ struct test_type_helper<custom_notaligned>
 template<>
 struct test_type_helper<custom_16aligned>
 {
-    ROCPRIM_HOST_DEVICE constexpr static custom_16aligned zero()
+    ROCPRIM_HOST_DEVICE
+    constexpr static custom_16aligned zero()
     {
         return {0, 0, 0};
     }
 
-    ROCPRIM_HOST_DEVICE constexpr static custom_16aligned uninitialized()
+    ROCPRIM_HOST_DEVICE
+    constexpr static custom_16aligned uninitialized()
     {
         return custom_16aligned(0xAA, 0xAA, 0xAA);
     }
@@ -188,13 +195,12 @@ public:
     using type = typename Params::type;
 };
 
-typedef ::testing::Types<params<int>,
-                         params<float>,
-                         params<double>,
-                         params<unsigned char>,
-                         params<custom_notaligned>,
-                         params<custom_16aligned>>
-    IntrinsicsTestParams;
+using IntrinsicsTestParams = ::testing::Types<params<int>,
+                                              params<float>,
+                                              params<double>,
+                                              params<unsigned char>,
+                                              params<custom_notaligned>,
+                                              params<custom_16aligned>>;
 
 TYPED_TEST_SUITE(RocprimIntrinsicsTests, IntrinsicsTestParams);
 
@@ -232,10 +238,11 @@ enum class shuffle_test_type
 };
 
 template<shuffle_test_type test_type, typename T>
-__global__ void shuffle_kernel(T*                       data,
-                               const unsigned int       delta,
-                               const unsigned int       width,
-                               const max_lane_mask_type active_lanes)
+__global__
+void shuffle_kernel(T*                       data,
+                    const unsigned int       delta,
+                    const unsigned int       width,
+                    const max_lane_mask_type active_lanes)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -306,17 +313,16 @@ void test_shuffle()
         }
     };
 
-    T* d_data;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_data, size * sizeof(T)));
+    test_utils::device_ptr<T> d_data(size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
-        auto           input = test_type_helper<T>::get_random_data(size, seed_value);
-        std::vector<T> output(input.size());
+        auto input = test_type_helper<T>::get_random_data(size, seed_value);
 
         for(const auto active_lanes : active_lanes_tests(device_id))
         {
@@ -342,10 +348,7 @@ void test_shuffle()
                     shuffle(expected.data(), input.data(), delta, logical_warp_size, active_lanes);
 
                     // Writing to device memory
-                    HIP_CHECK(hipMemcpy(d_data,
-                                        input.data(),
-                                        input.size() * sizeof(T),
-                                        hipMemcpyHostToDevice));
+                    d_data.store(input);
 
                     // Launching kernel
                     hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_kernel<test_type, T>),
@@ -353,7 +356,7 @@ void test_shuffle()
                                        dim3(hardware_warp_size),
                                        0,
                                        0,
-                                       d_data,
+                                       d_data.get(),
                                        delta,
                                        logical_warp_size,
                                        active_lanes);
@@ -361,18 +364,13 @@ void test_shuffle()
                     HIP_CHECK(hipDeviceSynchronize());
 
                     // Read from device memory
-                    HIP_CHECK(hipMemcpy(output.data(),
-                                        d_data,
-                                        output.size() * sizeof(T),
-                                        hipMemcpyDeviceToHost));
+                    const auto output = d_data.load();
 
                     test_utils::assert_eq(output, expected);
                 }
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_data));
 }
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
@@ -391,16 +389,13 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleXor)
 }
 
 template<class T>
-__global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+__global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 {
     const unsigned int index = (blockIdx.x * blockDim.x) + threadIdx.x;
-    T value = data[index];
-    value = rocprim::warp_shuffle(
-        value, src_lanes[threadIdx.x/width], width
-    );
-    data[index] = value;
+    T                  value = data[index];
+    value                    = rocprim::warp_shuffle(value, src_lanes[threadIdx.x / width], width);
+    data[index]              = value;
 }
 
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
@@ -414,31 +409,19 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
     const size_t size = hardware_warp_size;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
-        auto           input = test_type_helper<T>::get_random_data(size, seed_value);
-        std::vector<T> output(input.size());
+        auto input = test_type_helper<T>::get_random_data(size, seed_value);
 
-        T* device_data;
-        int * device_src_lanes;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_data,
-                input.size() * sizeof(typename decltype(input)::value_type)
-            )
-        );
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_src_lanes,
-                hardware_warp_size * sizeof(int)
-            )
-        );
+        test_utils::device_ptr<T>   device_data(input.size());
+        test_utils::device_ptr<int> device_src_lanes(hardware_warp_size);
 
-        for(unsigned int i = hardware_warp_size; i > 1; i = i/2)
+        for(unsigned int i = hardware_warp_size; i > 1; i = i / 2)
         {
             const unsigned int logical_warp_size = i;
             SCOPED_TRACE(testing::Message() << "where logical_warp_size = " << i);
@@ -451,62 +434,47 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 
             // Calculate expected results on host
             std::vector<T> expected(size, test_type_helper<T>::zero());
-            for(size_t j = 0; j < input.size()/logical_warp_size; j++)
+            for(size_t j = 0; j < input.size() / logical_warp_size; j++)
             {
                 int src_lane = src_lanes[j];
                 for(size_t k = 0; k < logical_warp_size; k++)
                 {
                     size_t index = k + logical_warp_size * j;
-                    if(src_lane >= int(logical_warp_size) || src_lane < 0) src_lane = index;
+                    if(src_lane >= int(logical_warp_size) || src_lane < 0)
+                        src_lane = index;
                     expected[index] = input[src_lane + logical_warp_size * j];
                 }
             }
 
             // Writing to device memory
-            HIP_CHECK(
-                hipMemcpy(
-                    device_data, input.data(),
-                    input.size() * sizeof(typename decltype(input)::value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    device_src_lanes, src_lanes.data(),
-                    src_lanes.size() * sizeof(typename decltype(src_lanes)::value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            device_data.store(input);
+            device_src_lanes.store(src_lanes);
 
             // Launching kernel
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(shuffle_index_kernel<T>),
-                dim3(1), dim3(hardware_warp_size), 0, 0,
-                device_data, device_src_lanes, logical_warp_size
-            );
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_index_kernel<T>),
+                               dim3(1),
+                               dim3(hardware_warp_size),
+                               0,
+                               0,
+                               device_data.get(),
+                               device_src_lanes.get(),
+                               logical_warp_size);
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Read from device memory
-            HIP_CHECK(
-                hipMemcpy(
-                    output.data(), device_data,
-                    output.size() * sizeof(T),
-                    hipMemcpyDeviceToHost
-                )
-            );
+            const auto output = device_data.load();
 
             for(size_t j = 0; j < output.size(); j++)
             {
                 ASSERT_EQ(output[j], expected[j]) << "where index = " << j;
             }
         }
-        HIP_CHECK(hipFree(device_data));
-        HIP_CHECK(hipFree(device_src_lanes));
     }
 }
 
-__global__ void lane_id_kernel(unsigned int* data)
+__global__
+void lane_id_kernel(unsigned int* data)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
     data[index]              = rocprim::lane_id();
@@ -521,26 +489,23 @@ TEST(RocprimIntrinsicsTests, LaneId)
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t warps_per_block    = 4;
-    const size_t block_size         = warps_per_block * hardware_warp_size;
-    const size_t blocks             = 2;
-    const size_t size               = blocks * block_size;
+    const size_t warps_per_block = 4;
+    const size_t block_size      = warps_per_block * hardware_warp_size;
+    const size_t blocks          = 2;
+    const size_t size            = blocks * block_size;
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    unsigned int* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(unsigned int)));
+    test_utils::device_ptr<unsigned int> d_output(size);
 
     hipLaunchKernelGGL(lane_id_kernel,
                        dim3(blocks),
                        dim3(block_size),
                        0,
                        hipStreamDefault,
-                       d_output);
+                       d_output.get());
     HIP_CHECK(hipGetLastError());
 
-    std::vector<unsigned int> h_output(size);
-    HIP_CHECK(
-        hipMemcpy(h_output.data(), d_output, size * sizeof(unsigned int), hipMemcpyDeviceToHost));
+    const auto h_output = d_output.load();
 
     size_t i = 0;
     for(size_t block = 0; block < blocks; ++block)
@@ -554,14 +519,13 @@ TEST(RocprimIntrinsicsTests, LaneId)
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_output));
 }
 
-__global__ void masked_bit_count_kernel(unsigned int*             out,
-                                        const max_lane_mask_type* in,
-                                        const unsigned int        add,
-                                        const max_lane_mask_type  active_lanes)
+__global__
+void masked_bit_count_kernel(unsigned int*             out,
+                             const max_lane_mask_type* in,
+                             const unsigned int        add,
+                             const max_lane_mask_type  active_lanes)
 {
     const unsigned int out_index = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int in_index  = out_index / rocprim::device_warp_size();
@@ -582,25 +546,22 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t warps_per_block    = 4;
-    const size_t block_size         = warps_per_block * hardware_warp_size;
-    const size_t blocks             = 2;
-    const size_t in_size            = blocks * warps_per_block;
-    const size_t out_size           = blocks * block_size;
-    const size_t n_add              = 2;
+    const size_t warps_per_block = 4;
+    const size_t block_size      = warps_per_block * hardware_warp_size;
+    const size_t blocks          = 2;
+    const size_t in_size         = blocks * warps_per_block;
+    const size_t out_size        = blocks * block_size;
+    const size_t n_add           = 2;
 
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    max_lane_mask_type* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, in_size * sizeof(max_lane_mask_type)));
+    test_utils::device_ptr<max_lane_mask_type> d_input(in_size);
 
-    unsigned int* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, out_size * sizeof(unsigned int)));
+    test_utils::device_ptr<unsigned int> d_output(out_size);
 
     std::vector<unsigned int> expected(out_size);
-    std::vector<unsigned int> output(out_size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -611,10 +572,7 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
                                                                            0,
                                                                            all_lanes_active,
                                                                            seed_value);
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            in_size * sizeof(max_lane_mask_type),
-                            hipMemcpyHostToDevice));
+        d_input.store(input);
 
         auto adds
             = test_utils::get_random_data<unsigned int>(n_add,
@@ -653,24 +611,18 @@ TEST(RocprimIntrinsicsTests, MaskedBitCount)
                                    dim3(block_size),
                                    0,
                                    hipStreamDefault,
-                                   d_output,
-                                   d_input,
+                                   d_output.get(),
+                                   d_input.get(),
                                    add,
                                    active_lanes);
                 HIP_CHECK(hipGetLastError());
 
-                HIP_CHECK(hipMemcpy(output.data(),
-                                    d_output,
-                                    out_size * sizeof(unsigned int),
-                                    hipMemcpyDeviceToHost));
+                const auto output = d_output.load();
 
                 test_utils::assert_eq(output, expected);
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 enum class warp_any_all_test_type
@@ -680,11 +632,12 @@ enum class warp_any_all_test_type
 };
 
 template<warp_any_all_test_type test_type>
-__global__ void warp_any_all_kernel(unsigned int*             out,
-                                    const max_lane_mask_type* in,
-                                    max_lane_mask_type        active_lanes)
+__global__
+void warp_any_all_kernel(unsigned int*             out,
+                         const max_lane_mask_type* in,
+                         max_lane_mask_type        active_lanes)
 {
-    const unsigned int index     = blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
     const unsigned int predicate
         = (in[index / rocprim::device_warp_size()] >> rocprim::lane_id()) & 1;
 
@@ -710,23 +663,20 @@ void warp_any_all_test()
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t warps_per_block    = 4;
-    const size_t block_size         = warps_per_block * hardware_warp_size;
-    const size_t blocks             = 2;
-    const size_t in_size            = blocks * warps_per_block;
-    const size_t out_size           = blocks * block_size;
+    const size_t warps_per_block = 4;
+    const size_t block_size      = warps_per_block * hardware_warp_size;
+    const size_t blocks          = 2;
+    const size_t in_size         = blocks * warps_per_block;
+    const size_t out_size        = blocks * block_size;
 
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    max_lane_mask_type* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, in_size * sizeof(max_lane_mask_type)));
+    test_utils::device_ptr<max_lane_mask_type> d_input(in_size);
 
-    unsigned int* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, out_size * sizeof(unsigned int)));
+    test_utils::device_ptr<unsigned int> d_output(out_size);
 
-    std::vector<unsigned int> output(out_size);
     std::vector<unsigned int> expected(out_size);
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -771,32 +721,23 @@ void warp_any_all_test()
                 }
             }
 
-            HIP_CHECK(hipMemcpy(d_input,
-                                input.data(),
-                                in_size * sizeof(max_lane_mask_type),
-                                hipMemcpyHostToDevice));
+            d_input.store(input);
 
             hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_any_all_kernel<test_type>),
                                dim3(blocks),
                                dim3(block_size),
                                0,
                                hipStreamDefault,
-                               d_output,
-                               d_input,
+                               d_output.get(),
+                               d_input.get(),
                                active_lanes);
             HIP_CHECK(hipGetLastError());
 
-            HIP_CHECK(hipMemcpy(output.data(),
-                                d_output,
-                                out_size * sizeof(unsigned int),
-                                hipMemcpyDeviceToHost));
+            const auto output = d_output.load();
 
             test_utils::assert_eq(output, expected);
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 TEST(RocprimIntrinsicsTests, WarpAny)
@@ -810,11 +751,12 @@ TEST(RocprimIntrinsicsTests, WarpAll)
 }
 
 template<typename T>
-__global__ void warp_permute_kernel(T*                       out,
-                                    const T*                 in,
-                                    const unsigned int*      indices,
-                                    const unsigned int       logical_warp_size,
-                                    const max_lane_mask_type active_lanes)
+__global__
+void warp_permute_kernel(T*                       out,
+                         const T*                 in,
+                         const unsigned int*      indices,
+                         const unsigned int       logical_warp_size,
+                         const max_lane_mask_type active_lanes)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -838,21 +780,17 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t warps_per_block    = 4;
-    const size_t block_size         = warps_per_block * hardware_warp_size;
-    const size_t blocks             = 2;
-    const size_t size               = blocks * block_size;
+    const size_t warps_per_block = 4;
+    const size_t block_size      = warps_per_block * hardware_warp_size;
+    const size_t blocks          = 2;
+    const size_t size            = blocks * block_size;
 
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    T* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(T)));
+    test_utils::device_ptr<T> d_input(size);
+    test_utils::device_ptr<T> d_output(size);
 
-    T* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(T)));
-
-    unsigned int* d_indices;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_indices, size * sizeof(unsigned int)));
+    test_utils::device_ptr<unsigned int> d_indices(size);
 
     const auto permute = [&](T*                       out,
                              const T*                 in,
@@ -881,11 +819,10 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
         }
     };
 
-    std::vector<T>            output(size);
     std::vector<T>            expected(size);
     std::vector<unsigned int> indices(size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -922,43 +859,35 @@ TYPED_TEST(RocprimIntrinsicsTests, WarpPermute)
                         logical_warp_size,
                         active_lanes);
 
-                HIP_CHECK(
-                    hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-                HIP_CHECK(hipMemcpy(d_indices,
-                                    indices.data(),
-                                    size * sizeof(unsigned int),
-                                    hipMemcpyHostToDevice));
+                d_input.store(input);
+                d_indices.store(indices);
 
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_permute_kernel<T>),
                                    dim3(blocks),
                                    dim3(block_size),
                                    0,
                                    hipStreamDefault,
-                                   d_output,
-                                   d_input,
-                                   d_indices,
+                                   d_output.get(),
+                                   d_input.get(),
+                                   d_indices.get(),
                                    logical_warp_size,
                                    active_lanes);
                 HIP_CHECK(hipGetLastError());
 
-                HIP_CHECK(
-                    hipMemcpy(output.data(), d_output, size * sizeof(T), hipMemcpyDeviceToHost));
+                const auto output = d_output.load();
 
                 test_utils::assert_eq(output, expected);
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_indices));
 }
 
 template<unsigned int LabelBits>
-__global__ void match_any_kernel(max_lane_mask_type* output,
-                                 const unsigned int* input,
-                                 max_lane_mask_type  active_lanes,
-                                 max_lane_mask_type  lane_predicates)
+__global__
+void match_any_kernel(max_lane_mask_type* output,
+                      const unsigned int* input,
+                      max_lane_mask_type  active_lanes,
+                      max_lane_mask_type  lane_predicates)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -978,23 +907,19 @@ TEST(RocprimIntrinsicsTests, MatchAny)
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t           warps_per_block    = 4;
-    const size_t           block_size         = warps_per_block * hardware_warp_size;
-    const size_t           blocks             = 2;
-    const size_t           size               = blocks * block_size;
-    constexpr unsigned int label_bits         = 3;
+    const size_t           warps_per_block = 4;
+    const size_t           block_size      = warps_per_block * hardware_warp_size;
+    const size_t           blocks          = 2;
+    const size_t           size            = blocks * block_size;
+    constexpr unsigned int label_bits      = 3;
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    unsigned int* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(unsigned int)));
-
-    max_lane_mask_type* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(max_lane_mask_type)));
+    test_utils::device_ptr<unsigned int>       d_input(size);
+    test_utils::device_ptr<max_lane_mask_type> d_output(size);
 
     std::vector<max_lane_mask_type> expected(size);
-    std::vector<max_lane_mask_type> output(size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -1048,38 +973,31 @@ TEST(RocprimIntrinsicsTests, MatchAny)
                     }
                 }
 
-                HIP_CHECK(hipMemcpy(d_input,
-                                    input.data(),
-                                    size * sizeof(unsigned int),
-                                    hipMemcpyHostToDevice));
+                d_input.store(input);
 
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(match_any_kernel<label_bits>),
                                    dim3(blocks),
                                    dim3(block_size),
                                    0,
                                    hipStreamDefault,
-                                   d_output,
-                                   d_input,
+                                   d_output.get(),
+                                   d_input.get(),
                                    active_lanes,
                                    lane_predicates);
                 HIP_CHECK(hipGetLastError());
 
-                HIP_CHECK(hipMemcpy(output.data(),
-                                    d_output,
-                                    size * sizeof(max_lane_mask_type),
-                                    hipMemcpyDeviceToHost));
+                const auto output = d_output.load();
 
                 test_utils::assert_eq(output, expected);
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
-__global__ void
-    ballot_kernel(max_lane_mask_type* output, const unsigned int* input, max_lane_mask_type active_lanes)
+__global__
+void ballot_kernel(max_lane_mask_type* output,
+                   const unsigned int* input,
+                   max_lane_mask_type  active_lanes)
 {
     const unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1099,22 +1017,18 @@ TEST(RocprimIntrinsicsTests, Ballot)
     unsigned int hardware_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, hardware_warp_size));
 
-    const size_t warps_per_block    = 4;
-    const size_t block_size         = warps_per_block * hardware_warp_size;
-    const size_t blocks             = 2;
-    const size_t size               = blocks * block_size;
+    const size_t warps_per_block = 4;
+    const size_t block_size      = warps_per_block * hardware_warp_size;
+    const size_t blocks          = 2;
+    const size_t size            = blocks * block_size;
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    unsigned int* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, size * sizeof(unsigned int)));
-
-    max_lane_mask_type* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(max_lane_mask_type)));
+    test_utils::device_ptr<unsigned int>       d_input(size);
+    test_utils::device_ptr<max_lane_mask_type> d_output(size);
 
     std::vector<max_lane_mask_type> expected(size);
-    std::vector<max_lane_mask_type> output(size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -1148,37 +1062,29 @@ TEST(RocprimIntrinsicsTests, Ballot)
                 }
             }
 
-            HIP_CHECK(hipMemcpy(d_input,
-                                input.data(),
-                                size * sizeof(unsigned int),
-                                hipMemcpyHostToDevice));
+            d_input.store(input);
 
             hipLaunchKernelGGL(ballot_kernel,
                                dim3(blocks),
                                dim3(block_size),
                                0,
                                hipStreamDefault,
-                               d_output,
-                               d_input,
+                               d_output.get(),
+                               d_input.get(),
                                active_lanes);
             HIP_CHECK(hipGetLastError());
 
-            HIP_CHECK(hipMemcpy(output.data(),
-                                d_output,
-                                size * sizeof(max_lane_mask_type),
-                                hipMemcpyDeviceToHost));
+            const auto output = d_output.load();
 
             test_utils::assert_eq(output, expected);
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
-__global__ void group_elect_kernel(max_lane_mask_type* output,
-                                   max_lane_mask_type* input,
-                                   size_t              warps_per_block)
+__global__
+void group_elect_kernel(max_lane_mask_type* output,
+                        max_lane_mask_type* input,
+                        size_t              warps_per_block)
 {
     const unsigned int input_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -1202,25 +1108,23 @@ TEST(RocprimIntrinsicsTests, GroupElect)
     const size_t warps_per_block = 4;
     const size_t block_size      = warps_per_block * hardware_warp_size;
     const size_t blocks          = 48;
+    const size_t size            = blocks * block_size;
     const size_t number_of_warps = blocks * warps_per_block;
     SCOPED_TRACE(testing::Message() << "with hardware_warp_size = " << hardware_warp_size);
 
-    max_lane_mask_type* d_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, blocks * block_size * sizeof(*d_input)));
-
-    max_lane_mask_type* d_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, number_of_warps * sizeof(*d_output)));
+    test_utils::device_ptr<max_lane_mask_type> d_input(size);
+    test_utils::device_ptr<max_lane_mask_type> d_output(number_of_warps);
 
     std::vector<max_lane_mask_type> output;
     output.reserve(number_of_warps);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        std::vector<max_lane_mask_type>              input(blocks * block_size, 0);
+        std::vector<max_lane_mask_type>              input(size, 0);
         std::vector<std::vector<max_lane_mask_type>> warp_histograms(blocks * warps_per_block);
 
         auto input_it = input.begin();
@@ -1256,29 +1160,22 @@ TEST(RocprimIntrinsicsTests, GroupElect)
 
         output.assign(number_of_warps, 0);
 
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            blocks * block_size * sizeof(*d_input),
-                            hipMemcpyHostToDevice));
-
-        HIP_CHECK(hipMemset(d_output, 0, number_of_warps * sizeof(*d_output)));
+        d_input.store(input);
+        d_output.store(output);
 
         hipLaunchKernelGGL(HIP_KERNEL_NAME(group_elect_kernel),
                            dim3(blocks),
                            dim3(block_size),
                            0,
                            hipStreamDefault,
-                           d_output,
-                           d_input,
+                           d_output.get(),
+                           d_input.get(),
                            warps_per_block);
         HIP_CHECK(hipGetLastError());
 
-        HIP_CHECK(hipMemcpy(output.data(),
-                            d_output,
-                            number_of_warps * sizeof(output[0]),
-                            hipMemcpyDeviceToHost));
+        output = d_output.load();
 
-        for(size_t i = 0; i < blocks * block_size; ++i)
+        for(size_t i = 0; i < size; ++i)
         {
             const auto group_mask  = input[i];
             const auto warp_output = output[i / hardware_warp_size];
@@ -1293,7 +1190,4 @@ TEST(RocprimIntrinsicsTests, GroupElect)
             }
         }
     }
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }

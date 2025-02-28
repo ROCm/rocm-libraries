@@ -33,17 +33,20 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
-#include <rocprim/detail/various.hpp>
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_search_n.hpp>
+#include <rocprim/device/device_search_n_config.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
 
 // C++ Standard Library
 #include <algorithm>
-#include <cstdlib>
-#include <numeric>
-#include <random>
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <stdint.h>
 #include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 using custom_int2            = custom_type<int>;
@@ -70,7 +73,7 @@ constexpr bool is_type_arr_end = true;
 template<typename T>
 constexpr bool is_type_arr_end<T, void_type<typename T::next>> = false;
 
-template<class Config, class InputType>
+template<typename Config, typename InputType>
 inline unsigned int search_n_get_item_per_block()
 {
     using input_type     = InputType;
@@ -105,7 +108,7 @@ inline std::string to_string(benchmark_search_n_mode e) noexcept
 
 } // namespace
 
-template<class InputType, class OutputType, benchmark_search_n_mode mode>
+template<typename InputType, typename OutputType, benchmark_search_n_mode mode>
 class benchmark_search_n
 {
 public:
@@ -229,7 +232,7 @@ private:
         self.launch_search_n();
         HIP_CHECK(hipMallocAsync(&self.d_temp_storage, self.temp_storage_size, self.stream));
         // Warm-up
-        for(size_t i = 0; i < self.warmup_size; i++)
+        for(size_t i = 0; i < self.warmup_size; ++i)
         {
             self.launch_search_n();
         }
@@ -241,7 +244,7 @@ private:
             // Record start event
             HIP_CHECK(hipEventRecord(self.start, self.stream));
 
-            for(size_t i = 0; i < self.batch_size; i++)
+            for(size_t i = 0; i < self.batch_size; ++i)
             {
                 self.launch_search_n();
             }
@@ -311,7 +314,7 @@ public:
     {
         return benchmark::RegisterBenchmark(
             bench_naming::format_name(
-                "{lvl:device,algo:search_n,input_type:" + std::string(typeid(InputType).name())
+                "{lvl:device,algo:search_n,input_type:" + std::string(Traits<InputType>::name())
                 + ",size:" + std::to_string(size) + ",count:" + std::to_string(count)
                 + ",mode:" + to_string(mode) + ",cfg:default_config}")
                 .c_str(),
@@ -332,33 +335,81 @@ static void clean_up_benchmarks_search_n()
     destructors = {};
 }
 
-template<class T>
+template<typename T>
 inline void add_one_benchmark_search_n(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                        const managed_seed                            _seed,
                                        const hipStream_t                             _stream,
                                        const size_t                                  _size_byte)
 {
     // normal
-    auto start_from_0
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NORMAL>(_seed,
-                                                                             _stream,
-                                                                             _size_byte,
-                                                                             _size_byte,
-                                                                             0);
-    auto start_from_mid
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NORMAL>(_seed,
-                                                                             _stream,
-                                                                             _size_byte,
-                                                                             _size_byte / 2,
-                                                                             _size_byte / 2);
+    auto half = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NORMAL>(_seed,
+                                                                                   _stream,
+                                                                                   _size_byte,
+                                                                                   _size_byte / 2,
+                                                                                   _size_byte / 2);
     // small count test
+    auto small_count1
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            1);
+    auto small_count2
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            2);
+    auto small_count4
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            4);
     auto small_count6
         = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
                                                                             _stream,
                                                                             _size_byte,
                                                                             1, // count times
                                                                             6);
+    auto small_count8
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            8);
+    auto small_count10
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            10);
+    auto small_count12
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            12);
+    auto small_count36
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            36);
     // mid count test
+    auto mid_count1023
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            1023);
+    auto mid_count2047
+        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
+                                                                            _stream,
+                                                                            _size_byte,
+                                                                            1, // count times
+                                                                            2047);
+
     auto mid_count4095
         = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
                                                                             _stream,
@@ -366,26 +417,59 @@ inline void add_one_benchmark_search_n(std::vector<benchmark::internal::Benchmar
                                                                             1, // count times
                                                                             4095);
     // big input
-    auto big_count6
-        = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(_seed,
-                                                                            _stream,
-                                                                            _size_byte,
-                                                                            6, // count times
-                                                                            (size_t)-1);
-    std::vector<benchmark::internal::Benchmark*> bs = {start_from_0->bench_register(),
-                                                       start_from_mid->bench_register(),
-                                                       small_count6->bench_register(),
-                                                       mid_count4095->bench_register(),
-                                                       big_count6->bench_register()};
+    auto big_count3 = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(
+        _seed,
+        _stream,
+        _size_byte,
+        3, // count times
+        (size_t)-1); // block_size
+    auto big_count6 = new benchmark_search_n<T, size_t, benchmark_search_n_mode::NOISE>(
+        _seed,
+        _stream,
+        _size_byte,
+        6, // count times
+        (size_t)-1); // block_size
+    std::vector<benchmark::internal::Benchmark*> bs = {
+
+        small_count1->bench_register(),
+        small_count2->bench_register(),
+        small_count4->bench_register(),
+        small_count6->bench_register(),
+        small_count8->bench_register(),
+        small_count10->bench_register(),
+        small_count12->bench_register(),
+        small_count36->bench_register(),
+
+        mid_count1023->bench_register(),
+        mid_count2047->bench_register(),
+        mid_count4095->bench_register(),
+
+        big_count3->bench_register(),
+        big_count6->bench_register(),
+        half->bench_register()};
+
     destructors.emplace_back(
         [=]()
         {
-            delete start_from_0;
-            delete start_from_mid;
+            delete small_count1;
+            delete small_count2;
+            delete small_count4;
             delete small_count6;
+            delete small_count8;
+            delete small_count10;
+            delete small_count12;
+            delete small_count36;
+
+            delete mid_count1023;
+            delete mid_count2047;
             delete mid_count4095;
+
+            delete big_count3;
             delete big_count6;
+
+            delete half;
         });
+
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
@@ -407,16 +491,17 @@ inline void add_benchmark_search_n(std::vector<benchmark::internal::Benchmark*>&
     add_one_benchmark_search_n<typename T::type>(benchmarks, _seed, _stream, _size_byte);
 }
 
-typedef type_arr<custom_int2,
-                 custom_longlong_double,
-                 int8_t,
-                 int16_t,
-                 int32_t,
-                 int64_t,
-                 rocprim::half,
-                 float,
-                 double>
-    benchmark_search_n_types;
+using benchmark_search_n_types = type_arr<custom_int2,
+                                          custom_longlong_double,
+                                          int8_t,
+                                          int16_t,
+                                          int32_t,
+                                          int64_t,
+                                          rocprim::int128_t,
+                                          rocprim::uint128_t,
+                                          rocprim::half,
+                                          float,
+                                          double>;
 
 template<typename InputT, unsigned int BlockSize>
 struct device_search_n_benchmark_generator

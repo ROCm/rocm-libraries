@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -92,11 +92,11 @@ enum class block_load_method
 /// for loading data from continuous memory into a blocked arrangement of items across the thread
 /// block.
 ///
-/// \tparam T - the input/output type.
-/// \tparam BlockSize - the number of threads in a block.
-/// \tparam ItemsPerThread - the number of items to be processed by
+/// \tparam T the input/output type.
+/// \tparam BlockSize the number of threads in a block.
+/// \tparam ItemsPerThread the number of items to be processed by
 /// each thread.
-/// \tparam Method - the method to load data.
+/// \tparam Method the method to load data.
 ///
 /// \par Overview
 /// * The \p block_load class has a number of different methods to load data:
@@ -153,11 +153,11 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// thread block.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -178,12 +178,12 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// thread block, which is guarded by range \p valid.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -206,14 +206,14 @@ public:
     /// thread block, which is guarded by range with a fall-back value for out-of-bound
     /// elements.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
-    /// \tparam Default - [inferred] The data type of the default value.
+    /// \tparam Default [inferred] The data type of the default value.
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
-    /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
+    /// \param [in] out_of_bounds default value assigned to out-of-bound items.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -240,12 +240,12 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// thread block, using temporary storage.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] storage temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -284,13 +284,13 @@ public:
     /// \brief Loads data from continuous memory into an arrangement of items across the
     /// thread block, which is guarded by range \p valid, using temporary storage.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
+    /// \param [in] storage temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -331,15 +331,15 @@ public:
     /// thread block, which is guarded by range with a fall-back value for out-of-bound
     /// elements, using temporary storage.
     ///
-    /// \tparam InputIterator - [inferred] an iterator type for input (can be a simple
+    /// \tparam InputIterator [inferred] an iterator type for input (can be a simple
     /// pointer.
-    /// \tparam Default - [inferred] The data type of the default value.
+    /// \tparam Default [inferred] The data type of the default value.
     ///
-    /// \param [in] block_input - the input iterator from the thread block to load from.
-    /// \param [out] items - array that data is loaded to.
-    /// \param [in] valid - maximum range of valid numbers to load.
-    /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] block_input the input iterator from the thread block to load from.
+    /// \param [out] items array that data is loaded to.
+    /// \param [in] valid maximum range of valid numbers to load.
+    /// \param [in] out_of_bounds default value assigned to out-of-bound items.
+    /// \param [in] storage temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator

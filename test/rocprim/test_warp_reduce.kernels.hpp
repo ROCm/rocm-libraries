@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,11 +21,7 @@
 #ifndef TEST_WARP_REDUCE_KERNELS_HPP_
 #define TEST_WARP_REDUCE_KERNELS_HPP_
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_sum_kernel(T* device_input, T* device_output)
@@ -46,11 +42,7 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output)
@@ -68,11 +60,7 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output)
     device_output[index] = value;
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
@@ -93,11 +81,7 @@ void warp_reduce_sum_kernel(T* device_input, T* device_output, size_t valid)
     }
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
@@ -115,12 +99,7 @@ void warp_allreduce_sum_kernel(T* device_input, T* device_output, size_t valid)
     device_output[index] = value;
 }
 
-template<
-    class T,
-    class Flag,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
@@ -139,12 +118,7 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
     output[index] = value;
 }
 
-template<
-    class T,
-    class Flag,
-    unsigned int BlockSize,
-    unsigned int LogicalWarpSize
->
+template<class T, class Flag, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__
 __launch_bounds__(BlockSize)
 void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)

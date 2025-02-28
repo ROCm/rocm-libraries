@@ -55,7 +55,7 @@ public:
     using expected_type = typename Params::expected_type;
 };
 
-typedef ::testing::Types<
+using RocprimInvokeResultBinOpTestsParams = ::testing::Types<
     RocprimTypeInvokeResultParams<uint16_t, rocprim::plus<uint16_t>>,
     RocprimTypeInvokeResultParams<int32_t, rocprim::plus<int32_t>>,
     RocprimTypeInvokeResultParams<float, rocprim::plus<float>>,
@@ -64,8 +64,7 @@ typedef ::testing::Types<
     RocprimTypeInvokeResultParams<rocprim::half, device_plus<rocprim::half>>,
     RocprimTypeInvokeResultParams<int32_t, rocprim::equal_to<int32_t>, bool>,
     RocprimTypeInvokeResultParams<rocprim::bfloat16, rocprim::equal_to<rocprim::bfloat16>, bool>,
-    RocprimTypeInvokeResultParams<rocprim::half, rocprim::equal_to<rocprim::half>, bool>>
-    RocprimInvokeResultBinOpTestsParams;
+    RocprimTypeInvokeResultParams<rocprim::half, rocprim::equal_to<rocprim::half>, bool>>;
 
 TYPED_TEST_SUITE(RocprimInvokeResultBinOpTests, RocprimInvokeResultBinOpTestsParams);
 
@@ -100,13 +99,12 @@ public:
     using expected_type = typename Params::expected_type;
 };
 
-typedef ::testing::Types<
+using RocprimInvokeResultUnOpTestsParams = ::testing::Types<
     RocprimTypeInvokeResultParams<uint16_t, static_cast_op<uint16_t, float>, float>,
     RocprimTypeInvokeResultParams<double,
                                   static_cast_op<double, rocprim::bfloat16>,
                                   rocprim::bfloat16>,
-    RocprimTypeInvokeResultParams<uint8_t, rocprim::identity<uint8_t>>>
-    RocprimInvokeResultUnOpTestsParams;
+    RocprimTypeInvokeResultParams<uint8_t, rocprim::identity<uint8_t>>>;
 
 TYPED_TEST_SUITE(RocprimInvokeResultUnOpTests, RocprimInvokeResultUnOpTestsParams);
 

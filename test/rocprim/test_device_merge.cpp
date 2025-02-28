@@ -22,6 +22,7 @@
 
 // required test headers
 #include "../common_test_header.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 // required rocprim headers
@@ -71,7 +72,7 @@ public:
 using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
-typedef ::testing::Types<
+using RocprimDeviceMergeTestsParams = ::testing::Types<
     DeviceMergeParams<int, double>,
     DeviceMergeParams<unsigned long, unsigned int, rocprim::greater<unsigned long>>,
     DeviceMergeParams<float, custom_double2>,
@@ -83,8 +84,7 @@ typedef ::testing::Types<
     DeviceMergeParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::less<rocprim::bfloat16>>,
     DeviceMergeParams<custom_double2, custom_int2, rocprim::greater<custom_double2>>,
     DeviceMergeParams<custom_int2, char>,
-    DeviceMergeParams<int, int, ::rocprim::less<int>, true>>
-    RocprimDeviceMergeTestsParams;
+    DeviceMergeParams<int, int, ::rocprim::less<int>, true>>;
 
 // size1, size2
 std::vector<std::tuple<size_t, size_t>> get_sizes()
@@ -145,7 +145,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
         // compare function
         compare_op_type compare_op;
 
-        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -170,40 +170,21 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
-            key_type * d_keys_input1;
-            key_type * d_keys_input2;
-            key_type * d_keys_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, keys_output.size() * sizeof(key_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input1, keys_input1.data(),
-                    keys_input1.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input2, keys_input2.data(),
-                    keys_input2.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<key_type> d_keys_input1(keys_input1);
+            test_utils::device_ptr<key_type> d_keys_input2(keys_input2);
+            test_utils::device_ptr<key_type> d_keys_output(keys_output.size());
 
             test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
-                d_keys_output,
+                d_keys_output.get(),
                 out_of_bounds.device_pointer(),
                 size1 + size2);
 
-            // temp storage
-            size_t temp_storage_size_bytes;
-            void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::merge<config>(d_temp_storage,
+            size_t temp_storage_size_bytes;
+            HIP_CHECK(rocprim::merge<config>(nullptr,
                                              temp_storage_size_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
                                              d_keys_checking_output,
                                              keys_input1.size(),
                                              keys_input2.size(),
@@ -215,7 +196,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -224,10 +205,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge<config>(d_temp_storage,
+            HIP_CHECK(rocprim::merge<config>(d_temp_storage.get(),
                                              temp_storage_size_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
                                              d_keys_checking_output,
                                              keys_input1.size(),
                                              keys_input2.size(),
@@ -246,21 +227,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             ASSERT_FALSE(out_of_bounds.get());
 
             // Copy keys_output to host
-            HIP_CHECK(
-                hipMemcpy(
-                    keys_output.data(), d_keys_output,
-                    keys_output.size() * sizeof(key_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
+            keys_output = d_keys_output.load();
 
             // Check if keys_output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            HIP_CHECK(hipFree(d_keys_input1));
-            HIP_CHECK(hipFree(d_keys_input2));
-            HIP_CHECK(hipFree(d_keys_output));
-            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
@@ -309,7 +279,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
         // compare function
         compare_op_type compare_op;
 
-        for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+        for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -351,68 +321,31 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
-            key_type * d_keys_input1;
-            key_type * d_keys_input2;
-            key_type * d_keys_output;
-            value_type * d_values_input1;
-            value_type * d_values_input2;
-            value_type * d_values_output;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1, keys_input1.size() * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input2, keys_input2.size() * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, keys_output.size() * sizeof(key_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input1, values_input1.size() * sizeof(value_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input2, values_input2.size() * sizeof(value_type)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, values_output.size() * sizeof(value_type)));
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input1, keys_input1.data(),
-                    keys_input1.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_keys_input2, keys_input2.data(),
-                    keys_input2.size() * sizeof(key_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_values_input1, values_input1.data(),
-                    values_input1.size() * sizeof(value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    d_values_input2, values_input2.data(),
-                    values_input2.size() * sizeof(value_type),
-                    hipMemcpyHostToDevice
-                )
-            );
+            test_utils::device_ptr<key_type>   d_keys_input1(keys_input1);
+            test_utils::device_ptr<key_type>   d_keys_input2(keys_input2);
+            test_utils::device_ptr<key_type>   d_keys_output(keys_output.size());
+            test_utils::device_ptr<value_type> d_values_input1(values_input1);
+            test_utils::device_ptr<value_type> d_values_input2(values_input2);
+            test_utils::device_ptr<value_type> d_values_output(values_output.size());
 
             test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
-                d_keys_output,
+                d_keys_output.get(),
                 out_of_bounds.device_pointer(),
-                size1 + size2
-            );
+                size1 + size2);
             test_utils::bounds_checking_iterator<value_type> d_values_checking_output(
-                d_values_output,
+                d_values_output.get(),
                 out_of_bounds.device_pointer(),
                 size1 + size2);
 
-            // temp storage
-            size_t temp_storage_size_bytes;
-            void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
-            HIP_CHECK(rocprim::merge<config>(d_temp_storage,
+            size_t temp_storage_size_bytes;
+            HIP_CHECK(rocprim::merge<config>(nullptr,
                                              temp_storage_size_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
                                              d_keys_checking_output,
-                                             d_values_input1,
-                                             d_values_input2,
+                                             d_values_input1.get(),
+                                             d_values_input2.get(),
                                              d_values_checking_output,
                                              keys_input1.size(),
                                              keys_input2.size(),
@@ -424,7 +357,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -433,13 +366,13 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge<config>(d_temp_storage,
+            HIP_CHECK(rocprim::merge<config>(d_temp_storage.get(),
                                              temp_storage_size_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
                                              d_keys_checking_output,
-                                             d_values_input1,
-                                             d_values_input2,
+                                             d_values_input1.get(),
+                                             d_values_input2.get(),
                                              d_values_checking_output,
                                              keys_input1.size(),
                                              keys_input2.size(),
@@ -457,20 +390,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
             ASSERT_FALSE(out_of_bounds.get());
 
-            HIP_CHECK(
-                hipMemcpy(
-                    keys_output.data(), d_keys_output,
-                    keys_output.size() * sizeof(key_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
-            HIP_CHECK(
-                hipMemcpy(
-                    values_output.data(), d_values_output,
-                    values_output.size() * sizeof(value_type),
-                    hipMemcpyDeviceToHost
-                )
-            );
+            keys_output   = d_keys_output.load();
+            values_output = d_values_output.load();
 
             // Check if keys_output values are as expected
             std::vector<key_type> expected_key(expected.size());
@@ -482,14 +403,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             }
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
-
-            HIP_CHECK(hipFree(d_keys_input1));
-            HIP_CHECK(hipFree(d_keys_input2));
-            HIP_CHECK(hipFree(d_keys_output));
-            HIP_CHECK(hipFree(d_values_input1));
-            HIP_CHECK(hipFree(d_values_input2));
-            HIP_CHECK(hipFree(d_values_output));
-            HIP_CHECK(hipFree(d_temp_storage));
 
             if (TestFixture::use_graphs)
                 gHelper.cleanupGraphHelper();
@@ -520,18 +433,8 @@ void testMergeMismatchedIteratorTypes()
     std::vector<int> expected_keys_output(2 * keys_input1.size());
     std::iota(expected_keys_output.begin(), expected_keys_output.end(), 0);
 
-    int* d_keys_input1 = nullptr;
-    int* d_keys_output = nullptr;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1,
-                                                 keys_input1.size() * sizeof(keys_input1[0])));
-    HIP_CHECK(
-        test_common_utils::hipMallocHelper(&d_keys_output,
-                                           expected_keys_output.size() * sizeof(keys_input1[0])));
-
-    HIP_CHECK(hipMemcpy(d_keys_input1,
-                        keys_input1.data(),
-                        keys_input1.size() * sizeof(keys_input1[0]),
-                        hipMemcpyHostToDevice));
+    test_utils::device_ptr<int> d_keys_input1(keys_input1);
+    test_utils::device_ptr<int> d_keys_output(expected_keys_output.size());
 
     const auto d_keys_input2
         = rocprim::make_transform_iterator(rocprim::make_counting_iterator(0),
@@ -549,9 +452,9 @@ void testMergeMismatchedIteratorTypes()
     size_t temp_storage_size_bytes = 0;
     HIP_CHECK(rocprim::merge<config>(nullptr,
                                      temp_storage_size_bytes,
-                                     d_keys_input1,
+                                     d_keys_input1.get(),
                                      d_keys_input2,
-                                     d_keys_output,
+                                     d_keys_output.get(),
                                      keys_input1.size(),
                                      keys_input1.size(),
                                      rocprim::less<int>{},
@@ -560,8 +463,7 @@ void testMergeMismatchedIteratorTypes()
 
     ASSERT_GT(temp_storage_size_bytes, 0);
 
-    void* d_temp_storage = nullptr;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+    test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
     test_utils::GraphHelper gHelper;
     if(UseGraphs)
@@ -569,11 +471,11 @@ void testMergeMismatchedIteratorTypes()
         gHelper.startStreamCapture(stream);
     }
 
-    HIP_CHECK(rocprim::merge<config>(d_temp_storage,
+    HIP_CHECK(rocprim::merge<config>(d_temp_storage.get(),
                                      temp_storage_size_bytes,
-                                     d_keys_input1,
+                                     d_keys_input1.get(),
                                      d_keys_input2,
-                                     d_keys_output,
+                                     d_keys_output.get(),
                                      keys_input1.size(),
                                      keys_input1.size(),
                                      rocprim::less<int>{},
@@ -585,17 +487,9 @@ void testMergeMismatchedIteratorTypes()
         gHelper.createAndLaunchGraph(stream);
     }
 
-    std::vector<int> keys_output(expected_keys_output.size());
-    HIP_CHECK(hipMemcpy(keys_output.data(),
-                        d_keys_output,
-                        keys_output.size() * sizeof(keys_output[0]),
-                        hipMemcpyDeviceToHost));
+    const auto keys_output = d_keys_output.load();
 
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_keys_output));
-
-    HIP_CHECK(hipFree(d_temp_storage));
-    HIP_CHECK(hipFree(d_keys_output));
-    HIP_CHECK(hipFree(d_keys_input1));
 
     if (UseGraphs)
     {

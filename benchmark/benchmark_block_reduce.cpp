@@ -32,30 +32,24 @@
 
 // rocPRIM
 #include <rocprim/block/block_reduce.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <vector>
-
-#include <cstdio>
-#include <cstdlib>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-namespace rp = rocprim;
-
-template<
-    class Runner,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int Trials
->
-__global__
-__launch_bounds__(BlockSize)
+template<typename Runner,
+         typename T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int Trials>
+__global__ __launch_bounds__(BlockSize)
 void kernel(const T* input, T* output)
 {
     Runner::template run<T, BlockSize, ItemsPerThread, Trials>(input, output);
@@ -64,12 +58,7 @@ void kernel(const T* input, T* output)
 template<rocprim::block_reduce_algorithm algorithm>
 struct reduce
 {
-    template<
-        class T,
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        unsigned int Trials
-    >
+    template<typename T, unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Trials>
     __device__
     static void run(const T* input, T* output)
     {
@@ -77,16 +66,16 @@ struct reduce
 
         T values[ItemsPerThread];
         T reduced_value;
-        for(unsigned int k = 0; k < ItemsPerThread; k++)
+        for(unsigned int k = 0; k < ItemsPerThread; ++k)
         {
             values[k] = input[i * ItemsPerThread + k];
         }
 
-        using breduce_t = rp::block_reduce<T, BlockSize, algorithm>;
+        using breduce_t = rocprim::block_reduce<T, BlockSize, algorithm>;
         __shared__ typename breduce_t::storage_type storage;
 
         ROCPRIM_NO_UNROLL
-        for(unsigned int trial = 0; trial < Trials; trial++)
+        for(unsigned int trial = 0; trial < Trials; ++trial)
         {
             breduce_t().reduce(values, reduced_value, storage);
             values[0] = reduced_value;
@@ -99,33 +88,25 @@ struct reduce
     }
 };
 
-template<
-    class Benchmark,
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int Trials = 100
->
+template<typename Benchmark,
+         typename T,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int Trials = 100>
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
     // Calculate the number of elements N
     size_t N = bytes / sizeof(T);
     // Make sure size is a multiple of BlockSize
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
     // Allocate and fill memory
     std::vector<T> input(size, T(1));
-    T * d_input;
-    T * d_output;
+    T*             d_input;
+    T*             d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // HIP events creation
@@ -133,16 +114,18 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
-            dim3(size/items_per_block), dim3(BlockSize), 0, stream,
-            d_input, d_output
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>),
+                           dim3(size / items_per_block),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           d_input,
+                           d_output);
         HIP_CHECK(hipGetLastError());
 
         // Record stop event and wait until it completes
@@ -175,65 +158,64 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
                                  stream,                                                           \
                                  bytes)
 
-#define BENCHMARK_TYPE(type, block) \
-    CREATE_BENCHMARK(type, block, 1), \
-    CREATE_BENCHMARK(type, block, 2), \
-    CREATE_BENCHMARK(type, block, 3), \
-    CREATE_BENCHMARK(type, block, 4), \
-    CREATE_BENCHMARK(type, block, 8), \
-    CREATE_BENCHMARK(type, block, 11), \
-    CREATE_BENCHMARK(type, block, 16)
+#define BENCHMARK_TYPE(type, block)                                          \
+    CREATE_BENCHMARK(type, block, 1), CREATE_BENCHMARK(type, block, 2),      \
+        CREATE_BENCHMARK(type, block, 3), CREATE_BENCHMARK(type, block, 4),  \
+        CREATE_BENCHMARK(type, block, 8), CREATE_BENCHMARK(type, block, 11), \
+        CREATE_BENCHMARK(type, block, 16)
 
-template<class Benchmark>
+template<typename Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const std::string&                            method_name,
                     hipStream_t                                   stream,
                     size_t                                        bytes)
 {
-    using custom_float2 = custom_type<float, float>;
+    using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
 
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
-    {
-        // When block size is less than or equal to warp size
-        BENCHMARK_TYPE(int, 64),
-        BENCHMARK_TYPE(float, 64),
-        BENCHMARK_TYPE(double, 64),
-        BENCHMARK_TYPE(int8_t, 64),
-        BENCHMARK_TYPE(uint8_t, 64),
-        BENCHMARK_TYPE(rocprim::half, 64),
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks
+        = {// When block size is less than or equal to warp size
+           BENCHMARK_TYPE(int, 64),
+           BENCHMARK_TYPE(float, 64),
+           BENCHMARK_TYPE(double, 64),
+           BENCHMARK_TYPE(int8_t, 64),
+           BENCHMARK_TYPE(uint8_t, 64),
+           BENCHMARK_TYPE(rocprim::half, 64),
+           BENCHMARK_TYPE(rocprim::int128_t, 64),
+           BENCHMARK_TYPE(rocprim::uint128_t, 64),
 
-        BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(float, 256),
-        BENCHMARK_TYPE(double, 256),
-        BENCHMARK_TYPE(int8_t, 256),
-        BENCHMARK_TYPE(uint8_t, 256),
-        BENCHMARK_TYPE(rocprim::half, 256),
+           BENCHMARK_TYPE(int, 256),
+           BENCHMARK_TYPE(float, 256),
+           BENCHMARK_TYPE(double, 256),
+           BENCHMARK_TYPE(int8_t, 256),
+           BENCHMARK_TYPE(uint8_t, 256),
+           BENCHMARK_TYPE(rocprim::half, 256),
+           BENCHMARK_TYPE(rocprim::int128_t, 256),
+           BENCHMARK_TYPE(rocprim::uint128_t, 256),
 
-        CREATE_BENCHMARK(custom_float2, 256, 1),
-        CREATE_BENCHMARK(custom_float2, 256, 4),
-        CREATE_BENCHMARK(custom_float2, 256, 8),
+           CREATE_BENCHMARK(custom_float2, 256, 1),
+           CREATE_BENCHMARK(custom_float2, 256, 4),
+           CREATE_BENCHMARK(custom_float2, 256, 8),
 
-        CREATE_BENCHMARK(float2, 256, 1),
-        CREATE_BENCHMARK(float2, 256, 4),
-        CREATE_BENCHMARK(float2, 256, 8),
+           CREATE_BENCHMARK(float2, 256, 1),
+           CREATE_BENCHMARK(float2, 256, 4),
+           CREATE_BENCHMARK(float2, 256, 8),
 
-        CREATE_BENCHMARK(custom_double2, 256, 1),
-        CREATE_BENCHMARK(custom_double2, 256, 4),
-        CREATE_BENCHMARK(custom_double2, 256, 8),
+           CREATE_BENCHMARK(custom_double2, 256, 1),
+           CREATE_BENCHMARK(custom_double2, 256, 4),
+           CREATE_BENCHMARK(custom_double2, 256, 8),
 
-        CREATE_BENCHMARK(double2, 256, 1),
-        CREATE_BENCHMARK(double2, 256, 4),
-        CREATE_BENCHMARK(double2, 256, 8),
+           CREATE_BENCHMARK(double2, 256, 1),
+           CREATE_BENCHMARK(double2, 256, 4),
+           CREATE_BENCHMARK(double2, 256, 8),
 
-        CREATE_BENCHMARK(float4, 256, 1),
-        CREATE_BENCHMARK(float4, 256, 4),
-        CREATE_BENCHMARK(float4, 256, 8),
-    };
+           CREATE_BENCHMARK(float4, 256, 1),
+           CREATE_BENCHMARK(float4, 256, 4),
+           CREATE_BENCHMARK(float4, 256, 8)};
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
@@ -246,8 +228,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP

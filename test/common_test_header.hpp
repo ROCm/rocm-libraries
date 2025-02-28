@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef ROCPRIM_COMMON_TEST_HEADER
-#define ROCPRIM_COMMON_TEST_HEADER
+#ifndef ROCPRIM_COMMON_TEST_HEADER_HPP_
+#define ROCPRIM_COMMON_TEST_HEADER_HPP_
 
 #include <algorithm>
 #include <cmath>
@@ -75,10 +75,8 @@
         }                                                                                   \
     }
 
-#if(defined(__GNUC__) || defined(__clang__)) && (defined(__GLIBCXX__) || defined(_LIBCPP_VERSION))
+#ifndef ROCPRIM_HAS_INT128_SUPPORT
     #define ROCPRIM_HAS_INT128_SUPPORT 1
-#else
-    #define ROCPRIM_HAS_INT128_SUPPORT 0
 #endif
 
 #define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...)         \
@@ -111,8 +109,7 @@ inline char* __get_env(const char* name)
 {
     char* env;
 #ifdef _MSC_VER
-    size_t  len;
-    errno_t err = _dupenv_s(&env, &len, name);
+    errno_t err = _dupenv_s(&env, nullptr, name);
     if(err)
     {
         return nullptr;
@@ -123,15 +120,12 @@ inline char* __get_env(const char* name)
     return env;
 }
 
-inline void clean_env(char* name)
+inline void clean_env(char* env)
 {
 #ifdef _MSC_VER
-    if(name != nullptr)
-    {
-        free(name);
-    }
+    free(env);
 #endif
-    (void)name;
+    (void)env;
 }
 
 inline int obtain_device_from_ctest()
@@ -184,4 +178,4 @@ hipError_t hipMallocHelper(T** devPtr, size_t size)
 
 }
 
-#endif
+#endif // ROCPRIM_COMMON_TEST_HEADER_HPP_

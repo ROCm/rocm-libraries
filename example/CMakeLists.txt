@@ -33,10 +33,16 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     PRIVATE
     rocprim
   )
-  target_link_libraries(${EXAMPLE_TARGET}
-    PRIVATE
+  if(USE_HIPCXX)
+    target_link_libraries(${EXAMPLE_TARGET}
+      PRIVATE
       $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
-  )
+    )
+  else()
+    target_link_libraries(${EXAMPLE_TARGET}
+      PRIVATE
+      hip::device)
+  endif()
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/example"
@@ -62,3 +68,4 @@ endfunction()
 # ****************************************************************************
 
 add_rocprim_example(example_temporary_storage.cpp)
+add_rocprim_example(example_type_traits_interface.cpp)

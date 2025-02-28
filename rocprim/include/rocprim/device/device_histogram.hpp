@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,11 +43,9 @@ namespace detail
 {
 
 template<class Config, unsigned int ActiveChannels, class Counter>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .histogram_config
-        .block_size) void init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
-                                                fixed_array<unsigned int, ActiveChannels> bins)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
+    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
+                          fixed_array<unsigned int, ActiveChannels> bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -60,23 +58,25 @@ template<class Config,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .histogram_config
-        .block_size) void histogram_shared_kernel(SampleIterator samples,
-                                                  unsigned int   columns,
-                                                  unsigned int   rows,
-                                                  unsigned int   row_stride,
-                                                  unsigned int   rows_per_block,
-                                                  unsigned int   shared_histograms,
-                                                  fixed_array<Counter*, ActiveChannels> histogram,
-                                                  fixed_array<SampleToBinOp, ActiveChannels>
-                                                      sample_to_bin_op,
-                                                  fixed_array<unsigned int, ActiveChannels> bins)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
+    histogram_shared_kernel(SampleIterator                             samples,
+                            unsigned int                               columns,
+                            unsigned int                               rows,
+                            unsigned int                               row_stride,
+                            unsigned int                               rows_per_block,
+                            unsigned int                               shared_histograms,
+                            fixed_array<Counter*, ActiveChannels>      histogram,
+                            fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                            fixed_array<unsigned int, ActiveChannels>  bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
+// Temporary fix: issue with dynamic shared memory on windows.
+#ifndef _WIN32
     HIP_DYNAMIC_SHARED(unsigned int, block_histogram);
+#else
+    __shared__ unsigned int block_histogram[params.shared_impl_max_bins];
+#endif
 
     histogram_shared<params.histogram_config.block_size,
                      params.histogram_config.items_per_thread,
@@ -99,17 +99,13 @@ template<class Config,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .histogram_config
-        .block_size) void histogram_global_kernel(SampleIterator                        samples,
-                                                  unsigned int                          columns,
-                                                  unsigned int                          row_stride,
-                                                  fixed_array<Counter*, ActiveChannels> histogram,
-                                                  fixed_array<SampleToBinOp, ActiveChannels>
-                                                      sample_to_bin_op,
-                                                  fixed_array<unsigned int, ActiveChannels>
-                                                      bins_bits)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
+    histogram_global_kernel(SampleIterator                             samples,
+                            unsigned int                               columns,
+                            unsigned int                               row_stride,
+                            fixed_array<Counter*, ActiveChannels>      histogram,
+                            fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                            fixed_array<unsigned int, ActiveChannels>  bins_bits)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -433,24 +429,24 @@ inline hipError_t histogram_range_impl(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] size - number of elements in the samples range.
-/// \param [out] histogram - pointer to the first element in the histogram range.
-/// \param [in] levels - number of boundaries (levels) for histogram bins.
-/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin.
-/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] size number of elements in the samples range.
+/// \param [out] histogram pointer to the first element in the histogram range.
+/// \param [in] levels number of boundaries (levels) for histogram bins.
+/// \param [in] lower_level lower sample value bound (inclusive) for the first histogram bin.
+/// \param [in] upper_level upper sample value bound (exclusive) for the last histogram bin.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -536,26 +532,26 @@ inline hipError_t histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] columns - number of elements in each row of the region.
-/// \param [in] rows - number of rows of the region.
-/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
-/// \param [out] histogram - pointer to the first element in the histogram range.
-/// \param [in] levels - number of boundaries (levels) for histogram bins.
-/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin.
-/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] columns number of elements in each row of the region.
+/// \param [in] rows number of rows of the region.
+/// \param [in] row_stride_bytes number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram pointer to the first element in the histogram range.
+/// \param [in] levels number of boundaries (levels) for histogram bins.
+/// \param [in] lower_level lower sample value bound (inclusive) for the first histogram bin.
+/// \param [in] upper_level upper sample value bound (exclusive) for the last histogram bin.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -645,26 +641,26 @@ inline hipError_t histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Channels - number of channels interleaved in the input samples.
-/// \tparam ActiveChannels - number of channels being used for computing histograms.
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Channels number of channels interleaved in the input samples.
+/// \tparam ActiveChannels number of channels being used for computing histograms.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] size - number of pixels in the samples range.
-/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
-/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
-/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin in each active channel.
-/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin in each active channel.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] size number of pixels in the samples range.
+/// \param [out] histogram pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] lower_level lower sample value bound (inclusive) for the first histogram bin in each active channel.
+/// \param [in] upper_level upper sample value bound (exclusive) for the last histogram bin in each active channel.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -764,28 +760,28 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Channels - number of channels interleaved in the input samples.
-/// \tparam ActiveChannels - number of channels being used for computing histograms.
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Channels number of channels interleaved in the input samples.
+/// \tparam ActiveChannels number of channels being used for computing histograms.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] columns - number of elements in each row of the region.
-/// \param [in] rows - number of rows of the region.
-/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
-/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
-/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
-/// \param [in] lower_level - lower sample value bound (inclusive) for the first histogram bin in each active channel.
-/// \param [in] upper_level - upper sample value bound (exclusive) for the last histogram bin in each active channel.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] columns number of elements in each row of the region.
+/// \param [in] rows number of rows of the region.
+/// \param [in] row_stride_bytes number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] lower_level lower sample value bound (inclusive) for the first histogram bin in each active channel.
+/// \param [in] upper_level upper sample value bound (exclusive) for the last histogram bin in each active channel.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -880,23 +876,23 @@ inline hipError_t multi_histogram_even(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] size - number of elements in the samples range.
-/// \param [out] histogram - pointer to the first element in the histogram range.
-/// \param [in] levels - number of boundaries (levels) for histogram bins.
-/// \param [in] level_values - pointer to the array of bin boundaries.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] size number of elements in the samples range.
+/// \param [out] histogram pointer to the first element in the histogram range.
+/// \param [in] levels number of boundaries (levels) for histogram bins.
+/// \param [in] level_values pointer to the array of bin boundaries.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -977,25 +973,25 @@ inline hipError_t histogram_range(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] columns - number of elements in each row of the region.
-/// \param [in] rows - number of rows of the region.
-/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
-/// \param [out] histogram - pointer to the first element in the histogram range.
-/// \param [in] levels - number of boundaries (levels) for histogram bins.
-/// \param [in] level_values - pointer to the array of bin boundaries.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] columns number of elements in each row of the region.
+/// \param [in] rows number of rows of the region.
+/// \param [in] row_stride_bytes number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram pointer to the first element in the histogram range.
+/// \param [in] levels number of boundaries (levels) for histogram bins.
+/// \param [in] level_values pointer to the array of bin boundaries.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -1081,25 +1077,25 @@ inline hipError_t histogram_range(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Channels - number of channels interleaved in the input samples.
-/// \tparam ActiveChannels - number of channels being used for computing histograms.
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Channels number of channels interleaved in the input samples.
+/// \tparam ActiveChannels number of channels being used for computing histograms.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] size - number of pixels in the samples range.
-/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
-/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
-/// \param [in] level_values - pointer to the array of bin boundaries for each active channel.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] size number of pixels in the samples range.
+/// \param [out] histogram pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] level_values pointer to the array of bin boundaries for each active channel.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of
@@ -1195,27 +1191,27 @@ inline hipError_t multi_histogram_range(void*          temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 ///
-/// \tparam Channels - number of channels interleaved in the input samples.
-/// \tparam ActiveChannels - number of channels being used for computing histograms.
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
-/// \tparam SampleIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Channels number of channels interleaved in the input samples.
+/// \tparam ActiveChannels number of channels being used for computing histograms.
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `histogram_config`.
+/// \tparam SampleIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam Counter - integer type for histogram bin counters.
-/// \tparam Level - type of histogram boundaries (levels)
+/// \tparam Counter integer type for histogram bin counters.
+/// \tparam Level type of histogram boundaries (levels)
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] samples - iterator to the first element in the range of input samples.
-/// \param [in] columns - number of elements in each row of the region.
-/// \param [in] rows - number of rows of the region.
-/// \param [in] row_stride_bytes - number of bytes between starts of consecutive rows of the region.
-/// \param [out] histogram - pointers to the first element in the histogram range, one for each active channel.
-/// \param [in] levels - number of boundaries (levels) for histogram bins in each active channel.
-/// \param [in] level_values - pointer to the array of bin boundaries for each active channel.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] samples iterator to the first element in the range of input samples.
+/// \param [in] columns number of elements in each row of the region.
+/// \param [in] rows number of rows of the region.
+/// \param [in] row_stride_bytes number of bytes between starts of consecutive rows of the region.
+/// \param [out] histogram pointers to the first element in the histogram range, one for each active channel.
+/// \param [in] levels number of boundaries (levels) for histogram bins in each active channel.
+/// \param [in] level_values pointer to the array of bin boundaries for each active channel.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful histogram operation; otherwise a HIP runtime error of

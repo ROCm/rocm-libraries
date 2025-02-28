@@ -32,13 +32,15 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM HIP API
+#include <rocprim/block/block_reduce.hpp>
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_reduce.hpp>
-
-#include <string>
-#include <vector>
+#include <rocprim/functional.hpp>
 
 #include <cstddef>
+#include <string>
+#include <vector>
 
 constexpr const char* get_reduce_method_name(rocprim::block_reduce_algorithm alg)
 {
@@ -81,7 +83,7 @@ struct device_reduce_benchmark : public config_autotune_interface
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size = 10;
+    static constexpr unsigned int batch_size  = 10;
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State&   state,
@@ -89,7 +91,7 @@ struct device_reduce_benchmark : public config_autotune_interface
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        // Calculate the number of elements 
+        // Calculate the number of elements
         size_t size = bytes / sizeof(T);
 
         BinaryFunction reduce_op{};
@@ -97,43 +99,39 @@ struct device_reduce_benchmark : public config_autotune_interface
         std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-        T * d_input;
-        T * d_output;
+        T* d_input;
+        T* d_output;
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
         HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), sizeof(T)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                size * sizeof(T),
-                hipMemcpyHostToDevice
-                )
-        );
+        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
         HIP_CHECK(hipDeviceSynchronize());
 
         // Allocate temporary storage memory
         size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
+        void*  d_temp_storage = nullptr;
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce<Config>(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, T(), size,
-                reduce_op, stream
-                )
-        );
-        HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
+        HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+                                          temp_storage_size_bytes,
+                                          d_input,
+                                          d_output,
+                                          T(),
+                                          size,
+                                          reduce_op,
+                                          stream));
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(
-                rocprim::reduce<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, T(), size,
-                    reduce_op, stream
-                    )
-            );
+            HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+                                              temp_storage_size_bytes,
+                                              d_input,
+                                              d_output,
+                                              T(),
+                                              size,
+                                              reduce_op,
+                                              stream));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -147,15 +145,16 @@ struct device_reduce_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(
-                    rocprim::reduce<Config>(
-                        d_temp_storage, temp_storage_size_bytes,
-                        d_input, d_output, T(), size,
-                        reduce_op, stream
-                        )
-                );
+                HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  d_input,
+                                                  d_output,
+                                                  T(),
+                                                  size,
+                                                  reduce_op,
+                                                  stream));
             }
             HIP_CHECK(hipStreamSynchronize(stream));
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,13 +54,12 @@ template<bool         WithInitialValue,
          class OutputIterator,
          class InitValueType,
          class BinaryFunction>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().reduce_config.block_size)
-void block_reduce_kernel(InputIterator  input,
-                         const size_t   size,
-                         OutputIterator output,
-                         InitValueType  initial_value,
-                         BinaryFunction reduce_op)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().reduce_config.block_size) void
+    block_reduce_kernel(InputIterator  input,
+                        const size_t   size,
+                        OutputIterator output,
+                        InitValueType  initial_value,
+                        BinaryFunction reduce_op)
 {
     block_reduce_kernel_impl<WithInitialValue, FitLarger, FitItems, Config, ResultType>(
         input,
@@ -308,31 +307,31 @@ hipError_t reduce_impl(void * temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for reduction. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to reduce.
-/// \param [out] output - iterator to the first element in the output range. It can be
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to reduce.
+/// \param [out] output iterator to the first element in the output range. It can be
 /// same as \p input.
-/// \param [in] initial_value - initial value to start the reduction.
-/// \param [in] size - number of element in the input range.
-/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// \param [in] initial_value initial value to start the reduction.
+/// \param [in] size number of element in the input range.
+/// \param [in] reduce_op binary operation function object that will be used for reduction.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of
@@ -457,29 +456,29 @@ inline hipError_t reduce(void*               temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// \tparam BinaryFunction type of binary function used for reduction. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to reduce.
-/// \param [out] output - iterator to the first element in the output range. It can be
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to reduce.
+/// \param [out] output iterator to the first element in the output range. It can be
 /// same as \p input.
-/// \param [in] size - number of element in the input range.
-/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// \param [in] size number of element in the input range.
+/// \param [in] reduce_op binary operation function object that will be used for reduction.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of

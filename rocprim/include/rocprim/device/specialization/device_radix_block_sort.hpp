@@ -37,16 +37,15 @@ template<class Config,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Decomposer>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().block_size) void radix_sort_block_sort_kernel(
-        KeysInputIterator    keys_input,
-        KeysOutputIterator   keys_output,
-        ValuesInputIterator  values_input,
-        ValuesOutputIterator values_output,
-        unsigned int         size,
-        Decomposer           decomposer,
-        unsigned int         bit,
-        unsigned int         current_radix_bits)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().block_size) void
+    radix_sort_block_sort_kernel(KeysInputIterator    keys_input,
+                                 KeysOutputIterator   keys_output,
+                                 ValuesInputIterator  values_input,
+                                 ValuesOutputIterator values_output,
+                                 unsigned int         size,
+                                 Decomposer           decomposer,
+                                 unsigned int         bit,
+                                 unsigned int         current_radix_bits)
 {
     static constexpr kernel_config_params params = device_params<Config>();
     sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,

@@ -53,6 +53,7 @@ subtrees:
               - file: block_ops/ops_classes/discontinuity.rst
               - file: block_ops/ops_classes/scan.rst
               - file: block_ops/ops_classes/reduce.rst
+              - file: block_ops/ops_classes/run_length_decode.rst
               - file: block_ops/ops_classes/shuffle.rst
               - file: block_ops/ops_classes/exchange.rst
               - file: block_ops/ops_classes/sort.rst
@@ -80,6 +81,7 @@ subtrees:
           - file: thread_ops/thread_store.rst
       - file: reference/iterators.rst
       - file: reference/intrinsics.rst
+      - file: concepts/type_traits.rst
       - file: reference/types.rst
       - file: reference/acknowledge.rst
   - file: license.rst

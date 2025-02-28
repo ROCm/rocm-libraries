@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,10 +40,10 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief The \p block_exchange class is a block level parallel primitive which provides
 /// methods for rearranging items partitioned across threads in a block.
 ///
-/// \tparam T - the input type.
-/// \tparam BlockSize - the number of threads in a block.
-/// \tparam ItemsPerThread - the number of items contributed by each thread.
-/// \tparam PaddingHint - a hint that decides when to use padding. May not always be applicable.
+/// \tparam T the input type.
+/// \tparam BlockSize the number of threads in a block.
+/// \tparam ItemsPerThread the number of items contributed by each thread.
+/// \tparam PaddingHint a hint that decides when to use padding. May not always be applicable.
 ///
 /// \par Overview
 /// * The \p block_exchange class supports the following rearrangement methods:
@@ -148,10 +148,10 @@ public:
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
     template<class U>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void blocked_to_striped(const T (&input)[ItemsPerThread],
@@ -164,11 +164,11 @@ public:
     /// \brief Transposes a blocked arrangement of items to a striped arrangement
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -215,10 +215,10 @@ public:
     /// \brief Transposes a striped arrangement of items to a blocked arrangement
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
     template<class U>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void striped_to_blocked(const T (&input)[ItemsPerThread],
@@ -231,11 +231,11 @@ public:
     /// \brief Transposes a striped arrangement of items to a blocked arrangement
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -282,10 +282,10 @@ public:
     /// \brief Transposes a blocked arrangement of items to a warp-striped arrangement
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
     template<class U>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
@@ -298,11 +298,11 @@ public:
     /// \brief Transposes a blocked arrangement of items to a warp-striped arrangement
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -353,10 +353,10 @@ public:
     /// \brief Transposes a warp-striped arrangement of items to a blocked arrangement
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
     template<class U>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
@@ -369,11 +369,11 @@ public:
     /// \brief Transposes a warp-striped arrangement of items to a blocked arrangement
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
+    /// \tparam U [inferred] the output type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -424,12 +424,12 @@ public:
     /// \brief Scatters items to a blocked arrangement based on their ranks
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
     template<class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
@@ -443,12 +443,12 @@ public:
     /// \brief Gathers items from a striped arrangement based on their ranks
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
     template<class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void gather_from_striped(const T (&input)[ItemsPerThread],
@@ -462,13 +462,13 @@ public:
     /// \brief Scatters items to a blocked arrangement based on their ranks
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -518,13 +518,13 @@ public:
     /// \brief Gathers items from a striped arrangement based on their ranks
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     template <class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void gather_from_striped(const T (&input)[ItemsPerThread],
@@ -552,12 +552,12 @@ public:
     /// \brief Scatters items to a striped arrangement based on their ranks
     /// across the thread block.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
     template<class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped(const T (&input)[ItemsPerThread],
@@ -571,13 +571,13 @@ public:
     /// \brief Scatters items to a striped arrangement based on their ranks
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -627,13 +627,13 @@ public:
     /// \brief Scatters items to a *warp* striped arrangement based on their ranks
     /// across the thread block, using temporary storage.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [out] ranks - array that has rank of data.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [out] ranks array that has rank of data.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -697,12 +697,12 @@ public:
     /// \par Overview
     /// * Items with rank -1 are not scattered.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] ranks - array that has rank of data.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] ranks array that has rank of data.
     template<class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
@@ -719,13 +719,13 @@ public:
     /// \par Overview
     /// * Items with rank -1 are not scattered.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] ranks - array that has rank of data.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] ranks array that has rank of data.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -778,14 +778,14 @@ public:
     /// \brief Scatters items to a striped arrangement based on their ranks
     /// across the thread block, with a flag to denote validity.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
-    /// \tparam ValidFlag - [inferred] the validity flag type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
+    /// \tparam ValidFlag [inferred] the validity flag type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] ranks - array that has rank of data.
-    /// \param [in] is_valid - array that has flags to denote validity.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] ranks array that has rank of data.
+    /// \param [in] is_valid array that has flags to denote validity.
     template<class U, class Offset, class ValidFlag>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
@@ -801,15 +801,15 @@ public:
     /// across the thread block, with a flag to denote validity, using temporary
     /// storage.
     ///
-    /// \tparam U - [inferred] the output type.
-    /// \tparam Offset - [inferred] the rank type.
-    /// \tparam ValidFlag - [inferred] the validity flag type.
+    /// \tparam U [inferred] the output type.
+    /// \tparam Offset [inferred] the rank type.
+    /// \tparam ValidFlag [inferred] the validity flag type.
     ///
-    /// \param [in] input - array that data is loaded from.
-    /// \param [out] output - array that data is loaded to.
-    /// \param [in] ranks - array that has rank of data.
-    /// \param [in] is_valid - array that has flags to denote validity.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] input array that data is loaded from.
+    /// \param [out] output array that data is loaded to.
+    /// \param [in] ranks array that has rank of data.
+    /// \param [in] is_valid array that has flags to denote validity.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused

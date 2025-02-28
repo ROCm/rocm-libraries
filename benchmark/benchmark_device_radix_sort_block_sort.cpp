@@ -32,9 +32,16 @@
 #include "benchmark_device_radix_sort_block_sort.parallel.hpp"
 #include "benchmark_utils.hpp"
 
-#include <string>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/types.hpp>
+#endif
 
 #include <cstddef>
+#include <string>
+#include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_BYTES
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
@@ -43,7 +50,7 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #define CREATE_BENCHMARK(...)                                               \
     {                                                                       \
         const device_radix_sort_block_sort_benchmark<__VA_ARGS__> instance; \
-        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);       \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance);      \
     }
 
 int main(int argc, char* argv[])
@@ -71,7 +78,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -103,6 +110,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(uint8_t)
     CREATE_BENCHMARK(rocprim::half)
     CREATE_BENCHMARK(short)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_float2      = custom_type<float, float>;
     using custom_double2     = custom_type<double, double>;
@@ -117,6 +126,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(int, custom_float2)
     CREATE_BENCHMARK(int, custom_char_double)
     CREATE_BENCHMARK(long long, custom_double2)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
 #endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing

@@ -1,7 +1,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022-2024, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -47,8 +47,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// methods for applying binary functions for pairs of consecutive items partition across a thread
 /// block.
 ///
-/// \tparam T - the input type.
-/// \tparam BlockSize - the number of threads in a block.
+/// \tparam T the input type.
+/// \tparam BlockSize the number of threads in a block.
 ///
 /// \par Overview
 /// * There are two types of flags:
@@ -126,19 +126,19 @@ public:
     /// flagged.
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use subtract_left() or block_discontinuity::flag_heads() instead.
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -203,21 +203,21 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use subtract_left() or block_discontinuity::flag_heads() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -291,19 +291,19 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use subtract_right() or block_discontinuity::flag_tails() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -369,21 +369,21 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use subtract_right() or block_discontinuity::flag_tails() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -454,20 +454,20 @@ public:
     /// \brief Tags both \p head_flags and\p tail_flags that indicate discontinuities
     /// between items partitioned across the thread block.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -550,22 +550,22 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use block_discontinuity::flag_heads_and_tails() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -656,22 +656,22 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use block_discontinuity::flag_heads_and_tails() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -763,24 +763,24 @@ public:
     /// \deprecated The flags API of block_adjacent_difference is deprecated,
     /// use block_discontinuity::flag_heads_and_tails() instead.
     ///
-    /// \tparam ItemsPerThread - [inferred] the number of items to be processed by
+    /// \tparam ItemsPerThread [inferred] the number of items to be processed by
     /// each thread.
-    /// \tparam Flag - [inferred] the flag type.
-    /// \tparam FlagOp - [inferred] type of binary function used for flagging.
+    /// \tparam Flag [inferred] the flag type.
+    /// \tparam FlagOp [inferred] type of binary function used for flagging.
     ///
-    /// \param [out] head_flags - array that contains the head flags.
-    /// \param [in] tile_predecessor_item - first tile item from thread to be compared
+    /// \param [out] head_flags array that contains the head flags.
+    /// \param [in] tile_predecessor_item first tile item from thread to be compared
     /// against.
-    /// \param [out] tail_flags - array that contains the tail flags.
-    /// \param [in] tile_successor_item - last tile item from thread to be compared
+    /// \param [out] tail_flags array that contains the tail flags.
+    /// \param [in] tile_successor_item last tile item from thread to be compared
     /// against.
-    /// \param [in] input - array that data is loaded from.
-    /// \param [in] flag_op - binary operation function object that will be used for flagging.
+    /// \param [in] input array that data is loaded from.
+    /// \param [in] flag_op binary operation function object that will be used for flagging.
     /// The signature of the function should be equivalent to the following:
     /// <tt>bool f(const T &a, const T &b);</tt> or <tt>bool (const T& a, const T& b, unsigned int b_index);</tt>.
     /// The signature does not need to have <tt>const &</tt>, but function object
     /// must not modify the objects passed to it.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] storage reference to a temporary storage object of type storage_type.
     ///
     /// \par Storage reuse
     /// Synchronization barrier should be placed before \p storage is reused
@@ -883,12 +883,12 @@ public:
     /// output[i] = op(input[i], input[i-1]);
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
@@ -921,18 +921,18 @@ public:
     /// output[i] = op(input[i], input[i-1]);
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_predecessor - the item before the tile, will be used as the input 
+    /// \param [in] tile_predecessor the item before the tile, will be used as the input 
     /// of the first application of `op`
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.
@@ -962,18 +962,18 @@ public:
     /// output[i] = input[i]
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] valid_items - number of items in the block which are considered "valid" and will
+    /// \param [in] valid_items number of items in the block which are considered "valid" and will
     /// be used. Must be less or equal to `BlockSize` * `ItemsPerThread`
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.
@@ -997,20 +997,20 @@ public:
     /// predecessor.
     ///
     /// This combines subtract_left_partial() with a tile predecessor.
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_predecessor - the item before the tile, will be used as the input 
+    /// \param [in] tile_predecessor the item before the tile, will be used as the input 
     /// of the first application of `op`
-    /// \param [in] valid_items - number of items in the block which are considered "valid" and will
+    /// \param [in] valid_items number of items in the block which are considered "valid" and will
     /// be used. Must be less or equal to `BlockSize` * `ItemsPerThread`
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.
@@ -1040,16 +1040,16 @@ public:
     /// output[i] = op(input[i], input[i+1]);
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.
@@ -1079,18 +1079,18 @@ public:
     ///      op(input[block_size * ItemsPerThread - 1], tile_successor)
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] tile_successor - the item after the tile, will be used as the input 
+    /// \param [in] tile_successor the item after the tile, will be used as the input 
     /// of the last application of `op`
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.
@@ -1119,18 +1119,18 @@ public:
     /// output[i] = input[i]
     /// \endcode
     ///
-    /// \tparam Output - [inferred] the type of output, must be assignable from the result of `op`
-    /// \tparam ItemsPerThread - [inferred] the number of items processed by each thread
-    /// \tparam BinaryFunction - [inferred] the type of the function to apply
-    /// \param [in] input - array that data is loaded from partitioned across the threads in the block
-    /// \param [out] output - array where the result of function application will be written to
-    /// \param [in] op - binary function applied to the items.
+    /// \tparam Output [inferred] the type of output, must be assignable from the result of `op`
+    /// \tparam ItemsPerThread [inferred] the number of items processed by each thread
+    /// \tparam BinaryFunction [inferred] the type of the function to apply
+    /// \param [in] input array that data is loaded from partitioned across the threads in the block
+    /// \param [out] output array where the result of function application will be written to
+    /// \param [in] op binary function applied to the items.
     /// The signature of the function should be equivalent to the following:
     /// `bool f(const T &a, const T &b)` The signature does not need to have
     /// `const &` but the function object must not modify the objects passed to it.
-    /// \param [in] valid_items - number of items in the block which are considered "valid" and will
+    /// \param [in] valid_items number of items in the block which are considered "valid" and will
     /// be used. Must be less or equal to `BlockSize` * `ItemsPerThread`
-    /// \param storage - reference to a temporary storage object of type #storage_type
+    /// \param storage reference to a temporary storage object of type #storage_type
     /// \par Storage reuse
     /// Synchronization barrier should be placed before `storage` is reused
     /// or repurposed: `__syncthreads()` or \link syncthreads() rocprim::syncthreads() \endlink.

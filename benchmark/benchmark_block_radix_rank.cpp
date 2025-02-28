@@ -34,34 +34,35 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_radix_rank.hpp>
 #include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/types.hpp>
 
 #include <chrono>
-#include <limits>
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
-namespace rp = rocprim;
-
 template<typename T,
-         unsigned int                   BlockSize,
-         unsigned int                   ItemsPerThread,
-         unsigned int                   RadixBits,
-         bool                           Descending,
-         rp::block_radix_rank_algorithm Algorithm,
-         unsigned int                   Trials>
-__global__ __launch_bounds__(BlockSize) void rank_kernel(const T*      keys_input,
-                                                         unsigned int* ranks_output)
+         unsigned int                        BlockSize,
+         unsigned int                        ItemsPerThread,
+         unsigned int                        RadixBits,
+         bool                                Descending,
+         rocprim::block_radix_rank_algorithm Algorithm,
+         unsigned int                        Trials>
+__global__ __launch_bounds__(BlockSize)
+void rank_kernel(const T* keys_input, unsigned int* ranks_output)
 {
-    using rank_type = rp::block_radix_rank<BlockSize, RadixBits, Algorithm>;
+    using rank_type = rocprim::block_radix_rank<BlockSize, RadixBits, Algorithm>;
 
     const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
-    rp::block_load_direct_striped<BlockSize>(lid, keys_input + block_offset, keys);
+    rocprim::block_load_direct_striped<BlockSize>(lid, keys_input + block_offset, keys);
 
     unsigned int ranks[ItemsPerThread];
 
@@ -87,20 +88,23 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T*      keys_inpu
         }
     }
 
-    rp::block_store_direct_striped<BlockSize>(lid, ranks_output + block_offset, ranks);
+    rocprim::block_store_direct_striped<BlockSize>(lid, ranks_output + block_offset, ranks);
 }
 
 template<typename T,
-         unsigned int                   BlockSize,
-         unsigned int                   ItemsPerThread,
-         rp::block_radix_rank_algorithm Algorithm,
-         unsigned int                   RadixBits  = 4,
-         bool                           Descending = false,
-         unsigned int                   Trials     = 10>
-void run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& seed, hipStream_t stream)
+         unsigned int                        BlockSize,
+         unsigned int                        ItemsPerThread,
+         rocprim::block_radix_rank_algorithm Algorithm,
+         unsigned int                        RadixBits  = 4,
+         bool                                Descending = false,
+         unsigned int                        Trials     = 10>
+void run_benchmark(benchmark::State&   state,
+                   size_t              bytes,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
     // Calculate the number of elements N
-    size_t N = bytes / sizeof(T);
+    size_t                 N               = bytes / sizeof(T);
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     grid_size       = ((N + items_per_block - 1) / items_per_block);
     const unsigned int     size            = items_per_block * grid_size;
@@ -155,15 +159,15 @@ void run_benchmark(benchmark::State& state, size_t bytes, const managed_seed& se
                                   ",ipt:" #IPT ",method:" #KIND "}}")                       \
             .c_str(),                                                                       \
         run_benchmark<T, BS, IPT, KIND>,                                                    \
-        bytes,                                                                               \
+        bytes,                                                                              \
         seed,                                                                               \
         stream)
 
 // clang-format off
 #define CREATE_BENCHMARK_KINDS(type, block, ipt)                                       \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::basic),         \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::basic_memoize), \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::match)
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic),         \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic_memoize), \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::match)
 
 #define BENCHMARK_TYPE(type, block)          \
     CREATE_BENCHMARK_KINDS(type, block, 1),  \
@@ -179,19 +183,25 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_TYPE(int, 128),
-        BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(int, 512),
+    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 128),
+                                                       BENCHMARK_TYPE(int, 256),
+                                                       BENCHMARK_TYPE(int, 512),
 
-        BENCHMARK_TYPE(uint8_t, 128),
-        BENCHMARK_TYPE(uint8_t, 256),
-        BENCHMARK_TYPE(uint8_t, 512),
+                                                       BENCHMARK_TYPE(uint8_t, 128),
+                                                       BENCHMARK_TYPE(uint8_t, 256),
+                                                       BENCHMARK_TYPE(uint8_t, 512),
 
-        BENCHMARK_TYPE(long long, 128),
-        BENCHMARK_TYPE(long long, 256),
-        BENCHMARK_TYPE(long long, 512),
-    };
+                                                       BENCHMARK_TYPE(long long, 128),
+                                                       BENCHMARK_TYPE(long long, 256),
+                                                       BENCHMARK_TYPE(long long, 512),
+
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 128),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 256),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 512),
+
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 128),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 256),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 512)};
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
@@ -210,7 +220,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t bytes   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");

@@ -10,7 +10,7 @@ merge_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { 
 
 {% macro general_case() -%}
 template<unsigned int arch, class key_type, class value_type, class enable = void>
-struct default_merge_config : default_merge_base<key_type, value_type>::type
+struct default_merge_config : default_merge_config_base<key_type, value_type>::type
 {};
 {%- endmacro %}
 

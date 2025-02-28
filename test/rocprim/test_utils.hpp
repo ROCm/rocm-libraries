@@ -78,43 +78,43 @@ static constexpr float precision<custom_test_array_type<T, N>> = precision<T>;
 template<class T>
 struct is_plus_operator : std::false_type
 {
-    typedef uint8_t value_type;
+    using value_type = uint8_t;
 };
 
 template<class T>
 struct is_plus_operator<rocprim::plus<T>> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 template<class T>
 struct is_add_operator : std::false_type
 {
-    typedef uint8_t value_type;
+    using value_type = uint8_t;
 };
 
 template<class T>
 struct is_add_operator<rocprim::plus<T>> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 template<class T>
 struct is_add_operator<rocprim::minus<T>> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 template<class T>
 struct is_multiply_operator : std::false_type
 {
-    typedef uint8_t value_type;
+    using value_type = uint8_t;
 };
 
 template<class T>
 struct is_multiply_operator<rocprim::multiplies<T>> : std::true_type
 {
-    typedef T value_type;
+    using value_type = T;
 };
 
 /* Plus to operator selector for host-side
@@ -126,22 +126,22 @@ struct is_multiply_operator<rocprim::multiplies<T>> : std::true_type
 template<typename T>
 struct select_plus_operator_host
 {
-    typedef ::rocprim::plus<T> type;
-    typedef T                  acc_type;
+    using type     = ::rocprim::plus<T>;
+    using acc_type = T;
 };
 
 template<>
 struct select_plus_operator_host<::rocprim::half>
 {
-    typedef ::rocprim::plus<double> type;
-    typedef double                  acc_type;
+    using type     = ::rocprim::plus<double>;
+    using acc_type = double;
 };
 
 template<>
 struct select_plus_operator_host<::rocprim::bfloat16>
 {
-    typedef ::rocprim::plus<double> type;
-    typedef double                  acc_type;
+    using type     = ::rocprim::plus<double>;
+    using acc_type = double;
 };
 
 template<class InputIt, class T,

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,11 +43,11 @@ BEGIN_ROCPRIM_NAMESPACE
 /// type, which includes value from the underlying range and its index in that range.
 /// * \p std::iterator_traits<InputIterator>::value_type should be convertible to \p InputValueType.
 ///
-/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// \tparam InputIterator type of the underlying random-access input iterator. Must be
 /// a random-access iterator.
-/// \tparam Difference - type used for identify distance between iterators and as the index type
+/// \tparam Difference type used for identify distance between iterators and as the index type
 /// in the output pair type (see \p value_type).
-/// \tparam InputValueType - value type used in the output pair type (see \p value_type).
+/// \tparam InputValueType value type used in the output pair type (see \p value_type).
 template<
     class InputIterator,
     class Difference = std::ptrdiff_t,
@@ -239,11 +239,11 @@ operator+(typename arg_index_iterator<InputIterator, Difference, InputValueType>
 /// the underlying iterator and \p offset as the position (index) of \p iterator
 /// in the input range.
 ///
-/// \tparam InputIterator - type of the underlying random-access input iterator. Must be
+/// \tparam InputIterator type of the underlying random-access input iterator. Must be
 /// a random-access iterator.
-/// \tparam Difference - type used for identify distance between iterators and as the index type
+/// \tparam Difference type used for identify distance between iterators and as the index type
 /// in the output pair type (see \p value_type in arg_index_iterator).
-/// \tparam InputValueType - value type used in the output pair type (see \p value_type
+/// \tparam InputValueType value type used in the output pair type (see \p value_type
 /// in arg_index_iterator).
 ///
 /// \param iterator input iterator pointing to the input range.

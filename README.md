@@ -1,7 +1,7 @@
 # rocPRIM
 
 > [!NOTE]
-> The published documentation is available at [rocPRIM](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+> The published rocPRIM documentation is available [here](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 rocPRIM is a header-only library that provides HIP parallel primitives. You can use this library to
 develop performant GPU-accelerated code on AMD ROCm platforms.
@@ -27,55 +27,6 @@ Optional:
 * [Google Benchmark](https://github.com/google/benchmark)
   * Required only for benchmarks. Building benchmarks is off by default.
   * This is automatically downloaded and built by the CMake script.
-
-## Documentation
-
-Documentation for rocPRIM is available at
-[https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
-
-### Build documentation locally
-
-```shell
-# Change directory to rocPRIM docs
-cd rocPRIM; cd docs
-
-# Install documentation dependencies
-python3 -m pip install -r sphinx/requirements.txt
-
-# Build the documentation
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-
-# To serve the HTML docs locally
-cd _build/html
-python3 -m http.server
-```
-
-### Build documentation via CMake
-
-Install [rocm-cmake](https://github.com/ROCm/rocm-cmake/)
-
-```shell
-# Change directory to rocPRIM
-cd rocPRIM
-
-# Install documentation dependencies
-python3 -m pip install -r docs/sphinx/requirements.txt
-
-# Set C++ compiler
-# This example uses hipcc and assumes it is at the path /usr/bin
-export CXX=hipcc
-export PATH=/usr/bin:$PATH
-
-# Configure the project
-cmake -S . -B ./build -D BUILD_DOCS=ON
-
-# Build the documentation
-cmake --build ./build --target doc
-
-# To serve the HTML docs locally
-cd ./build/docs/html
-python3 -m http.server
-```
 
 ## Build and install
 
@@ -157,9 +108,15 @@ find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
 # to be linked manually by user
 target_link_libraries(<your_target> roc::rocprim)
 
-# Includes rocPRIM headers and required HIP dependencies
-target_link_libraries(<your_target> roc::rocprim_hip)
+# Include rocPRIM headers and required HIP dependencies
+# - If using HIP language support (USE_HIPCXX=ON):
+target_link_libraries(<your_target> hip::host)
+
+# - Otherwise:
+target_link_libraries(<your_target> hip::device)
 ```
+
+For more information on `hip::host` and `hip::device`, please see the [ROCm documentation](https://rocm.docs.amd.com/en/latest/conceptual/cmake-packages.html#consuming-the-hip-api-in-c-code).
 
 ## Running unit tests
 
@@ -308,9 +265,8 @@ different types and operations, by passing compile-time configuration structures
 parameter. The main "knobs" are usually the size of the block and the number of items processed by a
 single thread.
 
-rocPRIM has built-in default configurations for each of its primitives. In order to use the included
-configurations, you need to define the macro `ROCPRIM_TARGET_ARCH` as `803` if you want the
-algorithms optimized for gfx803 GCN version, or to `900` for gfx900.
+rocPRIM has built-in default configurations for each of its primitives, these will be used automatically
+based on the input types and the target architecture from the stream used.
 
 ## hipCUB
 
@@ -320,6 +276,85 @@ algorithms optimized for gfx803 GCN version, or to `900` for gfx900.
 [HIP](https://github.com/ROCm/HIP) layer and run them on AMD hardware. In the
 [ROCm](https://rocm.docs.amd.com/en/latest/) environment, hipCUB uses the rocPRIM library as a
 backend; on CUDA platforms, it uses CUB as a backend.
+
+## Building the documentation locally
+
+### Requirements
+
+#### Doxygen
+
+The build system uses Doxygen [version 1.9.4](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_4). You can try using a newer version, but that might cause issues.
+
+After you have downloaded Doxygen version 1.9.4:
+
+```shell
+# Add doxygen to your PATH
+echo 'export PATH=<doxygen 1.9.4 path>/bin:$PATH' >> ~/.bashrc
+
+# Apply the updated .bashrc
+source ~/.bashrc
+
+# Confirm that you are using version 1.9.4
+doxygen --version
+```
+
+#### Python
+
+The build system uses Python version 3.10. You can try using a newer version, but that might cause issues.
+
+You can install Python 3.10 alongside your other Python versions using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#installation):
+
+```shell
+# Install Python 3.10
+pyenv install 3.10
+
+# Create a Python 3.10 virtual environment
+pyenv virtualenv 3.10 venv_rocprim
+
+# Activate the virtual environment
+pyenv activate venv_rocprim
+```
+
+### Building
+
+After cloning this repository, and `cd`ing into it:
+
+```shell
+# Install Python dependencies
+python3 -m pip install -r docs/sphinx/requirements.txt
+
+# Build the documentation
+python3 -m sphinx -T -E -b html -d docs/_build/doctrees -D language=en docs docs/_build/html
+```
+
+You can then open `docs/_build/html/index.html` in your browser to view the documentation.
+
+### Build documentation via CMake
+
+Install [rocm-cmake](https://github.com/ROCm/rocm-cmake/)
+
+```shell
+# Change directory to rocPRIM
+cd rocPRIM
+
+# Install documentation dependencies
+python3 -m pip install -r docs/sphinx/requirements.txt
+
+# Set C++ compiler
+# This example uses hipcc and assumes it is at the path /usr/bin
+export CXX=hipcc
+export PATH=/usr/bin:$PATH
+
+# Configure the project
+cmake -S . -B ./build -D BUILD_DOCS=ON
+
+# Build the documentation
+cmake --build ./build --target doc
+
+# To serve the HTML docs locally
+cd ./build/docs/html
+python3 -m http.server
+```
 
 ## Support
 
