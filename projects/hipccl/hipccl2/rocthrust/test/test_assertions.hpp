@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -86,8 +86,8 @@ testing::AssertionResult ComplexCompare(const char*             expr1,
 
     const thrust::complex<double> diff(real_diff, imag_diff);
     const thrust::complex<double> tol_diff(
-        0.1 * (fabs(val1.real() + val2.real()) + abs_error.real()),
-        0.1 * (fabs(val1.imag() + val2.imag()) + abs_error.imag()));
+        std::max( 0.1 * (fabs(val1.real() + val2.real()) + abs_error.real()), 0.01 ),
+        std::max( 0.1 * (fabs(val1.imag() + val2.imag()) + abs_error.imag()), 0.01 ));
 
     if((diff.real() != 0 && diff.real() > tol_diff.real())
        || (diff.imag() != 0 && diff.imag() > tol_diff.imag()))

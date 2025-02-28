@@ -30,7 +30,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/distance.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -39,6 +38,8 @@
 #include <thrust/system/cuda/detail/dispatch.h>
 
 #include <cub/device/device_scan.cuh>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
@@ -64,13 +65,13 @@ OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
                                        OutputIt,
                                        ScanOp,
                                        cub::NullType,
-                                       thrust::detail::int32_t,
+                                       std::int32_t,
                                        AccumT>;
   using Dispatch64 = cub::DispatchScan<InputIt,
                                        OutputIt,
                                        ScanOp,
                                        cub::NullType,
-                                       thrust::detail::int64_t,
+                                       std::int64_t,
                                        AccumT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -99,7 +100,7 @@ OutputIt inclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
     THRUST_INDEX_TYPE_DISPATCH2(status,
@@ -143,13 +144,13 @@ OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
                                        OutputIt,
                                        ScanOp,
                                        InputValueT,
-                                       thrust::detail::int32_t,
+                                       std::int32_t,
                                        InitValueT>;
   using Dispatch64 = cub::DispatchScan<InputIt,
                                        OutputIt,
                                        ScanOp,
                                        InputValueT,
-                                       thrust::detail::int64_t,
+                                       std::int64_t,
                                        InitValueT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -178,7 +179,7 @@ OutputIt exclusive_scan_n_impl(thrust::cuda_cub::execution_policy<Derived> &poli
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
     THRUST_INDEX_TYPE_DISPATCH2(status,

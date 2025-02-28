@@ -114,7 +114,7 @@ private:
 
 struct execute_on_stream : execute_on_stream_base<execute_on_stream>
 {
-  typedef execute_on_stream_base<execute_on_stream> base_t;
+  using base_t = execute_on_stream_base<execute_on_stream>;
 
   _CCCL_HOST_DEVICE
   execute_on_stream() : base_t(){};
@@ -125,7 +125,7 @@ struct execute_on_stream : execute_on_stream_base<execute_on_stream>
 
 struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
 {
-  typedef execute_on_stream_nosync_base<execute_on_stream_nosync> base_t;
+  using base_t = execute_on_stream_nosync_base<execute_on_stream_nosync>;
 
   _CCCL_HOST_DEVICE
   execute_on_stream_nosync() : base_t(){};
@@ -141,12 +141,12 @@ struct par_t : execution_policy<par_t>,
 , thrust::detail::dependencies_aware_execution_policy<
     execute_on_stream_base>
 {
-  typedef execution_policy<par_t> base_t;
+  using base_t = execution_policy<par_t>;
 
   _CCCL_HOST_DEVICE
   constexpr par_t() : base_t() {}
 
-  typedef execute_on_stream stream_attachment_type;
+  using stream_attachment_type = execute_on_stream;
 
   THRUST_RUNTIME_FUNCTION
   stream_attachment_type
@@ -161,12 +161,12 @@ struct par_nosync_t : execution_policy<par_nosync_t>,
     execute_on_stream_nosync_base>, thrust::detail::dependencies_aware_execution_policy<
     execute_on_stream_nosync_base>
 {
-  typedef execution_policy<par_nosync_t> base_t;
+  using base_t = execution_policy<par_nosync_t>;
 
   _CCCL_HOST_DEVICE
   constexpr par_nosync_t() : base_t() {}
 
-  typedef execute_on_stream_nosync stream_attachment_type;
+  using stream_attachment_type = execute_on_stream_nosync;
 
   THRUST_RUNTIME_FUNCTION
   stream_attachment_type

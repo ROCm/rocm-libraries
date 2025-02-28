@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2024 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -22,6 +22,12 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if (CMAKE_CXX_STANDARD EQUAL 14)
+  message(WARNING "C++14 will be deprecated in the next major release")
+elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
+  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+endif()
+
 # Set HIP flags
 set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
@@ -39,6 +45,7 @@ option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
 option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
@@ -130,16 +137,9 @@ if (NOT THRUST_HOST_SYSTEM IN_LIST THRUST_HOST_SYSTEM_OPTIONS)
   )
 endif ()
 
-if(DISABLE_WERROR)
-  add_compile_options(-Wall -Wextra)
-else()
-  add_compile_options(-Wall -Wextra -Werror)
-endif()
-
-if (CMAKE_CXX_STANDARD EQUAL 14)
-  message(WARNING "C++14 will be deprecated in the next major release")
-elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
-  message(FATAL_ERROR "Only C++14 and C++17 are supported")
+set(COMPILE_OPTIONS -Wall -Wextra)
+if(NOT DISABLE_WERROR)
+  list(APPEND COMPILE_OPTIONS -Werror)
 endif()
 
 if (WIN32)
@@ -149,13 +149,13 @@ endif()
 
 # Address Sanitizer
 if(BUILD_ADDRESS_SANITIZER)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+  list(APPEND COMPILE_OPTIONS -fsanitize=address -shared-libasan)
   add_link_options(-fuse-ld=lld)
 endif()
 
 # Setup VERSION
 rocm_setup_version(VERSION "3.3.0")
+math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${rocthrust_VERSION_MINOR} * 100 + ${rocthrust_VERSION_PATCH}")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
@@ -191,7 +191,6 @@ endif()
 # Benchmarks
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
-  add_subdirectory(internal/benchmark)
 endif()
 
 #Create header wrapper for backward compatibility

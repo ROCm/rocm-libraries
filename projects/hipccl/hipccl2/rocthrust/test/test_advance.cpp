@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ TYPED_TEST(AdvanceVectorTests, TestAdvance)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
-    typedef typename Vector::iterator Iterator;
+    using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -54,7 +54,7 @@ TYPED_TEST(AdvanceVectorTests, TestNext)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
-    typedef typename Vector::iterator Iterator;
+    using Iterator = typename Vector::iterator;
 
     Vector v(10);
     thrust::sequence(v.begin(), v.end());
@@ -85,7 +85,7 @@ TYPED_TEST(AdvanceVectorTests, TestPrev)
     using Vector = typename TestFixture::input_type;
     using T      = typename Vector::value_type;
 
-    typedef typename Vector::iterator Iterator;
+    using Iterator = typename Vector::iterator;
 
     Vector v(10);
     thrust::sequence(v.begin(), v.end());

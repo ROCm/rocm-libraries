@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +56,7 @@ namespace temp_storage
 
     /// \brief This structure describes a single required partition of temporary global memory, as well
     /// as where to store the allocated pointer.
-    /// \tparam T - The base type to allocate temporary memory for.
+    /// \tparam T The base type to allocate temporary memory for.
     template <typename T>
     struct simple_partition
     {
@@ -73,7 +73,7 @@ namespace temp_storage
 
         /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
         /// alignment and size as described by the layout returned by `get_layout()`.
-        /// \param storage - Base pointer to the storage to be used for this partition.
+        /// \param storage Base pointer to the storage to be used for this partition.
         void set_storage(void* const storage)
         {
             *this->dest = this->storage_layout.size == 0 ? nullptr : static_cast<T*>(storage);
@@ -81,9 +81,9 @@ namespace temp_storage
     };
 
     /// \brief Construct a simple `simple_partition` with a particular layout.
-    /// \tparam T              - The base type to allocate temporary memory for
-    /// \param  dest           - Pointer to where to store the final allocated pointer
-    /// \param  storage_layout - The required layout that the memory allocated to `*dest` should have.
+    /// \tparam T              The base type to allocate temporary memory for
+    /// \param  dest           Pointer to where to store the final allocated pointer
+    /// \param  storage_layout The required layout that the memory allocated to `*dest` should have.
     template <typename T>
     simple_partition<T> make_partition(T** dest, layout storage_layout)
     {
@@ -91,10 +91,10 @@ namespace temp_storage
     }
 
     /// \brief Construct a simple `simple_partition` from a size and an alignment that forms the layout.
-    /// \tparam T         - The base type to allocate temporary memory for
-    /// \param  dest      - Pointer to where to store the final allocated pointer
-    /// \param  size      - The required size that the memory allocated to `*dest` should have.
-    /// \param  alignment - The required alignment that the memory allocated to `*dest` should have.
+    /// \tparam T         The base type to allocate temporary memory for
+    /// \param  dest      Pointer to where to store the final allocated pointer
+    /// \param  size      The required size that the memory allocated to `*dest` should have.
+    /// \param  alignment The required alignment that the memory allocated to `*dest` should have.
     template <typename T>
     simple_partition<T> make_partition(T** dest, size_t size, size_t alignment = default_alignment)
     {
@@ -103,9 +103,9 @@ namespace temp_storage
 
     /// \brief Construct a `simple_partition` for a type, given a total number of _elements_ that the allocated
     /// temporary memory should consist of. The natural alignment for `T` is used.
-    /// \tparam T        - The base type to allocate temporary memory for
-    /// \param  dest     - Pointer to where to store the final allocated pointer
-    /// \param  elements - The number of elements of `T` that the memory allocated to `dest` should consist of.
+    /// \tparam T        The base type to allocate temporary memory for
+    /// \param  dest     Pointer to where to store the final allocated pointer
+    /// \param  elements The number of elements of `T` that the memory allocated to `dest` should consist of.
     template <typename T>
     simple_partition<T> ptr_aligned_array(T** dest, size_t elements)
     {
@@ -115,7 +115,7 @@ namespace temp_storage
     /// \brief A partition that represents a linear sequence of sub-partitions. This structure can be used to
     /// allocate multiple sub-partitions, each of which are sequentially allocated in order, and packed
     /// such that the only padding between memory of different sub-partitions is due to required alignment.
-    /// \tparam Ts - The sub-partitions to allocate temporary memory for. Each should have the following member functions:
+    /// \tparam Ts The sub-partitions to allocate temporary memory for. Each should have the following member functions:
     ///   `layout get_layout()` - Compute the required storage layout for the partition.
     ///   `void set_storage(void* const storage)` - Update the internal destination pointer or the destination pointers
     ///     of sub-partitions with the given pointer. `storage` has at least the required size and alignment as described
@@ -157,7 +157,7 @@ namespace temp_storage
 
         /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
         /// alignment and size as described by the layout returned by `get_layout()`.
-        /// \param storage - Base pointer to the storage to be used for this partition.
+        /// \param storage Base pointer to the storage to be used for this partition.
         void set_storage(void* const storage)
         {
             size_t offset = 0;
@@ -179,7 +179,7 @@ namespace temp_storage
     };
 
     /// \brief Construct a `linear_partition` from sub-partitions.
-    /// \tparam Ts - The sub-partitions to allocate temporary memory for.
+    /// \tparam Ts The sub-partitions to allocate temporary memory for.
     /// \see linear_partition
     template <typename... Ts>
     linear_partition<Ts...> make_linear_partition(Ts... ts)
@@ -189,7 +189,7 @@ namespace temp_storage
 
     /// \brief A partition that represents a union of sub-partitions of temporary memories which are not used
     /// at the same time, and for which the allocated temporary memory can be shared.
-    /// \tparam Ts - The sub-partitions to allocate temporary memory for. Each should have the following member functions:
+    /// \tparam Ts The sub-partitions to allocate temporary memory for. Each should have the following member functions:
     ///   `layout get_layout()` - Compute the required storage layout for the partition.
     ///   `void set_storage(void* const storage)` - Update the internal destination pointer or the destination pointers
     ///     of sub-partitions with the given pointer. `storage` has at least the required size and alignment as described
@@ -225,7 +225,7 @@ namespace temp_storage
 
         /// \brief Assigns the final storage for this partition. `storage` is assumed to have the required
         /// alignment and size as described by the layout returned by `get_layout()`.
-        /// \param storage - Base pointer to the storage to be used for this partition.
+        /// \param storage Base pointer to the storage to be used for this partition.
         void set_storage(void* const storage)
         {
             thrust::system::hip::detail::apply_to_each_in_tuple(
@@ -235,7 +235,7 @@ namespace temp_storage
     };
 
     /// \brief Construct a `union_partition` from sub-partitions.
-    /// \tparam Ts - The sub-partitions to allocate temporary memory for.
+    /// \tparam Ts The sub-partitions to allocate temporary memory for.
     /// \see union_partition
     template <typename... Ts>
     union_partition<Ts...> make_union_partition(Ts... ts)
@@ -260,15 +260,15 @@ namespace temp_storage
     /// memory, its alignment is not factored into the total required memory, and its destination pointer will be set to
     /// `nullptr`.
     ///
-    /// \tparam TempStoragePartition - The root partition to allocate temporary memory for. It should have the following
+    /// \tparam TempStoragePartition The root partition to allocate temporary memory for. It should have the following
     ///   member functions:
     ///   `layout get_layout()` - Compute the required storage layout for the partition.
     ///   `void set_storage(void* const storage)` - Update the internal destination pointer or the destination pointers of
     ///     sub-partitions with the given pointer. `storage` has at least the required size and alignment as described by
     ///     the result of `get_layout()`.
-    /// \param temporary_storage     - The base pointer to the allocated temporary memory. May be `nullptr`.
-    /// \param storage_size [in,out] - The size of `temporary_storage`.
-    /// \param partition    [in,out] - The root partition to allocate temporary memory to.
+    /// \param temporary_storage     The base pointer to the allocated temporary memory. May be `nullptr`.
+    /// \param storage_size [in,out] The size of `temporary_storage`.
+    /// \param partition    [in,out] The root partition to allocate temporary memory to.
     template <typename TempStoragePartition>
     hipError_t
     partition(void* const temporary_storage, size_t& storage_size, TempStoragePartition partition)

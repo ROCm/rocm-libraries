@@ -96,13 +96,13 @@ template<typename System = use_default>
     /*! \cond
      */
     friend class thrust::iterator_core_access;
-    typedef typename detail::discard_iterator_base<System>::type          super_t;
-    typedef typename detail::discard_iterator_base<System>::incrementable incrementable;
-    typedef typename detail::discard_iterator_base<System>::base_iterator base_iterator;
+    using super_t       = typename detail::discard_iterator_base<System>::type;
+    using incrementable = typename detail::discard_iterator_base<System>::incrementable;
+    using base_iterator = typename detail::discard_iterator_base<System>::base_iterator;
 
   public:
-    typedef typename super_t::reference  reference;
-    typedef typename super_t::value_type value_type;
+    using reference  = typename super_t::reference;
+    using value_type = typename super_t::value_type;
 
     /*! \endcond
      */

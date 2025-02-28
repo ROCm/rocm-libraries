@@ -50,7 +50,7 @@ struct execution_policy;
 template <>
 struct execution_policy<tag> : thrust::execution_policy<tag>
 {
-  typedef tag tag_type;
+  using tag_type = tag;
 };
 
 struct tag : execution_policy<tag>
@@ -61,7 +61,7 @@ struct tag : execution_policy<tag>
 template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
-  typedef tag tag_type; 
+  using tag_type = tag;
   operator tag() const { return tag(); }
 };
 

@@ -50,7 +50,7 @@ class memory_resource
 public:
     /*! Alias for the template parameter.
      */
-    typedef Pointer pointer;
+    using pointer = Pointer;
 
     /*! Virtual destructor, defaulted when possible.
      */
@@ -137,7 +137,7 @@ class memory_resource<void *>
 #endif
 {
 public:
-    typedef void * pointer;
+    using pointer = void *;
 
     virtual ~memory_resource() = default;
 

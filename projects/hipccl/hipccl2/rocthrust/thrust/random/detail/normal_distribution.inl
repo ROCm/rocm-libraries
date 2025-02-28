@@ -20,8 +20,9 @@
 
 #include <thrust/random/normal_distribution.h>
 #include <thrust/random/uniform_real_distribution.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/integer_traits.h>
+
+#include <cstdint>
 
 // for floating point infinity
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
@@ -126,7 +127,7 @@ template<typename RealType>
   // complain that it is a __host__ function
   union
   {
-    thrust::detail::uint32_t inf_as_int;
+    std::uint32_t inf_as_int;
     float result;
   } hack;
 
@@ -171,8 +172,8 @@ template<typename RealType>
       normal_distribution<RealType>
         ::stream_out(std::basic_ostream<CharT,Traits> &os) const
 {
-  typedef std::basic_ostream<CharT,Traits> ostream_type;
-  typedef typename ostream_type::ios_base  ios_base;
+  using ostream_type = std::basic_ostream<CharT, Traits>;
+  using ios_base     = typename ostream_type::ios_base;
 
   // save old flags and fill character
   const typename ios_base::fmtflags flags = os.flags();
@@ -197,8 +198,8 @@ template<typename RealType>
       normal_distribution<RealType>
         ::stream_in(std::basic_istream<CharT,Traits> &is)
 {
-  typedef std::basic_istream<CharT,Traits> istream_type;
-  typedef typename istream_type::ios_base  ios_base;
+  using istream_type = std::basic_istream<CharT, Traits>;
+  using ios_base     = typename istream_type::ios_base;
 
   // save old flags
   const typename ios_base::fmtflags flags = is.flags();

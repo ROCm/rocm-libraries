@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@
 
 void TestCopyFromConstIterator(void)
 {
-    typedef int T;
+    using T = int;
 
     std::vector<T> v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -66,7 +66,7 @@ DECLARE_UNITTEST(TestCopyFromConstIterator);
 
 void TestCopyToDiscardIterator(void)
 {
-    typedef int T;
+    using T = int;
 
     thrust::host_vector<T> h_input(5,1);
     thrust::device_vector<T> d_input = h_input;
@@ -88,7 +88,7 @@ DECLARE_UNITTEST(TestCopyToDiscardIterator);
 
 void TestCopyToDiscardIteratorZipped(void)
 {
-    typedef int T;
+    using T = int;
 
     thrust::host_vector<T> h_input(5,1);
     thrust::device_vector<T> d_input = h_input;
@@ -97,11 +97,11 @@ void TestCopyToDiscardIteratorZipped(void)
     thrust::device_vector<T>   d_output(5);
     thrust::discard_iterator<> reference(5);
 
-    typedef thrust::tuple<thrust::discard_iterator<>,thrust::host_vector<T>::iterator>   Tuple1;
-    typedef thrust::tuple<thrust::discard_iterator<>,thrust::device_vector<T>::iterator> Tuple2;
+    using Tuple1 = thrust::tuple<thrust::discard_iterator<>, thrust::host_vector<T>::iterator>;
+    using Tuple2 = thrust::tuple<thrust::discard_iterator<>, thrust::device_vector<T>::iterator>;
 
-    typedef thrust::zip_iterator<Tuple1> ZipIterator1;
-    typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+    using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+    using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
     // copy from host_vector
     ZipIterator1 h_result =
@@ -125,7 +125,7 @@ DECLARE_UNITTEST(TestCopyToDiscardIteratorZipped);
 template <class Vector>
 void TestCopyMatchingTypes(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -207,7 +207,7 @@ DECLARE_UNITTEST(TestCopyVectorBool);
 template <class Vector>
 void TestCopyListTo(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     // copy from list to Vector
     std::list<T> l;
@@ -269,7 +269,7 @@ struct mod_3
 template <class Vector>
 void TestCopyIfSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -395,7 +395,7 @@ DECLARE_INTEGRAL_VARIABLE_UNITTEST(TestCopyIfSequence);
 template <class Vector>
 void TestCopyIfStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -540,8 +540,8 @@ DECLARE_UNITTEST(TestCopyIfNonTrivial);
 
 template <typename Vector>
 void TestCopyCountingIterator(void)
-{
-    typedef typename Vector::value_type T;
+{ 
+    using T = typename Vector::value_type;
 
     thrust::counting_iterator<T> iter(1);
 
@@ -559,7 +559,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyCountingIterator);
 template <typename Vector>
 void TestCopyZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(3); v1[0] = 1; v1[1] = 2; v1[2] = 3;
     Vector v2(3); v2[0] = 4; v2[1] = 5; v2[2] = 6;
@@ -578,7 +578,7 @@ DECLARE_VECTOR_UNITTEST(TestCopyZipIterator);
 template <typename Vector>
 void TestCopyConstantIteratorToZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(3,T(0));
     Vector v2(3,T(0));
@@ -763,9 +763,9 @@ struct is_non_const_reference<only_set_when_expected_it> : thrust::true_type {};
 template<>
 struct iterator_traits<only_set_when_expected_it>
 {
-    typedef long long value_type;
-    typedef only_set_when_expected_it reference;
-    typedef thrust::random_access_device_iterator_tag iterator_category;
+    using value_type        = long long;
+    using reference         = only_set_when_expected_it;
+    using iterator_category = thrust::random_access_device_iterator_tag;
 };
 THRUST_NAMESPACE_END
 

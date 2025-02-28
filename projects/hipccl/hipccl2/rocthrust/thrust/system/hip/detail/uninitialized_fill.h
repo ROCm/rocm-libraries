@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -48,7 +48,7 @@ namespace __uninitialized_fill
         Iterator items;
         T        value;
 
-        typedef typename iterator_traits<Iterator>::value_type value_type;
+        using value_type = typename iterator_traits<Iterator>::value_type;
 
         THRUST_HIP_FUNCTION
         functor(Iterator items_, T const& value_)
@@ -74,7 +74,7 @@ uninitialized_fill_n(execution_policy<Derived>& policy,
                      Size                       count,
                      T const&                   x)
 {
-    typedef __uninitialized_fill::functor<Iterator, T> functor_t;
+    using functor_t = __uninitialized_fill::functor<Iterator, T>;
 
     hip_rocprim::parallel_for(policy, functor_t(first, x), count);
     return first + static_cast<typename std::pointer_traits<Iterator>::difference_type>(count);

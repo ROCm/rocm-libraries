@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/unique.h>
 #include <thrust/execution_policy.h>
@@ -33,8 +50,8 @@ void unique_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, Binary
 template<typename ExecutionPolicy>
 void TestUniqueDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -108,8 +125,8 @@ DECLARE_UNITTEST(TestUniqueDeviceNoSync);
 template<typename ExecutionPolicy>
 void TestUniqueCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -188,8 +205,8 @@ void unique_copy_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, I
 template<typename ExecutionPolicy>
 void TestUniqueCopyDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -265,8 +282,8 @@ DECLARE_UNITTEST(TestUniqueCopyDeviceNoSync);
 template<typename ExecutionPolicy>
 void TestUniqueCopyCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -347,8 +364,8 @@ void unique_count_kernel(ExecutionPolicy exec, Iterator1 first, Iterator1 last, 
 template<typename ExecutionPolicy>
 void TestUniqueCountDevice(ExecutionPolicy exec)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 
@@ -407,8 +424,8 @@ DECLARE_UNITTEST(TestUniqueCountDeviceNoSync);
 template<typename ExecutionPolicy>
 void TestUniqueCountCudaStreams(ExecutionPolicy policy)
 {
-  typedef thrust::device_vector<int> Vector;
-  typedef Vector::value_type T;
+  using Vector = thrust::device_vector<int>;
+  using T      = Vector::value_type;
 
   Vector data(10);
   data[0] = 11; 

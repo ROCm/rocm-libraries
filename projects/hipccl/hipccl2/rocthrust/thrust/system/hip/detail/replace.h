@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -137,8 +137,8 @@ replace_copy_if(execution_policy<Derived>& policy,
                 Predicate                  predicate,
                 T const&                   new_value)
 {
-    typedef typename iterator_traits<OutputIt>::value_type       output_type;
-    typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+    using output_type    = typename iterator_traits<OutputIt>::value_type;
+    using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
     return hip_rocprim::transform(
         policy, first, last, result, new_value_if_t(predicate, new_value)
     );
@@ -159,8 +159,8 @@ replace_copy_if(execution_policy<Derived>& policy,
                 Predicate                  predicate,
                 T const&                   new_value)
 {
-    typedef typename iterator_traits<OutputIt>::value_type       output_type;
-    typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+    using output_type    = typename iterator_traits<OutputIt>::value_type;
+    using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
     return hip_rocprim::transform(
         policy, first, last, stencil, result, new_value_if_t(predicate, new_value)
     );

@@ -56,18 +56,18 @@ template<typename T, typename System>
              >
 {
   private:
-    typedef contiguous_storage<
-      T,
-      no_throw_allocator<
-        temporary_allocator<T,System>
-      >
-    > super_t;
+    using super_t = contiguous_storage<
+                      T,
+                      no_throw_allocator<
+                        temporary_allocator<T,System>
+                      >
+                    >;
 
     // to help out the constructor
-    typedef no_throw_allocator<temporary_allocator<T,System> > alloc_type;
+    using alloc_type = no_throw_allocator<temporary_allocator<T,System> >;
 
   public:
-    typedef typename super_t::size_type size_type;
+    using size_type = typename super_t::size_type;
 
     THRUST_HOST_DEVICE
     temporary_array(thrust::execution_policy<System> &system);
@@ -115,7 +115,7 @@ template<typename Iterator, typename System>
   class tagged_iterator_range
 {
   public:
-    typedef thrust::detail::tagged_iterator<Iterator,System> iterator;
+    using iterator = thrust::detail::tagged_iterator<Iterator,System>;
 
     template<typename Ignored1, typename Ignored2>
     tagged_iterator_range(const Ignored1 &, const Ignored2 &, Iterator first, Iterator last)
@@ -162,7 +162,7 @@ template<typename Iterator, typename FromSystem, typename ToSystem>
         ToSystem
       >::type
 {
-  typedef typename move_to_system_base<Iterator,FromSystem,ToSystem>::type super_t;
+  using super_t = typename move_to_system_base<Iterator,FromSystem,ToSystem>::type;
 
   public:
     move_to_system(thrust::execution_policy<FromSystem> &from_system,

@@ -45,11 +45,11 @@ THRUST_HOST_DEVICE
                            OutputIterator result,
                            UnaryFunction op)
 {
-  typedef thrust::detail::unary_transform_functor<UnaryFunction> UnaryTransformFunctor;
+  using UnaryTransformFunctor = thrust::detail::unary_transform_functor<UnaryFunction>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator,OutputIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, OutputIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -75,11 +75,11 @@ THRUST_HOST_DEVICE
                            BinaryFunction op)
 {
   // given the minimal system, determine the binary transform functor we need
-  typedef thrust::detail::binary_transform_functor<BinaryFunction> BinaryTransformFunctor;
+  using BinaryTransformFunctor = thrust::detail::binary_transform_functor<BinaryFunction>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,OutputIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, OutputIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -104,11 +104,11 @@ THRUST_HOST_DEVICE
                                UnaryFunction unary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::unary_transform_if_functor<UnaryFunction,Predicate> UnaryTransformIfFunctor;
+  using UnaryTransformIfFunctor = thrust::detail::unary_transform_if_functor<UnaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -135,11 +135,11 @@ THRUST_HOST_DEVICE
                                UnaryFunction unary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::unary_transform_if_with_stencil_functor<UnaryFunction,Predicate> UnaryTransformIfFunctor;
+  using UnaryTransformIfFunctor = thrust::detail::unary_transform_if_with_stencil_functor<UnaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,
@@ -168,11 +168,11 @@ THRUST_HOST_DEVICE
                                BinaryFunction binary_op,
                                Predicate pred)
 {
-  typedef thrust::detail::binary_transform_if_functor<BinaryFunction,Predicate> BinaryTransformIfFunctor;
+  using BinaryTransformIfFunctor = thrust::detail::binary_transform_if_functor<BinaryFunction, Predicate>;
 
   // make an iterator tuple
-  typedef thrust::tuple<InputIterator1,InputIterator2,InputIterator3,ForwardIterator> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple> ZipIterator;
+  using IteratorTuple = thrust::tuple<InputIterator1, InputIterator2, InputIterator3, ForwardIterator>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator zipped_result =
     thrust::for_each(exec,

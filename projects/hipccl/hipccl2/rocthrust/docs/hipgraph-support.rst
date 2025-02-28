@@ -1,3 +1,5 @@
+:orphan:
+
 .. meta::
     :description: rocThrust documentation and API reference
     :keywords: rocThrust, ROCm, API, reference, hipGraph

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # rocThrust header-only library
@@ -7,7 +7,7 @@
 # Configure a header file to pass the rocThrust version
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/rocthrust_version.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/include/rocthrust_version.hpp"
+  "${CMAKE_CURRENT_BINARY_DIR}/include/thrust/rocthrust_version.hpp"
   @ONLY
 )
 
@@ -55,13 +55,12 @@ endif()
 rocm_install(
   DIRECTORY
     "./"
-    "${PROJECT_BINARY_DIR}/thrust/include/"
+    "${PROJECT_BINARY_DIR}/thrust/include/thrust/"
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/thrust
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.cuh"
   PATTERN "*.hpp"
-  PATTERN "*.in"
   PATTERN "*.inl"
   ${EXCLUDE_PATTERNS}
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/find.h>
 #include <thrust/execution_policy.h>
@@ -60,10 +77,10 @@ void TestFindDevice(ExecutionPolicy exec)
 
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find(h_data.begin(), h_data.end(), int(0));
@@ -121,10 +138,10 @@ void TestFindIfDevice(ExecutionPolicy exec)
 
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<int>(0));
@@ -181,10 +198,10 @@ void TestFindIfNotDevice(ExecutionPolicy exec)
   size_t n = 100;
   thrust::host_vector<int>   h_data = unittest::random_integers<int>(n);
   thrust::device_vector<int> d_data = h_data;
-  
-  typename thrust::host_vector<int>::iterator   h_iter;
-  
-  typedef typename thrust::device_vector<int>::iterator iter_type;
+
+  typename thrust::host_vector<int>::iterator h_iter;
+
+  using iter_type = typename thrust::device_vector<int>::iterator;
   thrust::device_vector<iter_type> d_result(1);
   
   h_iter = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<int>(0));

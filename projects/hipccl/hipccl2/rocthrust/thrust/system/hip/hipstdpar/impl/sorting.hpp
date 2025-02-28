@@ -65,7 +65,7 @@ inline void __partial_sort(thrust::hip_rocprim::par_t policy,
   thrust::hip_rocprim::throw_on_error(status, "partial_sort: failed on 1st step");
 
   // Allocate temporary storage.
-  thrust::detail::temporary_array<thrust::detail::uint8_t, decltype(policy)> tmp(policy, storage_size);
+  thrust::detail::temporary_array<std::uint8_t, decltype(policy)> tmp(policy, storage_size);
   void*                                                                      ptr = static_cast<void*>(tmp.data().get());
 
   status = rocprim::partial_sort(ptr, storage_size, first, n_index, count, compare_op, stream, debug_sync);
@@ -109,7 +109,7 @@ inline void __partial_sort_copy(thrust::hip_rocprim::par_t policy,
   thrust::hip_rocprim::throw_on_error(status, "partial_sort_copy: failed on 1st step");
 
   // Allocate temporary storage.
-  thrust::detail::temporary_array<thrust::detail::uint8_t, decltype(policy)> tmp(policy, storage_size);
+  thrust::detail::temporary_array<std::uint8_t, decltype(policy)> tmp(policy, storage_size);
   void*                                                                      ptr = static_cast<void*>(tmp.data().get());
 
   status =
@@ -148,7 +148,7 @@ inline void __nth_element(thrust::hip_rocprim::par_t policy,
   status = rocprim::nth_element(nullptr, storage_size, first, n, count, compare_op, stream, debug_sync);
   thrust::hip_rocprim::throw_on_error(status, "nth_element: failed on 1st step");
   // Allocate temporary storage.
-  thrust::detail::temporary_array<thrust::detail::uint8_t, decltype(policy)> tmp(policy, storage_size);
+  thrust::detail::temporary_array<std::uint8_t, decltype(policy)> tmp(policy, storage_size);
   void*                                                                      ptr = static_cast<void*>(tmp.data().get());
 
   status = rocprim::nth_element(ptr, storage_size, first, n, count, compare_op, stream, debug_sync);
@@ -334,7 +334,7 @@ namespace std
                                 KeysIt                                 middle,
                                 KeysIt                                 last)
     {
-        typedef typename thrust::iterator_value<KeysIt>::type item_type;
+        using item_type = typename thrust::iterator_value<KeysIt>::type;
         std::partial_sort(policy, first, middle, last, thrust::less<item_type>());
     }
     // END PARTIAL_SORT
@@ -409,7 +409,7 @@ namespace std
                                   RandomIt                               d_first,
                                   RandomIt                               d_last)
     {
-        typedef typename thrust::iterator_value<ForwardIt>::type item_type;
+        using item_type = typename thrust::iterator_value<ForwardIt>::type;
         std::partial_sort_copy(policy, first, last, d_first, d_last, thrust::less<item_type>());
     }
     // END PARTIAL_SORT_COPY
@@ -585,7 +585,7 @@ namespace std
                             KeysIt                                 nth,
                             KeysIt                                 last)
     {
-        typedef typename thrust::iterator_value<KeysIt>::type item_type;
+        using item_type = typename thrust::iterator_value<KeysIt>::type;
         std::nth_element(policy, first, nth, last, thrust::less<item_type>());
     }
     // END NTH_ELEMENT

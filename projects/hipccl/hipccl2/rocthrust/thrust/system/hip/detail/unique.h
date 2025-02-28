@@ -1,6 +1,6 @@
  /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/temporary_array.h>
@@ -43,6 +42,8 @@
 #include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+
+#include <cstdint>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -83,7 +84,7 @@ namespace __unique
                          BinaryPred                 binary_pred)
     {
         using namespace thrust::system::hip_rocprim::temp_storage;
-        typedef size_t size_type;
+        using size_type = size_t;
 
         size_type num_items = static_cast<size_type>(thrust::distance(items_first, items_last));
         size_t    temp_storage_bytes   = 0;
@@ -94,11 +95,11 @@ namespace __unique
             return items_result;
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::unique(NULL,
+        hip_rocprim::throw_on_error(rocprim::unique(nullptr,
                                                     temp_storage_bytes,
                                                     items_first,
                                                     items_result,
-                                                    reinterpret_cast<size_type*>(NULL),
+                                                    static_cast<size_type*>(nullptr),
                                                     num_items,
                                                     binary_pred,
                                                     stream,
@@ -117,7 +118,7 @@ namespace __unique
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         ptr = static_cast<void*>(tmp.data().get());
 
         // Create pointers with alignment
@@ -187,7 +188,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HIP_FUNCTION
 unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-    typedef typename iterator_traits<InputIt>::value_type input_type;
+    using input_type = typename iterator_traits<InputIt>::value_type;
     return hip_rocprim::unique_copy(policy, first, last, result, equal_to<input_type>());
 }
 
@@ -224,7 +225,7 @@ InputIt THRUST_HIP_FUNCTION unique(execution_policy<Derived>& policy,
                                    InputIt                    first,
                                    InputIt                    last)
 {
-    typedef typename iterator_traits<InputIt>::value_type input_type;
+    using input_type = typename iterator_traits<InputIt>::value_type;
     return hip_rocprim::unique(policy, first, last, equal_to<input_type>());
 }
 

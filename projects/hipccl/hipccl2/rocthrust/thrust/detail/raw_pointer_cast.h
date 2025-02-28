@@ -34,7 +34,7 @@ THRUST_HOST_DEVICE
 ToPointer
 reinterpret_pointer_cast(FromPointer ptr)
 {
-  typedef typename thrust::detail::pointer_element<ToPointer>::type to_element;
+  using to_element = typename thrust::detail::pointer_element<ToPointer>::type;
   return ToPointer(reinterpret_cast<to_element*>(thrust::raw_pointer_cast(ptr)));
 }
 
@@ -43,7 +43,7 @@ THRUST_HOST_DEVICE
 ToPointer
 static_pointer_cast(FromPointer ptr)
 {
-  typedef typename thrust::detail::pointer_element<ToPointer>::type to_element;
+  using to_element = typename thrust::detail::pointer_element<ToPointer>::type;
   return ToPointer(static_cast<to_element*>(thrust::raw_pointer_cast(ptr)));
 }
 

@@ -54,7 +54,7 @@ template<typename T>
 template<typename T>
   struct pointer_raw_pointer< thrust::device_ptr<T> >
 {
-  typedef typename device_ptr<T>::raw_pointer type;
+  using type = typename device_ptr<T>::raw_pointer;
 }; // end pointer_raw_pointer
 #endif
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -122,8 +122,6 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
-    T                         min   = (T)std::numeric_limits<T>::min();
-    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : get_sizes())
     {
@@ -135,14 +133,19 @@ TYPED_TEST(PrimitiveGatherTests, Gather)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
+            thrust::host_vector<T> h_source = get_random_data<T>(
+                source_size,
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
+                seed
+            );
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + seed_value_addition
             );
 
@@ -171,8 +174,6 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
-    T                         min   = (T)std::numeric_limits<T>::min();
-    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : get_sizes())
     {
@@ -185,14 +186,19 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
+            thrust::host_vector<T> h_source = get_random_data<T>(
+                source_size,
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
+                seed
+            );
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + seed_value_addition
             );
 
@@ -333,8 +339,6 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
-    T                         min   = (T)std::numeric_limits<T>::min();
-    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : get_sizes())
     {
@@ -347,14 +351,19 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
+            thrust::host_vector<T> h_source = get_random_data<T>(
+                source_size,
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
+                seed
+            );
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + seed_value_addition
             );
 
@@ -366,8 +375,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIf)
             // gather stencil
             thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -406,8 +415,6 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     const std::vector<size_t> sizes = get_sizes();
-    T                         min   = (T)std::numeric_limits<T>::min();
-    T                         max   = (T)std::numeric_limits<T>::max();
 
     for(auto size : get_sizes())
     {
@@ -420,14 +427,19 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
         {
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
-            thrust::host_vector<T> h_source = get_random_data<T>(source_size, min, max, seed);
+            thrust::host_vector<T> h_source = get_random_data<T>(
+                source_size,
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
+                seed
+            );
             thrust::device_vector<T> d_source = h_source;
 
             // gather indices
             thrust::host_vector<unsigned int> h_map = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + seed_value_addition
             );
 
@@ -439,8 +451,8 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
             // gather stencil
             thrust::host_vector<unsigned int> h_stencil = get_random_data<unsigned int>(
                 size,
-                saturate_cast<unsigned int>(min),
-                saturate_cast<unsigned int>(max),
+                std::numeric_limits<unsigned int>::min(),
+                std::numeric_limits<unsigned int>::max(),
                 seed + seed_value_addition
             );
 

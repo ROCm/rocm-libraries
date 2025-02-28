@@ -44,7 +44,7 @@ template<typename RandomAccessIterator,
       RandomAccessIterator iter;
       IndexType n;
 
-      typedef ValueType result_type;
+      using result_type = ValueType;
 
       THRUST_HOST_DEVICE
       tail_flag_functor(RandomAccessIterator first, RandomAccessIterator last)
@@ -63,13 +63,13 @@ template<typename RandomAccessIterator,
       }
     };
 
-    typedef thrust::counting_iterator<IndexType> counting_iterator;
+    using counting_iterator = thrust::counting_iterator<IndexType>;
 
   public:
-    typedef thrust::transform_iterator<
-      tail_flag_functor,
-      counting_iterator
-    > iterator;
+    using iterator = thrust::transform_iterator<
+                      tail_flag_functor,
+                      counting_iterator
+                      >;
 
     THRUST_EXEC_CHECK_DISABLE
     THRUST_HOST_DEVICE

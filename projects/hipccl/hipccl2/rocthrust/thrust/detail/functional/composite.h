@@ -46,11 +46,11 @@ template<typename Eval0, typename Eval1>
     template<typename Env>
       struct result
     {
-      typedef typename Eval0::template result<
+      using type = typename Eval0::template result<
         thrust::tuple<
           typename Eval1::template result<Env>::type
         >
-      >::type type;
+      >::type;
     };
 
     THRUST_HOST_DEVICE
@@ -80,12 +80,12 @@ template<typename Eval0, typename Eval1, typename Eval2>
     template<typename Env>
       struct result
     {
-      typedef typename Eval0::template result<
+      using type = typename Eval0::template result<
         thrust::tuple<
           typename Eval1::template result<Env>::type,
           typename Eval2::template result<Env>::type
         >
-      >::type type;
+      >::type;
     };
 
     THRUST_HOST_DEVICE

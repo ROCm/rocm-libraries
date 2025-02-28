@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -47,9 +47,9 @@ transform_reduce(execution_policy<Derived>& policy,
                  T                          init,
                  ReduceOp                   reduce_op)
 {
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-    typedef transform_input_iterator_t<T, InputIt, TransformOp> transformed_iterator_t;
+    using transformed_iterator_t = transform_input_iterator_t<T, InputIt, TransformOp>;
 
     return reduce_n(
         policy, transformed_iterator_t(first, transform_op), num_items, init, reduce_op

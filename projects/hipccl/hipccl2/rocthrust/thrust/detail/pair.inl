@@ -146,13 +146,13 @@ template <typename T1, typename T2>
 template<typename T1, typename T2>
   struct tuple_element<0, pair<T1,T2>>
 {
-  typedef T1 type;
+  using type = T1;
 }; // end tuple_element
 
 template<typename T1, typename T2>
   struct tuple_element<1, pair<T1,T2>>
 {
-  typedef T2 type;
+  using type = T2;
 }; // end tuple_element
 
 

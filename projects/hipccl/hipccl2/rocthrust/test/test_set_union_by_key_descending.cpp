@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -99,7 +99,7 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEqu
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a_key(temp.begin(), temp.begin() + size);
             thrust::host_vector<T> h_b_key(temp.begin() + size, temp.end());
@@ -109,14 +109,14 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEqu
 
             thrust::host_vector<T> h_a_val = get_random_data<T>(
                 h_a_key.size(),
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
             thrust::host_vector<T> h_b_val = get_random_data<T>(
                 h_b_key.size(),
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -318,7 +318,7 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEqu
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> temp = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
 
         thrust::host_vector<T> h_a_key = temp;
@@ -326,10 +326,10 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingEqu
         thrust::host_vector<T> h_b_key = h_a_key;
 
         thrust::host_vector<T> h_a_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         thrust::host_vector<T> h_b_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         thrust::device_vector<T> d_a_key = h_a_key;
         thrust::device_vector<T> d_b_key = h_b_key;
@@ -391,7 +391,7 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingMul
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
         thrust::host_vector<T> temp = get_random_data<T>(
-            2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         // restrict elements to [min,13)
         for(typename thrust::host_vector<T>::iterator i = temp.begin();
@@ -410,9 +410,9 @@ TYPED_TEST(SetUnionByKeyDescendingPrimitiveTests, TestSetUnionByKeyDescendingMul
         thrust::sort(h_b_key.begin(), h_b_key.end());
 
         thrust::host_vector<T> h_a_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
         thrust::host_vector<T> h_b_val = get_random_data<T>(
-            size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+            size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
         thrust::device_vector<T> d_a_key = h_a_key;
         thrust::device_vector<T> d_b_key = h_b_key;

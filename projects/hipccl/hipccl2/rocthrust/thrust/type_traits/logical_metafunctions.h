@@ -25,7 +25,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
 #include <type_traits>
 

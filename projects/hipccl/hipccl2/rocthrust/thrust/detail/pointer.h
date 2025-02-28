@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -79,22 +79,22 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  typedef typename thrust::detail::eval_if<
+  using value_type = typename thrust::detail::eval_if<
     thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
     thrust::detail::identity_<void>,
     thrust::detail::remove_cv<Element>
-  >::type value_type;
+  >::type;
 
   // if no Derived type is given, just use pointer
-  typedef typename thrust::detail::eval_if<
+  using derived_type = typename thrust::detail::eval_if<
     thrust::detail::is_same<Derived,use_default>::value,
     thrust::detail::identity_<pointer<Element,Tag,Reference,Derived> >,
     thrust::detail::identity_<Derived>
-  >::type derived_type;
+  >::type;
 
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
-  typedef typename thrust::detail::eval_if<
+  using reference_type = typename thrust::detail::eval_if<
     thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
     thrust::detail::identity_<void>,
     thrust::detail::eval_if<
@@ -102,9 +102,9 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
       thrust::detail::identity_<reference<Element,derived_type> >,
       thrust::detail::identity_<Reference>
     >
-  >::type reference_type;
+  >::type;
 
-  typedef thrust::iterator_adaptor<
+  using type = thrust::iterator_adaptor<
     derived_type,                        // pass along the type of our Derived class to iterator_adaptor
     Element *,                           // we adapt a raw pointer
     value_type,                          // the value type
@@ -112,7 +112,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     thrust::random_access_traversal_tag, // pointers have random access traversal
     reference_type,                      // pass along our Reference type
     std::ptrdiff_t
-  > type;
+  >;
 }; // end pointer_base
 
 
@@ -132,9 +132,9 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     : public thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type
 {
   private:
-    typedef typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type         super_t;
+    using super_t = typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::type;
 
-    typedef typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::derived_type derived_type;
+    using derived_type = typename thrust::detail::pointer_base<Element,Tag,Reference,Derived>::derived_type;
 
     // friend iterator_core_access to give it access to dereference
     friend class thrust::iterator_core_access;
@@ -147,7 +147,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     using typename super_t::base_type;
 
   public:
-    typedef typename super_t::base_type raw_pointer;
+    using raw_pointer = typename super_t::base_type;
 
     // constructors
 

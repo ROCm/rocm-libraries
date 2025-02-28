@@ -14,7 +14,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 #include <thrust/detail/type_traits.h>
 
 #include <thrust/addressof.h>
@@ -238,7 +237,7 @@ template <typename Fn, typename... Args,
 THRUST_HOST_DEVICE
 constexpr auto invoke(Fn &&f, Args &&... args)
   noexcept(noexcept(std::mem_fn(f)(std::forward<Args>(args)...)))
-  THRUST_TRAILING_RETURN(decltype(std::mem_fn(f)(std::forward<Args>(args)...)))
+  -> decltype(std::mem_fn(f)(std::forward<Args>(args)...))
 {
   return std::mem_fn(f)(std::forward<Args>(args)...);
 }
@@ -249,7 +248,7 @@ template <typename Fn, typename... Args,
 THRUST_HOST_DEVICE
 constexpr auto invoke(Fn &&f, Args &&... args)
   noexcept(noexcept(std::forward<Fn>(f)(std::forward<Args>(args)...)))
-  THRUST_TRAILING_RETURN(decltype(std::forward<Fn>(f)(std::forward<Args>(args)...)))
+  -> decltype(std::forward<Fn>(f)(std::forward<Args>(args)...))
 {
   return std::forward<Fn>(f)(std::forward<Args>(args)...);
 }

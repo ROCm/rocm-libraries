@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -73,7 +73,7 @@ template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_HIP_FUNCTION
 for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
-    typedef thrust::detail::wrapped_function<UnaryOp, void> wrapped_t;
+    using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
     wrapped_t wrapped_op(op);
 
     hip_rocprim::parallel_for(policy,
@@ -88,7 +88,7 @@ template <class Derived, class Input, class UnaryOp>
 Input THRUST_HIP_FUNCTION
 for_each(execution_policy<Derived>& policy, Input first, Input last, UnaryOp op)
 {
-    typedef typename iterator_traits<Input>::difference_type size_type;
+    using size_type = typename iterator_traits<Input>::difference_type;
     size_type count = static_cast<size_type>(thrust::distance(first, last));
     return hip_rocprim::for_each_n(policy, first, count, op);
 }

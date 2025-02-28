@@ -154,8 +154,8 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return cuda_cub::transform(policy,
                              first,
                              last,
@@ -178,8 +178,8 @@ replace_copy_if(execution_policy<Derived> &policy,
                 Predicate                  predicate,
                 T const &                  new_value)
 {
-  typedef typename iterator_traits<OutputIt>::value_type output_type;
-  typedef __replace::new_value_if_f<Predicate, T, output_type> new_value_if_t;
+  using output_type    = typename iterator_traits<OutputIt>::value_type;
+  using new_value_if_t = __replace::new_value_if_f<Predicate, T, output_type>;
   return cuda_cub::transform(policy,
                            first,
                            last,

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -58,10 +58,9 @@ inner_product(execution_policy<Derived>& policy,
               ReduceOp                   reduce_op,
               ProductOp                  product_op)
 {
-    typedef typename iterator_traits<InputIt1>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt1>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
-    typedef transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>
-        binop_iterator_t;
+    using binop_iterator_t = transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>;
 
     return reduce_n(
         policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op

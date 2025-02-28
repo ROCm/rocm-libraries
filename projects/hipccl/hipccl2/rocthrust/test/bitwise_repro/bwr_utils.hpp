@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #ifndef BWR_UTILS_HPP
 #define BWR_UTILS_HPP
 
-#include "../thrust/include/rocthrust_version.hpp"
+#include <thrust/rocthrust_version.hpp>
 #include <hip/hip_runtime_api.h>
 #include <string>
 
@@ -502,4 +502,3 @@ private:
 } // end namespace bwr_utils
 
 #endif // BRW_UTILS_HPP
-

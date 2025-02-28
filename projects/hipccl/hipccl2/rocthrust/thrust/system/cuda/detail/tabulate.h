@@ -67,11 +67,11 @@ tabulate(execution_policy<Derived>& policy,
          Iterator                   last,
          TabulateOp                 tabulate_op)
 {
-  typedef typename iterator_traits<Iterator>::difference_type size_type;
+  using size_type = typename iterator_traits<Iterator>::difference_type;
 
   size_type count = thrust::distance(first, last);
 
-  typedef __tabulate::functor<Iterator, TabulateOp, size_type> functor_t;
+  using functor_t = __tabulate::functor<Iterator, TabulateOp, size_type>;
 
   cuda_cub::parallel_for(policy,
                          functor_t(first, tabulate_op),

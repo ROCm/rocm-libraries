@@ -44,7 +44,7 @@ template<typename Iterator, typename DerivedPolicy, typename is_trivial> struct 
 template<typename Iterator, typename DerivedPolicy>
 struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
 {
-    typedef Iterator iterator_type;
+    using iterator_type = Iterator;
     Iterator first, last;
 
     THRUST_HOST_DEVICE
@@ -73,8 +73,8 @@ struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::true_type>
 template<typename Iterator, typename DerivedPolicy>
 struct _trivial_sequence<Iterator, DerivedPolicy, thrust::detail::false_type>
 {
-    typedef typename thrust::iterator_value<Iterator>::type iterator_value;
-    typedef typename thrust::detail::temporary_array<iterator_value, DerivedPolicy>::iterator iterator_type;
+    using iterator_value = typename thrust::iterator_value<Iterator>::type;
+    using iterator_type  = typename thrust::detail::temporary_array<iterator_value, DerivedPolicy>::iterator;
 
     thrust::detail::temporary_array<iterator_value, DerivedPolicy> buffer;
 
@@ -105,7 +105,7 @@ template <typename Iterator, typename DerivedPolicy>
 struct trivial_sequence
   : detail::_trivial_sequence<Iterator, DerivedPolicy, typename thrust::is_contiguous_iterator<Iterator>::type>
 {
-    typedef _trivial_sequence<Iterator, DerivedPolicy, typename thrust::is_contiguous_iterator<Iterator>::type> super_t;
+    using super_t = _trivial_sequence<Iterator, DerivedPolicy, typename thrust::is_contiguous_iterator<Iterator>::type>;
 
     THRUST_HOST_DEVICE
     trivial_sequence(thrust::execution_policy<DerivedPolicy> &exec, Iterator first, Iterator last) : super_t(exec, first, last) { }

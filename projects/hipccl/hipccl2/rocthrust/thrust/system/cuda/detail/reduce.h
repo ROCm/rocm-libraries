@@ -31,7 +31,6 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/temporary_array.h>
@@ -49,6 +48,8 @@
 
 #include <cub/device/device_reduce.cuh>
 #include <cub/util_math.cuh>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -109,39 +110,36 @@ namespace __reduce {
       SCALE_FACTOR_1B = sizeof(T),
     };
 
-    typedef PtxPolicy<256,
-                      CUB_MAX(1, 20 / SCALE_FACTOR_4B),
-                      2,
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
-                      cub::LOAD_DEFAULT,
-                      cub::GRID_MAPPING_RAKE>
-        type;
+    using type = PtxPolicy<256,
+                           CUB_MAX(1, 20 / SCALE_FACTOR_4B),
+                           2,
+                           cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                           cub::LOAD_DEFAULT,
+                           cub::GRID_MAPPING_RAKE>;
   }; // Tuning sm30
 
   template <class T>
   struct Tuning<sm35, T> : Tuning<sm30,T>
   {
     // ReducePolicy1B (GTX Titan: 228.7 GB/s @ 192M 1B items)
-    typedef PtxPolicy<128,
-                      CUB_MAX(1, 24 / Tuning::SCALE_FACTOR_1B),
-                      4,
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
-                      cub::LOAD_LDG,
-                      cub::GRID_MAPPING_DYNAMIC>
-        ReducePolicy1B;
+    using ReducePolicy1B = PtxPolicy<128,
+                                     CUB_MAX(1, 24 / Tuning::SCALE_FACTOR_1B),
+                                     4,
+                                     cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                                     cub::LOAD_LDG,
+                                     cub::GRID_MAPPING_DYNAMIC>;
 
     // ReducePolicy4B types (GTX Titan: 255.1 GB/s @ 48M 4B items)
-    typedef PtxPolicy<256,
-                      CUB_MAX(1, 20 / Tuning::SCALE_FACTOR_4B),
-                      4,
-                      cub::BLOCK_REDUCE_WARP_REDUCTIONS,
-                      cub::LOAD_LDG,
-                      cub::GRID_MAPPING_DYNAMIC>
-        ReducePolicy4B;
+    using ReducePolicy4B = PtxPolicy<256,
+                                     CUB_MAX(1, 20 / Tuning::SCALE_FACTOR_4B),
+                                     4,
+                                     cub::BLOCK_REDUCE_WARP_REDUCTIONS,
+                                     cub::LOAD_LDG,
+                                     cub::GRID_MAPPING_DYNAMIC>;
 
-    typedef typename thrust::detail::conditional<(sizeof(T) < 4),
-                                                 ReducePolicy1B,
-                                                 ReducePolicy4B>::type type;
+    using type = typename thrust::detail::conditional<(sizeof(T) < 4),
+                                                      ReducePolicy1B,
+                                                      ReducePolicy4B>::type;
   };    // Tuning sm35
 
   template <class InputIt,
@@ -151,7 +149,7 @@ namespace __reduce {
             class ReductionOp>
   struct ReduceAgent
   {
-    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+    using UnsignedSize = typename detail::make_unsigned_special<Size>::type;
 
     template<class Arch>
     struct PtxPlan : Tuning<Arch,T>::type
@@ -160,22 +158,12 @@ namespace __reduce {
       // that this PtxPlan may have specializations for different Arch
       // via Tuning<Arch,T> type.
       //
-      typedef Tuning<Arch,T> tuning;
+      using tuning = Tuning<Arch,T>;
 
-      typedef typename cub::CubVector<T, PtxPlan::VECTOR_LOAD_LENGTH> Vector;
-      typedef typename core::LoadIterator<PtxPlan, InputIt>::type     LoadIt;
-      typedef cub::BlockReduce<T,
-                               PtxPlan::BLOCK_THREADS,
-                               PtxPlan::BLOCK_ALGORITHM,
-                               1,
-                               1,
-                               Arch::ver>
-          BlockReduce;
-
-      typedef cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER,
-                                              Vector,
-                                              Size>
-          VectorLoadIt;
+      using Vector       = typename cub::CubVector<T, PtxPlan::VECTOR_LOAD_LENGTH>;
+      using LoadIt       = typename core::LoadIterator<PtxPlan, InputIt>::type;
+      using BlockReduce  = cub::BlockReduce<T, PtxPlan::BLOCK_THREADS, PtxPlan::BLOCK_ALGORITHM, 1, 1, Arch::ver>;
+      using VectorLoadIt = cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER, Vector, Size>;
 
       struct TempStorage
       {
@@ -212,13 +200,13 @@ namespace __reduce {
     // ptx_plan type *must* only be used from device code
     // Its use from host code will result in *undefined behaviour*
     //
-    typedef typename core::specialize_plan_msvc10_war<PtxPlan>::type::type ptx_plan;
+    using ptx_plan = typename core::specialize_plan_msvc10_war<PtxPlan>::type::type;
 
-    typedef typename ptx_plan::TempStorage  TempStorage;
-    typedef typename ptx_plan::Vector       Vector;
-    typedef typename ptx_plan::LoadIt       LoadIt;
-    typedef typename ptx_plan::BlockReduce  BlockReduce;
-    typedef typename ptx_plan::VectorLoadIt VectorLoadIt;
+    using TempStorage  = typename ptx_plan::TempStorage;
+    using Vector       = typename ptx_plan::Vector;
+    using LoadIt       = typename ptx_plan::LoadIt;
+    using BlockReduce  = typename ptx_plan::BlockReduce;
+    using VectorLoadIt = typename ptx_plan::VectorLoadIt;
 
     enum
     {
@@ -451,9 +439,9 @@ namespace __reduce {
       THRUST_DEVICE_FUNCTION T consume_range(Size block_offset,
                                              Size block_end)
       {
-        typedef is_true<ATTEMPT_VECTORIZATION>          attempt_vec;
-        typedef is_true<true && ATTEMPT_VECTORIZATION>  path_a;
-        typedef is_true<false && ATTEMPT_VECTORIZATION> path_b;
+        using attempt_vec = is_true<ATTEMPT_VECTORIZATION>;
+        using path_a      = is_true<true && ATTEMPT_VECTORIZATION>;
+        using path_b      = is_true<false && ATTEMPT_VECTORIZATION>;
 
         return is_aligned(input_it + block_offset, attempt_vec())
                    ? consume_range_impl(block_offset, block_end, path_a())
@@ -468,9 +456,9 @@ namespace __reduce {
                     cub::GridQueue<UnsignedSize> & /*queue*/,
                     thrust::detail::integral_constant<cub::GridMappingStrategy, cub::GRID_MAPPING_RAKE> /*is_rake*/)
       {
-        typedef is_true<ATTEMPT_VECTORIZATION>          attempt_vec;
-        typedef is_true<true && ATTEMPT_VECTORIZATION>  path_a;
-        typedef is_true<false && ATTEMPT_VECTORIZATION> path_b;
+        using attempt_vec = is_true<ATTEMPT_VECTORIZATION>;
+        using path_a      = is_true<true && ATTEMPT_VECTORIZATION>;
+        using path_b      = is_true<false && ATTEMPT_VECTORIZATION>;
 
         // Initialize even-share descriptor for this thread block
         even_share
@@ -586,9 +574,9 @@ namespace __reduce {
           cub::GridQueue<UnsignedSize> &    queue,
           thrust::detail::integral_constant<cub::GridMappingStrategy, cub::GRID_MAPPING_DYNAMIC>)
       {
-        typedef is_true<ATTEMPT_VECTORIZATION>         attempt_vec;
-        typedef is_true<true && ATTEMPT_VECTORIZATION> path_a;
-        typedef is_true<false && ATTEMPT_VECTORIZATION> path_b;
+        using attempt_vec = is_true<ATTEMPT_VECTORIZATION>;
+        using path_a      = is_true<true && ATTEMPT_VECTORIZATION>;
+        using path_b      = is_true<false && ATTEMPT_VECTORIZATION>;
 
         return is_aligned(input_it, attempt_vec())
                    ? consume_tiles_impl(num_items, queue, path_a())
@@ -657,7 +645,7 @@ namespace __reduce {
     {
       TempStorage& storage = *reinterpret_cast<TempStorage*>(shmem);
 
-      typedef thrust::detail::integral_constant<cub::GridMappingStrategy, ptx_plan::GRID_MAPPING> grid_mapping;
+      using grid_mapping = thrust::detail::integral_constant<cub::GridMappingStrategy, ptx_plan::GRID_MAPPING>;
 
       T block_aggregate =
           impl(storage, input_it, reduction_op)
@@ -671,11 +659,11 @@ namespace __reduce {
   template<class Size>
   struct DrainAgent
   {
-    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+    using UnsignedSize = typename detail::make_unsigned_special<Size>::type;
 
     template <class Arch>
     struct PtxPlan : PtxPolicy<1> {};
-    typedef core::specialize_plan<PtxPlan> ptx_plan;
+    using ptx_plan = core::specialize_plan<PtxPlan>;
 
     //---------------------------------------------------------------------
     // Agent entry point
@@ -710,14 +698,13 @@ namespace __reduce {
     using core::get_agent_plan;
     using core::cuda_optional;
 
-    typedef typename detail::make_unsigned_special<Size>::type UnsignedSize;
+    using UnsignedSize = typename detail::make_unsigned_special<Size>::type;
 
     if (num_items == 0)
       return cudaErrorNotSupported;
 
-    typedef AgentLauncher<
-        ReduceAgent<InputIt, OutputIt, T, Size, ReductionOp> >
-        reduce_agent;
+    using reduce_agent = AgentLauncher<
+                         ReduceAgent<InputIt, OutputIt, T, Size, ReductionOp> >;
 
     typename reduce_agent::Plan reduce_plan = reduce_agent::get_plan(stream);
 
@@ -729,12 +716,12 @@ namespace __reduce {
       size_t vshmem_size = core::vshmem_size(reduce_plan.shared_memory_size, 1);
 
       // small, single tile size
-      if (d_temp_storage == NULL)
+      if (d_temp_storage == nullptr)
       {
         temp_storage_bytes = max<size_t>(1, vshmem_size);
         return status;
       }
-      char *vshmem_ptr = vshmem_size > 0 ? (char*)d_temp_storage : NULL;
+      char *vshmem_ptr = vshmem_size > 0 ? (char*)d_temp_storage : nullptr;
 
       reduce_agent ra(reduce_plan, num_items, stream, vshmem_ptr, "reduce_agent: single_tile only");
       ra.launch(input_it, output_it, num_items, reduction_op, init);
@@ -775,7 +762,7 @@ namespace __reduce {
                                              max_blocks);
 
       // Temporary storage allocation requirements
-      void * allocations[3] = {NULL, NULL, NULL};
+      void * allocations[3] = {nullptr, nullptr, nullptr};
       size_t allocation_sizes[3] =
           {
               max_blocks * sizeof(T),                            // bytes needed for privatized block reductions
@@ -787,14 +774,14 @@ namespace __reduce {
                                      allocations,
                                      allocation_sizes);
       CUDA_CUB_RET_IF_FAIL(status);
-      if (d_temp_storage == NULL)
+      if (d_temp_storage == nullptr)
       {
         return status;
       }
 
       T *d_block_reductions = (T*) allocations[0];
       cub::GridQueue<UnsignedSize> queue(allocations[1]);
-      char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[2] : NULL;
+      char *vshmem_ptr = vshmem_size > 0 ? (char *)allocations[2] : nullptr;
 
 
       // Get grid size for device_reduce_sweep_kernel
@@ -813,7 +800,7 @@ namespace __reduce {
         // then fill the device with threadblocks
         reduce_grid_size = static_cast<int>((min)(num_tiles, static_cast<size_t>(reduce_device_occupancy)));
 
-        typedef AgentLauncher<DrainAgent<Size> > drain_agent;
+        using drain_agent = AgentLauncher<DrainAgent<Size> >;
         AgentPlan drain_plan = drain_agent::get_plan();
         drain_plan.grid_size = 1;
         drain_agent da(drain_plan, stream, "__reduce::drain_agent");
@@ -835,10 +822,8 @@ namespace __reduce {
                 reduction_op);
       CUDA_CUB_RET_IF_FAIL(cudaPeekAtLastError());
 
-
-      typedef AgentLauncher<
-        ReduceAgent<T*, OutputIt, T, Size, ReductionOp> >
-        reduce_agent_single;
+      using reduce_agent_single = AgentLauncher<
+                                  ReduceAgent<T*, OutputIt, T, Size, ReductionOp> >;
 
       reduce_plan.grid_size = 1;
       reduce_agent_single ra1(reduce_plan, stream, vshmem_ptr, "reduce_agent: single tile reduce");
@@ -870,28 +855,28 @@ namespace __reduce {
     cudaStream_t stream             = cuda_cub::stream(policy);
 
     cudaError_t status;
-    status = doit_step(NULL,
+    status = doit_step(nullptr,
                        temp_storage_bytes,
                        first,
                        num_items,
                        init,
                        binary_op,
-                       reinterpret_cast<T*>(NULL),
+                       static_cast<T*>(nullptr),
                        stream);
     cuda_cub::throw_on_error(status, "reduce failed on 1st step");
 
     size_t allocation_sizes[2] = {sizeof(T*), temp_storage_bytes};
-    void * allocations[2]      = {NULL, NULL};
+    void * allocations[2]      = {nullptr, nullptr};
 
     size_t storage_size = 0;
-    status = core::alias_storage(NULL,
+    status = core::alias_storage(nullptr,
                                  storage_size,
                                  allocations,
                                  allocation_sizes);
     cuda_cub::throw_on_error(status, "reduce failed on 1st alias_storage");
 
     // Allocate temporary storage.
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+    thrust::detail::temporary_array<std::uint8_t, Derived>
       tmp(policy, storage_size);
     void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -946,13 +931,13 @@ T reduce_n_impl(execution_policy<Derived>& policy,
   THRUST_INDEX_TYPE_DISPATCH(status,
     cub::DeviceReduce::Reduce,
     num_items,
-    (NULL, tmp_size, first, reinterpret_cast<T*>(NULL),
+    (nullptr, tmp_size, first, static_cast<T*>(nullptr),
         num_items_fixed, binary_op, init, stream));
   cuda_cub::throw_on_error(status, "after reduction step 1");
 
   // Allocate temporary storage.
 
-  thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+  thrust::detail::temporary_array<std::uint8_t, Derived>
     tmp(policy, sizeof(T) + tmp_size);
 
   // Run reduction.
@@ -1032,7 +1017,7 @@ T reduce(execution_policy<Derived> &policy,
          T                          init,
          BinaryOp                   binary_op)
 {
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
+  using size_type = typename iterator_traits<InputIt>::difference_type;
   // FIXME: Check for RA iterator.
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
   return cuda_cub::reduce_n(policy, first, num_items, init, binary_op);
@@ -1058,7 +1043,7 @@ reduce(execution_policy<Derived> &policy,
        InputIt                    first,
        InputIt                    last)
 {
-  typedef typename iterator_traits<InputIt>::value_type value_type;
+  using value_type = typename iterator_traits<InputIt>::value_type;
   return cuda_cub::reduce(policy, first, last, value_type(0));
 }
 

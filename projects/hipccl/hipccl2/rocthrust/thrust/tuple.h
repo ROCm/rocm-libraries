@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -503,6 +503,9 @@ get(const detail::cons<HT, TT>& t);
 template <class... Ts>
 THRUST_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
 
+/*! \cond
+ */
+
 /*! A \p pair is a structure template holding two elements of types \p T1 and \p T2.
  *
  *  \tparam T1 The type of the first element in the \p pair.
@@ -512,6 +515,9 @@ THRUST_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
  */
 template <class T1, class T2>
 struct pair;
+
+/*! \endcond
+ */
 
 /*! Constructs a \p tuple from a \p pair<T1,T2>, unpacking its elements to initialize
  *  the tuple as \p tuple<T1,T2>.
@@ -579,7 +585,7 @@ template <class T0, class T1, class T2, class T3, class T4,
    */
 
   private:
-  typedef typename detail::map_tuple_to_cons<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>::type inherited;
+  using inherited = typename detail::map_tuple_to_cons<T0, T1, T2, T3, T4, T5, T6, T7, T8, T9>::type;
 
   /*! \endcond
    */
@@ -783,7 +789,7 @@ class tuple<null_type, null_type, null_type, null_type, null_type, null_type, nu
   public null_type
 {
 public:
-  typedef null_type inherited;
+  using inherited = null_type;
 };
 
 /*! \endcond

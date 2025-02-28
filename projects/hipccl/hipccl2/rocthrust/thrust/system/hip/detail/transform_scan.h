@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,8 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 #include <thrust/detail/alignment.h>
-#include <thrust/detail/cstdint.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -58,10 +59,9 @@ transform_inclusive_scan(execution_policy<Derived>& policy,
     using result_type = thrust::detail::invoke_result_t<TransformOp, input_type>;
     using value_type = thrust::remove_cvref_t<result_type>;
 
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-    typedef transform_input_iterator_t<value_type, InputIt, TransformOp>
-        transformed_iterator_t;
+    using transformed_iterator_t = transform_input_iterator_t<value_type, InputIt, TransformOp>;
 
     return hip_rocprim::inclusive_scan_n(
         policy,
@@ -90,10 +90,9 @@ transform_exclusive_scan(execution_policy<Derived>& policy,
     // Use the initial value type per https://wg21.link/P0571
     using result_type = thrust::remove_cvref_t<InitialValueType>;
 
-    typedef typename iterator_traits<InputIt>::difference_type size_type;
+    using size_type = typename iterator_traits<InputIt>::difference_type;
     size_type num_items = static_cast<size_type>(thrust::distance(first, last));
-    typedef transform_input_iterator_t<result_type, InputIt, TransformOp>
-        transformed_iterator_t;
+    using transformed_iterator_t = transform_input_iterator_t<result_type, InputIt, TransformOp>;
 
     return hip_rocprim::exclusive_scan_n(
         policy,

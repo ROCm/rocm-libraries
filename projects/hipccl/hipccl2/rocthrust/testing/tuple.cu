@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2024 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -489,7 +489,7 @@ void TestTupleSwap(void)
   ASSERT_EQUAL(c, thrust::get<2>(t2));
 
 
-  typedef thrust::tuple<user_swappable,user_swappable,user_swappable,user_swappable> swappable_tuple;
+  using swappable_tuple = thrust::tuple<user_swappable,user_swappable,user_swappable,user_swappable>;
 
   thrust::host_vector<swappable_tuple>   h_v1(1), h_v2(1);
   thrust::device_vector<swappable_tuple> d_v1(1), d_v2(1);

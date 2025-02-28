@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 
 #include <thrust/detail/config.h>
@@ -37,7 +54,7 @@ struct pointer_traits<alloc_id>
     template<typename>
     struct rebind
     {
-        typedef alloc_id other;
+        using other = alloc_id;
     };
 
     // implemented for the purposes of alignment test in disjoint pool's do_deallocate
@@ -100,10 +117,7 @@ void TestDisjointPool()
     dummy_resource upstream;
     thrust::mr::new_delete_resource bookkeeper;
 
-    typedef PoolTemplate<
-        dummy_resource,
-        thrust::mr::new_delete_resource
-    > Pool;
+    using Pool = PoolTemplate<dummy_resource, thrust::mr::new_delete_resource>;
 
     thrust::mr::pool_options opts = Pool::get_default_options();
     opts.cache_oversized = false;
@@ -192,10 +206,7 @@ void TestDisjointPoolCachingOversized()
     dummy_resource upstream;
     thrust::mr::new_delete_resource bookkeeper;
 
-    typedef PoolTemplate<
-        dummy_resource,
-        thrust::mr::new_delete_resource
-    > Pool;
+    using Pool = PoolTemplate<dummy_resource, thrust::mr::new_delete_resource>;
 
     thrust::mr::pool_options opts = Pool::get_default_options();
     opts.cache_oversized = true;
@@ -270,12 +281,9 @@ DECLARE_UNITTEST(TestDisjointSynchronizedPoolCachingOversized);
 template<template<typename, typename> class PoolTemplate>
 void TestDisjointGlobalPool()
 {
-    typedef PoolTemplate<
-        thrust::mr::new_delete_resource,
-        thrust::mr::new_delete_resource
-    > Pool;
+    using Pool = PoolTemplate<thrust::mr::new_delete_resource, thrust::mr::new_delete_resource>;
 
-    ASSERT_EQUAL(thrust::mr::get_global_resource<Pool>() != NULL, true);
+    ASSERT_EQUAL(thrust::mr::get_global_resource<Pool>() != nullptr, true);
 }
 
 void TestUnsynchronizedDisjointGlobalPool()

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/pair.h>
 #include <thrust/tuple.h>
@@ -8,7 +25,7 @@ struct TestPairManipulation
 {
   void operator()(void)
   {
-    typedef thrust::pair<T,T> P;
+    using P = thrust::pair<T, T>;
 
     // test null constructor
     P p1;
@@ -78,7 +95,7 @@ struct TestPairComparison
 {
   void operator()(void)
   {
-    typedef thrust::pair<T,T> P;
+    using P = thrust::pair<T, T>;
 
     P x, y;
 
@@ -271,8 +288,7 @@ void TestPairSwap(void)
   ASSERT_EQUAL(x, b.first);
   ASSERT_EQUAL(y, b.second);
 
-
-  typedef thrust::pair<user_swappable,user_swappable> swappable_pair;
+  using swappable_pair = thrust::pair<user_swappable, user_swappable>;
 
   thrust::host_vector<swappable_pair>   h_v1(1), h_v2(1);
   thrust::device_vector<swappable_pair> d_v1(1), d_v2(1);

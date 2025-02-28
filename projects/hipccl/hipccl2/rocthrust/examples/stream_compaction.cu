@@ -12,7 +12,7 @@
 
 // this functor returns true if the argument is odd, and false otherwise
 template <typename T>
-struct is_odd : public thrust::unary_function<T,bool>
+struct is_odd
 {
     __host__ __device__
     bool operator()(T x)
@@ -25,7 +25,7 @@ struct is_odd : public thrust::unary_function<T,bool>
 template <typename Iterator>
 void print_range(const std::string& name, Iterator first, Iterator last)
 {
-    typedef typename std::iterator_traits<Iterator>::value_type T;
+    using T = typename std::iterator_traits<Iterator>::value_type;
 
     std::cout << name << ": ";
     thrust::copy(first, last, std::ostream_iterator<T>(std::cout, " "));  
@@ -38,8 +38,8 @@ int main(void)
     size_t N = 10;
 
     // define some types
-    typedef thrust::device_vector<int> Vector;
-    typedef Vector::iterator           Iterator;
+    using Vector   = thrust::device_vector<int>;
+    using Iterator = Vector::iterator;
 
     // allocate storage for array
     Vector values(N);

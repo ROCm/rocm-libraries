@@ -47,7 +47,7 @@ unique_by_key(thrust::execution_policy<ExecutionPolicy> &exec,
               ForwardIterator1 keys_last,
               ForwardIterator2 values_first)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator1>::value_type KeyType;
+  using KeyType = typename thrust::iterator_traits<ForwardIterator1>::value_type;
   return thrust::unique_by_key(exec, keys_first, keys_last, values_first, thrust::equal_to<KeyType>());
 } // end unique_by_key()
 
@@ -64,8 +64,8 @@ unique_by_key(thrust::execution_policy<ExecutionPolicy> &exec,
               ForwardIterator2 values_first,
               BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator1>::value_type InputType1;
-  typedef typename thrust::iterator_traits<ForwardIterator2>::value_type InputType2;
+  using InputType1 = typename thrust::iterator_traits<ForwardIterator1>::value_type;
+  using InputType2 = typename thrust::iterator_traits<ForwardIterator2>::value_type;
 
   ForwardIterator2 values_last = values_first + (keys_last - keys_first);
 
@@ -90,7 +90,7 @@ unique_by_key_copy(thrust::execution_policy<ExecutionPolicy> &exec,
                    OutputIterator1 keys_output,
                    OutputIterator2 values_output)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::value_type KeyType;
+  using KeyType = typename thrust::iterator_traits<InputIterator1>::value_type;
   return thrust::unique_by_key_copy(exec, keys_first, keys_last, values_first, keys_output, values_output, thrust::equal_to<KeyType>());
 } // end unique_by_key_copy()
 
@@ -111,7 +111,7 @@ unique_by_key_copy(thrust::execution_policy<ExecutionPolicy> &exec,
                    OutputIterator2 values_output,
                    BinaryPredicate binary_pred)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::difference_type difference_type;
+  using difference_type = typename thrust::iterator_traits<InputIterator1>::difference_type;
 
   difference_type n = thrust::distance(keys_first, keys_last);
 

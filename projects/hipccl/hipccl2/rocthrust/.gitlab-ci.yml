@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2024 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 include:
@@ -22,6 +22,10 @@ stages:
   - build     # Tests if builds succeed (CMake)
   - test      # Tests if unit tests are passing (CTest)
   - benchmark # Runs the non-internal benchmarks (Google Benchmark)
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS !~ /CI Skip/
 
 variables:
   # Helper variables
@@ -74,7 +78,6 @@ copyright-date:
       -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
-      -D BUILD_HIPSTDPAR_TEST=OFF
       -D BUILD_EXAMPLE=OFF
       -D ROCM_DEP_ROCMCORE=OFF
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
@@ -116,7 +119,6 @@ copyright-date:
       -D CMAKE_BUILD_TYPE=$BUILD_TYPE
       -D BUILD_$BUILD_TARGET=ON
       -D GPU_TARGETS=$GPU_TARGETS
-      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -D RNG_SEED_COUNT=$rng_seed_count
       -D PRNG_SEEDS=$prng_seeds
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
@@ -137,7 +139,7 @@ copyright-date:
     - $CI_PROJECT_DIR/build/.ninja_log
     exclude:
     - $CI_PROJECT_DIR/build/**/*.o
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:cmake-latest:
   stage: build
@@ -183,7 +185,7 @@ build:package:
     paths:
       - $PACKAGE_DIR/rocthrust*.deb
       - $PACKAGE_DIR/rocthrust*.zip
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:windows:
   stage: build
@@ -231,7 +233,7 @@ build:windows:
     paths:
       - $CI_PROJECT_DIR/build/
       - $ROCPRIM_DIR/build/install
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 test:package:
   stage: test
@@ -268,13 +270,18 @@ test:doc:
   extends:
     - .build:docs
     - .rules:test
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
 
-test:
+.test:rocm:
   stage: test
+  tags:
+    - rocm
+    - $GPU
   extends:
     - .cmake-minimum
-    - .rules:test
-    - .gpus:rocm
   needs:
     - job: build:cmake-minimum
       parallel:
@@ -294,9 +301,75 @@ test:
     - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
-      --tests-regex $GPU_TARGET
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+
+test:rocm-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:rocm
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:rocm-label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:arch-labels
+
+test:rocm-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:rocm
+    - .rules:test
+
+test-bitwise-repro-generate:
+  stage: test
+  extends:
+    - .cmake-minimum
+    - .rules:manual
+    - .gpus:rocm
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 14
+  cache:
+    key: database
+    paths:
+      - $CI_PROJECT_DIR/bitwise.db
+    policy: push
+  script:
+    - cd $CI_PROJECT_DIR/build/test/
+    - ROCTHRUST_BWR_PATH=$CI_PROJECT_DIR/bitwise.db ROCTHRUST_BWR_GENERATE=1 ./reproducibility.hip
+
+test-bitwise-repro:
+  stage: test
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm
+  needs:
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: TEST
+            BUILD_VERSION: 14
+  cache:
+    key: database
+    paths:
+      - $CI_PROJECT_DIR/bitwise.db
+    policy: pull
+  script:
+    - cd $CI_PROJECT_DIR/build/test/
+    - ROCTHRUST_BWR_PATH=$CI_PROJECT_DIR/bitwise.db ./reproducibility.hip
 
 .rocm-windows:test:
   extends:
@@ -358,7 +431,7 @@ build:cuda-and-omp:
   tags:
     - build
   variables:
-    CCCL_GIT_BRANCH: v2.5.0
+    CCCL_GIT_BRANCH: v2.6.0
     CCCL_DIR: ${CI_PROJECT_DIR}/cccl
   needs: []
   script:
@@ -402,16 +475,17 @@ build:cuda-and-omp:
       - $CCCL_DIR/thrust/cmake/ThrustRunTest.cmake
       - $CCCL_DIR/thrust/cmake/ThrustRunExample.cmake
       - $CI_PROJECT_DIR/build/.ninja_log
-    expire_in: 1 week
+    expire_in: 1 day
 
-test:cuda-and-omp:
+.test:cuda-and-omp:
   stage: test
+  tags:
+    - nvcc
+    - $GPU
   needs:
     - build:cuda-and-omp
   extends:
     - .nvcc
-    - .gpus:nvcc
-    - .rules:test
   before_script:
     # This is only needed because of the legacy before_script in .gpus:nvcc would otherwise overwrite before_script
     - !reference [.nvcc, before_script]
@@ -419,6 +493,23 @@ test:cuda-and-omp:
     - cd $CI_PROJECT_DIR/build
     # These tests are executed on the build stage because they require sources
     - ctest --output-on-failure --exclude-regex "thrust.example.cmake.add_subdir|thrust.test.cmake.check_source_files"
+
+test:cuda-and-omp-any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:cuda-and-omp
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+
+test:cuda-and-omp-all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:nvcc
+    - .test:cuda-and-omp
+    - .rules:test
 
 .benchmark-base:
   stage: benchmark
@@ -430,7 +521,12 @@ test:cuda-and-omp:
 
 benchmark:
   needs:
-    - build:cmake-minimum
+    - job: build:cmake-minimum
+      parallel:
+        matrix:
+          - BUILD_TYPE: Release
+            BUILD_TARGET: BENCHMARKS
+            BUILD_VERSION: 14
   extends:
     - .cmake-minimum
     - .gpus:rocm
@@ -453,4 +549,4 @@ benchmark:
   artifacts:
     paths:
       - ${BENCHMARK_RESULT_DIR}
-    expire_in: 1 week
+    expire_in: 1 day

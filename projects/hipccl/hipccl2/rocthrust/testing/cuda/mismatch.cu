@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/mismatch.h>
 #include <thrust/execution_policy.h>
@@ -21,10 +38,8 @@ void TestMismatchDevice(ExecutionPolicy exec)
   a[2] = 3; b[2] = 4;
   a[3] = 4; b[3] = 3;
 
-  typedef thrust::pair<
-    typename thrust::device_vector<int>::iterator,
-    typename thrust::device_vector<int>::iterator
-  > pair_type;
+  using pair_type =
+    thrust::pair<typename thrust::device_vector<int>::iterator, typename thrust::device_vector<int>::iterator>;
 
   thrust::device_vector<pair_type> d_result(1);
   
@@ -78,7 +93,7 @@ DECLARE_UNITTEST(TestMismatchDeviceDevice);
 
 void TestMismatchCudaStreams()
 {
-  typedef thrust::device_vector<int> Vector;
+  using Vector = thrust::device_vector<int>;
 
   Vector a(4); Vector b(4);
   a[0] = 1; b[0] = 1;

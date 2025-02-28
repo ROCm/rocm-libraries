@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/system/cuda/memory.h>
 #include <thrust/system/cpp/memory.h>
@@ -54,8 +71,8 @@ void TestGetTemporaryBufferDeviceSeq()
 {
   const std::ptrdiff_t n = 9001;
 
-  typedef thrust::pointer<int, thrust::detail::seq_t> pointer;
-  typedef thrust::pair<pointer, std::ptrdiff_t> ptr_and_sz_type;
+  using pointer         = thrust::pointer<int, thrust::detail::seq_t>;
+  using ptr_and_sz_type = thrust::pair<pointer, std::ptrdiff_t>;
   thrust::device_vector<ptr_and_sz_type> d_result(1);
   
   get_temporary_buffer_kernel<<<1,1>>>(n, d_result.begin());
@@ -105,7 +122,7 @@ void TestMallocDeviceSeq()
 {
   const std::ptrdiff_t n = 9001;
 
-  typedef thrust::pointer<int, thrust::detail::seq_t> pointer;
+  using pointer = thrust::pointer<int, thrust::detail::seq_t>;
   thrust::device_vector<pointer> d_result(1);
   
   malloc_kernel<<<1,1>>>(n, d_result.begin());

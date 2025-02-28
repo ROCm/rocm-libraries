@@ -1,10 +1,27 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/device_vector.h>
 #include <thrust/device_reference.h>
 
 void TestDeviceReferenceConstructorFromDeviceReference(void)
 {
-    typedef int T;
+    using T = int;
 
     thrust::device_vector<T> v(1,0);
     thrust::device_reference<T> ref = v[0];
@@ -29,7 +46,7 @@ DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDeviceReference);
 
 void TestDeviceReferenceConstructorFromDevicePointer(void)
 {
-    typedef int T;
+    using T = int;
 
     thrust::device_vector<T> v(1,0);
     thrust::device_ptr<T> ptr = &v[0];
@@ -55,9 +72,9 @@ DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDevicePointer);
 
 void TestDeviceReferenceAssignmentFromDeviceReference(void)
 {
-    // test same types
-    typedef int T0;
-    thrust::device_vector<T0> v0(2,0);
+  // test same types
+    using T0 = int;
+    thrust::device_vector<T0> v0(2, 0);
     thrust::device_reference<T0> ref0 = v0[0];
     thrust::device_reference<T0> ref1 = v0[1];
 
@@ -70,8 +87,8 @@ void TestDeviceReferenceAssignmentFromDeviceReference(void)
     ASSERT_EQUAL(ref0, ref1);
 
     // test different types
-    typedef float T1;
-    thrust::device_vector<T1> v1(1,0.0f);
+    using T1 = float;
+    thrust::device_vector<T1> v1(1, 0.0f);
     thrust::device_reference<T1> ref2 = v1[0];
 
     ref2 = ref1;
@@ -85,7 +102,7 @@ DECLARE_UNITTEST(TestDeviceReferenceAssignmentFromDeviceReference);
 
 void TestDeviceReferenceManipulation(void)
 {
-    typedef int T1;
+    using T1 = int;
 
     thrust::device_vector<T1> v(1,0);
     thrust::device_ptr<T1> ptr = &v[0];
@@ -208,7 +225,7 @@ DECLARE_UNITTEST(TestDeviceReferenceManipulation);
 
 void TestDeviceReferenceSwap(void)
 {
-  typedef int T;
+  using T = int;
 
   thrust::device_vector<T> v(2);
   thrust::device_reference<T> ref1 = v.front();

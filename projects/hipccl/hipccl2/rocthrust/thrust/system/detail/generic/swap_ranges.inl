@@ -61,8 +61,8 @@ THRUST_HOST_DEVICE
                                ForwardIterator1 last1,
                                ForwardIterator2 first2)
 {
-  typedef thrust::tuple<ForwardIterator1,ForwardIterator2> IteratorTuple;
-  typedef thrust::zip_iterator<IteratorTuple>              ZipIterator;
+  using IteratorTuple = thrust::tuple<ForwardIterator1, ForwardIterator2>;
+  using ZipIterator   = thrust::zip_iterator<IteratorTuple>;
 
   ZipIterator result = thrust::for_each(exec,
                                         thrust::make_zip_iterator(thrust::make_tuple(first1, first2)),

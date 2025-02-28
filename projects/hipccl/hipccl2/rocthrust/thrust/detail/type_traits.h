@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2022 NVIDIA Corporation
- *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,8 +56,8 @@ template<typename T, T v>
   {
     THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
 
-    typedef T                       value_type;
-    typedef integral_constant<T, v> type;
+    using value_type = T;
+    using type       = integral_constant<T, v>;
 
     // We don't want to switch to std::integral_constant, because we want access
     // to the C++14 operator(), but we'd like standard traits to interoperate
@@ -76,10 +76,10 @@ template<typename T, T v>
   };
 
 /// typedef for true_type
-typedef integral_constant<bool, true>  true_type;
+using true_type = integral_constant<bool, true>;
 
 /// typedef for true_type
-typedef integral_constant<bool, false> false_type;
+using false_type = integral_constant<bool, false>;
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 //template<typename T> struct is_integral : public std::tr1::is_integral<T> {};
@@ -212,49 +212,49 @@ template<typename T> struct is_volatile<volatile T> : public true_type {};
 template<typename T>
   struct add_const
 {
-  typedef T const type;
+  using type = T const;
 }; // end add_const
 
 template<typename T>
   struct remove_const
 {
-  typedef T type;
+  using type = T;
 }; // end remove_const
 
 template<typename T>
   struct remove_const<const T>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_const
 
 template<typename T>
   struct add_volatile
 {
-  typedef volatile T type;
+  using type = volatile T;
 }; // end add_volatile
 
 template<typename T>
   struct remove_volatile
 {
-  typedef T type;
+  using type = T;
 }; // end remove_volatile
 
 template<typename T>
   struct remove_volatile<volatile T>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_volatile
 
 template<typename T>
   struct add_cv
 {
-  typedef const volatile T type;
+  using type = const volatile T;
 }; // end add_cv
 
 template<typename T>
   struct remove_cv
 {
-  typedef typename remove_const<typename remove_volatile<T>::type>::type type;
+  using type = typename remove_const<typename remove_volatile<T>::type>::type;
 }; // end remove_cv
 
 
@@ -268,13 +268,17 @@ template<typename T> struct is_device_reference< thrust::device_reference<T> > :
 
 
 // NB: Careful with reference to void.
-template<typename _Tp, bool = (is_void<_Tp>::value || is_reference<_Tp>::value)>
-  struct __add_reference_helper
-  { typedef _Tp&    type; };
+template <typename _Tp, bool = (is_void<_Tp>::value || is_reference<_Tp>::value)>
+struct __add_reference_helper
+{
+  using type = _Tp&;
+};
 
-template<typename _Tp>
-  struct __add_reference_helper<_Tp, true>
-  { typedef _Tp     type; };
+template <typename _Tp>
+struct __add_reference_helper<_Tp, true>
+{
+  using type = _Tp;
+};
 
 template<typename _Tp>
   struct add_reference
@@ -283,13 +287,13 @@ template<typename _Tp>
 template<typename T>
   struct remove_reference
 {
-  typedef T type;
+  using type = T;
 }; // end remove_reference
 
 template<typename T>
   struct remove_reference<T&>
 {
-  typedef T type;
+  using type = T;
 }; // end remove_reference
 
 template<typename T1, typename T2>
@@ -396,10 +400,10 @@ template <typename Boolean>
 }; // end not_
 
 template<bool B, class T, class F>
-struct conditional { typedef T type; };
+struct conditional { using type = T; };
 
 template<class T, class F>
-struct conditional<false, T, F> { typedef F type; };
+struct conditional<false, T, F> { using type = F; };
 
 template <bool, typename Then, typename Else>
   struct eval_if
@@ -409,13 +413,13 @@ template <bool, typename Then, typename Else>
 template<typename Then, typename Else>
   struct eval_if<true, Then, Else>
 {
-  typedef typename Then::type type;
+  using type = typename Then::type;
 }; // end eval_if
 
 template<typename Then, typename Else>
   struct eval_if<false, Then, Else>
 {
-  typedef typename Else::type type;
+  using type = typename Else::type;
 }; // end eval_if
 
 template<typename T>
@@ -423,14 +427,14 @@ template<typename T>
 //  XXX WAR nvcc's confusion with thrust::identity
   struct identity_
 {
-  typedef T type;
+  using type = T;
 }; // end identity
 
 template<bool, typename T = void> struct enable_if {};
-template<typename T>              struct enable_if<true, T> {typedef T type;};
+template<typename T>              struct enable_if<true, T> {using type = T;};
 
 template<bool, typename T> struct lazy_enable_if {};
-template<typename T>       struct lazy_enable_if<true, T> {typedef typename T::type type;};
+template<typename T>       struct lazy_enable_if<true, T> {using type = typename T::type;};
 
 template<bool condition, typename T = void> struct disable_if : enable_if<!condition, T> {};
 template<bool condition, typename T>        struct lazy_disable_if : lazy_enable_if<!condition, T> {};
@@ -476,29 +480,29 @@ namespace tt_detail
 
 template<typename T> struct make_unsigned_simple;
 
-template<> struct make_unsigned_simple<char>                   { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<signed char>            { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<unsigned char>          { typedef unsigned char          type; };
-template<> struct make_unsigned_simple<short>                  { typedef unsigned short         type; };
-template<> struct make_unsigned_simple<unsigned short>         { typedef unsigned short         type; };
-template<> struct make_unsigned_simple<int>                    { typedef unsigned int           type; };
-template<> struct make_unsigned_simple<unsigned int>           { typedef unsigned int           type; };
-template<> struct make_unsigned_simple<long int>               { typedef unsigned long int      type; };
-template<> struct make_unsigned_simple<unsigned long int>      { typedef unsigned long int      type; };
-template<> struct make_unsigned_simple<long long int>          { typedef unsigned long long int type; };
-template<> struct make_unsigned_simple<unsigned long long int> { typedef unsigned long long int type; };
+template<> struct make_unsigned_simple<char>                   { using type = unsigned char;          };
+template<> struct make_unsigned_simple<signed char>            { using type = unsigned char;          };
+template<> struct make_unsigned_simple<unsigned char>          { using type = unsigned char;          };
+template<> struct make_unsigned_simple<short>                  { using type = unsigned short;         };
+template<> struct make_unsigned_simple<unsigned short>         { using type = unsigned short;         };
+template<> struct make_unsigned_simple<int>                    { using type = unsigned int;           };
+template<> struct make_unsigned_simple<unsigned int>           { using type = unsigned int;           };
+template<> struct make_unsigned_simple<long int>               { using type = unsigned long int;      };
+template<> struct make_unsigned_simple<unsigned long int>      { using type = unsigned long int;      };
+template<> struct make_unsigned_simple<long long int>          { using type = unsigned long long int; };
+template<> struct make_unsigned_simple<unsigned long long int> { using type = unsigned long long int; };
 
 template<typename T>
   struct make_unsigned_base
 {
   // remove cv
-  typedef typename remove_cv<T>::type remove_cv_t;
+  using remove_cv_t = typename remove_cv<T>::type;
 
   // get the simple unsigned type
-  typedef typename make_unsigned_simple<remove_cv_t>::type unsigned_remove_cv_t;
+  using unsigned_remove_cv_t = typename make_unsigned_simple<remove_cv_t>::type;
 
   // add back const, volatile, both, or neither to the simple result
-  typedef typename eval_if<
+  using type = typename eval_if<
     is_const<T>::value && is_volatile<T>::value,
     // add cv back
     add_cv<unsigned_remove_cv_t>,
@@ -515,7 +519,7 @@ template<typename T>
         identity_<unsigned_remove_cv_t>
       >
     >
-  >::type type;
+  >::type;
 };
 
 } // end tt_detail
@@ -527,7 +531,7 @@ template<typename T>
 
 struct largest_available_float
 {
-  typedef double type;
+  using type = double;
 };
 
 // T1 wins if they are both the same size
@@ -565,12 +569,15 @@ namespace is_assignable_ns
 template<typename T1, typename T2>
   class is_assignable
 {
-  typedef char                      yes_type;
-  typedef struct { char array[2]; } no_type;
+  using yes_type = char;
+  using no_type  = struct
+  {
+    char array[2];
+  };
 
   template<typename T> static typename add_reference<T>::type declval();
 
-  template<size_t> struct helper { typedef void * type; };
+  template<size_t> struct helper { using type = void *; };
 
   template<typename U1, typename U2> static yes_type test(typename helper<sizeof(declval<U1>() = declval<U2>())>::type);
 
@@ -608,7 +615,7 @@ template<typename T1, typename T2>
   <typename is_floating_point<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
-  typedef typename larger_type<T1,T2>::type type;
+  using type = typename larger_type<T1,T2>::type;
   };
 
 template<typename T1, typename T2>
@@ -616,7 +623,7 @@ template<typename T1, typename T2>
   <typename is_integral<T1>::type, typename is_floating_point<T2>::type>
   ::value>::type>
   {
-  typedef T2 type;
+  using type = T2;
   };
 
 template<typename T1, typename T2>
@@ -624,7 +631,7 @@ template<typename T1, typename T2>
   <typename is_floating_point<T1>::type, typename is_integral<T2>::type>
   ::value>::type>
   {
-  typedef T1 type;
+  using type = T1;
   };
 
 template<typename T>

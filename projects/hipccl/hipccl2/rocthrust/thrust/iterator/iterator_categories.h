@@ -156,7 +156,7 @@ struct random_access_device_iterator_tag
  *  output_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-typedef std::input_iterator_tag input_host_iterator_tag;
+using input_host_iterator_tag = std::input_iterator_tag;
 
 /*! \p output_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -170,7 +170,7 @@ typedef std::input_iterator_tag input_host_iterator_tag;
  *  input_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-typedef std::output_iterator_tag output_host_iterator_tag;
+using output_host_iterator_tag = std::output_iterator_tag;
 
 /*! \p forward_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -184,7 +184,7 @@ typedef std::output_iterator_tag output_host_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-typedef std::forward_iterator_tag forward_host_iterator_tag;
+using forward_host_iterator_tag = std::forward_iterator_tag;
 
 /*! \p bidirectional_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -198,7 +198,7 @@ typedef std::forward_iterator_tag forward_host_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, random_access_host_iterator_tag
  */
-typedef std::bidirectional_iterator_tag bidirectional_host_iterator_tag;
+using bidirectional_host_iterator_tag = std::bidirectional_iterator_tag;
 
 /*! \p random_access_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -212,7 +212,7 @@ typedef std::bidirectional_iterator_tag bidirectional_host_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, bidirectional_host_iterator_tag
  */
-typedef std::random_access_iterator_tag random_access_host_iterator_tag;
+using random_access_host_iterator_tag = std::random_access_iterator_tag;
 
 /*! \} // end iterator_tag_classes
  */

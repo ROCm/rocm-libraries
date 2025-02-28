@@ -44,7 +44,7 @@ THRUST_HOST_DEVICE
                       InputIterator                            last,
                       OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator>::type T;
+  using T = typename thrust::iterator_value<InputIterator>::type;
   return thrust::transform(exec, first, last, result, thrust::identity<T>());
 } // end copy()
 
@@ -59,13 +59,13 @@ THRUST_HOST_DEVICE
                         Size                                     n,
                         OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator>::type value_type;
-  typedef thrust::identity<value_type>                         xfrm_type;
+  using value_type = typename thrust::iterator_value<InputIterator>::type;
+  using xfrm_type  = thrust::identity<value_type>;
 
-  typedef thrust::detail::unary_transform_functor<xfrm_type> functor_type;
+  using functor_type = thrust::detail::unary_transform_functor<xfrm_type>;
 
-  typedef thrust::tuple<InputIterator,OutputIterator> iterator_tuple;
-  typedef thrust::zip_iterator<iterator_tuple>        zip_iter;
+  using iterator_tuple = thrust::tuple<InputIterator, OutputIterator>;
+  using zip_iter       = thrust::zip_iterator<iterator_tuple>;
 
   zip_iter zipped = thrust::make_zip_iterator(thrust::make_tuple(first,result));
 

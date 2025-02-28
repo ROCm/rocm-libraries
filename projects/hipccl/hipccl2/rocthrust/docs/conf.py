@@ -16,7 +16,7 @@ left_nav_title = f"rocThrust {version_number} Documentation"
 # for PDF output on Read the Docs
 project = "rocThrust Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
@@ -34,4 +34,4 @@ doxygen_project = {
     "path": "doxygen/xml",
 }
 
-cpp_id_attributes = ["__device__", "__host__"]
+cpp_id_attributes = ["__device__", "__host__", "THRUST_HOST_DEVICE", "THRUST_HOST", "THRUST_DEVICE"]

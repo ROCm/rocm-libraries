@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -165,12 +165,12 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_src = get_random_data<T>(
-                size + 3, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size + 3, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_dst = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -334,7 +334,7 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_dst = get_random_data<T>(
-                size + 2, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size + 2, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_dst = h_dst;
 

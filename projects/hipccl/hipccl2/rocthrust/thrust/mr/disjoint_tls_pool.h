@@ -21,7 +21,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
 
 #include <thrust/mr/disjoint_pool.h>
@@ -47,8 +46,8 @@ namespace mr
 template<typename Upstream, typename Bookkeeper>
 THRUST_HOST 
 thrust::mr::disjoint_unsynchronized_pool_resource<Upstream, Bookkeeper> & tls_disjoint_pool(
-    Upstream * upstream = NULL,
-    Bookkeeper * bookkeeper = NULL)
+    Upstream * upstream = nullptr,
+    Bookkeeper * bookkeeper = nullptr)
 {
     static thread_local auto adaptor = [&]{
         assert(upstream && bookkeeper);

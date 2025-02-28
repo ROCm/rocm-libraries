@@ -166,7 +166,7 @@ template<typename Iterator>
 template<typename Iterator1, typename Iterator2, typename Iterator3, typename Iterator4, typename Iterator5, typename Iterator6, typename BinaryPredicate, typename BinaryFunction>
   struct serial_reduce_by_key_body
 {
-  typedef typename thrust::iterator_difference<Iterator1>::type size_type;
+  using size_type = typename thrust::iterator_difference<Iterator1>::type;
 
   Iterator1 keys_first;
   Iterator2 values_first;
@@ -213,8 +213,8 @@ template<typename Iterator1, typename Iterator2, typename Iterator3, typename It
     Iterator6 my_carry_result   = carry_result  + interval_idx;
 
     // consume the rest of the interval with reduce_by_key
-    typedef typename thrust::iterator_value<Iterator1>::type key_type;
-    typedef typename partial_sum_type<Iterator2,BinaryFunction>::type value_type;
+    using key_type   = typename thrust::iterator_value<Iterator1>::type;
+    using value_type = typename partial_sum_type<Iterator2, BinaryFunction>::type;
 
     // XXX is there a way to pose this so that we don't require default construction of carry?
     thrust::pair<key_type, value_type> carry;
@@ -271,7 +271,7 @@ template<typename DerivedPolicy, typename Iterator1, typename Iterator2, typenam
                   BinaryFunction binary_op)
 {
 
-  typedef typename thrust::iterator_difference<Iterator1>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<Iterator1>::type;
   difference_type n = keys_last - keys_first;
   if(n == 0) return thrust::make_pair(keys_result, values_result);
 
@@ -309,7 +309,7 @@ template<typename DerivedPolicy, typename Iterator1, typename Iterator2, typenam
 
   // do a reduce_by_key serially in each thread
   // the final interval never has a carry by definition, so don't reserve space for it
-  typedef typename reduce_by_key_detail::partial_sum_type<Iterator2,BinaryFunction>::type carry_type;
+  using carry_type = typename reduce_by_key_detail::partial_sum_type<Iterator2, BinaryFunction>::type;
   thrust::detail::temporary_array<carry_type, DerivedPolicy> carries(0, exec, num_intervals - 1);
 
   // force grainsize == 1 with simple_partioner()

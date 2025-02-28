@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ struct return_value
 template<class Vector>
 void TestGenerateSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector result(5);
 
@@ -129,7 +129,7 @@ DECLARE_VARIABLE_UNITTEST(TestGenerateToDiscardIterator);
 template<class Vector>
 void TestGenerateNSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector result(5);
 
@@ -211,7 +211,7 @@ DECLARE_VARIABLE_UNITTEST(TestGenerateNToDiscardIterator);
 template <typename Vector>
 void TestGenerateZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(3,T(0));
     Vector v2(3,T(0));
@@ -232,8 +232,8 @@ DECLARE_VECTOR_UNITTEST(TestGenerateZipIterator);
 
 void TestGenerateTuple(void)
 {
-    typedef int T;
-    typedef thrust::tuple<T,T> Tuple;
+    using T     = int;
+    using Tuple = thrust::tuple<T, T>;
 
     thrust::host_vector<Tuple>   h(3, Tuple(0,0));
     thrust::device_vector<Tuple> d(3, Tuple(0,0));

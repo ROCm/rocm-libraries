@@ -204,7 +204,7 @@ template<typename RandomAccessIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -221,7 +221,7 @@ template<typename RandomAccessIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -235,7 +235,7 @@ template<typename RandomAccessIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -251,7 +251,7 @@ template<typename RandomAccessIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator>::type System;
+  using System = typename thrust::iterator_system<RandomAccessIterator>::type;
 
   System system;
 
@@ -272,8 +272,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -292,8 +292,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -310,8 +310,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -330,8 +330,8 @@ template<typename RandomAccessIterator1,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<RandomAccessIterator1>::type System1;
-  typedef typename thrust::iterator_system<RandomAccessIterator2>::type System2;
+  using System1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
+  using System2 = typename thrust::iterator_system<RandomAccessIterator2>::type;
 
   System1 system1;
   System2 system2;
@@ -346,7 +346,7 @@ template<typename ForwardIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -362,7 +362,7 @@ template<typename ForwardIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -376,7 +376,7 @@ template<typename ForwardIterator>
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 
@@ -392,7 +392,7 @@ template<typename ForwardIterator,
 {
   using thrust::system::detail::generic::select_system;
 
-  typedef typename thrust::iterator_system<ForwardIterator>::type System;
+  using System = typename thrust::iterator_system<ForwardIterator>::type;
 
   System system;
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -549,7 +549,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_vals = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -564,7 +564,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestInclusiveScanByKeyInPlace)
                 h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin());
             thrust::inclusive_scan_by_key(
                 d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin());
-            ASSERT_EQ(d_output, h_output);
+            test_equality(h_output, d_output);
         }
     }
 }
@@ -594,7 +594,7 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_vals = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             for(size_t i = 0; i < size; i++)
                 h_vals[i] = i % 10;
             thrust::device_vector<T> d_vals = h_vals;
@@ -604,8 +604,8 @@ TYPED_TEST(ScanByKeyVariablesTests, TestExclusiveScanByKeyInPlace)
             thrust::exclusive_scan_by_key(
                 h_keys.begin(), h_keys.end(), h_output.begin(), h_output.begin(), (T)11);
             thrust::exclusive_scan_by_key(
-                d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin(), (T)11);
-            ASSERT_EQ(d_output, h_output);
+                d_keys.begin(), d_keys.end(), d_output.begin(), d_output.begin(), (T)11);\
+            test_equality(h_output, d_output);
         }
     }
 }

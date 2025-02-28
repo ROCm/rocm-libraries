@@ -47,8 +47,8 @@ namespace __uninitialized_copy {
     InputIt  input;
     OutputIt output;
 
-    typedef typename iterator_traits<InputIt>::value_type  InputType;
-    typedef typename iterator_traits<OutputIt>::value_type OutputType;
+    using InputType  = typename iterator_traits<InputIt>::value_type;
+    using OutputType = typename iterator_traits<OutputIt>::value_type;
 
     THRUST_FUNCTION
     functor(InputIt input_, OutputIt output_)
@@ -81,7 +81,7 @@ uninitialized_copy_n(execution_policy<Derived> &policy,
                      Size                       count,
                      OutputIt                   result)
 {
-  typedef __uninitialized_copy::functor<InputIt,OutputIt> functor_t;
+  using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
   cuda_cub::parallel_for(policy,
                          functor_t(first, result),

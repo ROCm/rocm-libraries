@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -240,7 +240,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_input = h_input;
 
             thrust::host_vector<T>   h_output(size);
@@ -256,7 +256,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
                                              d_output.begin(),
                                              thrust::negate<T>(),
                                              thrust::plus<T>());
-            ASSERT_EQ(d_output, h_output);
+            test_equality(h_output, d_output);
 
             thrust::transform_exclusive_scan(h_input.begin(),
                                              h_input.end(),
@@ -270,7 +270,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
                                              thrust::negate<T>(),
                                              (T)11,
                                              thrust::plus<T>());
-            ASSERT_EQ(d_output, h_output);
+            test_equality(h_output, d_output);
 
             // in-place scans
             h_output = h_input;
@@ -285,7 +285,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
                                              d_output.begin(),
                                              thrust::negate<T>(),
                                              thrust::plus<T>());
-            ASSERT_EQ(d_output, h_output);
+            test_equality(h_output, d_output);
 
             h_output = h_input;
             d_output = d_input;
@@ -301,7 +301,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScan)
                                              thrust::negate<T>(),
                                              (T)11,
                                              thrust::plus<T>());
-            ASSERT_EQ(d_output, h_output);
+            test_equality(h_output, d_output);
         }
     }
 };
@@ -313,7 +313,7 @@ TYPED_TEST(TransformScanVectorTests, TestTransformScanCountingIterator)
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    typedef typename thrust::iterator_system<typename Vector::iterator>::type space;
+    using space = typename thrust::iterator_system<typename Vector::iterator>::type;
 
     thrust::counting_iterator<T, space> first(1);
 
@@ -342,7 +342,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::device_vector<T> d_input = h_input;
 
             thrust::discard_iterator<> reference(size);
@@ -434,8 +434,8 @@ TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
 
 TEST(TransformScanTests, TestTransformScanConstAccumulator)
 {
-    typedef thrust::device_vector<int> Vector;
-    typedef Vector::value_type         T;
+    using Vector = thrust::device_vector<int>;
+    using T      = Vector::value_type;
 
     Vector::iterator iter;
 

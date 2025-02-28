@@ -9,3 +9,4 @@ License
 ******************************************
 
 .. include:: ../LICENSE
+  :literal:

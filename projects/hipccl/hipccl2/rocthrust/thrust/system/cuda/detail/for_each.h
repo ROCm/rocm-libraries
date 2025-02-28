@@ -74,7 +74,7 @@ namespace cuda_cub {
              Size                       count,
              UnaryOp                    op)
   {
-    typedef thrust::detail::wrapped_function<UnaryOp, void> wrapped_t;
+    using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
     wrapped_t wrapped_op(op);
 
     cuda_cub::parallel_for(policy,
@@ -94,7 +94,7 @@ namespace cuda_cub {
            Input                      last,
            UnaryOp                    op)
   {
-    typedef typename iterator_traits<Input>::difference_type size_type;
+    using size_type = typename iterator_traits<Input>::difference_type;
     size_type count = static_cast<size_type>(thrust::distance(first,last));
     return cuda_cub::for_each_n(policy, first,  count, op);
   }

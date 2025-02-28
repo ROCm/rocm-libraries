@@ -76,7 +76,7 @@ THRUST_HOST_DEVICE
                             ForwardIterator last,
                             Predicate pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   // create temporary storage for an intermediate result
   thrust::detail::temporary_array<InputType,DerivedPolicy> temp(exec, first, last);
@@ -97,7 +97,7 @@ THRUST_HOST_DEVICE
                             InputIterator stencil,
                             Predicate pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   // create temporary storage for an intermediate result
   thrust::detail::temporary_array<InputType,DerivedPolicy> temp(exec, first, last);
@@ -135,7 +135,7 @@ THRUST_HOST_DEVICE
                                 OutputIterator result,
                                 Predicate pred)
 {
-  return thrust::copy_if(exec, first, last, stencil, result, thrust::detail::not1(pred));
+  return thrust::copy_if(exec, first, last, stencil, result, thrust::not_fn(pred));
 } // end remove_copy_if()
 
 

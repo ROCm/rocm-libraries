@@ -35,7 +35,7 @@ template<typename ExecutionPolicy, typename InputIterator, typename Predicate>
 THRUST_HOST_DEVICE
 bool all_of(thrust::execution_policy<ExecutionPolicy> &exec, InputIterator first, InputIterator last, Predicate pred)
 {
-  return thrust::find_if(exec, first, last, thrust::detail::not1(pred)) == last;
+  return thrust::find_if(exec, first, last, thrust::not_fn(pred)) == last;
 }
 
 

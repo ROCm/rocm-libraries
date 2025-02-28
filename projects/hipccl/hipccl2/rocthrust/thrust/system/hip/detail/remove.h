@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,7 +46,7 @@ remove_if(execution_policy<Derived>& policy,
           StencilIt                  stencil,
           Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, stencil, first, thrust::detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, stencil, first, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class Predicate>
@@ -56,7 +56,7 @@ remove_if(execution_policy<Derived>& policy,
           InputIt                    last,
           Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, first, thrust::detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, first, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
@@ -81,7 +81,7 @@ remove_copy_if(execution_policy<Derived>& policy,
                OutputIt                   result,
                Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, stencil, result, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, stencil, result, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class Predicate>
@@ -92,7 +92,7 @@ remove_copy_if(execution_policy<Derived>& policy,
                OutputIt                   result,
                Predicate                  predicate)
 {
-    return hip_rocprim::copy_if(policy, first, last, result, detail::not1(predicate));
+    return hip_rocprim::copy_if(policy, first, last, result, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class OutputIt, class T>

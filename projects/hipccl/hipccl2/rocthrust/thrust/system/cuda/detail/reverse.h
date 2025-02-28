@@ -81,7 +81,7 @@ reverse(execution_policy<Derived> &policy,
         ItemsIt                    first,
         ItemsIt                    last)
 {
-  typedef typename thrust::iterator_difference<ItemsIt>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<ItemsIt>::type;
 
   // find the midpoint of [first,last)
   difference_type N = thrust::distance(first, last);

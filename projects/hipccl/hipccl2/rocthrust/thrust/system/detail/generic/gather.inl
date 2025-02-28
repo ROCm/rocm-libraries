@@ -64,7 +64,7 @@ THRUST_HOST_DEVICE
                            RandomAccessIterator                     input_first,
                            OutputIterator                           result)
 {
-  typedef typename thrust::iterator_value<InputIterator2>::type StencilType;
+  using StencilType = typename thrust::iterator_value<InputIterator2>::type;
   return thrust::gather_if(exec,
                            map_first,
                            map_last,
@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE
                            OutputIterator                           result,
                            Predicate                                pred)
 {
-  typedef typename thrust::iterator_value<RandomAccessIterator>::type InputType;
+  using InputType = typename thrust::iterator_value<RandomAccessIterator>::type;
   return thrust::transform_if(exec,
                               thrust::make_permutation_iterator(input_first, map_first),
                               thrust::make_permutation_iterator(input_first, map_last),

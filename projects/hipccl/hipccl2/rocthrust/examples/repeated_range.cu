@@ -20,30 +20,29 @@
 template <typename Iterator>
 class repeated_range
 {
-    public:
+public:
+    using difference_type = typename thrust::iterator_difference<Iterator>::type;
 
-    typedef typename thrust::iterator_difference<Iterator>::type difference_type;
-
-    struct repeat_functor : public thrust::unary_function<difference_type,difference_type>
+    struct repeat_functor
     {
         difference_type repeats;
 
         repeat_functor(difference_type repeats)
-            : repeats(repeats) {}
+        : repeats(repeats)
+        {}
 
-        __host__ __device__
-        difference_type operator()(const difference_type& i) const
-        { 
+        __host__ __device__ difference_type operator()(const difference_type& i) const
+        {
             return i / repeats;
         }
     };
 
-    typedef typename thrust::counting_iterator<difference_type>                   CountingIterator;
-    typedef typename thrust::transform_iterator<repeat_functor, CountingIterator> TransformIterator;
-    typedef typename thrust::permutation_iterator<Iterator,TransformIterator>     PermutationIterator;
+    using CountingIterator    = typename thrust::counting_iterator<difference_type>;
+    using TransformIterator   = typename thrust::transform_iterator<repeat_functor, CountingIterator>;
+    using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
 
     // type of the repeated_range iterator
-    typedef PermutationIterator iterator;
+    using iterator = PermutationIterator;
 
     // construct repeated_range for the range [first,last)
     repeated_range(Iterator first, Iterator last, difference_type repeats)
@@ -77,7 +76,7 @@ int main(void)
     std::cout << "range        ";
     thrust::copy(data.begin(), data.end(), std::ostream_iterator<int>(std::cout, " "));  std::cout << std::endl;
 
-    typedef thrust::device_vector<int>::iterator Iterator;
+    using Iterator = thrust::device_vector<int>::iterator;
   
     // create repeated_range with elements repeated twice
     repeated_range<Iterator> twice(data.begin(), data.end(), 2);

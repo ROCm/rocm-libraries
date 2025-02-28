@@ -61,7 +61,7 @@ namespace __parallel_for {
   template <class F>
   struct Tuning<sm30, F>
   {
-    typedef PtxPolicy<256, 2> type;
+    using type = PtxPolicy<256, 2>;
   };
 
 
@@ -72,9 +72,9 @@ namespace __parallel_for {
     template <class Arch>
     struct PtxPlan : Tuning<Arch, F>::type
     {
-      typedef Tuning<Arch, F> tuning;
+      using tuning = Tuning<Arch, F>;
     };
-    typedef core::specialize_plan<PtxPlan> ptx_plan;
+    using ptx_plan = core::specialize_plan<PtxPlan>;
 
     enum
     {
@@ -132,7 +132,7 @@ namespace __parallel_for {
     using core::AgentLauncher;
     using core::AgentPlan;
 
-    typedef AgentLauncher<ParallelForAgent<F, Size> > parallel_for_agent;
+    using parallel_for_agent = AgentLauncher<ParallelForAgent<F, Size> >;
     AgentPlan parallel_for_plan = parallel_for_agent::get_plan(stream);
 
     parallel_for_agent pfa(parallel_for_plan, num_items, stream, "transform::agent");

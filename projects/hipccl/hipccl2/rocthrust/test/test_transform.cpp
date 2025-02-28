@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -504,7 +504,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple)
                                 stencil.begin(),
                                 output.begin(),
                                 thrust::minus<T>(),
-                                thrust::not1(identity));
+                                thrust::not_fn(identity));
 
     ASSERT_EQ(iter - output.begin(), input1.size());
     ASSERT_EQ(output, result);
@@ -594,7 +594,7 @@ TYPED_TEST(TransformTests, TestTransformUnary)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -626,7 +626,7 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -673,7 +673,7 @@ TYPED_TEST(TransformTests, TestTransformUnaryToDiscardIteratorZipped)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::device_vector<T> d_input = h_input;
 
@@ -733,12 +733,12 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryNoStencil)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<U> h_output = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -778,18 +778,18 @@ TYPED_TEST(TransformTests, TestTransformIfUnary)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_output = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -831,11 +831,11 @@ TYPED_TEST(TransformTests, TestTransformIfUnaryToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -881,11 +881,11 @@ TYPED_TEST(TransformTests, TestTransformBinary)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -939,11 +939,11 @@ TYPED_TEST(TransformTests, TestTransformBinaryToDiscardIterator)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
@@ -984,24 +984,24 @@ TYPED_TEST(TransformTests, TestTransformIfBinary)
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
             thrust::host_vector<T> h_output = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 3 * seed_value_addition
             );
 
@@ -1030,8 +1030,8 @@ TYPED_TEST(TransformTests, TestTransformIfBinary)
 
             h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 4 * seed_value_addition
             );
             d_stencil = h_stencil;
@@ -1073,21 +1073,21 @@ TYPED_TEST(TransformTests, TestTransformIfBinaryToDiscardIterator)
 
             thrust::host_vector<T> h_input1 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed
             );
             thrust::host_vector<T> h_input2 = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + seed_value_addition
             );
 
             thrust::host_vector<T> h_stencil = get_random_data<T>(
                 size,
-                std::numeric_limits<T>::min(),
-                std::numeric_limits<T>::max(),
+                get_default_limits<T>::min(),
+                get_default_limits<T>::max(),
                 seed + 2 * seed_value_addition
             );
 
@@ -1131,7 +1131,7 @@ TYPED_TEST(TransformTests, TestTransformUnaryCountingIterator)
     for(auto size : get_sizes())
     {
         if (std::is_integral<T>::value) {
-            size = thrust::min<size_t>(size, std::numeric_limits<T>::max());
+            size = thrust::min<size_t>(size, get_default_limits<T>::max());
         }
 
         thrust::counting_iterator<T, thrust::host_system_tag> h_first
@@ -1159,7 +1159,7 @@ TYPED_TEST(TransformTests, TestTransformBinaryCountingIterators)
     for(auto size : get_sizes())
     {
         if (std::is_integral<T>::value) {
-            size = thrust::min<size_t>(size, std::numeric_limits<T>::max());
+            size = thrust::min<size_t>(size, get_default_limits<T>::max());
         }
 
         thrust::counting_iterator<T, thrust::host_system_tag> h_first

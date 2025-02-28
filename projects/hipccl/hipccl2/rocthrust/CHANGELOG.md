@@ -7,7 +7,8 @@ Documentation for rocThrust available at
 
 ### Added
 
-* gfx950 support
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
 
 ## rocThrust 3.3.0 for ROCm 6.4
 

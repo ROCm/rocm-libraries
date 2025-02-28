@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 
 #include <thrust/detail/seq.h>
@@ -40,12 +57,12 @@ struct test_memory_resource_t final : thrust::mr::memory_resource<>
 template<typename Policy, template <typename> class CRTPBase>
 struct policy_info
 {
-    typedef Policy policy;
+    using policy = Policy;
 
     template<template <typename, template <typename> class> class Template, typename Argument>
     struct apply_base_second
     {
-        typedef Template<Argument, CRTPBase> type;
+        using type = Template<Argument, CRTPBase>;
     };
 };
 
@@ -123,35 +140,17 @@ struct TestAllocatorAttachment
     }
 };
 
-typedef policy_info<
-    thrust::detail::seq_t,
-    thrust::system::detail::sequential::execution_policy
-> sequential_info;
-typedef policy_info<
-    thrust::system::cpp::detail::par_t,
-    thrust::system::cpp::detail::execution_policy
-> cpp_par_info;
-typedef policy_info<
-    thrust::system::omp::detail::par_t,
-    thrust::system::omp::detail::execution_policy
-> omp_par_info;
-typedef policy_info<
-    thrust::system::tbb::detail::par_t,
-    thrust::system::tbb::detail::execution_policy
-> tbb_par_info;
+using sequential_info = policy_info<thrust::detail::seq_t, thrust::system::detail::sequential::execution_policy>;
+using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::system::cpp::detail::execution_policy>;
+using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::detail::execution_policy>;
+using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::detail::execution_policy>;
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-typedef policy_info<
-    thrust::system::cuda::detail::par_t,
-    thrust::cuda_cub::execute_on_stream_base
-> cuda_par_info;
+using cuda_par_info = policy_info<thrust::system::cuda::detail::par_t, thrust::cuda_cub::execute_on_stream_base>;
 #endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-typedef policy_info<
-    thrust::system::hip::detail::par_t,
-    thrust::hip_rocprim::execute_on_stream_base
-> hip_par_info;
+using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
 #endif
 
 SimpleUnitTest<

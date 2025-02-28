@@ -35,7 +35,7 @@ THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 // in-place
-  
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class InputIt,
           class StencilIt,
@@ -47,21 +47,25 @@ remove_if(execution_policy<Derived> &policy,
           StencilIt                  stencil,
           Predicate                  predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, stencil, first,
-    thrust::detail::not1(predicate));
+  THRUST_CDP_DISPATCH((return cuda_cub::detail::copy_if<cuda_cub::detail::InputMayAliasOutput::yes>(
+                                policy, first, last, stencil, first, thrust::not_fn(predicate));),
+                      (return thrust::remove_if(cvt_to_seq(derived_cast(policy)), first, last, stencil, predicate);));
 }
 
+THRUST_EXEC_CHECK_DISABLE
 template <class Derived,
           class InputIt,
           class Predicate>
-InputIt _CCCL_HOST_DEVICE
+InputIt THRUST_HOST_DEVICE
 remove_if(execution_policy<Derived> &policy,
           InputIt                    first,
           InputIt                    last,
           Predicate                  predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, first,
-    thrust::detail::not1(predicate));
+  THRUST_CDP_DISPATCH(
+    (return cuda_cub::detail::copy_if<cuda_cub::detail::InputMayAliasOutput::yes>(
+              policy, first, last, static_cast<cub::NullType*>(nullptr), first, thrust::not_fn(predicate));),
+    (return thrust::remove_if(cvt_to_seq(derived_cast(policy)), first, last, predicate);));
 }
 
 
@@ -94,8 +98,7 @@ remove_copy_if(execution_policy<Derived> &policy,
                OutputIt                   result,
                Predicate                  predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, stencil, result,
-    thrust::detail::not1(predicate));
+  return cuda_cub::copy_if(policy, first, last, stencil, result, thrust::not_fn(predicate));
 }
 
 template <class Derived,
@@ -109,8 +112,7 @@ remove_copy_if(execution_policy<Derived> &policy,
                OutputIt                   result,
                Predicate                  predicate)
 {
-  return cuda_cub::copy_if(policy, first, last, result,
-    thrust::detail::not1(predicate));
+  return cuda_cub::copy_if(policy, first, last, result, thrust::not_fn(predicate));
 }
 
 

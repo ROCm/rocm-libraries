@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -833,7 +833,7 @@ benchmark::BenchmarkReporter* ChooseCustomReporter()
 {
     // benchmark::BenchmarkReporter is polymorphic as it has a virtual
     // function which allows us to use dynamic_cast to detect the derived type.
-    typedef benchmark::BenchmarkReporter* PtrType;
+    using PtrType = benchmark::BenchmarkReporter*;
     PtrType default_display_reporter = benchmark::CreateDefaultDisplayReporter();
 
     if (IsType<benchmark::CSVReporter>(default_display_reporter))

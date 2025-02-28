@@ -33,8 +33,7 @@ namespace system
 {
 
 
-/*! \addtogroup system_diagnostics
- *  \ingroup system
+/*! \addtogroup system
  *  \{
  */
 
@@ -141,9 +140,15 @@ enum errc_t
 } // end namespace errc
 
 
+/*! \cond
+ */
+
 /*! Specialization of \p is_error_condition_enum for \p errc::errc_t
  */
 template<> struct is_error_condition_enum<errc::errc_t> : public thrust::detail::true_type {};
+
+/*! \endcond
+ */
 
 
 // [19.5.1.1] class error_category
@@ -493,7 +498,7 @@ inline bool operator!=(const error_condition &lhs, const error_code &rhs);
  */
 inline bool operator!=(const error_condition &lhs, const error_condition &rhs);
 
-/*! \} // end system_diagnostics
+/*! \} // end system
  */
 
 

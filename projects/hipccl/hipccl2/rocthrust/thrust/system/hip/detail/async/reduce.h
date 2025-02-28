@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -86,7 +86,7 @@ auto async_reduce_n(
     , init
     , n
     , op
-    , NULL // Null stream, just for sizing.
+    , nullptr // Null stream, just for sizing.
     , THRUST_HIP_DEBUG_SYNC_FLAG
     )
   , "after reduction sizing"
@@ -94,7 +94,7 @@ auto async_reduce_n(
 
   // Allocate temporary storage.
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, sizeof(U) + tmp_size
   );
 
@@ -246,7 +246,7 @@ auto async_reduce_into_n(
 
   // Allocate temporary storage.
 
-  auto content = uninitialized_allocate_unique_n<thrust::detail::uint8_t>(
+  auto content = uninitialized_allocate_unique_n<std::uint8_t>(
     device_alloc, tmp_size
   );
 

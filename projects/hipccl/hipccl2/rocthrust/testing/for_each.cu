@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ class mark_present_for_each
 template <class Vector>
 void TestForEachSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector input(5);
     Vector output(7, (T) 0);
@@ -105,7 +105,7 @@ DECLARE_UNITTEST(TestForEachDispatchImplicit);
 template <class Vector>
 void TestForEachNSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector input(5);
     Vector output(7, (T) 0);

@@ -49,7 +49,7 @@ THRUST_HOST_DEVICE
                                    ForwardIterator last,
                                    Predicate pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   // copy input to temp buffer
   thrust::detail::temporary_array<InputType,DerivedPolicy> temp(exec, first, last);
@@ -76,7 +76,7 @@ THRUST_HOST_DEVICE
                                    InputIterator stencil,
                                    Predicate pred)
 {
-  typedef typename thrust::iterator_traits<ForwardIterator>::value_type InputType;
+  using InputType = typename thrust::iterator_traits<ForwardIterator>::value_type;
 
   // copy input to temp buffer
   thrust::detail::temporary_array<InputType,DerivedPolicy> temp(exec, first, last);
@@ -108,7 +108,7 @@ THRUST_HOST_DEVICE
                           OutputIterator2 out_false,
                           Predicate pred)
 {
-  thrust::detail::unary_negate<Predicate> not_pred(pred);
+  auto not_pred = thrust::not_fn(pred);
 
   // remove_copy_if the true partition to out_true
   OutputIterator1 end_of_true_partition = thrust::remove_copy_if(exec, first, last, out_true, not_pred);
@@ -136,7 +136,7 @@ THRUST_HOST_DEVICE
                           OutputIterator2 out_false,
                           Predicate pred)
 {
-  thrust::detail::unary_negate<Predicate> not_pred(pred);
+  auto not_pred = thrust::not_fn(pred);
 
   // remove_copy_if the true partition to out_true
   OutputIterator1 end_of_true_partition = thrust::remove_copy_if(exec, first, last, stencil, out_true, not_pred);
@@ -237,8 +237,8 @@ THRUST_HOST_DEVICE
                       Predicate pred)
 {
   return thrust::is_sorted(exec,
-                           thrust::make_transform_iterator(first, thrust::detail::not1(pred)),
-                           thrust::make_transform_iterator(last,  thrust::detail::not1(pred)));
+                           thrust::make_transform_iterator(first, thrust::not_fn(pred)),
+                           thrust::make_transform_iterator(last,  thrust::not_fn(pred)));
 } // end is_partitioned()
 
 

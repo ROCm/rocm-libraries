@@ -8,7 +8,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
 
 #include <thrust/detail/preprocessor.h>

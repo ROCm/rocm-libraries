@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 template <class Vector>
 void TestIsSortedSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(4);
     v[0] = 0; v[1] = 5; v[2] = 8; v[3] = 0;
@@ -74,7 +74,7 @@ DECLARE_VECTOR_UNITTEST(TestIsSortedRepeatedElements);
 template <class Vector>
 void TestIsSorted(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     const size_t n = (1 << 16) + 13;
 

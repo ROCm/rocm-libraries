@@ -1,3 +1,5 @@
+:orphan:
+
 .. meta::
     :description: rocThrust documentation and API reference
     :keywords: rocThrust, ROCm, API, reference, execution policy
@@ -17,7 +19,7 @@ rocThrust's HIP backend provides the following:
 * ``hip_rocprim::par_nosync`` - This policy tells Thrust that algorithms may avoid synchronization
   barriers when it is possible to do so. As a result, algorithms may be launched asynchronously with
   respect to the host. This can allow you to perform other host-side work while the algorithms
-  are running on the device. If you use this policy, you must synchronize before accessing results 
+  are running on the device. If you use this policy, you must synchronize before accessing results
   on the host side.
 
 The example below illustrates the behaviour of these two policies.

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -115,7 +115,7 @@ DECLARE_UNITTEST(TestUninitializedFillNDispatchImplicit);
 template <class Vector>
 void TestUninitializedFillPOD(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -200,7 +200,7 @@ struct TestUninitializedFillNonPOD
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T                 = CopyConstructTest;
     thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
 
     T exemplar;
@@ -230,7 +230,7 @@ DECLARE_UNITTEST(TestUninitializedFillNonPOD);
 template <class Vector>
 void TestUninitializedFillNPOD(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -286,7 +286,7 @@ struct TestUninitializedFillNNonPOD
 {
   void operator()(const size_t)
   {
-    typedef CopyConstructTest T;
+    using T                 = CopyConstructTest;
     thrust::device_ptr<T> v = thrust::device_malloc<T>(5);
 
     T exemplar;

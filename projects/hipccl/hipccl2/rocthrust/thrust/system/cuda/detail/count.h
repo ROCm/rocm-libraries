@@ -47,11 +47,8 @@ count_if(execution_policy<Derived> &policy,
          InputIt                    last,
          UnaryPred                  unary_pred)
 {
-  typedef typename iterator_traits<InputIt>::difference_type size_type;
-  typedef transform_input_iterator_t<size_type,
-                                     InputIt,
-                                     UnaryPred>
-      flag_iterator_t;
+  using size_type       = typename iterator_traits<InputIt>::difference_type;
+  using flag_iterator_t = transform_input_iterator_t<size_type, InputIt, UnaryPred>;
 
   return cuda_cub::reduce_n(policy,
                             flag_iterator_t(first, unary_pred),

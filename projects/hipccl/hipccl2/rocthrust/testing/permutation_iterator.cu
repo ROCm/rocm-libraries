@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/iterator/permutation_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -9,8 +26,8 @@
 template <class Vector>
 void TestPermutationIteratorSimple(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator   Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector source(8);
     Vector indices(4);
@@ -59,7 +76,7 @@ static_assert(std::is_trivially_copyable<thrust::permutation_iterator<int*, int*
 template <class Vector>
 void TestPermutationIteratorGather(void)
 {
-    typedef typename Vector::iterator Iterator;
+    using Iterator = typename Vector::iterator;
 
     Vector source(8);
     Vector indices(4);
@@ -87,7 +104,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPermutationIteratorGather);
 template <class Vector>
 void TestPermutationIteratorScatter(void)
 {
-    typedef typename Vector::iterator Iterator;
+    using Iterator = typename Vector::iterator;
 
     Vector source(4, 10);
     Vector indices(4);
@@ -146,8 +163,8 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestMakePermutationIterator);
 template <typename Vector>
 void TestPermutationIteratorReduce(void)
 {
-    typedef typename Vector::value_type T;
-    typedef typename Vector::iterator Iterator;
+    using T        = typename Vector::value_type;
+    using Iterator = typename Vector::iterator;
 
     Vector source(8);
     Vector indices(4);
@@ -180,11 +197,11 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestPermutationIteratorReduce);
 
 void TestPermutationIteratorHostDeviceGather(void)
 {
-    typedef int T;
-    typedef thrust::host_vector<T> HostVector;
-    typedef thrust::host_vector<T> DeviceVector;
-    typedef HostVector::iterator   HostIterator;
-    typedef DeviceVector::iterator DeviceIterator;
+    using T              = int;
+    using HostVector     = thrust::host_vector<T>;
+    using DeviceVector   = thrust::host_vector<T>;
+    using HostIterator   = HostVector::iterator;
+    using DeviceIterator = DeviceVector::iterator;
 
     HostVector h_source(8);
     HostVector h_indices(4);
@@ -226,11 +243,11 @@ DECLARE_UNITTEST(TestPermutationIteratorHostDeviceGather);
 
 void TestPermutationIteratorHostDeviceScatter(void)
 {
-    typedef int T;
-    typedef thrust::host_vector<T> HostVector;
-    typedef thrust::host_vector<T> DeviceVector;
-    typedef HostVector::iterator   HostIterator;
-    typedef DeviceVector::iterator DeviceIterator;
+    using T              = int;
+    using HostVector     = thrust::host_vector<T>;
+    using DeviceVector   = thrust::host_vector<T>;
+    using HostIterator   = HostVector::iterator;
+    using DeviceIterator = DeviceVector::iterator;
 
     HostVector h_source(4,10);
     HostVector h_indices(4);

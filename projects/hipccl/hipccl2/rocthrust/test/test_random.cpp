@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -166,7 +166,7 @@ struct ValidateEngineUnequal
 template <typename Distribution, typename Engine>
 struct ValidateDistributionMin
 {
-    typedef Engine random_engine;
+    using random_engine = Engine;
 
     __host__ __device__ ValidateDistributionMin(const Distribution& dd)
         : d(dd)
@@ -193,7 +193,7 @@ struct ValidateDistributionMin
 template <typename Distribution, typename Engine>
 struct ValidateDistributionMax
 {
-    typedef Engine random_engine;
+    using random_engine = Engine;
 
     __host__ __device__ ValidateDistributionMax(const Distribution& dd)
         : d(dd)
@@ -246,7 +246,7 @@ TEST(RandomTests, UsingHip)
     ASSERT_EQ(THRUST_DEVICE_SYSTEM, THRUST_DEVICE_SYSTEM_HIP);
 }
 
-template <typename Engine, thrust::detail::uint64_t value_10000>
+template <typename Engine, std::uint64_t value_10000>
 void TestEngineValidation(void)
 {
     // test host
@@ -360,7 +360,7 @@ void TestEngineUnequal(void)
 
 TEST(RandomTests, TestRanlux24BaseValidation)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -369,7 +369,7 @@ TEST(RandomTests, TestRanlux24BaseValidation)
 
 TEST(RandomTests, TestRanlux24BaseMin)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -378,7 +378,7 @@ TEST(RandomTests, TestRanlux24BaseMin)
 
 TEST(RandomTests, TestRanlux24BaseMax)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -387,7 +387,7 @@ TEST(RandomTests, TestRanlux24BaseMax)
 
 TEST(RandomTests, TestRanlux24BaseSaveRestore)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -396,7 +396,7 @@ TEST(RandomTests, TestRanlux24BaseSaveRestore)
 
 TEST(RandomTests, TestRanlux24BaseEqual)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -405,7 +405,7 @@ TEST(RandomTests, TestRanlux24BaseEqual)
 
 TEST(RandomTests, TestRanlux24BaseUnequal)
 {
-    typedef thrust::random::ranlux24_base Engine;
+    using Engine = thrust::random::ranlux24_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -414,7 +414,7 @@ TEST(RandomTests, TestRanlux24BaseUnequal)
 
 TEST(RandomTests, TestRanlux48BaseValidation)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -423,7 +423,7 @@ TEST(RandomTests, TestRanlux48BaseValidation)
 
 TEST(RandomTests, TestRanlux48BaseMin)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -432,7 +432,7 @@ TEST(RandomTests, TestRanlux48BaseMin)
 
 TEST(RandomTests, TestRanlux48BaseMax)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -441,7 +441,7 @@ TEST(RandomTests, TestRanlux48BaseMax)
 
 TEST(RandomTests, TestRanlux48BaseSaveRestore)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -450,7 +450,7 @@ TEST(RandomTests, TestRanlux48BaseSaveRestore)
 
 TEST(RandomTests, TestRanlux48BaseEqual)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -459,7 +459,7 @@ TEST(RandomTests, TestRanlux48BaseEqual)
 
 TEST(RandomTests, TestRanlux48BaseUnequal)
 {
-    typedef thrust::random::ranlux48_base Engine;
+    using Engine = thrust::random::ranlux48_base;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -468,7 +468,7 @@ TEST(RandomTests, TestRanlux48BaseUnequal)
 
 TEST(RandomTests, TestMinstdRandValidation)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -477,7 +477,7 @@ TEST(RandomTests, TestMinstdRandValidation)
 
 TEST(RandomTests, TestMinstdRandMin)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -486,7 +486,7 @@ TEST(RandomTests, TestMinstdRandMin)
 
 TEST(RandomTests, TestMinstdRandMax)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -495,7 +495,7 @@ TEST(RandomTests, TestMinstdRandMax)
 
 TEST(RandomTests, TestMinstdRandSaveRestore)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -504,7 +504,7 @@ TEST(RandomTests, TestMinstdRandSaveRestore)
 
 TEST(RandomTests, TestMinstdRandEqual)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -513,7 +513,7 @@ TEST(RandomTests, TestMinstdRandEqual)
 
 TEST(RandomTests, TestMinstdRandUnequal)
 {
-    typedef thrust::random::minstd_rand Engine;
+    using Engine = thrust::random::minstd_rand;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -522,7 +522,7 @@ TEST(RandomTests, TestMinstdRandUnequal)
 
 TEST(RandomTests, TestMinstdRand0Validation)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -531,7 +531,7 @@ TEST(RandomTests, TestMinstdRand0Validation)
 
 TEST(RandomTests, TestMinstdRand0Min)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -540,7 +540,7 @@ TEST(RandomTests, TestMinstdRand0Min)
 
 TEST(RandomTests, TestMinstdRand0Max)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -549,7 +549,7 @@ TEST(RandomTests, TestMinstdRand0Max)
 
 TEST(RandomTests, TestMinstdRand0SaveRestore)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -558,7 +558,7 @@ TEST(RandomTests, TestMinstdRand0SaveRestore)
 
 TEST(RandomTests, TestMinstdRand0Equal)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -567,7 +567,7 @@ TEST(RandomTests, TestMinstdRand0Equal)
 
 TEST(RandomTests, TestMinstdRand0Unequal)
 {
-    typedef thrust::random::minstd_rand0 Engine;
+    using Engine = thrust::random::minstd_rand0;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -576,7 +576,7 @@ TEST(RandomTests, TestMinstdRand0Unequal)
 
 TEST(RandomTests, TestTaus88Validation)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -585,7 +585,7 @@ TEST(RandomTests, TestTaus88Validation)
 
 TEST(RandomTests, TestTaus88Min)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -594,7 +594,7 @@ TEST(RandomTests, TestTaus88Min)
 
 TEST(RandomTests, TestTaus88Max)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -603,7 +603,7 @@ TEST(RandomTests, TestTaus88Max)
 
 TEST(RandomTests, TestTaus88SaveRestore)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -612,7 +612,7 @@ TEST(RandomTests, TestTaus88SaveRestore)
 
 TEST(RandomTests, TestTaus88Equal)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -621,7 +621,7 @@ TEST(RandomTests, TestTaus88Equal)
 
 TEST(RandomTests, TestTaus88Unequal)
 {
-    typedef thrust::random::taus88 Engine;
+    using Engine = thrust::random::taus88;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -630,7 +630,7 @@ TEST(RandomTests, TestTaus88Unequal)
 
 TEST(RandomTests, TestRanlux24Validation)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -639,7 +639,7 @@ TEST(RandomTests, TestRanlux24Validation)
 
 TEST(RandomTests, TestRanlux24Min)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -648,7 +648,7 @@ TEST(RandomTests, TestRanlux24Min)
 
 TEST(RandomTests, TestRanlux24Max)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -657,7 +657,7 @@ TEST(RandomTests, TestRanlux24Max)
 
 TEST(RandomTests, TestRanlux24SaveRestore)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -666,7 +666,7 @@ TEST(RandomTests, TestRanlux24SaveRestore)
 
 TEST(RandomTests, TestRanlux24Equal)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -675,7 +675,7 @@ TEST(RandomTests, TestRanlux24Equal)
 
 TEST(RandomTests, TestRanlux24Unequal)
 {
-    typedef thrust::random::ranlux24 Engine;
+    using Engine = thrust::random::ranlux24;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -684,7 +684,7 @@ TEST(RandomTests, TestRanlux24Unequal)
 
 TEST(RandomTests, TestRanlux48Validation)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -693,7 +693,7 @@ TEST(RandomTests, TestRanlux48Validation)
 
 TEST(RandomTests, TestRanlux48Min)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -702,7 +702,7 @@ TEST(RandomTests, TestRanlux48Min)
 
 TEST(RandomTests, TestRanlux48Max)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -711,7 +711,7 @@ TEST(RandomTests, TestRanlux48Max)
 
 TEST(RandomTests, TestRanlux48SaveRestore)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -720,7 +720,7 @@ TEST(RandomTests, TestRanlux48SaveRestore)
 
 TEST(RandomTests, TestRanlux48Equal)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -729,7 +729,7 @@ TEST(RandomTests, TestRanlux48Equal)
 
 TEST(RandomTests, TestRanlux48Unequal)
 {
-    typedef thrust::random::ranlux48 Engine;
+    using Engine = thrust::random::ranlux48;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -739,7 +739,7 @@ TEST(RandomTests, TestRanlux48Unequal)
 template <typename Distribution, typename Validator>
 void ValidateDistributionCharacteristic(void)
 {
-    typedef typename Validator::random_engine Engine;
+    using Engine = typename Validator::random_engine;
 
     // test default-constructed Distribution
 
@@ -820,8 +820,8 @@ void TestDistributionSaveRestore(void)
 
 TEST(RandomTests, TestUniformIntDistributionMin)
 {
-    typedef thrust::random::uniform_int_distribution<int>          int_dist;
-    typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
+    using int_dist  = thrust::random::uniform_int_distribution<int>;
+    using uint_dist = thrust::random::uniform_int_distribution<unsigned int>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -833,8 +833,8 @@ TEST(RandomTests, TestUniformIntDistributionMin)
 
 TEST(RandomTests, TestUniformIntDistributionMax)
 {
-    typedef thrust::random::uniform_int_distribution<int>          int_dist;
-    typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
+    using int_dist  = thrust::random::uniform_int_distribution<int>;
+    using uint_dist = thrust::random::uniform_int_distribution<unsigned int>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -846,8 +846,8 @@ TEST(RandomTests, TestUniformIntDistributionMax)
 
 TEST(RandomTests, TestUniformIntDistributionSaveRestore)
 {
-    typedef thrust::random::uniform_int_distribution<int>          int_dist;
-    typedef thrust::random::uniform_int_distribution<unsigned int> uint_dist;
+    using int_dist  = thrust::random::uniform_int_distribution<int>;
+    using uint_dist = thrust::random::uniform_int_distribution<unsigned int>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -857,8 +857,8 @@ TEST(RandomTests, TestUniformIntDistributionSaveRestore)
 
 TEST(RandomTests, TestUniformRealDistributionMin)
 {
-    typedef thrust::random::uniform_real_distribution<float>  float_dist;
-    typedef thrust::random::uniform_real_distribution<double> double_dist;
+    using float_dist  = thrust::random::uniform_real_distribution<float>;
+    using double_dist = thrust::random::uniform_real_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -870,8 +870,8 @@ TEST(RandomTests, TestUniformRealDistributionMin)
 
 TEST(RandomTests, TestUniformRealDistributionMax)
 {
-    typedef thrust::random::uniform_real_distribution<float>  float_dist;
-    typedef thrust::random::uniform_real_distribution<double> double_dist;
+    using float_dist  = thrust::random::uniform_real_distribution<float>;
+    using double_dist = thrust::random::uniform_real_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -883,8 +883,8 @@ TEST(RandomTests, TestUniformRealDistributionMax)
 
 TEST(RandomTests, TestUniformRealDistributionSaveRestore)
 {
-    typedef thrust::random::uniform_real_distribution<float>  float_dist;
-    typedef thrust::random::uniform_real_distribution<double> double_dist;
+    using float_dist  = thrust::random::uniform_real_distribution<float>;
+    using double_dist = thrust::random::uniform_real_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -894,8 +894,8 @@ TEST(RandomTests, TestUniformRealDistributionSaveRestore)
 
 TEST(RandomTests, TestNormalDistributionMin)
 {
-    typedef thrust::random::normal_distribution<float>  float_dist;
-    typedef thrust::random::normal_distribution<double> double_dist;
+    using float_dist  = thrust::random::normal_distribution<float>;
+    using double_dist = thrust::random::normal_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -907,8 +907,8 @@ TEST(RandomTests, TestNormalDistributionMin)
 
 TEST(RandomTests, TestNormalDistributionMax)
 {
-    typedef thrust::random::normal_distribution<float>  float_dist;
-    typedef thrust::random::normal_distribution<double> double_dist;
+    using float_dist  = thrust::random::normal_distribution<float>;
+    using double_dist = thrust::random::normal_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -920,8 +920,8 @@ TEST(RandomTests, TestNormalDistributionMax)
 
 TEST(RandomTests, TestNormalDistributionSaveRestore)
 {
-    typedef thrust::random::normal_distribution<float>  float_dist;
-    typedef thrust::random::normal_distribution<double> double_dist;
+    using float_dist  = thrust::random::normal_distribution<float>;
+    using double_dist = thrust::random::normal_distribution<double>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 

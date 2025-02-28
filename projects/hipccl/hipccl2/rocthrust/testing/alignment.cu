@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 #include <thrust/detail/alignment.h>
 
@@ -190,7 +207,7 @@ DECLARE_UNITTEST(test_alignment_of);
 template <std::size_t Align>
 void test_aligned_type_instantiation()
 {
-    typedef typename thrust::detail::aligned_type<Align>::type type;
+    using type = typename thrust::detail::aligned_type<Align>::type;
     ASSERT_GEQUAL(sizeof(type), 1lu);
     ASSERT_EQUAL(alignof(type), Align);
     ASSERT_EQUAL(thrust::detail::alignment_of<type>::value, Align);

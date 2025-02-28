@@ -17,7 +17,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
 
 #include <thrust/system/detail/generic/per_device_resource.h>
@@ -57,7 +56,7 @@ MR * get_per_device_resource(const thrust::detail::execution_policy_base<Derived
 template<typename T, typename Upstream, typename ExecutionPolicy>
 class per_device_allocator : public thrust::mr::allocator<T, Upstream>
 {
-    typedef thrust::mr::allocator<T, Upstream> base;
+    using base = thrust::mr::allocator<T, Upstream>;
 
 public:
     /*! The \p rebind metafunction provides the type of an \p per_device_allocator instantiated with another type.
@@ -69,7 +68,7 @@ public:
     {
         /*! The typedef \p other gives the type of the rebound \p per_device_allocator.
          */
-        typedef per_device_allocator<U, Upstream, ExecutionPolicy> other;
+        using other = per_device_allocator<U, Upstream, ExecutionPolicy>;
     };
 
     /*! Default constructor. Uses \p get_global_resource to get the global instance of \p Upstream and initializes the

@@ -37,7 +37,6 @@
 
 #include <thrust/iterator/iterator_traits.h>
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/temporary_array.h>
@@ -50,6 +49,8 @@
 
 #include <cub/device/dispatch/dispatch_scan_by_key.cuh>
 #include <cub/util_type.cuh>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
@@ -96,7 +97,7 @@ ValuesOutIt inclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             cub::NullType,
-                                            thrust::detail::int32_t,
+                                            std::int32_t,
                                             AccumT>;
   using Dispatch64 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -104,7 +105,7 @@ ValuesOutIt inclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             cub::NullType,
-                                            thrust::detail::int64_t,
+                                            std::int64_t,
                                             AccumT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -135,7 +136,7 @@ ValuesOutIt inclusive_scan_by_key_n(
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
 
@@ -206,7 +207,7 @@ ValuesOutIt exclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             InitValueT,
-                                            thrust::detail::int32_t,
+                                            std::int32_t,
                                             InitValueT>;
   using Dispatch64 = cub::DispatchScanByKey<KeysInUnwrapIt,
                                             ValuesInUnwrapIt,
@@ -214,7 +215,7 @@ ValuesOutIt exclusive_scan_by_key_n(
                                             EqualityOpT,
                                             ScanOpT,
                                             InitValueT,
-                                            thrust::detail::int64_t,
+                                            std::int64_t,
                                             InitValueT>;
 
   cudaStream_t stream = thrust::cuda_cub::stream(policy);
@@ -245,7 +246,7 @@ ValuesOutIt exclusive_scan_by_key_n(
   // Run scan:
   {
     // Allocate temporary storage:
-    thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp{
+    thrust::detail::temporary_array<std::uint8_t, Derived> tmp{
       policy,
       tmp_size};
 

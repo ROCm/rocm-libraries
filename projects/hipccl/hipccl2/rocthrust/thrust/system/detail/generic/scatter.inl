@@ -65,7 +65,7 @@ THRUST_HOST_DEVICE
                   RandomAccessIterator output)
 {
   // default predicate is identity
-  typedef typename thrust::iterator_value<InputIterator3>::type StencilType;
+  using StencilType = typename thrust::iterator_value<InputIterator3>::type;
   thrust::scatter_if(exec, first, last, map, stencil, output, thrust::identity<StencilType>());
 } // end scatter_if()
 
@@ -85,7 +85,7 @@ THRUST_HOST_DEVICE
                   RandomAccessIterator output,
                   Predicate pred)
 {
-  typedef typename thrust::iterator_value<InputIterator1>::type InputType;
+  using InputType = typename thrust::iterator_value<InputIterator1>::type;
   thrust::transform_if(exec, first, last, stencil, thrust::make_permutation_iterator(output, map), thrust::identity<InputType>(), pred);
 } // end scatter_if()
 

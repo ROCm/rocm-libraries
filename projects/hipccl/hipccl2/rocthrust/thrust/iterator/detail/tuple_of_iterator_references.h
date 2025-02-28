@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright (c) 2024, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ public:
   inline THRUST_HOST_DEVICE tuple_of_iterator_references&
   operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived>& other)
   {
-    typedef thrust::tuple<Us...> tuple_type;
+    using tuple_type = thrust::tuple<Us...>;
 
     // XXX perhaps this could be accelerated
     super_t::operator=(tuple_type{other});
@@ -187,7 +187,7 @@ template<
     : public thrust::tuple<Ts...>
 {
   private:
-    typedef thrust::tuple<Ts...> super_t;
+    using super_t = thrust::tuple<Ts...>;
 
   public:
     // allow implicit construction from tuple<refs>
@@ -228,7 +228,7 @@ template<
     tuple_of_iterator_references &
     operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived> &other)
     {
-      typedef thrust::tuple<Us...> tuple_type;
+      using tuple_type = thrust::tuple<Us...>;
 
       // XXX perhaps this could be accelerated
       tuple_type other_tuple = other;

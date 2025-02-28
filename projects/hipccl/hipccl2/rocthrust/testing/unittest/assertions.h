@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #pragma once
 
 #include <thrust/complex.h>
@@ -99,17 +116,17 @@ double const DEFAULT_ABSOLUTE_TOL = 1e-4;
 template<typename T>
   struct value_type
 {
-  typedef typename THRUST_NS_QUALIFIER::detail::remove_const<
-    typename THRUST_NS_QUALIFIER::detail::remove_reference<
-      T
-    >::type
-  >::type type;
+  using type = typename THRUST_NS_QUALIFIER::detail::remove_const<
+                        typename THRUST_NS_QUALIFIER::detail::remove_reference<
+                        T
+                        >::type
+                      >::type;
 };
 
 template<typename T>
   struct value_type< THRUST_NS_QUALIFIER::device_reference<T> >
 {
-  typedef typename value_type<T>::type type;
+  using type = typename value_type<T>::type;
 };
 
 ////
@@ -378,8 +395,8 @@ template <typename ForwardIterator1, typename ForwardIterator2, typename BinaryP
 void assert_equal(ForwardIterator1 first1, ForwardIterator1 last1, ForwardIterator2 first2, ForwardIterator2 last2, BinaryPredicate op,
                   const std::string& filename = "unknown", int lineno = -1)
 {
-    typedef typename THRUST_NS_QUALIFIER::iterator_difference<ForwardIterator1>::type difference_type;
-    typedef typename THRUST_NS_QUALIFIER::iterator_value<ForwardIterator1>::type InputType;
+    using difference_type = typename THRUST_NS_QUALIFIER::iterator_difference<ForwardIterator1>::type;
+    using InputType       = typename THRUST_NS_QUALIFIER::iterator_value<ForwardIterator1>::type;
 
     bool failure = false;
 
@@ -452,7 +469,7 @@ template <typename ForwardIterator1, typename ForwardIterator2>
 void assert_equal(ForwardIterator1 first1, ForwardIterator1 last1, ForwardIterator2 first2, ForwardIterator2 last2,
                   const std::string& filename = "unknown", int lineno = -1)
 {
-    typedef typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type InputType;
+    using InputType = typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type;
     assert_equal(first1, last1, first2, last2, THRUST_NS_QUALIFIER::equal_to<InputType>(), filename, lineno);
 }
 
@@ -462,7 +479,7 @@ void assert_almost_equal(ForwardIterator1 first1, ForwardIterator1 last1, Forwar
                          const std::string& filename = "unknown", int lineno = -1,
                          const double a_tol = DEFAULT_ABSOLUTE_TOL, const double r_tol = DEFAULT_RELATIVE_TOL)
 {
-    typedef typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type InputType;
+    using InputType = typename THRUST_NS_QUALIFIER::iterator_traits<ForwardIterator1>::value_type;
     assert_equal(first1, last1, first2, last2, almost_equal_to<InputType>(a_tol, r_tol), filename, lineno);
 }
 

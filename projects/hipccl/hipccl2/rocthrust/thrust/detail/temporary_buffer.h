@@ -39,7 +39,8 @@ THRUST_HOST_DEVICE
   // XXX should use a hypothetical thrust::static_pointer_cast here
   thrust::pointer<T,DerivedPolicy> ptr = thrust::pointer<T,DerivedPolicy>(static_cast<T*>(thrust::raw_pointer_cast(p.first)));
 
-  typedef thrust::pair<thrust::pointer<T,DerivedPolicy>, typename thrust::pointer<T,DerivedPolicy>::difference_type> result_type;
+  using result_type =
+    thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>;
   return result_type(ptr, p.second);
 } // end down_cast_pair()
 

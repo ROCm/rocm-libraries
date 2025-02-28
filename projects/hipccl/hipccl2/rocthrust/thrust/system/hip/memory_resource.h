@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018-2020 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -43,8 +43,8 @@ namespace hip
 namespace detail
 {
 
-    typedef hipError_t (*allocation_fn)(void **, std::size_t);
-    typedef hipError_t (*deallocation_fn)(void *);
+    using allocation_fn   = hipError_t (*)(void **, std::size_t);
+    using deallocation_fn = hipError_t (*)(void *);
 
     template<allocation_fn Alloc, deallocation_fn Dealloc, typename Pointer>
     class hip_memory_resource final : public mr::memory_resource<Pointer>
@@ -92,15 +92,12 @@ namespace detail
         return ::hipHostMalloc(ptr, bytes, hipHostMallocMapped);
     }
 
-    typedef detail::hip_memory_resource<hipMalloc, hipFree,
-        thrust::hip_rocprim::pointer<void> >
-        device_memory_resource;
-    typedef detail::hip_memory_resource<detail::hipMallocManaged, hipFree,
-        thrust::hip::universal_pointer<void> >
-        managed_memory_resource;
-    typedef detail::hip_memory_resource<hipHostMalloc, hipHostFree,
-        thrust::hip::universal_pointer<void> >
-        pinned_memory_resource;
+    using device_memory_resource  = detail::hip_memory_resource<hipMalloc, hipFree,
+                                    thrust::hip_rocprim::pointer<void> >;
+    using managed_memory_resource = detail::hip_memory_resource<detail::hipMallocManaged, hipFree,
+                                    thrust::hip::universal_pointer<void> >;
+    using pinned_memory_resource  = detail::hip_memory_resource<hipHostMalloc, hipHostFree,
+                                    thrust::hip::universal_pointer<void> >;
 
 } // end detail
 //! \endcond
@@ -108,17 +105,17 @@ namespace detail
 /*! The memory resource for the HIP system. Uses <tt>hipMalloc</tt> and wraps
  *  the result with \p hip::pointer.
  */
-typedef detail::device_memory_resource memory_resource;
+using memory_resource = detail::device_memory_resource;
 /*! The universal memory resource for the HIP system. Uses
  *  <tt>hipMallocManaged</tt> and wraps the result with
  *  \p hip::universal_pointer.
  */
-typedef detail::managed_memory_resource universal_memory_resource;
+using universal_memory_resource = detail::managed_memory_resource;
 /*! The host pinned memory resource for the HIP system. Uses
  *  <tt>hipMallocHost</tt> and wraps the result with \p
  *  hip::universal_pointer.
  */
-typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
+using universal_host_pinned_memory_resource = detail::pinned_memory_resource;
 
 } // end hip
 } // end system

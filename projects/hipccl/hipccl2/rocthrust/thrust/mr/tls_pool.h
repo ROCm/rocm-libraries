@@ -21,7 +21,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
 
 #include <thrust/mr/pool.h>
 
@@ -42,7 +41,7 @@ namespace mr
  */
 template<typename Upstream, typename Bookkeeper>
 THRUST_HOST
-thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstream = NULL)
+thrust::mr::unsynchronized_pool_resource<Upstream> & tls_pool(Upstream * upstream = nullptr)
 {
     static thread_local auto adaptor = [&]{
         assert(upstream);

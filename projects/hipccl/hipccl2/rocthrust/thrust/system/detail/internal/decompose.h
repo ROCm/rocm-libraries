@@ -30,7 +30,7 @@ namespace internal
     class index_range
     {
       public:
-        typedef IndexType index_type;
+        using index_type = IndexType;
 
         THRUST_HOST_DEVICE
           index_range(index_type begin, index_type end) : m_begin(begin), m_end(end) {}
@@ -53,8 +53,8 @@ namespace internal
     class uniform_decomposition
     {
       public:
-        typedef IndexType               index_type;
-        typedef index_range<index_type> range_type;
+        using index_type = IndexType;
+        using range_type = index_range<index_type>;
 
         THRUST_HOST_DEVICE
         uniform_decomposition(index_type N, index_type granularity, index_type max_intervals)

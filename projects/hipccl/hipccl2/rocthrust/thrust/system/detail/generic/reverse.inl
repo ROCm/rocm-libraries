@@ -40,7 +40,7 @@ THRUST_HOST_DEVICE
                BidirectionalIterator first,
                BidirectionalIterator last)
 {
-  typedef typename thrust::iterator_difference<BidirectionalIterator>::type difference_type;
+  using difference_type = typename thrust::iterator_difference<BidirectionalIterator>::type;
 
   // find the midpoint of [first,last)
   difference_type N = thrust::distance(first, last);

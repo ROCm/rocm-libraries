@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@
 
 void TestCopyNFromConstIterator(void)
 {
-    typedef int T;
+    using T = int;
 
     std::vector<T> v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -60,7 +60,7 @@ DECLARE_UNITTEST(TestCopyNFromConstIterator);
 
 void TestCopyNToDiscardIterator(void)
 {
-    typedef int T;
+    using T = int;
 
     thrust::host_vector<T> h_input(5, 1);
     thrust::device_vector<T> d_input = h_input;
@@ -83,7 +83,7 @@ DECLARE_UNITTEST(TestCopyNToDiscardIterator);
 template <class Vector>
 void TestCopyNMatchingTypes(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v(5);
     v[0] = 0; v[1] = 1; v[2] = 2; v[3] = 3; v[4] = 4;
@@ -165,7 +165,7 @@ DECLARE_UNITTEST(TestCopyNVectorBool);
 template <class Vector>
 void TestCopyNListTo(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     // copy from list to Vector
     std::list<T> l;
@@ -205,7 +205,7 @@ DECLARE_VECTOR_UNITTEST(TestCopyNListTo);
 template <typename Vector>
 void TestCopyNCountingIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     thrust::counting_iterator<T> iter(1);
 
@@ -223,7 +223,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestCopyNCountingIterator);
 template <typename Vector>
 void TestCopyNZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(4); v1[0] = 1; v1[1] = 2; v1[2] = 3; v1[3] = 4;
     Vector v2(4); v2[0] = 4; v2[1] = 5; v2[2] = 6; v2[3] = 7;
@@ -242,7 +242,7 @@ DECLARE_VECTOR_UNITTEST(TestCopyNZipIterator);
 template <typename Vector>
 void TestCopyNConstantIteratorToZipIterator(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector v1(4, T(0));
     Vector v2(4, T(0));

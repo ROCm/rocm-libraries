@@ -23,9 +23,10 @@
 
 #include <thrust/detail/config.h>
 #include <iostream>
-#include <thrust/detail/cstdint.h>
 #include <thrust/random/detail/random_core_access.h>
 #include <thrust/random/detail/linear_congruential_engine_discard.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -117,7 +118,7 @@ template<typename UIntType, UIntType a, UIntType c, UIntType m>
     /*! \typedef result_type
      *  \brief The type of the unsigned integer produced by this \p linear_congruential_engine.
      */
-    typedef UIntType result_type;
+    using result_type = UIntType;
 
     // engine characteristics
 
@@ -267,7 +268,7 @@ operator>>(std::basic_istream<CharT,Traits> &is,
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p minstd_rand0
  *        shall produce the value \c 1043618065 .
  */
-typedef linear_congruential_engine<thrust::detail::uint32_t, 16807, 0, 2147483647> minstd_rand0;
+using minstd_rand0 = linear_congruential_engine<std::uint32_t, 16807, 0, 2147483647>;
 
 
 /*! \typedef minstd_rand
@@ -276,7 +277,7 @@ typedef linear_congruential_engine<thrust::detail::uint32_t, 16807, 0, 214748364
  *  \note The 10000th consecutive invocation of a default-constructed object of type \p minstd_rand
  *        shall produce the value \c 399268537 .
  */
-typedef linear_congruential_engine<thrust::detail::uint32_t, 48271, 0, 2147483647> minstd_rand;
+using minstd_rand = linear_congruential_engine<std::uint32_t, 48271, 0, 2147483647>;
 
 /*! \} // predefined_random
  */

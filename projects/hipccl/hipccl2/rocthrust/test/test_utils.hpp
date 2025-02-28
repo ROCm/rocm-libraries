@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@
 #include <thrust/detail/event_error.h>
 
 #include "test_seed.hpp"
+#include "thrust/detail/tuple.inl"
 
 #include <algorithm>
 #include <cstdlib>
@@ -200,6 +201,35 @@ std::vector<seed_type> get_seeds()
     std::generate_n(std::back_inserter(seeds), rng_seed_count, [&](){ return rng(); });
     return seeds;
 }
+
+template<class T, class enable = void>
+struct get_default_limits;
+
+template<class T>
+struct get_default_limits<T, std::enable_if_t<std::is_integral<T>::value>>
+{
+    static inline T min()
+    {
+        return std::numeric_limits<T>::min();
+    }
+    static inline T max()
+    {
+        return std::numeric_limits<T>::max();
+    }
+};
+
+template<class T>
+struct get_default_limits<T, std::enable_if_t<std::is_floating_point<T>::value>>
+{
+    static inline T min()
+    {
+        return T(-1);
+    }
+    static inline T max()
+    {
+        return T(1);
+    }
+};
 
 template <class T>
 inline auto get_random_data(size_t size, T, T, seed_type seed) ->
@@ -393,8 +423,8 @@ struct FixedVector
 template <typename Key, typename Value>
 struct key_value
 {
-    typedef Key   key_type;
-    typedef Value value_type;
+    using key_type  = Key;
+    using value_type = Value;
 
     __host__ __device__ key_value(void)
         : key()
@@ -676,3 +706,57 @@ struct precision_threshold<rocprim::half>
 {
     static constexpr float percentage = 0.075f;
 };
+
+template<class T,
+         typename std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
+inline
+void test_equality(const T &hvalue, const T &dvalue) {
+    // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
+    if( std::memcmp(&hvalue, &dvalue, sizeof(T)) == 0 ) return;
+
+    // Check value difference based on precision threshold
+    // relative difference or absolute difference with small values
+    auto tolerance = std::max<T>(std::abs(T(precision_threshold<T>::percentage) * hvalue),
+                                 T(precision_threshold<T>::percentage));
+    ASSERT_NEAR(hvalue, dvalue, tolerance);
+}
+
+template<class T,
+         typename std::enable_if_t<std::is_integral<T>::value>* = nullptr>
+inline
+void test_equality(const T &hvalue, const T &dvalue) {
+    ASSERT_EQ(hvalue, dvalue);
+}
+
+// Test vector comparing host and device results
+// If type is integral check for equality, if floating
+// check absolute or relative difference
+template<class T>
+void test_equality(const thrust::host_vector<T>&   hvalue,
+                   const thrust::device_vector<T>& dvalue)
+{
+    thrust::host_vector<T> hvalue_d(dvalue);
+    ASSERT_EQ(hvalue.size(), hvalue_d.size());
+    for(size_t i = 0; i < hvalue.size(); i++)
+    {
+        test_equality(hvalue[i], hvalue_d[i]);
+    }
+}
+
+// Test vector of pairs comparing host and device results
+// If type is integral check for equality, if floating
+// check absolute or relative difference
+template<typename X,
+         typename Y,
+         template<typename, typename> class Pair>
+void test_equality(const thrust::host_vector<Pair<X,Y>>&   hvalue,
+                   const thrust::device_vector<Pair<X,Y>>& dvalue)
+{
+    thrust::host_vector<Pair<X,Y>> hvalue_d(dvalue);
+    ASSERT_EQ(hvalue.size(), hvalue_d.size());
+    for(size_t i = 0; i < hvalue.size(); i++)
+    {
+        test_equality(hvalue[i].first, hvalue_d[i].first);
+        test_equality(hvalue[i].second, hvalue_d[i].second);
+    }
+}

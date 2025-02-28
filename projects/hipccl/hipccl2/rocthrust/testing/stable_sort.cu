@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -93,7 +93,7 @@ void InitializeSimpleStableKeySortTest(Vector& unsorted_keys, Vector& sorted_key
 template <class Vector>
 void TestStableSortSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector unsorted_keys;
     Vector   sorted_keys;
@@ -159,7 +159,7 @@ template <typename Vector>
 void TestStableSortWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(7);
     data[0] = 1;

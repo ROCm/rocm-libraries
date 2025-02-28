@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2024 Advanced Micro Devices, Inc.
+# Copyright 2019-2025 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -11,6 +11,7 @@
 
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
+include(FetchContent)
 
 # rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
 if(NOT DOWNLOAD_ROCPRIM)
@@ -22,6 +23,7 @@ if(NOT rocprim_FOUND)
     PROJ                rocprim
     GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
     GIT_TAG             develop
+    GIT_SHALLOW         TRUE
     INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
     CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
     LOG_DOWNLOAD        TRUE
@@ -52,6 +54,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       PROJ                googletest
       GIT_REPOSITORY      https://github.com/google/googletest.git
       GIT_TAG             release-1.11.0
+      GIT_SHALLOW         TRUE
       INSTALL_DIR         ${GTEST_ROOT}
       CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
       LOG_DOWNLOAD        TRUE
@@ -90,8 +93,6 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   # for cache serialization.  We also want to use a static SQLite,
   # and distro static libraries aren't typically built
   # position-independent.
-  include( FetchContent )
-
   if(DEFINED ENV{SQLITE_3_43_2_SRC_URL})
     set(SQLITE_3_43_2_SRC_URL_INIT $ENV{SQLITE_3_43_2_SRC_URL})
   else()
@@ -161,6 +162,7 @@ if(BUILD_BENCHMARKS)
       PROJ                googlebenchmark
       GIT_REPOSITORY      https://github.com/google/benchmark.git
       GIT_TAG             v${BENCHMARK_VERSION}
+      GIT_SHALLOW         TRUE
       INSTALL_DIR         ${GOOGLEBENCHMARK_ROOT}
       CMAKE_ARGS          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBUILD_SHARED_LIBS=OFF -DBENCHMARK_ENABLE_TESTING=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_CXX_STANDARD=14 ${COMPILER_OVERRIDE}
       LOG_DOWNLOAD        TRUE
@@ -171,5 +173,40 @@ if(BUILD_BENCHMARKS)
       UPDATE_DISCONNECTED TRUE
     )
     find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT} NO_DEFAULT_PATH)
+  endif()
+
+  # rocRAND (https://github.com/ROCmSoftwarePlatform/rocRAND)
+  if(NOT DOWNLOAD_ROCRAND)
+    find_package(rocrand QUIET)
+  endif()
+  if(NOT rocrand_FOUND)
+    message(STATUS "Downloading and building rocrand.")
+    set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
+
+    set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
+    # CMAKE_ARGS of download_project (or ExternalProject_Add) can't contain ; so another separator
+    # is needed and LIST_SEPARATOR is passed to download_project()
+    string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
+    # Pass launcher so sccache can be used to speed up building rocRAND
+    if(CMAKE_CXX_COMPILER_LAUNCHER)
+      set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
+    endif()
+    download_project(
+      PROJ                  rocrand
+      GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
+      GIT_TAG               develop
+      GIT_SHALLOW           TRUE
+      INSTALL_DIR           ${ROCRAND_ROOT}
+      LIST_SEPARATOR        |
+      CMAKE_ARGS            -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+      LOG_DOWNLOAD          TRUE
+      LOG_CONFIGURE         TRUE
+      LOG_BUILD             TRUE
+      LOG_INSTALL           TRUE
+      LOG_OUTPUT_ON_FAILURE TRUE
+      BUILD_PROJECT         TRUE
+      UPDATE_DISCONNECTED   TRUE
+    )
+    find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
   endif()
 endif()

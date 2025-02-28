@@ -32,7 +32,7 @@ struct execute_with_allocator
   : BaseSystem<execute_with_allocator<Allocator, BaseSystem> >
 {
 private:
-  typedef BaseSystem<execute_with_allocator<Allocator, BaseSystem> > super_t;
+  using super_t = BaseSystem<execute_with_allocator<Allocator, BaseSystem>>;
 
   Allocator alloc;
 

@@ -1,3 +1,20 @@
+/*
+ *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ */
+
 #include <unittest/unittest.h>
 
 #include <thrust/sort.h>
@@ -10,15 +27,15 @@ template <typename Iterator>
 class strided_range
 {
     public:
+    using difference_type = typename thrust::iterator_difference<Iterator>::type;
 
-    typedef typename thrust::iterator_difference<Iterator>::type difference_type;
-
-    struct stride_functor : public thrust::unary_function<difference_type,difference_type>
+    struct stride_functor
     {
         difference_type stride;
 
         stride_functor(difference_type stride)
-            : stride(stride) {}
+        : stride(stride)
+        {}
 
         THRUST_HOST_DEVICE difference_type operator()(const difference_type& i) const
         {
@@ -26,12 +43,12 @@ class strided_range
         }
     };
 
-    typedef typename thrust::counting_iterator<difference_type>                   CountingIterator;
-    typedef typename thrust::transform_iterator<stride_functor, CountingIterator> TransformIterator;
-    typedef typename thrust::permutation_iterator<Iterator,TransformIterator>     PermutationIterator;
+    using CountingIterator    = typename thrust::counting_iterator<difference_type>;
+    using TransformIterator   = typename thrust::transform_iterator<stride_functor, CountingIterator>;
+    using PermutationIterator = typename thrust::permutation_iterator<Iterator, TransformIterator>;
 
     // type of the strided_range iterator
-    typedef PermutationIterator iterator;
+    using iterator = PermutationIterator;
 
     // construct strided_range for the range [first,last)
     strided_range(Iterator first, Iterator last, difference_type stride)
@@ -56,7 +73,7 @@ class strided_range
 template <class Vector>
 void TestSortPermutationIterator(void)
 {
-  typedef typename Vector::iterator Iterator;
+  using Iterator = typename Vector::iterator;
 
   Vector A(10);
   A[0] = 2;
@@ -90,7 +107,7 @@ DECLARE_VECTOR_UNITTEST(TestSortPermutationIterator);
 template <class Vector>
 void TestStableSortPermutationIterator(void)
 {
-  typedef typename Vector::iterator Iterator;
+  using Iterator = typename Vector::iterator;
 
   Vector A(10);
   A[0] = 2;
@@ -124,7 +141,7 @@ DECLARE_VECTOR_UNITTEST(TestStableSortPermutationIterator);
 template <class Vector>
 void TestSortByKeyPermutationIterator(void)
 {
-  typedef typename Vector::iterator Iterator;
+  using Iterator = typename Vector::iterator;
 
   Vector A(10), B(10);
   A[0] = 2; B[0] = 0;
@@ -170,7 +187,7 @@ DECLARE_VECTOR_UNITTEST(TestSortByKeyPermutationIterator);
 template <class Vector>
 void TestStableSortByKeyPermutationIterator(void)
 {
-  typedef typename Vector::iterator Iterator;
+  using Iterator = typename Vector::iterator;
 
   Vector A(10), B(10);
   A[0] = 2; B[0] = 0;

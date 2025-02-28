@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,14 +25,6 @@
 
 #ifndef __has_cpp_attribute
 #  define __has_cpp_attribute(X) 0
-#endif
-
-// Trailing return types seem to confuse Doxygen, and cause it to interpret
-// parts of the function's body as new function signatures.
-#if defined(THRUST_DOXYGEN)
-#  define THRUST_TRAILING_RETURN(...)
-#else
-#  define THRUST_TRAILING_RETURN(...) -> __VA_ARGS__
 #endif
 
 #if THRUST_CPP_DIALECT >= 2014 && __has_cpp_attribute(nodiscard)

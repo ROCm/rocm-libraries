@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -36,7 +36,6 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/type_deduction.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/system/hip/memory_resource.h>
 #include <thrust/mr/host_memory_resource.h>
@@ -44,6 +43,8 @@
 #include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/sync_pool.h>
 #include <thrust/per_device_resource.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -61,7 +62,7 @@ auto get_async_host_allocator(
 )
 THRUST_RETURNS(
   thrust::mr::stateless_resource_allocator<
-    thrust::detail::uint8_t, default_async_host_resource
+    std::uint8_t, default_async_host_resource
   >{}
 )
 
@@ -79,7 +80,7 @@ auto get_async_device_allocator(
 )
 THRUST_RETURNS(
   thrust::per_device_allocator<
-    thrust::detail::uint8_t, default_async_device_resource, par_t
+    std::uint8_t, default_async_device_resource, par_t
   >{}
 )
 
@@ -110,7 +111,7 @@ auto get_async_universal_host_pinned_allocator(
 )
 THRUST_RETURNS(
   thrust::mr::stateless_resource_allocator<
-    thrust::detail::uint8_t, default_async_universal_host_pinned_resource
+    std::uint8_t, default_async_universal_host_pinned_resource
   >{}
 )
 

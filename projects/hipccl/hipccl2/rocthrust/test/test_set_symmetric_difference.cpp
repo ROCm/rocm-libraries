@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -191,7 +191,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceEquiv
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             thrust::host_vector<T> h_a = temp;
             thrust::sort(h_a.begin(), h_a.end());
@@ -234,7 +234,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<T> temp = get_random_data<T>(
-                2 * size, std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed);
+                2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
 
             // restrict elements to [min,13)
             for(typename thrust::host_vector<T>::iterator i = temp.begin(); i != temp.end(); ++i)
@@ -275,7 +275,7 @@ TYPED_TEST(SetSymmetricDifferencePrimitiveTests, TestSetSymmetricDifferenceMulti
 TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValue)
 {
     using U = typename TestFixture::input_type;
-    typedef key_value<U, U> T;
+    using T = key_value<U, U>;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -288,24 +288,24 @@ TYPED_TEST(SetSymmetricDifferenceIntegerTests, TestSetSymmetricDifferenceKeyValu
             SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
             thrust::host_vector<U> h_keys_a = get_random_data<U>(
-                size, std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed);
+                size, get_default_limits<U>::min(), get_default_limits<U>::max(), seed);
             thrust::host_vector<U> h_values_a = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + seed_value_addition
             );
 
             thrust::host_vector<U> h_keys_b = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + 2 * seed_value_addition
             );
             thrust::host_vector<U> h_values_b = get_random_data<U>(
                 size,
-                std::numeric_limits<U>::min(),
-                std::numeric_limits<U>::max(),
+                get_default_limits<U>::min(),
+                get_default_limits<U>::max(),
                 seed + 3 * seed_value_addition
             );
 

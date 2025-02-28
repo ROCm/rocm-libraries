@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -56,7 +56,7 @@ equal(execution_policy<Derived>& policy,
       InputIt1                   last1,
       InputIt2                   first2)
 {
-    typedef typename thrust::iterator_value<InputIt1>::type InputType1;
+    using InputType1 = typename thrust::iterator_value<InputIt1>::type;
     return hip_rocprim::equal(policy, first1, last1, first2, equal_to<InputType1>());
 }
 

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -126,7 +126,7 @@ struct my_allocator_with_custom_destroy
     return !(*this == other);
   }
 
-  typedef thrust::detail::true_type is_always_equal;
+  using is_always_equal = thrust::detail::true_type;
 
   // use composition rather than inheritance
   // to avoid inheriting std::allocator's member
@@ -154,12 +154,11 @@ DECLARE_VARIABLE_UNITTEST(TestAllocatorCustomDestroy);
 template <typename T>
 struct my_minimal_allocator
 {
-  typedef T         value_type;
+  using value_type = T;
 
-  // XXX ideally, we shouldn't require
-  //     these two typedefs
-  typedef T &       reference;
-  typedef const T & const_reference;
+  // XXX ideally, we shouldn't require these two aliases
+  using reference       = T&;
+  using const_reference = const T&;
 
   THRUST_HOST
   my_minimal_allocator(){}

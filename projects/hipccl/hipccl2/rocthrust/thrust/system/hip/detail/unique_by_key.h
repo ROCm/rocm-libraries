@@ -1,6 +1,6 @@
  /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,7 +32,6 @@
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/minmax.h>
 #include <thrust/detail/mpl/math.h>
@@ -45,6 +44,8 @@
 #include <thrust/system/hip/detail/general/temp_storage.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
+
+#include <cstdint>
 
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
@@ -92,7 +93,7 @@ namespace __unique_by_key
                   BinaryPred                 binary_pred)
     {
         using namespace thrust::system::hip_rocprim::temp_storage;
-        typedef size_t size_type;
+        using size_type = size_t;
 
         size_type   num_items = static_cast<size_type>(thrust::distance(keys_first, keys_last));
         size_t      temp_storage_bytes = 0;
@@ -103,13 +104,13 @@ namespace __unique_by_key
             return thrust::make_pair(keys_result, values_result);
 
         // Determine temporary device storage requirements.
-        hip_rocprim::throw_on_error(rocprim::unique_by_key(NULL,
+        hip_rocprim::throw_on_error(rocprim::unique_by_key(nullptr,
                                                            temp_storage_bytes,
                                                            keys_first,
                                                            values_first,
                                                            keys_result,
                                                            values_result,
-                                                           reinterpret_cast<size_type*>(NULL),
+                                                           static_cast<size_type*>(nullptr),
                                                            num_items,
                                                            binary_pred,
                                                            stream,
@@ -128,7 +129,7 @@ namespace __unique_by_key
         hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived> tmp(policy, storage_size);
+        thrust::detail::temporary_array<std::uint8_t, Derived> tmp(policy, storage_size);
         ptr = static_cast<void*>(tmp.data().get());
 
         // Create pointers with alignment
@@ -232,7 +233,7 @@ unique_by_key_copy(execution_policy<Derived>& policy,
                    KeyOutputIt                keys_result,
                    ValOutputIt                values_result)
 {
-    typedef typename iterator_traits<KeyInputIt>::value_type key_type;
+    using key_type = typename iterator_traits<KeyInputIt>::value_type;
     return hip_rocprim::unique_by_key_copy(policy,
                                            keys_first,
                                            keys_last,
@@ -286,7 +287,7 @@ unique_by_key(execution_policy<Derived>& policy,
               KeyInputIt                 keys_last,
               ValInputIt                 values_first)
 {
-    typedef typename iterator_traits<KeyInputIt>::value_type key_type;
+    using key_type = typename iterator_traits<KeyInputIt>::value_type;
     return hip_rocprim::unique_by_key(
         policy, keys_first, keys_last, values_first, equal_to<key_type>()
     );

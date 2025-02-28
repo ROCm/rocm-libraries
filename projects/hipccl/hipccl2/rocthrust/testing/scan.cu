@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ template<typename T>
 template <class Vector>
 void TestScanSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
     // icc miscompiles the intermediate sum updates for custom_numeric.
     // The issue doesn't happen with opts disabled, or on other compilers.
     // Printing the intermediate sum each iteration "fixes" the issue,
@@ -225,7 +225,7 @@ DECLARE_UNITTEST(TestExclusiveScanDispatchImplicit);
 
 void TestInclusiveScan32(void)
 {
-    typedef int T;
+    using T  = int;
     size_t n = 32;
 
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
@@ -244,9 +244,9 @@ DECLARE_UNITTEST(TestInclusiveScan32);
 
 void TestExclusiveScan32(void)
 {
-    typedef int T;
+    using T  = int;
     size_t n = 32;
-    T init = 13;
+    T init   = 13;
 
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_input = h_input;
@@ -560,7 +560,7 @@ template <typename Vector>
 void TestInclusiveScanWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(7);
     data[0] = 0;
@@ -609,7 +609,7 @@ template <typename Vector>
 void TestInclusiveScanWithConstAccumulator(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector data(7);
     data[0] = 0;
@@ -666,8 +666,8 @@ THRUST_NAMESPACE_BEGIN
 template<>
 struct iterator_traits<only_set_when_expected_it>
 {
-    typedef long long value_type;
-    typedef only_set_when_expected_it reference;
+    using value_type = long long;
+    using reference  = only_set_when_expected_it;
 };
 THRUST_NAMESPACE_END
 

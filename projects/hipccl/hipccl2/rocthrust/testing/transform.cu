@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformUnarySimple(void)
 {
-    typedef typename Vector::value_type T;
+     using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -108,7 +108,7 @@ template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnaryNoStencilSimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -199,7 +199,7 @@ template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfUnarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -295,7 +295,7 @@ template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformBinarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -378,7 +378,7 @@ template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformIfBinarySimple(void)
 {
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     typename Vector::iterator iter;
 
@@ -396,12 +396,14 @@ void TestTransformIfBinarySimple(void)
 
     thrust::identity<T> identity;
 
-    iter = thrust::transform_if(input1.begin(), input1.end(),
-                                input2.begin(),
-                                stencil.begin(),
-                                output.begin(),
-                                thrust::minus<T>(),
-                                thrust::not1(identity));
+    iter = thrust::transform_if(
+        input1.begin(),
+        input1.end(),
+        input2.begin(),
+        stencil.begin(),
+        output.begin(),
+        thrust::minus<T>(),
+        thrust::not_fn(identity));
 
     ASSERT_EQUAL(std::size_t(iter - output.begin()), input1.size());
     ASSERT_EQUAL(output, result);
@@ -545,14 +547,14 @@ void TestTransformUnaryToDiscardIteratorZipped(const size_t n)
     thrust::host_vector<T>   h_output(n);
     thrust::device_vector<T> d_output(n);
 
-    typedef typename thrust::host_vector<T>::iterator Iterator1;
-    typedef typename thrust::device_vector<T>::iterator Iterator2;
+    using Iterator1 = typename thrust::host_vector<T>::iterator;
+    using Iterator2 = typename thrust::device_vector<T>::iterator;
 
-    typedef thrust::tuple<Iterator1,thrust::discard_iterator<> > Tuple1;
-    typedef thrust::tuple<Iterator2,thrust::discard_iterator<> > Tuple2;
+    using Tuple1 = thrust::tuple<Iterator1, thrust::discard_iterator<>>;
+    using Tuple2 = thrust::tuple<Iterator2, thrust::discard_iterator<>>;
 
-    typedef thrust::zip_iterator<Tuple1> ZipIterator1;
-    typedef thrust::zip_iterator<Tuple2> ZipIterator2;
+    using ZipIterator1 = thrust::zip_iterator<Tuple1>;
+    using ZipIterator2 = thrust::zip_iterator<Tuple2>;
 
     ZipIterator1 z1(thrust::make_tuple(h_output.begin(), thrust::make_discard_iterator()));
     ZipIterator2 z2(thrust::make_tuple(d_output.begin(), thrust::make_discard_iterator()));
@@ -882,7 +884,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 void TestTransformWithIndirection(void)
 {
     // add numbers modulo 3 with external lookup table
-    typedef typename Vector::value_type T;
+    using T = typename Vector::value_type;
 
     Vector input1(7);
     Vector input2(7);

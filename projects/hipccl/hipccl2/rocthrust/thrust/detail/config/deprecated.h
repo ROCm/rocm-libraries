@@ -1,5 +1,5 @@
 /*
- *  Copyright 2018-2020 NVIDIA Corporation
+ *  Copyright 2018-2024 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 /*! \file deprecated.h
- *  \brief Defines the THRUST_DEPRECATED macro
+ *  \brief Defines Thrust's deprecation macros
  */
 
 #pragma once
@@ -27,16 +27,24 @@
 #  define THRUST_IGNORE_DEPRECATED_API
 #endif
 
+#define THRUST_ALIAS_ATTRIBUTE(...)
+
 #ifdef THRUST_IGNORE_DEPRECATED_API
 #  define THRUST_DEPRECATED
+#  define THRUST_DEPRECATED_BECAUSE(MSG)
 #elif THRUST_CPP_DIALECT >= 2014
 #  define THRUST_DEPRECATED [[deprecated]]
+#  define THRUST_DEPRECATED_BECAUSE(MSG) [[deprecated(MSG)]]
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 #  define THRUST_DEPRECATED __declspec(deprecated)
+#  define THRUST_DEPRECATED_BECAUSE(MSG) __declspec(deprecated(MSG))
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
 #  define THRUST_DEPRECATED __attribute__((deprecated))
+#  define THRUST_DEPRECATED_BECAUSE(MSG) __attribute__((deprecated(MSG)))
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
 #  define THRUST_DEPRECATED __attribute__((deprecated))
+#  define THRUST_DEPRECATED_BECAUSE(MSG) __attribute__((deprecated(MSG)))
 #else
 #  define THRUST_DEPRECATED
+#  define THRUST_DEPRECATED_BECAUSE(MSG)
 #endif

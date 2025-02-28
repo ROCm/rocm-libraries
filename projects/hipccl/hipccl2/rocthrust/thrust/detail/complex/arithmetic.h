@@ -1,7 +1,7 @@
 /*
  *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
- *  Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved. 
+ *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved. 
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator+(const complex<T0>& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() + y.real(), x.imag() + y.imag());
 }
 
@@ -41,7 +41,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator+(const complex<T0>& x, const T1& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() + y, x.imag());
 }
 
@@ -49,7 +49,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator+(const T0& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x + y.real(), y.imag());
 }
 
@@ -58,7 +58,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator-(const complex<T0>& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() - y.real(), x.imag() - y.imag());
 }
 
@@ -66,7 +66,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator-(const complex<T0>& x, const T1& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() - y, x.imag());
 }
 
@@ -74,7 +74,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator-(const T0& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x - y.real(), -y.imag());
 }
 
@@ -83,7 +83,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator*(const complex<T0>& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>( x.real() * y.real() - x.imag() * y.imag()
 			             , x.real() * y.imag() + x.imag() * y.real());
 }
@@ -92,7 +92,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator*(const complex<T0>& x, const T1& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() * y, x.imag() * y);
 }
 
@@ -100,7 +100,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator*(const T0& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x * y.real(), x * y.imag());
 }
 
@@ -109,7 +109,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator/(const complex<T0>& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
 
   // Find `abs` by ADL.
   using std::abs;
@@ -136,7 +136,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator/(const complex<T0>& x, const T1& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x.real() / y, x.imag() / y);
 }
 
@@ -144,7 +144,7 @@ template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type>
 operator/(const T0& x, const complex<T1>& y)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
   return complex<T>(x) / y;
 }
 
@@ -278,7 +278,7 @@ THRUST_HOST_DEVICE inline double norm(const complex<double>& z)
 template <typename T0, typename T1>
 THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::type> polar(const T0& m, const T1& theta)
 {
-  typedef typename detail::promoted_numerical_type<T0, T1>::type T;
+  using T = typename detail::promoted_numerical_type<T0, T1>::type;
 
   // Find `cos` and `sin` by ADL.
   #ifdef __HIP_DEVICE_COMPILE__

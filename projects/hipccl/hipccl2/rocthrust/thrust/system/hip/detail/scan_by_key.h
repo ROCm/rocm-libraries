@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,7 +30,6 @@
 #include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/system/hip/detail/util.h>
 
@@ -40,6 +39,7 @@
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
 
+#include <cstdint>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>
@@ -138,7 +138,7 @@ namespace __scan_by_key
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(invoke_inclusive_scan_by_key(policy,
-                                                                 NULL,
+                                                                 nullptr,
                                                                  storage_size,
                                                                  key_first,
                                                                  value_first,
@@ -151,7 +151,7 @@ namespace __scan_by_key
                                     "scan_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -273,7 +273,7 @@ namespace __scan_by_key
 
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(invoke_exclusive_scan_by_key(policy,
-                                                                 NULL,
+                                                                 nullptr,
                                                                  storage_size,
                                                                  key_first,
                                                                  value_first,
@@ -287,7 +287,7 @@ namespace __scan_by_key
                                     "scan_by_key failed on 1st step");
 
         // Allocate temporary storage.
-        thrust::detail::temporary_array<thrust::detail::uint8_t, Derived>
+        thrust::detail::temporary_array<std::uint8_t, Derived>
             tmp(policy, storage_size);
         void *ptr = static_cast<void*>(tmp.data().get());
 
@@ -538,7 +538,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValInputIt                 value_first,
                       ValOutputIt                value_result)
 {
-    typedef typename iterator_traits<ValInputIt>::value_type value_type;
+    using value_type = typename iterator_traits<ValInputIt>::value_type;
     return hip_rocprim::exclusive_scan_by_key(policy,
                                               key_first,
                                               key_last,

@@ -55,7 +55,7 @@ void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)
   // XXX this isn't correct because it doesn't use thrust::swap
   using namespace thrust::detail;
 
-  typedef typename thrust::iterator_value<ForwardIterator1>::type T;
+  using T = typename thrust::iterator_value<ForwardIterator1>::type;
 
   T temp = *iter1;
   *iter1 = *iter2;
@@ -176,10 +176,10 @@ THRUST_HOST_DEVICE
     bool
   > wrapped_pred(pred);
 
-  typedef typename thrust::iterator_value<ForwardIterator>::type T;
+  using T = typename thrust::iterator_value<ForwardIterator>::type;
 
-  typedef thrust::detail::temporary_array<T,DerivedPolicy> TempRange;
-  typedef typename TempRange::iterator                     TempIterator;
+  using TempRange    = thrust::detail::temporary_array<T, DerivedPolicy>;
+  using TempIterator = typename TempRange::iterator;
 
   TempRange temp(exec, first, last);
 
@@ -225,10 +225,10 @@ THRUST_HOST_DEVICE
     bool
   > wrapped_pred(pred);
 
-  typedef typename thrust::iterator_value<ForwardIterator>::type T;
+  using T = typename thrust::iterator_value<ForwardIterator>::type;
 
-  typedef thrust::detail::temporary_array<T,DerivedPolicy> TempRange;
-  typedef typename TempRange::iterator                     TempIterator;
+  using TempRange    = thrust::detail::temporary_array<T, DerivedPolicy>;
+  using TempIterator = typename TempRange::iterator;
 
   TempRange temp(exec, first, last);
 

@@ -101,9 +101,7 @@ template<typename T>
     >::type
   >
 {
-  typedef typename add_reference<
-    typename pointer_element<typename T::pointer>::type
-  >::type type;
+  using type = typename add_reference<typename pointer_element<typename T::pointer>::type>::type;
 };
 
 
@@ -153,9 +151,7 @@ template <
     thrust::tuple<Ts...>
   >
 {
-  typedef thrust::tuple<
-    typename raw_reference_tuple_helper<Ts>::type...
-  > type;
+  using type = thrust::tuple<typename raw_reference_tuple_helper<Ts>::type...>;
 };
 
 
@@ -166,9 +162,7 @@ template <
     thrust::detail::tuple_of_iterator_references<Ts...>
   >
 {
-  typedef thrust::detail::tuple_of_iterator_references<
-    typename raw_reference_tuple_helper<Ts>::type...
-  > type;
+  using type = thrust::detail::tuple_of_iterator_references<typename raw_reference_tuple_helper<Ts>::type...>;
 };
 
 
@@ -188,37 +182,25 @@ template <
     thrust::tuple<Ts...>
   >
 {
-  private:
-    typedef thrust::tuple<Ts...> tuple_type;
+private:
+  using tuple_type = thrust::tuple<Ts...>;
 
-  public:
-    typedef typename eval_if<
-      is_unwrappable<tuple_type>::value,
-      raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-      add_reference<tuple_type>
-    >::type type;
+public:
+  using type = typename eval_if<
+                        is_unwrappable<tuple_type>::value,
+                        raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
+                        add_reference<tuple_type>
+                        >::type;
 };
 
-
-template <
-  typename... Ts
->
-  struct raw_reference<
-    thrust::detail::tuple_of_iterator_references<Ts...>
-  >
+template <typename... Ts>
+struct raw_reference<thrust::detail::tuple_of_iterator_references<Ts...>>
 {
-  private:
-    typedef detail::tuple_of_iterator_references<Ts...> tuple_type;
+private:
+  using tuple_type = detail::tuple_of_iterator_references<Ts...>;
 
-  public:
-    typedef typename raw_reference_detail::raw_reference_tuple_helper<tuple_type>::type type;
-
-    // XXX figure out why is_unwrappable seems to be broken for tuple_of_iterator_references
-    //typedef typename eval_if<
-    //  is_unwrappable<tuple_type>::value,
-    //  raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-    //  add_reference<tuple_type>
-    //>::type type;
+public:
+  using type = typename raw_reference_detail::raw_reference_tuple_helper<tuple_type>::type;
 };
 
 

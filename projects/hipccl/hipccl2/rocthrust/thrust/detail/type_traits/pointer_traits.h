@@ -33,49 +33,49 @@ template<typename Ptr> struct pointer_element;
 template<template<typename> class Ptr, typename Arg>
   struct pointer_element<Ptr<Arg> >
 {
-  typedef Arg type;
+  using type = Arg;
 };
 
 template<template<typename,typename> class Ptr, typename Arg1, typename Arg2>
   struct pointer_element<Ptr<Arg1,Arg2> >
 {
-  typedef Arg1 type;
+  using type = Arg1;
 };
 
 template<template<typename,typename,typename> class Ptr, typename Arg1, typename Arg2, typename Arg3>
   struct pointer_element<Ptr<Arg1,Arg2,Arg3> >
 {
-  typedef Arg1 type;
+  using type = Arg1;
 };
 
 template<template<typename,typename,typename,typename> class Ptr, typename Arg1, typename Arg2, typename Arg3, typename Arg4>
   struct pointer_element<Ptr<Arg1,Arg2,Arg3,Arg4> >
 {
-  typedef Arg1 type;
+  using type = Arg1;
 };
 
 template<template<typename,typename,typename,typename,typename> class Ptr, typename Arg1, typename Arg2, typename Arg3, typename Arg4, typename Arg5>
   struct pointer_element<Ptr<Arg1,Arg2,Arg3,Arg4,Arg5> >
 {
-  typedef Arg1 type;
+  using type = Arg1;
 };
 
 template<typename T>
   struct pointer_element<T*>
 {
-  typedef T type;
+  using type = T;
 };
 
 template<typename Ptr>
   struct pointer_difference
 {
-  typedef typename Ptr::difference_type type;
+  using type = typename Ptr::difference_type;
 };
 
 template<typename T>
   struct pointer_difference<T*>
 {
-  typedef std::ptrdiff_t type;
+  using type = std::ptrdiff_t;
 };
 
 template<typename Ptr, typename T> struct rebind_pointer;
@@ -145,13 +145,13 @@ template<typename Ptr, typename Enable = void> struct pointer_raw_pointer_impl {
 template<typename T>
   struct pointer_raw_pointer_impl<T*>
 {
-  typedef T* type;
+  using type = T*;
 };
 
 template<typename Ptr>
   struct pointer_raw_pointer_impl<Ptr, typename enable_if<has_raw_pointer<Ptr>::value>::type>
 {
-  typedef typename Ptr::raw_pointer type;
+  using type = typename Ptr::raw_pointer;
 };
 
 } // end pointer_traits_detail
@@ -197,15 +197,15 @@ template<typename T>
 template<typename Ptr>
   struct pointer_traits
 {
-  typedef Ptr                                    pointer;
-  typedef typename Ptr::reference                reference;
-  typedef typename pointer_element<Ptr>::type    element_type;
-  typedef typename pointer_difference<Ptr>::type difference_type;
+  using pointer         = Ptr;
+  using reference       = typename Ptr::reference;
+  using element_type    = typename pointer_element<Ptr>::type;
+  using difference_type = typename pointer_difference<Ptr>::type;
 
   template<typename U>
     struct rebind
   {
-    typedef typename rebind_pointer<Ptr,U>::type other;
+    using other = typename rebind_pointer<Ptr, U>::type;
   };
 
   THRUST_HOST_DEVICE
@@ -218,7 +218,7 @@ template<typename Ptr>
   }
 
   // thrust additions follow
-  typedef typename pointer_raw_pointer<Ptr>::type raw_pointer;
+  using raw_pointer = typename pointer_raw_pointer<Ptr>::type;
 
   THRUST_HOST_DEVICE
   inline static raw_pointer get(pointer ptr)
@@ -230,15 +230,15 @@ template<typename Ptr>
 template<typename T>
   struct pointer_traits<T*>
 {
-  typedef T*                                    pointer;
-  typedef T&                                    reference;
-  typedef T                                     element_type;
-  typedef typename pointer_difference<T*>::type difference_type;
+  using pointer         = T*;
+  using reference       = T&;
+  using element_type    = T;
+  using difference_type = typename pointer_difference<T*>::type;
 
   template<typename U>
     struct rebind
   {
-    typedef U* other;
+    using other = U*;
   };
 
   THRUST_HOST_DEVICE
@@ -248,7 +248,7 @@ template<typename T>
   }
 
   // thrust additions follow
-  typedef typename pointer_raw_pointer<T*>::type raw_pointer;
+  using raw_pointer = typename pointer_raw_pointer<T*>::type;
 
   THRUST_HOST_DEVICE
   inline static raw_pointer get(pointer ptr)
@@ -260,15 +260,15 @@ template<typename T>
 template<>
   struct pointer_traits<void*>
 {
-  typedef void*                                    pointer;
-  typedef void                                     reference;
-  typedef void                                     element_type;
-  typedef pointer_difference<void*>::type          difference_type;
+  using pointer         = void*;
+  using reference       = void;
+  using element_type    = void;
+  using difference_type = pointer_difference<void*>::type;
 
   template<typename U>
     struct rebind
   {
-    typedef U* other;
+    using other = U*;
   };
 
   THRUST_HOST_DEVICE
@@ -278,7 +278,7 @@ template<>
   }
 
   // thrust additions follow
-  typedef pointer_raw_pointer<void*>::type raw_pointer;
+  using raw_pointer = pointer_raw_pointer<void*>::type;
 
   THRUST_HOST_DEVICE
   inline static raw_pointer get(pointer ptr)
@@ -290,15 +290,15 @@ template<>
 template<>
   struct pointer_traits<const void*>
 {
-  typedef const void*                           pointer;
-  typedef const void                            reference;
-  typedef const void                            element_type;
-  typedef pointer_difference<const void*>::type difference_type;
+  using pointer         = const void*;
+  using reference       = const void;
+  using element_type    = const void;
+  using difference_type = pointer_difference<const void*>::type;
 
   template<typename U>
     struct rebind
   {
-    typedef U* other;
+    using other = U*;
   };
 
   THRUST_HOST_DEVICE
@@ -308,7 +308,7 @@ template<>
   }
 
   // thrust additions follow
-  typedef pointer_raw_pointer<const void*>::type raw_pointer;
+  using raw_pointer = pointer_raw_pointer<const void*>::type;
 
   THRUST_HOST_DEVICE
   inline static raw_pointer get(pointer ptr)

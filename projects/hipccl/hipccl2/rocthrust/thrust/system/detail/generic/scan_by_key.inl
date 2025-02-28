@@ -17,7 +17,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cstdint.h>
 #include <thrust/system/detail/generic/scan_by_key.h>
 #include <thrust/functional.h>
 #include <thrust/transform.h>
@@ -27,6 +26,8 @@
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/internal_functional.h>
 #include <thrust/scan.h>
+
+#include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -44,7 +45,7 @@ struct segmented_scan_functor
 {
   AssociativeOperator binary_op;
 
-  typedef typename thrust::tuple<OutputType, HeadFlagType> result_type;
+  using result_type = typename thrust::tuple<OutputType, HeadFlagType>;
 
   THRUST_HOST_DEVICE
   segmented_scan_functor(AssociativeOperator _binary_op) : binary_op(_binary_op) {}
@@ -109,15 +110,16 @@ THRUST_HOST_DEVICE
                                        AssociativeOperator binary_op)
 {
   using OutputType = typename thrust::iterator_traits<InputIterator2>::value_type;
-  using HeadFlagType = thrust::detail::uint8_t;
+  using HeadFlagType = std::uint8_t;
 
   const size_t n = last1 - first1;
 
   if(n != 0)
   {
     // compute head flags
-    thrust::detail::temporary_array<HeadFlagType,DerivedPolicy> flags(exec, n);
-    flags[0] = 1; thrust::transform(exec, first1, last1 - 1, first1 + 1, flags.begin() + 1, thrust::detail::not2(binary_pred));
+    thrust::detail::temporary_array<HeadFlagType, DerivedPolicy> flags(exec, n);
+    flags[0] = 1;
+    thrust::transform(exec, first1, last1 - 1, first1 + 1, flags.begin() + 1, thrust::not_fn(binary_pred));
 
     // scan key-flag tuples,
     // For additional details refer to Section 2 of the following paper
@@ -146,7 +148,7 @@ THRUST_HOST_DEVICE
                                        InputIterator2 first2,
                                        OutputIterator result)
 {
-  typedef typename thrust::iterator_traits<InputIterator2>::value_type InitType;
+  using InitType = typename thrust::iterator_traits<InputIterator2>::value_type;
   return thrust::exclusive_scan_by_key(exec, first1, last1, first2, result, InitType{});
 }
 
@@ -205,7 +207,7 @@ THRUST_HOST_DEVICE
                                        AssociativeOperator binary_op)
 {
   using OutputType = T;
-  using HeadFlagType = thrust::detail::uint8_t;
+  using HeadFlagType = std::uint8_t;
 
   const size_t n = last1 - first1;
 
@@ -214,8 +216,9 @@ THRUST_HOST_DEVICE
     InputIterator2 last2 = first2 + n;
 
     // compute head flags
-    thrust::detail::temporary_array<HeadFlagType,DerivedPolicy> flags(exec, n);
-    flags[0] = 1; thrust::transform(exec, first1, last1 - 1, first1 + 1, flags.begin() + 1, thrust::detail::not2(binary_pred));
+    thrust::detail::temporary_array<HeadFlagType, DerivedPolicy> flags(exec, n);
+    flags[0] = 1;
+    thrust::transform(exec, first1, last1 - 1, first1 + 1, flags.begin() + 1, thrust::not_fn(binary_pred));
 
     // shift input one to the right and initialize segments with init
     thrust::detail::temporary_array<OutputType,DerivedPolicy> temp(exec, n);

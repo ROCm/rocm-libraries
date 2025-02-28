@@ -82,7 +82,7 @@ template<typename RealType = double>
     : public detail::normal_distribution_base<RealType>::type
 {
   private:
-    typedef typename detail::normal_distribution_base<RealType>::type super_t;
+    using super_t = typename detail::normal_distribution_base<RealType>::type;
 
   public:
     // types
@@ -90,12 +90,12 @@ template<typename RealType = double>
     /*! \typedef result_type
      *  \brief The type of the floating point number produced by this \p normal_distribution.
      */
-    typedef RealType result_type;
+    using result_type = RealType;
 
     /*! \typedef param_type
      *  \brief The type of the object encapsulating this \p normal_distribution's parameters.
      */
-    typedef thrust::pair<RealType,RealType> param_type;
+    using param_type = thrust::pair<RealType,RealType>;
 
     // constructors and reset functions
     

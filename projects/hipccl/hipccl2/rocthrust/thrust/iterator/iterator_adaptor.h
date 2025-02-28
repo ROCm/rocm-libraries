@@ -70,10 +70,10 @@ THRUST_NAMESPACE_BEGIN
  *  {
  *    public:
  *      // shorthand for the name of the iterator_adaptor we're deriving from
- *      typedef thrust::iterator_adaptor<
+ *      using super_t = thrust::iterator_adaptor<
  *        repeat_iterator<Iterator>,
  *        Iterator
- *      > super_t;
+ *      >;
  *
  *      THRUST_HOST_DEVICE
  *      repeat_iterator(const Iterator &x, int n) : super_t(x), begin(x), n(n) {}
@@ -128,9 +128,8 @@ template<typename Derived,
     friend class thrust::iterator_core_access;
 
   protected:
-    typedef typename detail::iterator_adaptor_base<
-        Derived, Base, Value, System, Traversal, Reference, Difference
-    >::type super_t;
+    using super_t =
+      typename detail::iterator_adaptor_base<Derived, Base, Value, System, Traversal, Reference, Difference>::type;
 
   /*! \endcond
    */
@@ -150,13 +149,13 @@ template<typename Derived,
 
     /*! The type of iterator this \p iterator_adaptor's \p adapts.
      */
-    typedef Base       base_type;
+    using base_type = Base;
 
     /*! \cond
      */
-    typedef typename super_t::reference reference;
+    using reference = typename super_t::reference;
 
-    typedef typename super_t::difference_type difference_type;
+    using difference_type = typename super_t::difference_type;
     /*! \endcond
      */
 

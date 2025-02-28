@@ -40,7 +40,7 @@ template<typename Pointer>
         Pointer
       >
 {
-  typedef iterator_adaptor<normal_iterator<Pointer>, Pointer> super_t;
+  using super_t = iterator_adaptor<normal_iterator<Pointer>, Pointer>;
 
   public:
     THRUST_HOST_DEVICE

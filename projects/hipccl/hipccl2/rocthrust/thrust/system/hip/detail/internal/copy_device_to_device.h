@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -48,7 +48,7 @@ namespace __copy
                                                   OutputIt                   result,
                                                   thrust::detail::true_type)
     {
-        typedef typename thrust::iterator_traits<InputIt>::value_type InputTy;
+        using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
         const auto n = thrust::distance(first, last);
         if(n > 0)
         {
@@ -70,7 +70,7 @@ namespace __copy
                                                   OutputIt                   result,
                                                   thrust::detail::false_type)
     {
-        typedef typename thrust::iterator_traits<InputIt>::value_type InputTy;
+        using InputTy = typename thrust::iterator_traits<InputIt>::value_type;
         return hip_rocprim::transform(policy, first, last, result, thrust::identity<InputTy>());
     }
 
