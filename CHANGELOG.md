@@ -2,11 +2,21 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
+## (Unreleased) rocDecode 0.11.0
+
+### Added
+
+* VP9 IVF container file parsing support in bitstream reader.
+
+### Changed
+
+### Removed
+
 ## rocDecode 0.10.0 for ROCm 6.4
 
 ### Added
 
-* The new bitstream reader feature. The bitstream reader contains a few built-in stream file parsers, including elementary stream file parser and IVF container file parser. Currently the reader can parse AVC, HEVC and AV1 elementary stream files and AV1 IVF container files. More format support will be added in the future.
+* The new bitstream reader feature. The bitstream reader contains built-in stream file parsers, including an elementary stream file parser and an IVF container file parser. It can parse AVC/HEVC/AV1 elementary stream files and AV1 IVF container files. Additional format support can be added in the future.
 * VP9 decode support.
 * More CTests: VP9 test and tests on video decode raw sample.
 * Two new samples, videodecoderaw and videodecodepicfiles, have been added. videodecoderaw uses the bitstream reader instead of the FFMPEG demuxer to get picture data, and videodecodepicfiles shows how to decode an elementary video stream stored in multiple files with each file containing bitstream data of a coded picutre

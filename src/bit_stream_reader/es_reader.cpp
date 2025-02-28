@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "hevc_defines.h"
 #include "avc_defines.h"
 #include "av1_defines.h"
+#include "vp9_defines.h"
 #include "roc_video_parser.h"
 
 RocVideoESParser::RocVideoESParser(const char *input_file_path) {
@@ -462,7 +463,7 @@ bool RocVideoESParser::CheckIvfFileHeader(uint8_t *stream) {
     }
 }
 
-int RocVideoESParser::GetPicDataIvfAv1(uint8_t **p_pic_data, int *pic_size) {
+int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
     uint8_t frame_header[12];
     pic_data_size_ = 0;
     if (ReadBytes(curr_byte_offset_, 12, frame_header)) {
@@ -491,7 +492,8 @@ int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *p
             return GetPicDataAvcHevc(p_pic_data, pic_size);
         case kStreamTypeAv1Elementary:
             return GetPicDataAv1(p_pic_data, pic_size);
-        case kStreamTypeAv1Ivf: {
+        case kStreamTypeAv1Ivf:
+        case kStreamTypeVp9Ivf: {
             if (!ivf_file_header_read_) {
                 uint8_t file_header[32];
                 ReadBytes(curr_byte_offset_, 32, file_header);
@@ -499,7 +501,7 @@ int RocVideoESParser::GetPicData(uint8_t **p_pic_data, int *pic_size, int64_t *p
                 SetReadPointer(curr_byte_offset_);
                 ivf_file_header_read_ = true;
             }
-            return GetPicDataIvfAv1(p_pic_data, pic_size);
+            return GetPicDataIvf(p_pic_data, pic_size);
         }
         default: {
             *p_pic_data = pic_data_.data();
@@ -518,6 +520,8 @@ rocDecVideoCodec RocVideoESParser::GetCodecId() {
         case kStreamTypeAv1Elementary:
         case kStreamTypeAv1Ivf:
             return rocDecVideoCodec_AV1;
+        case kStreamTypeVp9Ivf:
+            return rocDecVideoCodec_VP9;
         default:
             return rocDecVideoCodec_NumCodecs;
     }
@@ -540,41 +544,53 @@ int RocVideoESParser::ProbeStreamType() {
     for (int i = kStreamTypeAvcElementary; i < kStreamTypeNumSupported; i++) {
         int curr_score = 0;
         switch (i) {
-            case kStreamTypeAvcElementary:
+            case kStreamTypeAvcElementary: {
                 curr_score = CheckAvcEStream(stream_buf, stream_size);
                 if (curr_score > STREAM_TYPE_SCORE_THRESHOLD && curr_score > stream_type_score) {
                     stream_type = kStreamTypeAvcElementary;
                     stream_type_score = curr_score;
                 }
                 break;
-            case kStreamTypeHevcElementary:
+            }
+            case kStreamTypeHevcElementary: {
                 curr_score = CheckHevcEStream(stream_buf, stream_size);
                 if (curr_score > STREAM_TYPE_SCORE_THRESHOLD && curr_score > stream_type_score) {
                     stream_type = kStreamTypeHevcElementary;
                     stream_type_score = curr_score;
                 }
                 break;
-            case kStreamTypeAv1Elementary:
+            }
+            case kStreamTypeAv1Elementary: {
                 curr_score = CheckAv1EStream(stream_buf, stream_size);
                 if (curr_score > STREAM_TYPE_SCORE_THRESHOLD && curr_score > stream_type_score) {
                     stream_type = kStreamTypeAv1Elementary;
                     stream_type_score = curr_score;
                 }
                 break;
-            case kStreamTypeAv1Ivf:
+            }
+            case kStreamTypeAv1Ivf: {
                 curr_score = CheckIvfAv1Stream(stream_buf, stream_size);
                 if (curr_score > STREAM_TYPE_SCORE_THRESHOLD && curr_score > stream_type_score) {
                     stream_type = kStreamTypeAv1Ivf;
                     stream_type_score = curr_score;
                 }
                 break;
+            }
+            case kStreamTypeVp9Ivf: {
+                curr_score = CheckIvfVp9Stream(stream_buf, stream_size);
+                if (curr_score > STREAM_TYPE_SCORE_THRESHOLD && curr_score > stream_type_score) {
+                    stream_type = kStreamTypeVp9Ivf;
+                    stream_type_score = curr_score;
+                }
+                break;
+            }
         }
     }
 
     if (stream_buf) {
         free(stream_buf);
     }
-    p_stream_file_.seekg (0, std::ios::beg);
+    p_stream_file_.seekg(0, std::ios::beg);
     return stream_type;
 }
 
@@ -1136,6 +1152,87 @@ int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
                 int size = stream_size - IvfFileHeaderSize - IvfFrameHeaderSize;
                 size = frame_size < size ? frame_size : size;
                 score = CheckAv1EStream(ptr, size);
+            }
+        }
+    } else {
+        score = 0;
+    }
+    return score;
+}
+
+int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
+    int score = 0;
+    int curr_offset = 0; // byte offset
+    size_t offset = 0; // bit offset
+    Vp9UncompressedHeader uncomp_header;
+
+    uncomp_header.frame_marker = Parser::ReadBits(p_stream, offset, 2);
+    if (uncomp_header.frame_marker != 2) {
+        return 0;
+    }
+    uncomp_header.profile_low_bit = Parser::GetBit(p_stream, offset);
+    uncomp_header.profile_high_bit = Parser::GetBit(p_stream, offset);
+    uncomp_header.profile = (uncomp_header.profile_high_bit << 1) + uncomp_header.profile_low_bit;
+    if (uncomp_header.profile == 3) {
+        uncomp_header.reserved_zero = Parser::GetBit(p_stream, offset);
+        if (uncomp_header.reserved_zero) {
+            return 0;
+        }
+    }
+    uncomp_header.show_existing_frame = Parser::GetBit(p_stream, offset);
+    if (uncomp_header.show_existing_frame) {
+        return 0;
+    }
+    uncomp_header.frame_type = Parser::GetBit(p_stream, offset);
+    uncomp_header.show_frame = Parser::GetBit(p_stream, offset);
+    uncomp_header.error_resilient_mode = Parser::GetBit(p_stream, offset);
+    if (uncomp_header.frame_type == kVp9KeyFrame) {
+        uncomp_header.frame_sync_code.frame_sync_byte_0 = Parser::ReadBits(p_stream, offset, 8);
+        if (uncomp_header.frame_sync_code.frame_sync_byte_0 != 0x49) {
+            return 0;
+        }
+        uncomp_header.frame_sync_code.frame_sync_byte_1 = Parser::ReadBits(p_stream, offset, 8);
+        if (uncomp_header.frame_sync_code.frame_sync_byte_1 != 0x83) {
+            return 0;
+        }
+        uncomp_header.frame_sync_code.frame_sync_byte_2 = Parser::ReadBits(p_stream, offset, 8);
+        if (uncomp_header.frame_sync_code.frame_sync_byte_2 != 0x42) {
+            return 0;
+        }
+        score = 100;
+    } else {
+        return 0;
+    }
+    return score;
+}
+
+int RocVideoESParser::CheckIvfVp9Stream(uint8_t *p_stream, int stream_size) {
+    static const char *IVF_SIGNATURE = "DKIF";
+    static const char *VP9_FourCC = "VP90";
+    static const int IvfFileHeaderSize = 32;
+    static const int IvfFrameHeaderSize = 12;
+    uint8_t *ptr = p_stream;
+    int score = 0;
+
+    // bytes 0-3: signature
+    if (memcmp(IVF_SIGNATURE, ptr, 4) == 0) {
+        ptr += 4;
+        // bytes 4-5: version (should be 0). Little Endian.
+        int ivf_version = ptr[0] | (ptr[1] << 8);
+        if (ivf_version != 0) {
+            score = 0;
+        } else {
+            ptr += 4;
+            // bytes 8-11: codec FourCC (e.g., 'VP90')
+            if (memcmp(VP9_FourCC, ptr, 4)) {
+                score = 0;
+            } else {
+                ptr = p_stream + IvfFileHeaderSize;
+                int frame_size = ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
+                ptr += IvfFrameHeaderSize;
+                int size = stream_size - IvfFileHeaderSize - IvfFrameHeaderSize;
+                size = frame_size < size ? frame_size : size;
+                score = CheckVp9EStream(ptr, size);
             }
         }
     } else {

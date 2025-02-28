@@ -36,6 +36,7 @@ enum {
     kStreamTypeHevcElementary,
     kStreamTypeAv1Elementary,
     kStreamTypeAv1Ivf,
+    kStreamTypeVp9Ivf,
     kStreamTypeNumSupported
 } StreamFileType;
 
@@ -110,11 +111,11 @@ class RocVideoESParser {
          */
         int GetPicDataAv1(uint8_t **p_pic_data, int *pic_size);
 
-        /*! \brief Function to retrieve the bitstream of a temporal unit for AV1 from IVF container
+        /*! \brief Function to retrieve the bitstream of a frame from IVF container
          * \param [out] p_pic_data Pointer to the picture data
          * \param [out] pic_size Size of the picture in bytes
          */
-        int GetPicDataIvfAv1(uint8_t **p_pic_data, int *pic_size);
+        int GetPicDataIvf(uint8_t **p_pic_data, int *pic_size);
 
         /*! \brief Function to read bitstream from file and fill into the ring buffer.
         * \return Number of bytes read from file.
@@ -225,6 +226,20 @@ class RocVideoESParser {
          * \return The likelihood score
          */
         int CheckIvfAv1Stream(uint8_t *p_stream, int stream_size);
+
+        /*! \brief Function to check the likelihood of a stream to be a VP9 elementary stream.
+         * \param [in] p_stream Pointer to the stream
+         * \param [in] stream_size Size of the stream in bytes
+         * \return The likelihood score
+         */
+        int CheckVp9EStream(uint8_t *p_stream, int stream_size);
+
+        /*! \brief Function to check the likelihood of a stream to be an IVF container of VP9 elementary stream.
+         * \param [in] p_stream Pointer to the stream
+         * \param [in] stream_size Size of the stream in bytes
+         * \return The likelihood score
+         */
+        int CheckIvfVp9Stream(uint8_t *p_stream, int stream_size);
 
         /*! \brief Function to read variable length unsigned n-bit number appearing directly in the bitstream. 4.10.3. uvlc().
         * \param [in] p_stream Bit stream pointer

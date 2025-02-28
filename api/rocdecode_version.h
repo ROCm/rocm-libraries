@@ -35,7 +35,7 @@ extern "C" {
 #endif
 /* NOTE: Match version with CMakeLists.txt */
 #define ROCDECODE_MAJOR_VERSION 0
-#define ROCDECODE_MINOR_VERSION 10
+#define ROCDECODE_MINOR_VERSION 11
 #define ROCDECODE_MICRO_VERSION 0
 
 
