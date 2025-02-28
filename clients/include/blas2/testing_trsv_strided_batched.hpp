@@ -171,7 +171,7 @@ void testing_trsv_strided_batched(const Arguments& arg)
     hb.copy_from(hx);
 
     // Calculate hb = hA*hx;
-    for(int b = 0; b < batch_count; b++)
+    for(size_t b = 0; b < batch_count; b++)
     {
         ref_trmv<T>(uplo, transA, diag, N, hA[b], lda, hb + stride_x * b, incx);
     }
@@ -180,8 +180,8 @@ void testing_trsv_strided_batched(const Arguments& arg)
     hx_or_b.copy_from(hb);
 
     // copy data from CPU to device
-    CHECK_HIP_ERROR(dA.transfer_from(hA));
     CHECK_HIP_ERROR(dx_or_b.transfer_from(hx_or_b));
+    CHECK_HIP_ERROR(dA.transfer_from(hA));
 
     double error_host              = 0.0;
     double error_device            = 0.0;
@@ -235,6 +235,7 @@ void testing_trsv_strided_batched(const Arguments& arg)
                         stride_x,
                         batch_count));
             handle.post_test(arg);
+
             CHECK_HIP_ERROR(hx_or_b.transfer_from(dx_or_b));
         }
 
@@ -243,6 +244,8 @@ void testing_trsv_strided_batched(const Arguments& arg)
             // calculate dxorb <- A^(-1) b   rocblas_device_pointer_device
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
             CHECK_HIP_ERROR(dx_or_b.transfer_from(cpu_x_or_b));
+
+            handle.pre_test(arg);
             DAPI_CHECK(rocblas_trsv_strided_batched_fn,
                        (handle,
                         uplo,
@@ -256,6 +259,7 @@ void testing_trsv_strided_batched(const Arguments& arg)
                         incx,
                         stride_x,
                         batch_count));
+            handle.post_test(arg);
 
             if(arg.repeatability_check)
             {

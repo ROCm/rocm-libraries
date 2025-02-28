@@ -157,7 +157,7 @@ void testing_trsv_batched(const Arguments& arg)
 
     hb.copy_from(hx);
 
-    for(int b = 0; b < batch_count; b++)
+    for(size_t b = 0; b < batch_count; b++)
     {
         // Calculate hb = hA*hx;
         ref_trmv<T>(uplo, transA, diag, N, hA[b], lda, hb[b], incx);
@@ -226,7 +226,6 @@ void testing_trsv_batched(const Arguments& arg)
         {
             // calculate dxorb <- A^(-1) b   rocblas_device_pointer_device
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
-
             CHECK_HIP_ERROR(dx_or_b.transfer_from(cpu_x_or_b));
 
             handle.pre_test(arg);
