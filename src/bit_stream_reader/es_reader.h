@@ -42,6 +42,7 @@ enum {
 
 #define STREAM_PROBE_SIZE 2 * 1024
 #define STREAM_TYPE_SCORE_THRESHOLD 50
+#define STREAM_TYPE_HIGH_CONFIDENCE_SCORE_THRESHOLD 90
 
 class RocVideoESParser {
     public:

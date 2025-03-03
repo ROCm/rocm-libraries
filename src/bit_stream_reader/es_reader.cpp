@@ -585,6 +585,9 @@ int RocVideoESParser::ProbeStreamType() {
                 break;
             }
         }
+        if (stream_type_score >= STREAM_TYPE_HIGH_CONFIDENCE_SCORE_THRESHOLD) {
+            break;
+        }
     }
 
     if (stream_buf) {
@@ -688,7 +691,7 @@ int RocVideoESParser::CheckAvcEStream(uint8_t *p_stream, int stream_size) {
     if (num_start_codes == 0) {
         score = 0;
     } else {
-        score = sps_present * 25 + pps_present * 25 + idr_slice_present * 15 + slice_present * 15 + first_slice_present * 15;
+        score = sps_present * 25 + pps_present * 25 + idr_slice_present * 20 + slice_present * 15 + first_slice_present * 15;
     }
     return score;
 }
@@ -832,7 +835,7 @@ int RocVideoESParser::CheckHevcEStream(uint8_t *p_stream, int stream_size) {
     if (num_start_codes == 0) {
         score = 0;
     } else {
-        score = vps_present * 20 + sps_present * 20 + pps_present * 20 + rap_slice_present * 15 + slice_present * 15 + first_slice_present * 15;
+        score = vps_present * 15 + sps_present * 20 + pps_present * 20 + rap_slice_present * 15 + slice_present * 15 + first_slice_present * 15;
     }
     return score;
 }

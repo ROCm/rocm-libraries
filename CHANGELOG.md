@@ -10,6 +10,8 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 ### Changed
 
+* Bitstream type detection optimization in bitstream reader.
+
 ### Removed
 
 ## rocDecode 0.10.0 for ROCm 6.4
