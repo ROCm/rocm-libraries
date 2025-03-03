@@ -10,7 +10,7 @@ Installation
 Prerequisites
 ===============
 
-* GFortran version 7.5.0 or newer. For more information, refer to the `GFortran website. <https://fortran-lang.org/en/learn/os_setup/install_gfortran/>`_
+* GFortran version 7.5.0 or newer. For more information, refer to the `GFortran website. <https://fortran-lang.org/learn/os_setup/install_gfortran/>`_
 
 Building and testing hipFORT from source
 ==========================================
