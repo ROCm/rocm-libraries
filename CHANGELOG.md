@@ -3,7 +3,9 @@
 Documentation for hipFFT is available at
 [https://rocm.docs.amd.com/projects/hipFFT/en/latest/](https://rocm.docs.amd.com/projects/hipFFT/en/latest/).
 
-## hipFFT 1.0.18 (unreleased)
+## hipFFT 1.0.19 (unreleased)
+
+## hipFFT 1.0.18 for ROCm 6.4.0
 
 ### Added
 
