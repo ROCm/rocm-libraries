@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -364,20 +365,62 @@ namespace GPUArchitectureGenerator
         FillArchitectures(DEFAULT_ASSEMBLER, "");
     }
 
-    void GenerateFile(std::string const& fileName, bool asYAML)
+    void LoadYamls(std::vector<std::string> const& yamlIns)
     {
-        std::ofstream outputFile;
-        outputFile.open(fileName);
+        for(const auto& yamlIn : yamlIns)
+        {
+            std::map<rocRoller::GPUArchitectureTarget, rocRoller::GPUArchitecture> splitArch
+                = rocRoller::GPUArchitecture::readYaml(yamlIn);
+            for(const auto& gpuArchitecture : splitArch)
+            {
+                GPUArchitectures[gpuArchitecture.first] = gpuArchitecture.second;
+            }
+        }
+    }
+
+    void GenerateFile(std::string const& fileName, bool asYAML, bool splitYAML)
+    {
         if(asYAML)
         {
-            outputFile << rocRoller::GPUArchitecture::writeYaml(GPUArchitectures) << std::endl;
+            if(!splitYAML)
+            {
+                std::ofstream outputFile;
+                outputFile.open(fileName);
+                outputFile << rocRoller::GPUArchitecture::writeYaml(GPUArchitectures) << std::endl;
+                outputFile.close();
+            }
+            else
+            {
+                std::filesystem::path argPath(fileName);
+
+                for(const auto& gpuArchitecture : GPUArchitectures)
+                {
+                    std::map<rocRoller::GPUArchitectureTarget, rocRoller::GPUArchitecture>
+                        splitArch;
+                    splitArch[gpuArchitecture.first] = gpuArchitecture.second;
+
+                    std::string newFilename
+                        = argPath.parent_path()
+                          / (argPath.stem().string() + "_" + gpuArchitecture.first.toString()
+                             + argPath.extension().string());
+                    std::ranges::replace(newFilename, ':', '_');
+                    std::ranges::replace(newFilename, '+', 't');
+
+                    std::ofstream outputFile;
+                    outputFile.open(newFilename);
+                    outputFile << rocRoller::GPUArchitecture::writeYaml(splitArch) << std::endl;
+                    outputFile.close();
+                }
+            }
         }
         else
         {
             // As msgpack
+            std::ofstream outputFile;
+            outputFile.open(fileName);
             outputFile << rocRoller::GPUArchitecture::writeMsgpack(GPUArchitectures) << std::endl;
+            outputFile.close();
         }
-        outputFile.close();
     }
 
     rocRoller::GPUInstructionInfo ConvertSpecInstruction(const amdisa::Instruction& instruction,

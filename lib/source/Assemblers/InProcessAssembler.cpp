@@ -105,7 +105,14 @@ namespace rocRoller
                                                     std::unique_ptr<llvm::MCAsmBackend>(MAB),
                                                     MAB->createObjectWriter(*Out),
                                                     std::unique_ptr<llvm::MCCodeEmitter>(CE),
-                                                    *STI));
+                                                    *STI
+#if LLVM_VERSION_MAJOR < 19
+                                                    ,
+                                                    true,
+                                                    true,
+                                                    true
+#endif
+                                                    ));
 
         // Create a Parser instance
         std::unique_ptr<llvm::MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx, *Str.get(), *MAI));

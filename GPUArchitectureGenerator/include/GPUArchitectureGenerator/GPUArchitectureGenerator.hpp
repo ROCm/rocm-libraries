@@ -45,7 +45,9 @@ namespace GPUArchitectureGenerator
 
     void FillArchitectures();
 
-    void GenerateFile(std::string const&, bool asYAML = false);
+    void LoadYamls(std::vector<std::string> const& yamlIns);
+
+    void GenerateFile(std::string const&, bool asYAML = false, bool splitYAML = false);
 
     void AddCapability(rocRoller::GPUArchitectureTarget const&,
                        rocRoller::GPUCapability const&,

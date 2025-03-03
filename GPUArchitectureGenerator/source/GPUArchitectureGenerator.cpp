@@ -15,18 +15,24 @@ const std::string HELP_MESSAGE
       "\n"
       "Options:\n"
       "  -Y               output YAML (msgpack by default)\n"
+      "  --split          split yaml file output into a file per architecture\n"
       "  --xml_dir        source directory for ISA xml files\n"
+      "  --yaml           one or more yaml files to convert to the desired output\n"
       "  -h, --help       display this help and exit";
 
 const std::string YAML_ARG    = "-Y";
 const std::string XML_DIR_ARG = "--xml_dir";
+const std::string YAML_IN_ARG = "--yaml";
+const std::string SPLIT_ARG   = "--split";
 
 struct ProgramArgs
 {
-    std::string outputFile;
-    std::string assembler = GPUArchitectureGenerator::DEFAULT_ASSEMBLER;
-    bool        useYAML   = false;
-    std::string xmlDir    = "";
+    std::string              outputFile;
+    std::string              assembler = GPUArchitectureGenerator::DEFAULT_ASSEMBLER;
+    bool                     useYAML   = false;
+    bool                     splitYAML = false;
+    std::string              xmlDir    = "";
+    std::vector<std::string> yamlIns;
 
     static ProgramArgs       ParseArgs(int argc, const char* argv[]);
     [[noreturn]] static void Help(bool error = false);
@@ -50,11 +56,24 @@ ProgramArgs ProgramArgs::ParseArgs(int argc, const char* argv[])
             iter       = args.erase(iter);
             iter--;
         }
+        if(*iter == SPLIT_ARG)
+        {
+            rv.splitYAML = true;
+            iter         = args.erase(iter);
+            iter--;
+        }
         if(*iter == XML_DIR_ARG)
         {
             iter      = args.erase(iter);
             rv.xmlDir = *iter;
             iter      = args.erase(iter);
+            iter--;
+        }
+        if(*iter == YAML_IN_ARG)
+        {
+            iter = args.erase(iter);
+            rv.yamlIns.push_back(*iter);
+            iter = args.erase(iter);
             iter--;
         }
     }
@@ -89,11 +108,18 @@ int main(int argc, const char* argv[])
         return 1;
     }
 
-    GPUArchitectureGenerator::FillArchitectures(args.assembler, args.xmlDir);
+    if(args.yamlIns.size() > 0)
+    {
+        GPUArchitectureGenerator::LoadYamls(args.yamlIns);
+    }
+    else
+    {
+        GPUArchitectureGenerator::FillArchitectures(args.assembler, args.xmlDir);
+    }
 
     try
     {
-        GPUArchitectureGenerator::GenerateFile(args.outputFile, args.useYAML);
+        GPUArchitectureGenerator::GenerateFile(args.outputFile, args.useYAML, args.splitYAML);
     }
     catch(std::exception& e)
     {

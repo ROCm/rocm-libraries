@@ -81,6 +81,9 @@ option(ROCROLLER_USE_HIP "Use HIP within the rocRoller." ON)
 option(ROCROLLER_EMBED_ARCH_DEF
        "Embed the generated GPU architecture msgpack in the library" ON
 )
+option(ROCROLLER_USE_PREGENERATED_ARCH_DEF
+       "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON
+)
 option(SKIP_CPPCHECK "Skip CPPCHECK." ON)
 
 option(CODE_ANALYSIS "When building, don't query for tests etc." OFF)

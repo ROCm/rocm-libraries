@@ -16,6 +16,13 @@
 #include "rocRoller/GPUArchitecture/GPUCapability.hpp"
 #include "rocRoller/GPUArchitecture/GPUInstructionInfo.hpp"
 
+/**
+  *
+  * If you make any changes to this file, you will likely need to
+  * regeneratee the yaml files in the pregenerated folder.
+  *
+  */
+
 namespace GPUArchitectureGenerator
 {
     const std::string DEFAULT_ASSEMBLER = "/opt/rocm/bin/amdclang";

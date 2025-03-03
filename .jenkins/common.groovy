@@ -8,7 +8,12 @@ def getPrComments(pullRequest) {
 }
 
 def withSSH(platform, pipeline) {
-    withCredentials([sshUserPrivateKey(credentialsId:"a1_mlselibci_npi-internal-github-ssh-key", keyFileVariable:"ROCROLLER_KEY_FILE")])
+    withCredentials(
+        [
+            sshUserPrivateKey(credentialsId:"github-rocmmathlibrariesbot-ssh_key-mathci_enterprise_job", keyFileVariable:"PUBLIC_KEY_FILE"),
+            sshUserPrivateKey(credentialsId:"github_enterprise-a1_mlselibci_npi-ssh_key-mathci_enterprise_job", keyFileVariable: "ENTERPRISE_KEY_FILE"),
+        ]
+    )
     {
         configFileProvider(
             [configFile(fileId: 'github-enterprise-known-hosts', variable: 'ENTERPRISE_KNOWN_HOSTS'),
@@ -18,7 +23,8 @@ def withSSH(platform, pipeline) {
             mkdir -p ~/.ssh/
             cat ${ENTERPRISE_KNOWN_HOSTS} >> ~/.ssh/known_hosts
             eval `ssh-agent -s`
-            ssh-add ${ROCROLLER_KEY_FILE}
+            ssh-add ${PUBLIC_KEY_FILE}
+            ssh-add ${ENTERPRISE_KEY_FILE}
             ssh-add -L
             cat ${ENTERPRISE_SSH_CONFIG} >> ~/.ssh/config
             """

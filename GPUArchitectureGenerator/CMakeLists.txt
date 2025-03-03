@@ -4,7 +4,9 @@
 rocroller_add_dependency(
     isa_spec_manager HASH 1c6fcc8072c7a94ceedb734cf06fd8a08487c4b3
 )
-rocroller_add_dependency(mrisa_xml VERSION 2024_08_22)
+if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
+    rocroller_add_dependency(mrisa_xml VERSION 2024_08_22)
+endif()
 
 add_executable(
     GPUArchitectureGenerator
@@ -23,7 +25,7 @@ add_executable(
     ${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp
 )
 
-if(DEFINED INTERNAL_MRISAS AND INTERNAL_MRISAS)
+if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF AND DEFINED INTERNAL_MRISAS AND INTERNAL_MRISAS)
     foreach(MRISA_FILE IN LISTS INTERNAL_MRISAS)
         if(EXISTS ${MRISA_FILE})
             get_filename_component(mrisa_file_name "${MRISA_FILE}" NAME)
@@ -83,22 +85,48 @@ set(ARCH_FILE_DIR ${PROJECT_BINARY_DIR}/share/rocRoller)
 
 file(MAKE_DIRECTORY ${ARCH_FILE_DIR})
 
-add_custom_command(
-    OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-    COMMAND
-        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/GPUArchitectureGenerator
-        ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml -Y --xml_dir
-        ${mrisa_xml_SOURCE_DIR}
-    DEPENDS GPUArchitectureGenerator ${INTERNAL_MRISA_TARGETS}
-)
+if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
+
+    file(MAKE_DIRECTORY ${ARCH_FILE_DIR}/split_yamls)
+
+    add_custom_command(
+        OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+        COMMAND
+            GPUArchitectureGenerator
+            ${ARCH_FILE_DIR}/split_yamls/GPUArchitecture_def.yaml -Y --split --xml_dir
+            ${mrisa_xml_SOURCE_DIR}
+        COMMAND
+            GPUArchitectureGenerator
+            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml -Y --xml_dir
+            ${mrisa_xml_SOURCE_DIR}
+        DEPENDS ${INTERNAL_MRISA_TARGETS}
+    )
+
+else()
+
+    file(GLOB YAML_FILES "${PROJECT_SOURCE_DIR}/GPUArchitectureGenerator/pregenerated/*.yaml")
+    set(YAML_ARGS "")
+    foreach(YAML_FILE ${YAML_FILES})
+        list(APPEND YAML_ARGS --yaml "${YAML_FILE}")
+    endforeach()
+
+    add_custom_command(
+        OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+        COMMAND
+            GPUArchitectureGenerator
+            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml -Y ${YAML_ARGS}
+        DEPENDS "${YAML_FILES}"
+    )
+
+endif()
 
 add_custom_command(
     OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
     COMMAND
-        ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/GPUArchitectureGenerator
-        ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack --xml_dir
-        ${mrisa_xml_SOURCE_DIR}
-    DEPENDS GPUArchitectureGenerator ${INTERNAL_MRISA_TARGETS}
+        GPUArchitectureGenerator
+        ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
+        --yaml ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+    DEPENDS ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
 )
 
 if(INTERNAL_MRISA_FILES)

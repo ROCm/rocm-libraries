@@ -15,7 +15,7 @@ include(CTest)
 rocroller_add_dependency(googletest VERSION 1.12.1)
 rocroller_add_dependency(Catch2 VERSION 3.7.0)
 rocroller_add_dependency(
-    mxDataGenerator HASH 05fd3a47fa83db1ccc81178ba360a8a7ade9bd49
+    mxDataGenerator HASH 2a26ecaf6df996e716534a43c11f29aa0d4723a0
 )
 
 # Component stand-alone test

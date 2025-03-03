@@ -131,6 +131,10 @@ make -j$(nproc)
 - It is highly recommended _not_ to reconfigure a build directory with cmake.
   Doing so can lead to caching problems with the configuration.  When in doubt,
   remove your build directory and start fresh.
+- `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF` will not use the
+  [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
+  into the repo, and will instead generate them from scratch using the MRISA XML
+  files and [GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) file.
 
 ### Running the tests
 
@@ -181,6 +185,24 @@ This allows catch/throw to work in GDB.
 To turn a test failure directly into a GDB breakpoint:
 ```
 --gtest_break_on_failure
+```
+
+### Updating pregenerated GPUArchitecture yaml files
+
+The [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
+into the repo should be updated anytime there are changes to the underlying MRISA XML files or the
+[GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) file.
+
+Updated yaml files can be copied from `./build/share/rocRoller/split_yamls/` after
+building with `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF`.
+
+```bash
+mkdir ./build
+cd ./build
+cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
+make -j GPUArchitecture_def
+rm -rf ../GPUArchitectureGenerator/pregenerated/*.yaml
+cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
 ```
 
 ## GEMM client
