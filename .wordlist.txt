@@ -10,12 +10,14 @@ GoogleTest
 hipSPARSELt
 html
 LeakyReLU
+matmul
 myst
 NONINFRINGEMENT
 ReLU
 rocSPARSELt
 sublicense
 sudo
+SMFMA
 SpMM
 Tanh
 tensorfloat
