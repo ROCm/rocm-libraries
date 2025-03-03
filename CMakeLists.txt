@@ -167,10 +167,12 @@ if(NOT DEFINED AMDGPU_TARGETS)
   set(XNACK_PLUS_TARGETS
     gfx90a:xnack+
     gfx908:xnack+
-    gfx942:xnack+)
+    gfx942:xnack+
+    gfx950:xnack+)
   set(XNACK_MINUS_TARGETS gfx90a:xnack-)
   set(MISC_TARGETS
     gfx942
+    gfx950
     gfx1100
     gfx1101
     gfx1102
