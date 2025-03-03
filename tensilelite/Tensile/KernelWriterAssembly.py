@@ -4340,6 +4340,11 @@ class KernelWriterAssembly(KernelWriter):
     if numG2LB > 0:
       # TODO: B alignment hack
       numG2LA = ((numG2LA+1)//2)*2
+    if numG2LMetadata > 0:
+      # TODO: M alignment hack
+      numTemp1 = numG2LA + numG2LB
+      numTemp2 = ((numTemp1+1)//2)*2
+      numG2LB += (numTemp2 - numTemp1)
     if numG2LA + numG2LB + numG2LMetadata > 0:
       vgprBase = self.vgprPool.checkOutAligned(numG2LA + numG2LB + numG2LMetadata, 2)
       imod.addComment0("Check out VGPR (numG2LA,numG2LB,numG2LMetadata) = (%d,%d,%d)"%(numG2LA,numG2LB,numG2LMetadata))
