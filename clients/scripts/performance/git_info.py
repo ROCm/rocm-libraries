@@ -1,3 +1,9 @@
+"""
+This module is used to create git info file,
+if it is not found in output_folder_location specified by the end user.
+"""
+
+
 from pathlib import Path
 import git
 import os
@@ -86,11 +92,25 @@ def create_github_file(filename: str, dir_name: str = None) -> str:
             os.chdir(cwd)
             repo = git.Repo(search_parent_directories=True)
         # Retrieving the values, when package/project is running inside any git repo
-        branch_name = repo.active_branch.name
-        git_hash = repo.head.object.hexsha
-        git_logs = repo.git.log("--grep=Merge", "--max-count=1")
-        if len(git_logs) > 0:
-            merge_id, pull_id = get_merge_id(git_logs.split("\n"))
+        # Check if the repo is in a detached HEAD state
+        if repo.head.is_detached:
+            print("Repository is in a detached HEAD state.")
+            # You can use repo.head.commit to get the current commit
+            git_hash = repo.head.commit.hexsha
+            branches_output = repo.git.branch('--contains', git_hash)
+            branches = [
+                branch.strip().lstrip("* ")  # Remove leading "* " for the current branch
+                for branch in branches_output.split("\n")
+                if branch.strip()  # Exclude empty lines
+            ]
+            branch_name = branches[0] if branches else "None"
+        else:
+            # Safe to access active_branch
+            branch_name = repo.active_branch.name
+            git_hash = repo.head.object.hexsha
+            git_logs = repo.git.log("--grep=Merge", "--max-count=1")
+            if len(git_logs) > 0:
+                merge_id, pull_id = get_merge_id(git_logs.split("\n"))
 
     except (git.InvalidGitRepositoryError, git.exc.NoSuchPathError):
         print(
