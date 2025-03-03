@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2020 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -83,8 +83,6 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
-  gfx940
-  gfx941
   gfx942
   gfx1030
   gfx1100
@@ -101,8 +99,6 @@ if(BUILD_ADDRESS_SANITIZER)
   SET(DEFAULT_GPUS
     gfx908:xnack+
     gfx90a:xnack+
-    gfx940:xnack+
-    gfx941:xnack+
     gfx942:xnack+)
   add_link_options(-fuse-ld=lld)
   add_compile_definitions(ADDRESS_SANITIZER)

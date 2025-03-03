@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.19 (unreleased)
 
+### Removed
+
+* Remove support for the gfx940 and gfx941 targets from the client programs.
+
 ## hipFFT 1.0.18 for ROCm 6.4.0
 
 ### Added
