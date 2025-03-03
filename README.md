@@ -1,5 +1,8 @@
 # hipRAND
 
+> [!NOTE]
+> The published hipRAND documentation is available [here](https://rocm.docs.amd.com/projects/hipRAND/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+
 hipRAND is a RAND marshalling library with multiple supported backends. It sits between your
 application and the backend RAND library, where it marshals inputs to the backend and results to the
 application. hipRAND exports an interface that doesn't require the client to change, regardless of the
@@ -7,28 +10,6 @@ chosen backend.
 
 hipRAND supports [rocRAND](https://github.com/ROCm/rocRAND) and
 [NVIDIA CUDA cuRAND](https://developer.nvidia.com/curand).
-
-> [!NOTE]
-> The published hipRAND documentation is available at [hipRAND](https://rocm.docs.amd.com/projects/hipRAND/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the hipRAND/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
-
-## Documentation
-
-To build our documentation, use the following commands:
-
-```bash
-# Go to hipRAND docs directory
-cd hipRAND; cd docs
-
-# Install Python dependencies
-python3 -m pip install -r sphinx/requirements.txt
-
-# Build the documentation
-python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
-
-# E.g. serve the HTML docs locally
-cd _build/html
-python3 -m http.server
-```
 
 ## Requirements
 
@@ -106,3 +87,55 @@ hiprand_log_normal_double(
   double stddev
 )
 ```
+
+## Building the documentation locally
+
+### Requirements
+
+#### Doxygen
+
+The build system uses Doxygen [version 1.9.4](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_4). You can try using a newer version, but that might cause issues.
+
+After you have downloaded Doxygen version 1.9.4:
+
+```shell
+# Add doxygen to your PATH
+echo 'export PATH=<doxygen 1.9.4 path>/bin:$PATH' >> ~/.bashrc
+
+# Apply the updated .bashrc
+source ~/.bashrc
+
+# Confirm that you are using version 1.9.4
+doxygen --version
+```
+
+#### Python
+
+The build system uses Python version 3.10. You can try using a newer version, but that might cause issues.
+
+You can install Python 3.10 alongside your other Python versions using [pyenv](https://github.com/pyenv/pyenv?tab=readme-ov-file#installation):
+
+```shell
+# Install Python 3.10
+pyenv install 3.10
+
+# Create a Python 3.10 virtual environment
+pyenv virtualenv 3.10 venv_hiprand
+
+# Activate the virtual environment
+pyenv activate venv_hiprand
+```
+
+### Building
+
+After cloning this repository and navigating into its directory:
+
+```shell
+# Install Python dependencies
+python3 -m pip install -r docs/sphinx/requirements.txt
+
+# Build the documentation
+python3 -m sphinx -T -E -b html -d docs/_build/doctrees -D language=en docs docs/_build/html
+```
+
+You can then open `docs/_build/html/index.html` in your browser to view the documentation.

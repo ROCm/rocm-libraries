@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -195,8 +195,8 @@ typedef enum hiprandDirectionVectorSet
  * - HIPRAND_RNG_QUASI_SOBOL64
  * - HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64
  *
- * \param generator - Pointer to generator
- * \param rng_type - Type of random number generator to create
+ * \param generator Pointer to generator
+ * \param rng_type Type of random number generator to create
  *
  * \return
  * - HIPRAND_STATUS_ALLOCATION_FAILED, if memory allocation failed \n
@@ -231,8 +231,8 @@ hiprandCreateGenerator(hiprandGenerator_t * generator, hiprandRngType_t rng_type
  * - HIPRAND_RNG_QUASI_SOBOL64
  * - HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64
  *
- * \param generator - Pointer to generator
- * \param rng_type - Type of random number generator to create
+ * \param generator Pointer to generator
+ * \param rng_type Type of random number generator to create
  *
  * \return
  * - HIPRAND_STATUS_ALLOCATION_FAILED, if memory allocation failed \n
@@ -250,7 +250,7 @@ hiprandCreateGeneratorHost(hiprandGenerator_t * generator, hiprandRngType_t rng_
  *
  * Destroys random number generator and frees related memory.
  *
- * \param generator - Generator to be destroyed
+ * \param generator Generator to be destroyed
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -268,9 +268,9 @@ hiprandDestroyGenerator(hiprandGenerator_t generator);
  * Generated numbers are between \p 0 and \p 2^32, including \p 0 and
  * excluding \p 2^32.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of 32-bit unsigned integers to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of 32-bit unsigned integers to generate
  *
  * Note: \p generator must be not be of type \p HIPRAND_RNG_QUASI_SOBOL64
  * or \p HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64.
@@ -293,9 +293,9 @@ hiprandGenerate(hiprandGenerator_t generator,
  * Generated numbers are between \p 0 and \p 2^8, including \p 0 and
  * excluding \p 2^8.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of 8-bit unsigned integers to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of 8-bit unsigned integers to generate
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -315,9 +315,9 @@ hiprandGenerateChar(hiprandGenerator_t generator,
  * Generated numbers are between \p 0 and \p 2^16, including \p 0 and
  * excluding \p 2^16.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of 16-bit unsigned integers to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of 16-bit unsigned integers to generate
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -337,9 +337,9 @@ hiprandGenerateShort(hiprandGenerator_t generator,
  * Generated numbers are between \p 0 and \p 2^64, including \p 0 and
  * excluding \p 2^64.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of 64-bit unsigned integers to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of 64-bit unsigned integers to generate
  *
  * Note: \p generator must be of type \p HIPRAND_RNG_QUASI_SOBOL64
  * or \p HIPRAND_RNG_QUASI_SCRAMBLED_SOBOL64.
@@ -362,9 +362,9 @@ hiprandStatus_t HIPRANDAPI hiprandGenerateLongLong(hiprandGenerator_t  generator
  * Generated numbers are between \p 0.0f and \p 1.0f, excluding \p 0.0f and
  * including \p 1.0f.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of floats to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of floats to generate
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -386,9 +386,9 @@ hiprandGenerateUniform(hiprandGenerator_t generator,
  * Generated numbers are between \p 0.0 and \p 1.0, excluding \p 0.0 and
  * including \p 1.0.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of floats to generate
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of floats to generate
  *
  * Note: When \p generator is of type: \p HIPRAND_RNG_PSEUDO_MRG32K3A,
  * \p HIPRAND_RNG_PSEUDO_MTGP32, \p HIPRAND_RNG_QUASI_SOBOL32, or
@@ -416,9 +416,9 @@ hiprandGenerateUniformDouble(hiprandGenerator_t generator,
 * Generated numbers are between \p 0.0 and \p 1.0, excluding \p 0.0 and
 * including \p 1.0.
 *
-* \param generator - Generator to use
-* \param output_data - Pointer to memory to store generated numbers
-* \param n - Number of halfs to generate
+* \param generator Generator to use
+* \param output_data Pointer to memory to store generated numbers
+* \param n Number of halfs to generate
 *
 * \return
 * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -437,11 +437,11 @@ hiprandGenerateUniformHalf(hiprandGenerator_t generator,
  * Generates \p n normally distributed 32-bit floating-point
  * values and saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of floats to generate
- * \param mean - Mean value of normal distribution
- * \param stddev - Standard deviation value of normal distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of floats to generate
+ * \param mean Mean value of normal distribution
+ * \param stddev Standard deviation value of normal distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -462,11 +462,11 @@ hiprandGenerateNormal(hiprandGenerator_t generator,
  * Generates \p n normally distributed 64-bit double-precision floating-point
  * numbers and saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of doubles to generate
- * \param mean - Mean value of normal distribution
- * \param stddev - Standard deviation value of normal distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of doubles to generate
+ * \param mean Mean value of normal distribution
+ * \param stddev Standard deviation value of normal distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -487,11 +487,11 @@ hiprandGenerateNormalDouble(hiprandGenerator_t generator,
  * Generates \p n normally distributed 16-bit half-precision floating-point
  * numbers and saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of halfs to generate
- * \param mean - Mean value of normal distribution
- * \param stddev - Standard deviation value of normal distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of halfs to generate
+ * \param mean Mean value of normal distribution
+ * \param stddev Standard deviation value of normal distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -512,11 +512,11 @@ hiprandGenerateNormalHalf(hiprandGenerator_t generator,
  * Generates \p n log-normally distributed 32-bit floating-point values
  * and saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of floats to generate
- * \param mean - Mean value of log normal distribution
- * \param stddev - Standard deviation value of log normal distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of floats to generate
+ * \param mean Mean value of log normal distribution
+ * \param stddev Standard deviation value of log normal distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -537,11 +537,11 @@ hiprandGenerateLogNormal(hiprandGenerator_t generator,
  * Generates \p n log-normally distributed 64-bit double-precision floating-point
  * values and saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of doubles to generate
- * \param mean - Mean value of log normal distribution
- * \param stddev - Standard deviation value of log normal distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of doubles to generate
+ * \param mean Mean value of log normal distribution
+ * \param stddev Standard deviation value of log normal distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -562,11 +562,11 @@ hiprandGenerateLogNormalDouble(hiprandGenerator_t generator,
 * Generates \p n log-normally distributed 16-bit half-precision floating-point
 * values and saves them to \p output_data.
 *
-* \param generator - Generator to use
-* \param output_data - Pointer to memory to store generated numbers
-* \param n - Number of halfs to generate
-* \param mean - Mean value of log normal distribution
-* \param stddev - Standard deviation value of log normal distribution
+* \param generator Generator to use
+* \param output_data Pointer to memory to store generated numbers
+* \param n Number of halfs to generate
+* \param mean Mean value of log normal distribution
+* \param stddev Standard deviation value of log normal distribution
 *
 * \return
 * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -587,10 +587,10 @@ hiprandGenerateLogNormalHalf(hiprandGenerator_t generator,
  * Generates \p n Poisson-distributed 32-bit unsigned integers and
  * saves them to \p output_data.
  *
- * \param generator - Generator to use
- * \param output_data - Pointer to memory to store generated numbers
- * \param n - Number of 32-bit unsigned integers to generate
- * \param lambda - lambda for the Poisson distribution
+ * \param generator Generator to use
+ * \param output_data Pointer to memory to store generated numbers
+ * \param n Number of 32-bit unsigned integers to generate
+ * \param lambda lambda for the Poisson distribution
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -614,7 +614,7 @@ hiprandGeneratePoisson(hiprandGenerator_t generator,
  * automatically called by functions which generates random numbers like
  * hiprandGenerate(), hiprandGenerateUniform(), hiprandGenerateNormal() etc.
  *
- * \param generator - Generator to initialize
+ * \param generator Generator to initialize
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was never created \n
@@ -632,8 +632,8 @@ hiprandGenerateSeeds(hiprandGenerator_t generator);
  * Sets the current stream for all kernel launches of the generator.
  * All functions will use this stream.
  *
- * \param generator - Generator to modify
- * \param stream - Stream to use or NULL for default stream
+ * \param generator Generator to modify
+ * \param stream Stream to use or NULL for default stream
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -650,8 +650,8 @@ hiprandSetStream(hiprandGenerator_t generator, hipStream_t stream);
  * - This operation resets the generator's internal state.
  * - This operation does not change the generator's offset.
  *
- * \param generator - Pseudo-random number generator
- * \param seed - New seed value
+ * \param generator Pseudo-random number generator
+ * \param seed New seed value
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -672,8 +672,8 @@ hiprandSetPseudoRandomGeneratorSeed(hiprandGenerator_t generator, unsigned long 
  * Absolute offset cannot be set if generator's type is
  * HIPRAND_RNG_PSEUDO_MTGP32 or HIPRAND_RNG_PSEUDO_MT19937.
  *
- * \param generator - Random number generator
- * \param offset - New absolute offset
+ * \param generator Random number generator
+ * \param offset New absolute offset
  *
  * \return
  * - HIPRAND_STATUS_NOT_INITIALIZED if the generator was not initialized \n
@@ -692,8 +692,8 @@ hiprandSetGeneratorOffset(hiprandGenerator_t generator, unsigned long long offse
  * - This operation resets the generator's internal state.
  * - This operation does not change the generator's seed.
  *
- * \param generator - Random number generator
- * \param order - New ordering of results
+ * \param generator Random number generator
+ * \param order New ordering of results
  *
  * The ordering choices for pseudorandom sequences are
  * HIPRAND_ORDERING_PSEUDO_DEFAULT and
@@ -721,8 +721,8 @@ hiprandStatus_t HIPRANDAPI hiprandSetGeneratorOrdering(hiprandGenerator_t genera
  * - This operation resets the generator's internal state.
  * - This operation does not change the generator's offset.
  *
- * \param generator - Quasi-random number generator
- * \param dimensions - Number of dimensions
+ * \param generator Quasi-random number generator
+ * \param dimensions Number of dimensions
  *
  * \return
  * - HIPRAND_STATUS_NOT_CREATED if the generator wasn't created \n
@@ -739,7 +739,7 @@ hiprandSetQuasiRandomGeneratorDimensions(hiprandGenerator_t generator, unsigned 
  * Returns in \p version the version number of the underlying cuRAND or
  * rocRAND library.
  *
- * \param version - Version of the library
+ * \param version Version of the library
  *
  * \return
  * - HIPRAND_STATUS_OUT_OF_RANGE if \p version is NULL \n
@@ -753,8 +753,8 @@ hiprandGetVersion(int * version);
  *
  * Construct the histogram for the Poisson distribution with lambda \p lambda.
  *
- * \param lambda - lambda for the Poisson distribution
- * \param discrete_distribution - pointer to the histogram in device memory
+ * \param lambda lambda for the Poisson distribution
+ * \param discrete_distribution pointer to the histogram in device memory
  *
  * \return
  * - HIPRAND_STATUS_ALLOCATION_FAILED if memory could not be allocated \n
@@ -771,7 +771,7 @@ hiprandCreatePoissonDistribution(double lambda, hiprandDiscreteDistribution_t * 
  * Destroy the histogram array for a discrete distribution created by
  * hiprandCreatePoissonDistribution.
  *
- * \param discrete_distribution - pointer to the histogram in device memory
+ * \param discrete_distribution pointer to the histogram in device memory
  *
  * \return
  * - HIPRAND_STATUS_OUT_OF_RANGE if \p discrete_distribution was null \n

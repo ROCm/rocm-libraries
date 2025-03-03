@@ -19,12 +19,10 @@ setup(
     description="hipRAND Python Wrapper",
     long_description=readme,
     author="Advanced Micro Devices, Inc.",
-    # author_email="",
     url="https://github.com/ROCm/hipRAND",
     license="MIT",
     packages=["hiprand"],
     install_requires=REQUIRED_PACKAGES,
-    test_suite="tests",
     command_options={
         "build_sphinx": {
             "version": ("setup.py", version),
