@@ -18,6 +18,28 @@ Definitions:
     - { N: *c_pos_x32_overflow_int32, incx: 1, incy: 32 }
 
 Tests:
+- name: set_get_vector_bad_dev_ptr
+  category: quick
+  precision: *single_precision
+  algo: 1
+  arguments:
+    - { N: 1, incx: 1, incy:1}
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
+- name: set_get_vector_bad_args
+  category: quick
+  precision: *single_precision
+  arguments:
+    - { N:  0, incx: 1, incy:1}
+    - { N: -1, incx: 1, incy:1}
+    - { N:  1, incx: 0, incy:1}
+    - { N:  1, incx: 1, incy:0}
+  function:
+  - set_get_vector
+  - set_get_vector_async
+
 - name: auxiliary_1
   category: quick
   precision: *single_double_precisions
