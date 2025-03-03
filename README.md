@@ -78,6 +78,8 @@ To set these options during the build process, use the following CMake command:
       * BFLOAT16 input/output, FP32 Matrix Core accumulate
       * INT8 input/output, INT32 Matrix Core accumulate
       * INT8 input, FP16 output, INT32 Matrix Core accumulate
+      * FP8(E4M3) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
+      * BF8(E5M2) input, FP32 output, FP32 Matrix Core accumulate (LLVM target: gfx950)
     * Matrix pruning and compression functionalities
     * Auto-tuning functionality (see hipsparseLtMatmulSearch())
     * Batched Sparse Gemm support:

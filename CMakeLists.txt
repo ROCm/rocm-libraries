@@ -252,7 +252,7 @@ if(HIPSPARSELT_ENABLE_MARKER)
 endif()
 
 # Setup version
-set (VERSION_STRING "0.2.3" )
+set (VERSION_STRING "0.2.4" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 set(hipsparselt_SOVERSION 0.2)
 
