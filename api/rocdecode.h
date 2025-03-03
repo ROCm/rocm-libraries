@@ -1610,8 +1610,8 @@ typedef struct _RocdecAv1SliceParams {
 //! \struct _RocdecPicParams
 //! \ingroup group_amd_rocdecode
 //! Picture parameters for decoding
-//! This structure is used in rocDecDecodePicture API
-//! IN  for rocDecDecodePicture
+//! This structure is used in rocDecDecodeFrame API
+//! IN  for rocDecDecodeFrame
 /******************************************************************************************/
 typedef struct _RocdecPicParams {
     int pic_width;         /**< IN: Coded frame width */

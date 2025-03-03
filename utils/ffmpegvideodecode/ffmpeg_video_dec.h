@@ -150,7 +150,7 @@ class FFMpegVideoDecoder: public RocVideoDecoder {
         int HandleVideoSequence(RocdecVideoFormat *p_video_format);
 
         /**
-         *   @brief  This function gets called when a picture is ready to be decoded. cuvidDecodePicture is called from this function
+         *   @brief  This function gets called when a picture is ready to be decoded. rocDecDecodeFrame is called from this function
          *   to decode the picture
          */
         int HandlePictureDecode(RocdecPicParams *p_pic_params);

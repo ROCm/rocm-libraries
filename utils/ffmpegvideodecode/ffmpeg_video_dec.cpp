@@ -157,7 +157,7 @@ FFMpegVideoDecoder::~FFMpegVideoDecoder() {
 }
 
 /* Return value from HandleVideoSequence() are interpreted as   :
-*  0: fail, 1: succeeded, > 1: override dpb size of parser (set by CUVIDPARSERPARAMS::max_num_decode_surfaces while creating parser)
+*  0: fail, 1: succeeded, > 1: override dpb size of parser (set by RocdecParserParams::max_num_decode_surfaces while creating parser)
 */
 int FFMpegVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     if (p_video_format == nullptr) {
