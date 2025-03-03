@@ -819,6 +819,9 @@ Tests:
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
+  lda: [129, 2440]
+  batch_count: [1, 5]
+  stride_a: 0
   transA: T
   transB: N
   alpha: 1

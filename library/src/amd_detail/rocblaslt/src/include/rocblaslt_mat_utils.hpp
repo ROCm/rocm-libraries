@@ -148,6 +148,49 @@ inline rocblaslt_status validateMatmulDescrArgs(rocblaslt_handle       handle,
 }
 
 /*******************************************************************************
+ * Validate Matmul Swizzle Arguments
+ ******************************************************************************/
+inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   matmul_descr,
+                                                  const rocblaslt_matrix_layout matA,
+                                                  const rocblaslt_matrix_layout matB,
+                                                  hipDataType                   a_type,
+                                                  hipDataType                   b_type,
+                                                  bool                          swizzleA,
+                                                  bool                          swizzleB)
+{
+    //support TN for swizzle
+    if(swizzleA && matmul_descr->op_A != HIPBLAS_OP_T)
+        return rocblaslt_status_invalid_value;
+
+    if(swizzleB && matmul_descr->op_B != HIPBLAS_OP_N)
+        return rocblaslt_status_invalid_value;
+
+    if(swizzleA && !isValidOrderForDatatype(a_type, matA->order))
+    {
+        log_error(__func__, "Error: Invalid Order for hipDataType A.");
+        return rocblaslt_status_invalid_value;
+    }
+
+    if(swizzleB && !isValidOrderForDatatype(b_type, matB->order))
+    {
+        log_error(__func__, "Error: Invalid Order for hipDataType B.");
+        return rocblaslt_status_invalid_value;
+    }
+
+    if(swizzleA && matA->ld != matA->m)
+        log_hints(__func__,
+                  "Warning: The lda parameter is ignored and disabled when swizzle_a is true. "
+                  "There's no need to set lda.");
+
+    if(swizzleB && matB->ld != matB->m)
+        log_hints(__func__,
+                  "Warning: The ldb parameter is ignored and disabled when swizzle_b is true. "
+                  "There's no need to set ldb.");
+
+    return rocblaslt_status_continue;
+}
+
+/*******************************************************************************
  * Validate Matmul Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulArgs(int64_t                       m,
@@ -366,27 +409,11 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     hipblasOperation_t opA = matmul_descr->op_A;
     hipblasOperation_t opB = matmul_descr->op_B;
 
-    if(swizzleA && opA != HIPBLAS_OP_T)
-    {
-        return rocblaslt_status_invalid_value;
-    }
+    auto matmul_swizzle_status
+        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, a_type, b_type, swizzleA, swizzleB);
 
-    if(swizzleB && opB != HIPBLAS_OP_N)
-    {
-        return rocblaslt_status_invalid_value;
-    }
-
-    if(swizzleA && !isValidOrderForDatatype(a_type, matA->order))
-    {
-        log_error(__func__, "Error: Invalid Order for hipDataType A.");
-        return rocblaslt_status_invalid_value;
-    }
-
-    if(swizzleB && !isValidOrderForDatatype(b_type, matB->order))
-    {
-        log_error(__func__, "Error: Invalid Order for hipDataType B.");
-        return rocblaslt_status_invalid_value;
-    }
+    if(matmul_swizzle_status != rocblaslt_status_continue)
+        return matmul_swizzle_status;
 
     // matrix A
     int64_t num_rows_a    = matA->m;

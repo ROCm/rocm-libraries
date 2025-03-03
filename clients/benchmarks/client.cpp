@@ -133,7 +133,7 @@ int run_bench_test(Arguments&         arg,
         int64_t min_stride_c = arg.ldc[i] * arg.N[i];
         int64_t min_stride_d = arg.ldd[i] * arg.N[i];
         int64_t min_stride_e = arg.lde[i] * arg.N[i];
-        if(!any_stride && arg.stride_a[i] < min_stride_a)
+        if(!any_stride && arg.stride_a[i] < min_stride_a && !arg.swizzle_a)
         {
             //hipblaslt_cout << "hipblaslt-bench INFO: stride_a < min_stride_a, set stride_a = "
             //               << min_stride_a << std::endl;

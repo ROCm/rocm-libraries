@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,10 +46,10 @@ public:
         buffer = nullptr;
     }
 
-    HipDeviceBuffer(const HipDeviceBuffer&) = delete;
-    HipDeviceBuffer(HipDeviceBuffer&&)      = default;
+    HipDeviceBuffer(const HipDeviceBuffer&)            = delete;
+    HipDeviceBuffer(HipDeviceBuffer&&)                 = default;
     HipDeviceBuffer& operator=(const HipDeviceBuffer&) = delete;
-    HipDeviceBuffer& operator=(HipDeviceBuffer&&) = default;
+    HipDeviceBuffer& operator=(HipDeviceBuffer&&)      = default;
 
     void* buf()
     {
@@ -102,10 +102,10 @@ public:
     {
         memory_pool<h_memory>::Restore(buffer);
     }
-    HipHostBuffer(const HipHostBuffer&) = delete;
-    HipHostBuffer(HipHostBuffer&&)      = default;
+    HipHostBuffer(const HipHostBuffer&)            = delete;
+    HipHostBuffer(HipHostBuffer&&)                 = default;
     HipHostBuffer& operator=(const HipHostBuffer&) = delete;
-    HipHostBuffer& operator=(HipHostBuffer&&) = default;
+    HipHostBuffer& operator=(HipHostBuffer&&)      = default;
 
     void* end()
     {
@@ -185,13 +185,37 @@ inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
     return hip_err;
 }
 
-inline hipError_t synchronize(HipHostBuffer& hBuf, const HipDeviceBuffer& dBuf)
+inline hipError_t synchronize(HipHostBuffer&         hBuf,
+                              const HipDeviceBuffer& dBuf,
+                              size_t                 batch       = 0,
+                              size_t                 row         = 0,
+                              size_t                 col         = 0,
+                              size_t                 lda         = 0,
+                              size_t                 elementSize = 1,
+                              bool                   needSwizzle = false)
 {
+    if(row > lda)
+        hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
     hipError_t hip_err;
     if(hipSuccess != (hip_err = hipDeviceSynchronize()))
         return hip_err;
 
-    return hipMemcpy(hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost);
+    if(!needSwizzle)
+        return hipMemcpy(
+            hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost);
+
+    for(size_t j = 0; j < batch * col; j++)
+    {
+        hip_err = hipMemcpy(hBuf.as<char>() + (j * lda * elementSize),
+                            dBuf.as<char>() + (j * row * elementSize),
+                            row * elementSize,
+                            hipMemcpyDeviceToHost);
+
+        if(hip_err != hipSuccess)
+            return hip_err;
+    }
+
+    return hipSuccess;
 }
 
 template <typename T1>

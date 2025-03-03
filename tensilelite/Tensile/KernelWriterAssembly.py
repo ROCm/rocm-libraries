@@ -1221,7 +1221,7 @@ class KernelWriterAssembly(KernelWriter):
         for item in innerModule.items():
             macro.add(item)
         module.add(macro)
-    
+
       # dot2: oneIUI for tail loop
       if kernel["UseDotInstruction"]:
         macro = Macro("MAC_%ux%u_X%u_OneIUI" % (kernel["ThreadTile0"],kernel["ThreadTile1"], 0), "")
@@ -2398,6 +2398,11 @@ class KernelWriterAssembly(KernelWriter):
     module.add(SLShiftLeftB32(dst=sgpr(dstBase), src=sgpr(dstBase), shiftHex=log2(alignment)))
     return module
 
+  def setTo(self, dstBase: Union[int, str], srcBase: Union[int, str]) -> Module:
+    module = Module()
+    module.add(SMovB32(dst=sgpr(dstBase), src=sgpr(srcBase), comment="Set to %s"%(srcBase)))
+    return module
+
   ##############################################################################
   # Global Read Addresses: Tile Offsets A/B
   ##############################################################################
@@ -3380,12 +3385,12 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isSwizzled"]:
       # "StrideA0I" or "StrideB1J"
       strideName = "Stride%s%s"%(tc,self.states.indexChars[tP["idx"]])
+      module.addModuleAsFlatItems(self.setTo(strideName, "SizeL"))
       module.addModuleAsFlatItems(self.alignTo(strideName, strideName, tP["swizzleK"]))
 
     if kernel["BufferLoad"]:
       # maxAddrSgpr = size[n] * stride[n-1]
       module.addComment0("max read offset = size[n] * stride[n-1]")
-
       module.add(self.computeLoadSrd(kernel, tP, tc, kernel["ProblemType"]["IndexAssignments%s"%tc], tP["bpeGR"]))
 
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
@@ -6043,7 +6048,7 @@ class KernelWriterAssembly(KernelWriter):
     # if kernel["ProblemType"]["DataType"].isHalf():
     #   # imod.addText(".align32 8, 0xbf800001", "align v_pk_fma")   # Align v_pk_fma instructions used in MAC_ blocks
     #   imod.addText(".align32 8, 0xbf800001\n")   # Align v_pk_fma instructions used in MAC_ blocks
-    
+
     # dot2: add shiftK module to prevent read out of K bound
     shiftK           = Module("shiftK")
     inputType        = kernel["ProblemType"]["DataType"]
@@ -6059,7 +6064,7 @@ class KernelWriterAssembly(KernelWriter):
     abReg   = None
     tmpVgpr = None
     dummy   = None
-    
+
     if isTail and (kernel["AssertSummationElementMultiple"] % kPerIter != 0):
       kReg    = self.vgprPool.checkOut(1,"kReg") # remainder
       loopCntSgpr = loopCounterName
@@ -6120,7 +6125,7 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["LocalSplitU"] > 1:
         self.sgprPool.checkIn(loopCntSgpr)
-        
+
       s_nop = 2
 
     if s_nop != 0:
@@ -6133,13 +6138,13 @@ class KernelWriterAssembly(KernelWriter):
       if not useMacro:
         printExit("MAC doesn't support useMacro=False")
       instr = "MAC_%ux%u_X%u" % (kernel["ThreadTile0"],kernel["ThreadTile1"], bufferIdx)
-    
+
     # release register
     if kReg is not None: self.vgprPool.checkIn(kReg)
     if abReg is not None: self.vgprPool.checkIn(abReg)
     if tmpVgpr is not None: self.vgprPool.checkIn(tmpVgpr)
-    if dummy is not None: self.vgprPool.checkIn(dummy)  
-    
+    if dummy is not None: self.vgprPool.checkIn(dummy)
+
     if self.do["MAC"]:
       imod.add(shiftK)
       imod.add(MacroInstruction(name=instr, args=[]))
@@ -6937,7 +6942,7 @@ class KernelWriterAssembly(KernelWriter):
 
               module.addComment0("Stores for OptNLL")
               module.add(self.endSummation(kernel, tPA, tPB, False, endSumLabel, isOptNLL))
-              
+
               # dot2: WaveSplitK reduction for opt NLL
               if kernel["NumWaveSplitK"] > 1:
                 module.add(self.waveSplitKReduction(kernel))
@@ -13243,7 +13248,7 @@ class KernelWriterAssembly(KernelWriter):
       # (no DTLA) + DTLB (need to put DTLB first)
       return True
     return False
-  
+
   ##############################################################################
   # WaveSplitK Reduction
   ##############################################################################
@@ -13266,8 +13271,8 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(VAddF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=vgpr("ValuC+%d"%vgprIdx), dpp=DPPModifiers(bound_ctrl=0, row_bcast=accK-1), comment="Reduce %s elements"%(accK*2) ))
       accK *= 2
-    
-    module.addSpaceLine()  
+
+    module.addSpaceLine()
     return module
 
   ##############################################################################

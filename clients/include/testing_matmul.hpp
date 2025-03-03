@@ -151,21 +151,34 @@ void swizzle_tensor(T*               dst,
                     size_t           b,
                     size_t           m,
                     size_t           k,
+                    size_t           ld,
                     bool             colMaj)
 {
+    if(ld < k)
+        throw std::runtime_error("invalid value of ld in swizzle_tensor: ld must be >= k.");
+
     using Tensor = Tensor::Manipulation::Tensor;
     size_t MiM   = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
     const size_t numElements = b * m * k;
     auto         tmpTensor   = Tensor::create<T>({b, m, k});
-    memcpy(tmpTensor.template as<void>(), src, numElements * sizeof(T));
 
     if(colMaj)
     {
         auto orgTensor = Tensor::create<T>({b, k, m});
-        memcpy(orgTensor.template as<void>(), src, numElements * sizeof(T));
+        for(size_t i = 0; i < b * k; i++)
+        {
+            memcpy(orgTensor.template as<T>() + (i * m), src + (i * ld), m * sizeof(T));
+        }
         tmpTensor = permute(orgTensor, {0, 2, 1});
+    }
+    else
+    {
+        for(size_t i = 0; i < b * m; i++)
+        {
+            memcpy(tmpTensor.template as<T>() + (i * k), src + (i * ld), k * sizeof(T));
+        }
     }
 
     auto                          MultipleM = MiM;
@@ -187,20 +200,21 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
                          size_t               b,
                          size_t               m,
                          size_t               k,
+                         size_t               ld,
                          bool                 colMaj)
 {
     switch(datatype)
     {
     case HIP_R_32F:
-        swizzle_tensor<float>(dst.as<float>(), src.as<float>(), datatype, arg, b, m, k, colMaj);
+        swizzle_tensor<float>(dst.as<float>(), src.as<float>(), datatype, arg, b, m, k, ld, colMaj);
         return;
     case HIP_R_16F:
         swizzle_tensor<hipblasLtHalf>(
-            dst.as<hipblasLtHalf>(), src.as<hipblasLtHalf>(), datatype, arg, b, m, k, colMaj);
+            dst.as<hipblasLtHalf>(), src.as<hipblasLtHalf>(), datatype, arg, b, m, k, ld, colMaj);
         return;
     case HIP_R_16BF:
         swizzle_tensor<hip_bfloat16>(
-            dst.as<hip_bfloat16>(), src.as<hip_bfloat16>(), datatype, arg, b, m, k, colMaj);
+            dst.as<hip_bfloat16>(), src.as<hip_bfloat16>(), datatype, arg, b, m, k, ld, colMaj);
         return;
     case HIP_R_8F_E4M3_FNUZ:
         swizzle_tensor<hipblaslt_f8_fnuz>(dst.as<hipblaslt_f8_fnuz>(),
@@ -210,6 +224,7 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
                                           b,
                                           m,
                                           k,
+                                          ld,
                                           colMaj);
         return;
     case HIP_R_8F_E5M2_FNUZ:
@@ -220,16 +235,17 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
                                            b,
                                            m,
                                            k,
+                                           ld,
                                            colMaj);
         return;
 #ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         swizzle_tensor<hipblaslt_f8>(
-            dst.as<hipblaslt_f8>(), src.as<hipblaslt_f8>(), datatype, arg, b, m, k, colMaj);
+            dst.as<hipblaslt_f8>(), src.as<hipblaslt_f8>(), datatype, arg, b, m, k, ld, colMaj);
         return;
     case HIP_R_8F_E5M2:
         swizzle_tensor<hipblaslt_bf8>(
-            dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m, k, colMaj);
+            dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m, k, ld, colMaj);
         return;
 #endif
     default:
@@ -704,7 +720,7 @@ auto _dgelu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
 // swish with beta=1
 auto _silu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
     using Tc = float;
-    Tc in_Tc   = static_cast<Tc>(in);
+    Tc in_Tc = static_cast<Tc>(in);
     return static_cast<decltype(in)>(in_Tc / (1.f + exp(-in_Tc)));
 };
 
@@ -1235,13 +1251,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
     std::vector<computeTypeInterface> h_alpha(gemm_count), h_beta(gemm_count);
     std::vector<int64_t> A_row(gemm_count), A_col(gemm_count), B_row(gemm_count), B_col(gemm_count);
-    std::vector<int64_t> stride_a(gemm_count), stride_b(gemm_count), stride_c(gemm_count),
-        stride_d(gemm_count), stride_e(gemm_count);
+    std::vector<int64_t> stride_a(gemm_count), stride_da(gemm_count), stride_b(gemm_count),
+        stride_c(gemm_count), stride_d(gemm_count), stride_e(gemm_count);
     std::vector<bool>   do_batched(gemm_count), epilogue_on(gemm_count, false);
     std::vector<int>    num_batches(gemm_count);
-    std::vector<size_t> size_A(gemm_count), size_B(gemm_count), size_C(gemm_count),
-        size_D(gemm_count), size_D_copy(gemm_count), size_E(gemm_count), size_bias(gemm_count),
-        size_scaleAlphaVec(gemm_count), size_scaleAVec(gemm_count), size_scaleBVec(gemm_count);
+    std::vector<size_t> size_A(gemm_count), size_dA(gemm_count), size_B(gemm_count),
+        size_C(gemm_count), size_D(gemm_count), size_D_copy(gemm_count), size_E(gemm_count),
+        size_bias(gemm_count), size_scaleAlphaVec(gemm_count), size_scaleAVec(gemm_count),
+        size_scaleBVec(gemm_count);
 
     std::vector<hipblasLtMatrixLayout_t> matA(gemm_count), matB(gemm_count), matC(gemm_count),
         matD(gemm_count);
@@ -1283,24 +1300,30 @@ void testing_matmul_with_bias(const Arguments& arg,
         do_batched[i]  = (arg.batch_count > 1);
         num_batches[i] = (do_batched[i] ? arg.batch_count : 1);
 
-        stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
+        stride_a[i] = (do_batched[i] && arg.stride_a[i] >= lda[i] * A_col[i]) ? arg.stride_a[i]
+                                                                              : lda[i] * A_col[i];
         stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
         stride_c[i] = do_batched[i] ? arg.stride_c[i] : ldc[i] * N[i];
         stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
         stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
 
+        size_A[i]    = stride_a[i] * num_batches[i];
+        size_dA[i]   = size_A[i];
+        stride_da[i] = stride_a[i];
         if(arg.swizzle_a && isSwizzleSupported(TiA))
         {
+            stride_da[i] = 0;
             size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
             calculateKforSwizzling(TiA, arg, MiK, __, PackK);
             size_t K_block = MiK * PackK;
-            size_A[i]      = num_batches[i] * ((M[i] + MiM - 1) / MiM) * MiM
-                        * ((K[i] + K_block - 1) / K_block) * K_block;
-        }
-        else
-        {
-            size_A[i] = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i]
-                                         : stride_a[i] * num_batches[i];
+            size_t stride_swizzle
+                = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
+            if(do_batched[i] && arg.stride_a[i] >= (int64_t)stride_swizzle)
+            {
+                stride_da[i]   = arg.stride_a[i];
+                stride_swizzle = (size_t)arg.stride_a[i];
+            }
+            size_dA[i] = num_batches[i] * stride_swizzle;
         }
 
         size_B[i]
@@ -1349,7 +1372,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         auto    biasSize = size_bias[i] * realDataTypeSize(Tbias);
         int64_t sizeC    = get_computeInterface(h_beta[i], Tc) == 0 ? 0 : size_C[i] * sizeof(To);
         totalRotatingSizeNeeded
-            += size_A[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB) + sizeC
+            += size_dA[i] * realDataTypeSize(TiA) + size_B[i] * realDataTypeSize(TiB) + sizeC
                + size_D[i] * realDataTypeSize(To) + size_E[i] * realDataTypeSize(To) + biasSize
                + size_scaleAlphaVec[i] * realDataTypeSize(Talpha)
                + size_scaleAVec[i] * realDataTypeSize(Talpha)
@@ -1411,7 +1434,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             EXPECT_HIPBLAS_STATUS(
                 hipblasLtMatrixLayoutSetAttribute(matA[i],
                                                   HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
-                                                  &(stride_a[i]),
+                                                  &(stride_da[i]),
                                                   sizeof(int64_t)),
                 HIPBLAS_STATUS_SUCCESS);
             EXPECT_HIPBLAS_STATUS(
@@ -1484,7 +1507,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 epilogue_on[i] = true;
                 break;
             case hipblaslt_activation_type::swish:
-                epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_EXT;
+                epilogue[i]    = HIPBLASLT_EPILOGUE_SWISH_EXT;
                 epilogue_on[i] = true;
                 break;
             default:
@@ -1543,7 +1566,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         // allocate memory on device
-        dA.emplace_back(TiA, size_A[i] * block_count, HMM);
+        dA.emplace_back(TiA, size_dA[i] * block_count, HMM);
         dB.emplace_back(TiB, size_B[i] * block_count, HMM);
         dC.emplace_back(To, size_C[i] * block_count, HMM);
 
@@ -1650,9 +1673,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                               dA[i].buf(),
                               A_row[i],
                               A_col[i],
-                              lda[i],
+                              (arg.swizzle_a) ? A_row[i] : lda[i],
                               TiA,
-                              stride_a[i],
+                              (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
                               num_batches[i]);
         hipblaslt_init_device(ABC::B,
                               arg.initialization,
@@ -1682,15 +1705,22 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         if(arg.unit_check || arg.norm_check || arg.allclose_check || arg.swizzle_a)
         {
-            CHECK_HIP_ERROR(synchronize(hA[i], dA[i]));
+            CHECK_HIP_ERROR(synchronize(hA[i],
+                                        dA[i],
+                                        num_batches[i],
+                                        A_row[i],
+                                        A_col[i],
+                                        lda[i],
+                                        realDataTypeSize(TiA),
+                                        arg.swizzle_a));
             CHECK_HIP_ERROR(synchronize(hB[i], dB[i]));
             CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
         }
 
         if(arg.swizzle_a && isSwizzleSupported(TiA))
         {
-            HipHostBuffer tmp(TiA, size_A[i]);
-            swizzle_tensor_type(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], false);
+            HipHostBuffer tmp(TiA, size_dA[i]);
+            swizzle_tensor_type(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
             CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
         }
 
@@ -2086,7 +2116,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         arg.scaleB == hipblaslt_scaling_format::Vector ? 1 : 0);
                 }
                 extinputs[b][gemmIdx].setA((void*)((dA[gemmIdx].as<char>())
-                                                   + b * size_A[gemmIdx] * realDataTypeSize(TiA)));
+                                                   + b * size_dA[gemmIdx] * realDataTypeSize(TiA)));
                 extinputs[b][gemmIdx].setB((void*)((dB[gemmIdx].as<char>())
                                                    + b * size_B[gemmIdx] * realDataTypeSize(TiB)));
                 extinputs[b][gemmIdx].setC(
@@ -2136,7 +2166,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             for(int32_t b = 0; b < block_count; b++)
             {
                 da[b][gemmIdx] = (void*)((dA[gemmIdx].as<char>())
-                                         + b * size_A[gemmIdx] * realDataTypeSize(TiA));
+                                         + b * size_dA[gemmIdx] * realDataTypeSize(TiA));
                 db[b][gemmIdx] = (void*)((dB[gemmIdx].as<char>())
                                          + b * size_B[gemmIdx] * realDataTypeSize(TiB));
                 dc[b][gemmIdx] = (void*)((dC[gemmIdx].as<char>())
@@ -2252,7 +2282,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                                 matmul[b][0],
                                 alpha_in[0],
-                                (dA[0].as<char>()) + b * size_A[0] * realDataTypeSize(TiA),
+                                (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                                 matA[0],
                                 (dB[0].as<char>()) + b * size_B[0] * realDataTypeSize(TiB),
                                 matB[0],
@@ -2433,7 +2463,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                             matmul[b][0],
                             alpha_in[0],
-                            (dA[0].as<char>()) + b * size_A[0] * realDataTypeSize(TiA),
+                            (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                             matA[0],
                             (dB[0].as<char>()) + b * size_B[0] * realDataTypeSize(TiB),
                             matB[0],
@@ -2602,7 +2632,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         CHECK_HIPBLASLT_ERROR(gemmVec[b].setProblem(
                             matmul[b][0],
                             alpha_in[0],
-                            (dA[0].as<char>()) + b * size_A[0] * realDataTypeSize(TiA),
+                            (dA[0].as<char>()) + b * size_dA[0] * realDataTypeSize(TiA),
                             matA[0],
                             (dB[0].as<char>()) + b * size_B[0] * realDataTypeSize(TiB),
                             matB[0],
@@ -3284,7 +3314,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 ptr_matmul,
                                 ptr_alpha,
                                 dA[0].as<char>()
-                                    + (i % block_count) * size_A[0] * realDataTypeSize(TiA),
+                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
                                 matA[0],
                                 dB[0].as<char>()
                                     + (i % block_count) * size_B[0] * realDataTypeSize(TiB),
@@ -3339,7 +3369,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 ptr_matmul,
                                 ptr_alpha,
                                 dA[0].as<char>()
-                                    + (i % block_count) * size_A[0] * realDataTypeSize(TiA),
+                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
                                 matA[0],
                                 dB[0].as<char>()
                                     + (i % block_count) * size_B[0] * realDataTypeSize(TiB),
