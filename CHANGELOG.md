@@ -10,6 +10,10 @@ Documentation for rocFFT is available at
 * Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
   contiguous.
 
+### Removed
+
+* Remove support for the gfx940 and gfx941 targets from the client programs.
+
 ## rocFFT 1.0.32 for ROCm 6.4.0
 
 ### Changed

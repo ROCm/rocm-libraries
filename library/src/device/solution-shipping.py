@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -296,9 +296,8 @@ def cli():
     archs = args.gpu_arch.split(' ')
     if 'all' in archs:
         archs = [
-            'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx940', 'gfx941',
-            'gfx942', 'gfx1030', 'gfx1100', 'gfx1101', 'gfx1102', 'gfx1200',
-            'gfx1201'
+            'gfx900', 'gfx906', 'gfx908', 'gfx90a', 'gfx942', 'gfx1030',
+            'gfx1100', 'gfx1101', 'gfx1102', 'gfx1200', 'gfx1201'
         ]
 
     # remove xnack and sramecc

@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -87,8 +87,6 @@ static std::string get_arch_name(const hipDeviceProp_t& prop)
                                                        "gfx906",
                                                        "gfx908",
                                                        "gfx90a",
-                                                       "gfx940",
-                                                       "gfx941",
                                                        "gfx942",
                                                        "gfx1030",
                                                        "gfx1100",
