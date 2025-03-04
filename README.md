@@ -17,20 +17,30 @@ rocJPEG is a high performance JPEG decode SDK for AMD GPUs. Using the rocJPEG AP
 
 ## Prerequisites
 
-* Linux distribution
+### Operating Systems
+* Linux
   * Ubuntu - `22.04` / `24.04`
-  * RHEL - `8` / `9`
+  * RedHat - `8` / `9`
   * SLES - `15-SP5`
 
-* [ROCm supported hardware](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
+### Hardware
+* **GPU**: [AMD Radeon&trade; Graphics](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) / [AMD Instinct&trade; Accelerators](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html)
 
-> [!IMPORTANT]
-> `gfx908` or higher GPU required
+> [!IMPORTANT] 
+> * `gfx908` or higher GPU required
 
-* Install ROCm `6.3.0` or later with [amdgpu-install](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/amdgpu-install.html): Required usecase - rocm
-
+* Install ROCm `6.3.0` or later with [amdgpu-install](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/amdgpu-install.html): **Required** usecase:`rocm`
 > [!IMPORTANT]
 > `sudo amdgpu-install --usecase=rocm`
+
+### Compiler
+* AMD Clang++ Version 18.0.0 or later - installed with ROCm
+
+### Libraries
+* CMake Version `3.10` or later
+  ```shell
+  sudo apt install cmake
+  ```
 
 * Video Acceleration API - `libva-amdgpu-dev` is an AMD implementation for VA-API
   ```shell
@@ -47,31 +57,16 @@ rocJPEG is a high performance JPEG decode SDK for AMD GPUs. Using the rocJPEG AP
 > [!NOTE]
 > RPM Packages for `RHEL`/`SLES` - `libva-amdgpu mesa-amdgpu-va-drivers`
 
-* CMake `3.10` or later
-
-  ```shell
-  sudo apt install cmake
-  ```
- 
-* AMD Clang++ Version 18.0.0 or later - installed with ROCm
-  
-* pkg-config
-
-  ```shell
-  sudo apt install pkg-config
-  ```
-
 > [!IMPORTANT]
->
-> * If using Ubuntu 22.04, you must install `libstdc++-12-dev`
->
+> * Required compiler support
+>   * C++17
+>   * Threads
+> * On Ubuntu 22.04 - Additional package required: libstdc++-12-dev
 >  ```shell
 >  sudo apt install libstdc++-12-dev
 >  ```
->
 
 >[!NOTE]
->
 > * All package installs are shown with the `apt` package manager. Use the appropriate package manager for your operating system.
 
 ### Prerequisites setup script for Linux

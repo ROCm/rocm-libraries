@@ -18,9 +18,8 @@ rocJPEG can be installed on the following Linux environments:
 
 The following prerequisites are installed by the package installer. If you are building and installing using the source code, use the `rocJPEG-setup.py <https://github.com/ROCm/rocJPEG/blob/develop/rocJPEG-setup.py>`_ setup script available in the rocJPEG GitHub repository to install these prerequisites. 
 
+* AMD Clang++
+* CMake version 3.10 or later
 * Video Acceleration API (VA-API) - libva-amdgpu-dev is an AMD implementation for VA-API
 * AMD VA Drivers
-* CMake version 3.10 or later
-* AMD Clang++
-* pkg-config
 * libstdc++-12-dev for installations on Ubuntu 22.04 

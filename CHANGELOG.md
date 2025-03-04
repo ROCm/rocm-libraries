@@ -3,10 +3,15 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## rocJPEG 0.9.0 (Unreleased)
+## (Unreleased) rocJPEG 0.9.0
+
+## Changed
+* Readme - cleanup and updates to pre-reqs
+
+## Removed
+* Dev Package - No longer installs pkg-config
 
 ### Resolved issues
-
 * Fixed a bug that prevented copying the decoded image into the output buffer when the output buffer is larger than the input image.
 
 ## rocJPEG 0.8.0 for ROCm 6.4
