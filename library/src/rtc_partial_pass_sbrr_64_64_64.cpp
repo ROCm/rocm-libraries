@@ -670,7 +670,6 @@ static std::string partial_pass_sbrr_64_64_64_rtc_body(const std::string& kernel
         const size_t *__restrict__ lengths,
         const size_t *__restrict__ stride,
         const size_t nbatch,
-        const unsigned int lds_padding,
         void *__restrict__ load_cb_fn,
         void *__restrict__ load_cb_data,
         unsigned int load_cb_lds_bytes,
@@ -740,7 +739,7 @@ static std::string partial_pass_sbrr_64_64_64_rtc_body(const std::string& kernel
     batch = remaining;
     // offset = offset + batch * stride[dim];
     offset_pp = offset_pp + batch * stride[dim];
-    stride_lds = 64 + (ebtype == EmbeddedType::NONE ? 0 : lds_padding);
+    stride_lds = 64 + (ebtype == EmbeddedType::NONE ? 0 : 1);
     offset_lds = stride_lds * (transform % 16);   
 
     bool inbound = batch < nbatch;
@@ -1002,7 +1001,6 @@ RTCKernelArgs RTCKernelPartialPassSBRR64Cubed::get_launch_args(DeviceCallIn& dat
     kargs.append_ptr(kargs_lengths(data.node->devKernArg));
     kargs.append_ptr(kargs_stride_in(data.node->devKernArg));
     kargs.append_size_t(data.node->batch);
-    kargs.append_size_t(data.node->lds_padding);
 
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);

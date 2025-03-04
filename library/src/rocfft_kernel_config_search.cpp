@@ -228,7 +228,6 @@ float launch_kernel(RTCKernel&             kernel,
     kargs.append_ptr(data.stride_in.data());
     kargs.append_ptr(data.stride_out.data());
     kargs.append_size_t(data.batch);
-    kargs.append_size_t(0);
     kargs.append_ptr(nullptr);
     kargs.append_ptr(nullptr);
     kargs.append_unsigned_int(0);

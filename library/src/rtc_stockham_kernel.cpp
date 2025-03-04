@@ -229,8 +229,6 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
         kargs.append_ptr(kargs_stride_out(data.node->devKernArg));
     // nbatch
     kargs.append_size_t(data.node->batch);
-    // lds padding
-    kargs.append_unsigned_int(data.node->lds_padding);
     // callback params
     kargs.append_ptr(data.callbacks.load_cb_fn);
     kargs.append_ptr(data.callbacks.load_cb_data);

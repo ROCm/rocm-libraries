@@ -918,10 +918,11 @@ void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
     auto kernel = function_pool::get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
-    lds_padding = 1;
-    lds         = (length[0] + lds_padding) * bwd;
-    gp.b_x      = DivRoundingUp(length[1], bwd) * length[2] * batch;
-    gp.wgs_x    = wgs;
+    // this kernel always does real-complex processing and needs one
+    // extra element per row
+    lds      = (length[0] + 1) * bwd;
+    gp.b_x   = DivRoundingUp(length[1], bwd) * length[2] * batch;
+    gp.wgs_x = wgs;
 }
 
 bool RealCmplxTransZ_XYNode::CreateDevKernelArgs()

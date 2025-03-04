@@ -315,9 +315,6 @@ public:
     // Direction of the transform (-1: forward, +1: inverse)
     int direction = -1;
 
-    // The number of padding at the end of each row in lds
-    unsigned int lds_padding = 0;
-
     // Data format parameters:
     rocfft_result_placement placement    = rocfft_placement_inplace;
     rocfft_precision        precision    = rocfft_precision_single;

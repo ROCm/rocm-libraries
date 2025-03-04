@@ -134,9 +134,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // number of transforms/batches
     Variable nbatch{"nbatch", "const size_t"};
 
-    // the number of padding at the end of each row in lds
-    Variable lds_padding{"lds_padding", "const unsigned int"};
-
     // should the device function write to lds?
     // only used for 2D
     Variable write{"write", "bool"};
@@ -270,9 +267,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual ArgumentList global_arguments()
     {
-        auto arguments = static_dim
-                             ? ArgumentList{twiddles, lengths, stride, nbatch, lds_padding}
-                             : ArgumentList{twiddles, dim, lengths, stride, nbatch, lds_padding};
+        auto arguments = static_dim ? ArgumentList{twiddles, lengths, stride, nbatch}
+                                    : ArgumentList{twiddles, dim, lengths, stride, nbatch};
         for(const auto& arg : get_callback_args().arguments)
             arguments.append(arg);
         arguments.append(buf);
@@ -335,12 +331,11 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return {};
     }
 
-    // we currently only use LDS padding for embedded R2C/C2R, so
-    // there's no reason to look at the lds_padding parameter
-    // otherwise.
+    // add one extra element per row for embedded real-complex
+    // processing
     virtual Expression get_lds_padding()
     {
-        return Ternary{embedded_type == "EmbeddedType::NONE", 0, lds_padding};
+        return Ternary{embedded_type == "EmbeddedType::NONE", 0, 1};
     }
 
     StatementList load_lds_generator(unsigned int h,

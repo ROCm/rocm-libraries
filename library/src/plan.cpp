@@ -3344,14 +3344,12 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
     obOut = srcNode.obOut;
 
     // NB:
-    //   we don't copy these since it's possible we're copying
+    //   we don't copy this since it's possible we're copying
     //   a node to another one that is different scheme/derived class
     //   (for example, when doing fusion).
     //   The src ebtype could be incorrect in the new node
-    //   same as lds_padding, lds_padding is initialized for each derived class
     //   so we don't copy this value, the target node already sets its value
     // ebtype      = srcNode.ebtype;
-    // lds_padding = srcNode.lds_padding;
 }
 
 void TreeNode::CopyNodeData(const NodeMetaData& data)

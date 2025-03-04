@@ -903,9 +903,6 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
     auto key    = GetKernelKey();
     auto kernel = function_pool::get_kernel(key);
 
-    if(ebtype != EmbeddedType::NONE)
-        lds_padding = 1;
-
     if(applyPartialPass)
     {
         // Special case for partial pass 64 x 64 x 64.
@@ -932,6 +929,8 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
         lds = 0;
     else
     {
+        const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
+
         lds = (length[0] + lds_padding) * bwd;
     }
 }
@@ -1378,14 +1377,14 @@ void SBCRNode::SetupGridParam_internal(GridParam& gp)
     auto kernel = function_pool::get_kernel(GetKernelKey());
     wgs         = kernel.workgroup_size;
     bwd         = kernel.transforms_per_block;
-    lds         = length[0] * bwd;
-    gp.b_x      = ((length[1]) - 1) / bwd + 1;
+
+    const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
+
+    lds    = (length[0] + lds_padding) * bwd;
+    gp.b_x = ((length[1]) - 1) / bwd + 1;
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
 
-    if(ebtype != EmbeddedType::NONE)
-        lds_padding = 1;
-    lds = (length[0] + lds_padding) * bwd;
     return;
 }
 
