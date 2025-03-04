@@ -91,8 +91,9 @@ int main(int, char**)
 {
   test<float>();
   test<double>();
-  // CUDA treats long double as double
-  //  test<long double>();
+#if _CCCL_HAS_LONG_DOUBLE()
+  test<long double>();
+#endif // _CCCL_HAS_LONG_DOUBLE()
 
   // Also test conversions
   test<float, int>();
@@ -100,17 +101,17 @@ int main(int, char**)
 
   test_edges<double>();
 
-#ifdef _LIBCUDACXX_HAS_NVFP16
+#if _LIBCUDACXX_HAS_NVFP16()
   test<__half>();
 // NOTE(HIP/AMD): for specific ROCm versions the optimization causes test failures for __half (https://github.com/ROCm/libhipcxx/issues/13)
 #if !defined(__OPTIMIZE__) || (defined(ROCM_VERSION_MAJOR) and defined(ROCM_VERSION_MINOR) and (ROCM_VERSION_MAJOR < 7 or ROCM_VERSION_MINOR < 2 and ROCM_VERSION_MAJOR == 7))
   test_edges<__half>();
 #endif
-#endif // _LIBCUDACXX_HAS_NVFP16
-#ifdef _LIBCUDACXX_HAS_NVBF16
+#endif // _LIBCUDACXX_HAS_NVFP16()
+#if _LIBCUDACXX_HAS_NVBF16()
   test<__nv_bfloat16>();
   test_edges<__nv_bfloat16>();
-#endif // _LIBCUDACXX_HAS_NVBF16
+#endif // _LIBCUDACXX_HAS_NVBF16()
 
   return 0;
 }
