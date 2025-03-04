@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,24 +68,14 @@ void testing_identity(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_create_identity_permutation(handle, N, dp));
-        }
-
-        double gpu_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_create_identity_permutation(handle, N, dp));
-        }
-
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        double gpu_time_used;
+        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+            return rocsparse_create_identity_permutation(handle, N, dp);
+        });
 
         double gbyte_count = identity_gbyte_count<T>(N);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
