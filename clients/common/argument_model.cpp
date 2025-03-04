@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,19 @@
 
 #include "argument_model.hpp"
 #include "frequency_monitor.hpp"
+
+// FLOPS/CLOCK/CU values for gfx942
+auto rocblas_get_flops_per_clock_per_cu_gfx942(rocblas_datatype type)
+{
+    if(type == rocblas_datatype_f32_r || type == rocblas_datatype_f64_r)
+        return 256;
+    else if(type == rocblas_datatype_f16_r || type == rocblas_datatype_bf16_r)
+        return 2048;
+    else if(type == rocblas_datatype_i8_r || type == rocblas_datatype_f8_r)
+        return 4096;
+    else
+        return 0;
+}
 
 // this should have been a member variable but due to the complex variadic template this singleton allows global control
 static bool log_function_name = false;
@@ -46,6 +59,26 @@ void ArgumentModel_set_log_datatype(bool d)
 bool ArgumentModel_get_log_datatype()
 {
     return log_datatype;
+}
+
+void ArgumentModel_log_efficiency(rocblas_internal_ostream& name_line,
+                                  rocblas_internal_ostream& val_line,
+                                  const Arguments&          arg,
+                                  double                    rocblas_gflops)
+{
+    FrequencyMonitor& frequency_monitor = getFrequencyMonitor();
+    if(!frequency_monitor.enabled())
+        return;
+
+    if(rocblas_internal_get_arch_name() == "gfx942"
+       && rocblas_get_flops_per_clock_per_cu_gfx942(arg.compute_type) != 0)
+    {
+        double theoretical_gflops = rocblas_get_flops_per_clock_per_cu_gfx942(arg.compute_type)
+                                    * frequency_monitor.getCuCount()
+                                    * frequency_monitor.getLowestAverageSYSCLK() * 0.001;
+        name_line << ",efficiency";
+        val_line << "," << (rocblas_gflops / theoretical_gflops) * 100;
+    }
 }
 
 void ArgumentModel_log_frequencies(rocblas_internal_ostream& name_line,

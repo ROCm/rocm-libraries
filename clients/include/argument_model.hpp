@@ -38,6 +38,11 @@ bool ArgumentModel_get_log_datatype();
 void ArgumentModel_log_frequencies(rocblas_internal_ostream& name_line,
                                    rocblas_internal_ostream& val_line);
 
+void ArgumentModel_log_efficiency(rocblas_internal_ostream& name_line,
+                                  rocblas_internal_ostream& val_line,
+                                  const Arguments&          arg,
+                                  double                    rocblas_gflops);
+
 // ArgumentModel template has a variadic list of argument enums
 template <rocblas_argument... Args>
 class ArgumentModel
@@ -101,6 +106,7 @@ public:
 
             name_line << ",rocblas-Gflops";
             val_line << ", " << rocblas_gflops;
+            ArgumentModel_log_efficiency(name_line, val_line, arg, rocblas_gflops);
         }
 
         if(gbytes != ArgumentLogging::NA_value)

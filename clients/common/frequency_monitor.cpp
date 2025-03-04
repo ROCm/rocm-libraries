@@ -1,6 +1,6 @@
 
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -254,6 +254,11 @@ public:
         return medianValueMHz(m_MEMCLK_array);
     }
 
+    double getCuCount()
+    {
+        return m_CUCount;
+    }
+
 private:
     void initThread()
     {
@@ -397,6 +402,7 @@ private:
         hipDeviceProp_t props;
 
         HIP_CHECK_EXC(hipGetDeviceProperties(&props, hipDeviceIndex));
+        m_CUCount = props.multiProcessorCount;
 #if HIP_VERSION >= 50220730
         int hip_version;
         HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
@@ -461,6 +467,7 @@ private:
     uint32_t                m_smiDeviceIndex;
     bool                    m_isMultiXCDSupported;
     uint16_t                m_XCDCount;
+    uint16_t                m_CUCount;
 
     std::vector<uint64_t>              m_SYSCLK_sum;
     std::vector<std::vector<uint64_t>> m_SYSCLK_array;
@@ -521,6 +528,12 @@ public:
     {
         return 0.0;
     }
+
+    double getCuCount()
+    {
+        return 0.0;
+    }
+
 #endif
 };
 
