@@ -37,29 +37,11 @@
 #  pragma system_header
 #endif // no system header
 
+#include <cuda/std/__internal/nvfp_types.h>
 #include <cuda/std/__type_traits/integral_constant.h>
 #include <cuda/std/__type_traits/is_same.h>
 #include <cuda/std/__utility/declval.h>
 #include <cuda/std/cstddef>
-
-#ifdef _LIBCUDACXX_HAS_NVFP16
-#if defined(__HIP_PLATFORM_AMD__)
-#  include <hip/hip_fp16.h>
-#else
-#  include <cuda_fp16.h>
-#endif
-#endif // _LIBCUDACXX_HAS_NVFP16
-
-#ifdef _LIBCUDACXX_HAS_NVBF16
-_CCCL_DIAG_PUSH
-_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
-#if defined(__HIP_PLATFORM_AMD__)
-#  include <hip/hip_bf16.h>
-#else
-#  include <cuda_bf16.h>
-#endif
-_CCCL_DIAG_POP
-#endif // _LIBCUDACXX_HAS_NVBF16
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 

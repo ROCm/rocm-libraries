@@ -40,18 +40,10 @@
 
 #if defined(_LIBCUDACXX_HAS_NVBF16)
 
-_CCCL_DIAG_PUSH
-_CCCL_DIAG_SUPPRESS_CLANG("-Wunused-function")
-#if defined(__HIP_PLATFORM_AMD__)
-#  include <hip/hip_bf16.h>
-#else
-#  include <cuda_bf16.h>
-#endif
-_CCCL_DIAG_POP
-
 #  include <cuda/std/__cmath/nvbf16.h>
 #  include <cuda/std/__complex/vector_support.h>
 #  include <cuda/std/__fwd/get.h>
+#  include <cuda/std/__internal/nvfp_types.h>
 #  include <cuda/std/__type_traits/enable_if.h>
 #  include <cuda/std/__type_traits/integral_constant.h>
 #  include <cuda/std/__type_traits/is_constructible.h>
