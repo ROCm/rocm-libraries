@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,8 +54,10 @@ namespace
             }
             else
             {
-                constexpr bool is_batched = (BLAS1_EX == blas1_ex::dot_batched_ex);
-                constexpr bool is_strided = (BLAS1_EX == blas1_ex::dot_strided_batched_ex);
+                constexpr bool is_batched = (BLAS1_EX == blas1_ex::dot_batched_ex
+                                             || BLAS1_EX == blas1_ex::dotc_batched_ex);
+                constexpr bool is_strided = (BLAS1_EX == blas1_ex::dot_strided_batched_ex
+                                             || BLAS1_EX == blas1_ex::dotc_strided_batched_ex);
 
                 name << rocblas_datatype2string(arg.a_type) << '_'
                      << rocblas_datatype2string(arg.b_type);

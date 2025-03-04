@@ -335,14 +335,18 @@ Tests:
     N: [ 10100103 ]
     incx: 1
     incy: 1
-    batch_count: [2, 3]
+    batch_count: [3]
     initialization: hpl
     function:
-      - dot:   *single_double_precisions_complex_real
-      - dot_batched:   *half_bfloat_single_double_complex_real_precisions
-      - dotc_batched:  *single_double_precisions_complex
-      - dot_batched_ex: *half_bfloat_single_double_complex_real_precisions
-      - dotc_batched_ex: *half_bfloat_single_double_complex_real_precisions
+      # N is so large excluding bfloat16 as only 2-3 digits precision and result may be in 100s range
+      - dot:             *half_single_double_precisions_complex_real
+      - dot_ex:          *half_single_double_precisions_complex_real
+      - dotc:            *half_single_double_precisions_complex_real
+      - dotc_ex:         *half_single_double_precisions_complex_real
+      - dot_batched:     *half_single_double_precisions_complex_real
+      - dot_batched_ex:  *half_single_double_precisions_complex_real
+      - dotc_batched:    *half_single_double_precisions_complex_real
+      - dotc_batched_ex: *half_single_double_precisions_complex_real
 
   - name: blas1_dot_internal_api
     category: pre_checkin

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,11 +52,6 @@ namespace
             }
             else
             {
-                constexpr bool is_dot
-                    = (BLAS1 == blas1::dot || BLAS1 == blas1::dot_batched
-                       || BLAS1 == blas1::dot_strided_batched || BLAS1 == blas1::dotc
-                       || BLAS1 == blas1::dotc_batched || BLAS1 == blas1::dotc_strided_batched);
-
                 constexpr bool is_batched
                     = (BLAS1 == blas1::dot_batched || BLAS1 == blas1::dotc_batched);
                 constexpr bool is_strided
@@ -69,12 +64,9 @@ namespace
                     name << '_' << arg.stride_x;
                 }
 
-                if(is_dot)
-                {
-                    name << '_' << arg.incy;
-                }
+                name << '_' << arg.incy;
 
-                if(BLAS1 == blas1::dot_strided_batched || BLAS1 == blas1::dotc_strided_batched)
+                if(is_strided)
                 {
                     name << '_' << arg.stride_y;
                 }
@@ -84,10 +76,7 @@ namespace
                     name << "_" << arg.batch_count;
                 }
 
-                if(is_dot)
-                {
-                    name << "_" << arg.algo;
-                }
+                name << "_" << arg.algo;
             }
 
             if(arg.api & c_API_64)
