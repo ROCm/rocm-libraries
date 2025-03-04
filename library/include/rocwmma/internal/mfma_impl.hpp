@@ -54,8 +54,8 @@ namespace rocwmma
         *  @tparam InputTA Datatype of input A
         *  @tparam InputTB Datatype of input B
         *  @tparam ComputeT Datatype of accumulator
-        *  @tparam BlockM M-dimension of wmma block
-        *  @tparam BlockN N-dimension of wmma block
+        *  @tparam BlockM M-dimension of mfma block
+        *  @tparam BlockN N-dimension of mfma block
         *  @tparam GfxTarget The current gfx family target of interest being compiled
         *  @tparam TargetEnable Enabler for the current target if supported
         */
@@ -64,16 +64,19 @@ namespace rocwmma
                   typename ComputeT,
                   uint32_t BlockM,
                   uint32_t BlockN,
+                  uint32_t BlockK,
                   typename GfxTarget    = conditional_t<(bool)ROCWMMA_ARCH_GFX9, Gfx9, Unsupported>,
                   typename TargetEnable = GfxTarget>
         struct amdgcn_mfma
         {
+            // This is a pass-through implementation that isn't supported, and doesn't
+            // do anything practical. The following trait will allow us to identify
+            // unsupported instances, as we won't include it in the overloads to follow.
+            using Unsupported = Unsupported;
+
             constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
-
-            // Choose reasonable minimal default params to satisfy static checks
-            constexpr static uint32_t KPerMma = 8u;
 
         private:
             using PackTraitsA   = PackTraits<InputTA>;
@@ -81,9 +84,9 @@ namespace rocwmma
             using PackTraitsAcc = PackTraits<ComputeT>;
 
             constexpr static uint32_t InputASize
-                = BlockM * KPerMma / (Constants::AMDGCN_WAVE_SIZE * PackTraitsA::PackRatio);
+                = BlockM * BlockK / (Constants::AMDGCN_WAVE_SIZE * PackTraitsA::PackRatio);
             constexpr static uint32_t InputBSize
-                = BlockN * KPerMma / (Constants::AMDGCN_WAVE_SIZE * PackTraitsB::PackRatio);
+                = BlockN * BlockK / (Constants::AMDGCN_WAVE_SIZE * PackTraitsB::PackRatio);
             constexpr static uint32_t AccumSize
                 = BlockM * BlockM / (Constants::AMDGCN_WAVE_SIZE * PackTraitsAcc::PackRatio);
 
@@ -101,8 +104,6 @@ namespace rocwmma
             }
         };
 
-#if ROCWMMA_ARCH_GFX9
-
         // Non-B32 compute types
         // Note: MFMA unit accum type is always b32 size.
         // Since we cannot natively accumulate in the desired type,
@@ -114,12 +115,14 @@ namespace rocwmma
                   typename ComputeT,
                   uint32_t BlockM,
                   uint32_t BlockN,
+                  uint32_t BlockK,
                   typename GfxTarget>
         struct amdgcn_mfma<InputTA,
                            InputTB,
                            ComputeT,
                            BlockM,
                            BlockN,
+                           BlockK,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (sizeof(ComputeT) < 4u)>>
         {
@@ -129,7 +132,7 @@ namespace rocwmma
 
             // B32 mfma traits
             using AccumDataT     = typename PackTraits::PackedT;
-            using MfmaB32        = amdgcn_mfma<InputTA, InputTB, AccumDataT, BlockM, BlockN>;
+            using MfmaB32        = amdgcn_mfma<InputTA, InputTB, AccumDataT, BlockM, BlockN, BlockK>;
             using AccumTraitsB32 = VecTraits<typename MfmaB32::CRegsT>;
 
             // ComputeT mfma traits
@@ -175,10 +178,10 @@ namespace rocwmma
                            float32_t,
                            16u,
                            16u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -205,10 +208,10 @@ namespace rocwmma
                            float32_t,
                            32u,
                            32u,
+                           8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 8u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -229,19 +232,17 @@ namespace rocwmma
             }
         };
 
-// TODO: Remove when BlockK is template param
-#if ROCWMMA_ARCH_GFX950
-
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float16_t,
                            float16_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -262,16 +263,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float16_t,
                            float16_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -292,30 +294,30 @@ namespace rocwmma
             }
         };
 
-#endif // ROCWMMA_ARCH_GFX950
-
         // hfloat16 derivative
-        template <uint32_t BlockM, uint32_t BlockN, typename GfxTarget>
+        template <uint32_t BlockM, uint32_t BlockN, uint32_t BlockK, typename GfxTarget>
         struct amdgcn_mfma<hfloat16_t,
                            hfloat16_t,
                            float32_t,
                            BlockM,
                            BlockN,
+                           BlockK,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_mfma<float16_t, float16_t, float32_t, BlockM, BlockN>
+            : public amdgcn_mfma<float16_t, float16_t, float32_t, BlockM, BlockN, BlockK>
         {
         };
 
-        template <uint32_t BlockM, uint32_t BlockN, typename GfxTarget>
+        template <uint32_t BlockM, uint32_t BlockN, uint32_t BlockK, typename GfxTarget>
         struct amdgcn_mfma<hfloat16_t,
                            hfloat16_t,
                            hfloat16_t,
                            BlockM,
                            BlockN,
+                           BlockK,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_mfma<float16_t, float16_t, float16_t, BlockM, BlockN>
+            : public amdgcn_mfma<float16_t, float16_t, float16_t, BlockM, BlockN, BlockK>
         {
         };
 
@@ -326,10 +328,10 @@ namespace rocwmma
                            float32_t,
                            16u,
                            16u,
+                           8u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX908>>
+                           enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 8u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -369,10 +371,10 @@ namespace rocwmma
                            float32_t,
                            32u,
                            32u,
+                           4u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX908>>
+                           enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 4u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -406,6 +408,7 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx90a+
         template <typename GfxTarget>
         struct amdgcn_mfma<
             bfloat16_t,
@@ -413,10 +416,10 @@ namespace rocwmma
             float32_t,
             16u,
             16u,
+            16u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X)>>
+            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_GFX950)>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -437,6 +440,7 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx90a+
         template <typename GfxTarget>
         struct amdgcn_mfma<
             bfloat16_t,
@@ -444,10 +448,10 @@ namespace rocwmma
             float32_t,
             32u,
             32u,
+            8u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X)>>
+            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_GFX950)>>
         {
-            constexpr static uint32_t      KPerMma = 8u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -468,18 +472,17 @@ namespace rocwmma
             }
         };
 
-#if ROCWMMA_ARCH_GFX950
-
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat16_t,
                            bfloat16_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -500,16 +503,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat16_t,
                            bfloat16_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -530,8 +534,6 @@ namespace rocwmma
             }
         };
 
-#endif // ROCWMMA_ARCH_GFX950
-
         // fp32
         template <typename GfxTarget>
         struct amdgcn_mfma<float32_t,
@@ -539,10 +541,10 @@ namespace rocwmma
                            float32_t,
                            16u,
                            16u,
+                           4u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 4u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -569,10 +571,10 @@ namespace rocwmma
                            float32_t,
                            32u,
                            32u,
+                           2u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 2u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -594,6 +596,7 @@ namespace rocwmma
         };
 
         // fp64
+        // Only supported on gfx90a+
         template <typename GfxTarget>
         struct amdgcn_mfma<
             float64_t,
@@ -601,10 +604,10 @@ namespace rocwmma
             float64_t,
             16u,
             16u,
+            4u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X)>>
+            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX90A || (bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_GFX950)>>
         {
-            constexpr static uint32_t      KPerMma = 4u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -633,10 +636,10 @@ namespace rocwmma
             int32_t,
             16u,
             16u,
+            16u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
+            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -664,10 +667,10 @@ namespace rocwmma
             int32_t,
             32u,
             32u,
+            8u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
+            enable_gfx9_t<GfxTarget>>
         {
-            constexpr static uint32_t      KPerMma = 8u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -688,16 +691,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940+
         template <typename GfxTarget>
         struct amdgcn_mfma<int8_t,
                            int8_t,
                            int32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
+                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -729,16 +733,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940+
         template <typename GfxTarget>
         struct amdgcn_mfma<int8_t,
                            int8_t,
                            int32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
+                           enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -770,18 +775,17 @@ namespace rocwmma
             }
         };
 
-#if ROCWMMA_ARCH_GFX950
-
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<int8_t,
                            int8_t,
                            int32_t,
                            16u,
                            16u,
+                           64u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 64u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -795,16 +799,11 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
-                using TypeIn = VRegI64x2;
-                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
-                              "Inconsistent data formats");
-                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
-                              "Inconsistent data formats");
-
+                
                 DRegsT result;
                 result.data
-                    = {__builtin_amdgcn_mfma_i32_16x16x64_i8(((TypeIn const&)(regsA)).data[0],
-                                                             ((TypeIn const&)(regsB)).data[0],
+                    = {__builtin_amdgcn_mfma_i32_16x16x64_i8(regsA.data,
+                                                             regsB.data,
                                                              regsC.data,
                                                              (int)Cbsz,
                                                              (int)Abid,
@@ -813,16 +812,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<int8_t,
                            int8_t,
                            int32_t,
                            32u,
                            32u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -836,16 +836,10 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
-                using TypeIn = VRegI64x2;
-                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
-                              "Inconsistent data formats");
-                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
-                              "Inconsistent data formats");
-
                 DRegsT result;
                 result.data
-                    = {__builtin_amdgcn_mfma_i32_32x32x32_i8(((TypeIn const&)(regsA)).data[0],
-                                                             ((TypeIn const&)(regsB)).data[0],
+                    = {__builtin_amdgcn_mfma_i32_32x32x32_i8(regsA.data,
+                                                             regsB.data,
                                                              regsC.data,
                                                              (int)Cbsz,
                                                              (int)Abid,
@@ -854,19 +848,18 @@ namespace rocwmma
             }
         };
 
-#endif // ROCWMMA_ARCH_GFX950
-
         // f8_fnuz
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_fnuz_t,
                            float8_fnuz_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -898,16 +891,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_fnuz_t,
                            float8_fnuz_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -940,16 +934,17 @@ namespace rocwmma
         };
 
         // bf8_fnuz
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_fnuz_t,
                            bfloat8_fnuz_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -981,16 +976,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_fnuz_t,
                            bfloat8_fnuz_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1023,16 +1019,17 @@ namespace rocwmma
         };
 
         // Mixed f8_fnuz / bf8_fnuz
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_fnuz_t,
                            bfloat8_fnuz_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1064,16 +1061,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_fnuz_t,
                            bfloat8_fnuz_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1105,16 +1103,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_fnuz_t,
                            float8_fnuz_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1146,16 +1145,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_fnuz_t,
                            float8_fnuz_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1188,16 +1188,17 @@ namespace rocwmma
         };
 
         // fp8
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_t,
                            float8_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1229,16 +1230,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_t,
                            float8_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1271,16 +1273,17 @@ namespace rocwmma
         };
 
         // bf8
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_t,
                            bfloat8_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1312,16 +1315,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_t,
                            bfloat8_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1354,16 +1358,17 @@ namespace rocwmma
         };
 
         // Mixed f8 / bf8
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_t,
                            bfloat8_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1395,16 +1400,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_t,
                            bfloat8_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1436,16 +1442,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_t,
                            float8_t,
                            float32_t,
                            16u,
                            16u,
+                           32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 32u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1477,16 +1484,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx950+
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_t,
                            float8_t,
                            float32_t,
                            32u,
                            32u,
+                           16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
-            constexpr static uint32_t      KPerMma = 16u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1519,16 +1527,17 @@ namespace rocwmma
         };
 
         // xf32
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<xfloat32_t,
                            xfloat32_t,
                            float32_t,
                            16u,
                            16u,
+                           8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 8u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1549,16 +1558,17 @@ namespace rocwmma
             }
         };
 
+        // Only supported on gfx940
         template <typename GfxTarget>
         struct amdgcn_mfma<xfloat32_t,
                            xfloat32_t,
                            float32_t,
                            32u,
                            32u,
+                           4u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX94X>>
         {
-            constexpr static uint32_t      KPerMma = 4u;
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Blgp    = MfmaCtrlFlags::DEFAULT;
@@ -1579,9 +1589,86 @@ namespace rocwmma
             }
         };
 
-#endif // ROCWMMA_ARCH_GFX9
-
     } // namespace detail
+
+    namespace MmaTraits_impl
+    {
+        template<typename MfmaOp>
+        struct is_mfma : public false_type{};
+
+        template <typename InputTA_In,
+                  typename InputTB_In,
+                  typename ComputeT_in,
+                  uint32_t BlockM_In,
+                  uint32_t BlockN_In,
+                  uint32_t BlockK_In>
+        struct is_mfma<detail::amdgcn_mfma<InputTA_In, InputTB_In, ComputeT_in, BlockM_In, BlockN_In, BlockK_In>>
+        : public true_type{};
+
+        template <typename MfmaOp>
+        constexpr static bool is_mfma_v = is_mfma<MfmaOp>::value;
+
+        // All of the overrides won't have the Unsupported tag
+        template<typename MfmaOp, typename Enabler = void>
+        struct is_mfma_supported
+        : public true_type {};
+
+        // Default implementation will have the Unsupported tag
+        template<typename MfmaOp>
+        struct is_mfma_supported<MfmaOp, enable_if_t<is_same_v<typename MfmaOp::Unsupported, detail::Unsupported>>>
+        : public false_type {};
+
+        template <typename MfmaOp>
+        constexpr static bool is_mfma_supported_v = is_mfma_supported<MfmaOp>::value;
+
+        template <typename MfmaOp>
+        struct mfma_traits;
+
+        template <typename InputTA_In,
+                  typename InputTB_In,
+                  typename ComputeT_In,
+                  uint32_t BlockM_In,
+                  uint32_t BlockN_In,
+                  uint32_t BlockK_In>
+        struct mfma_traits<detail::amdgcn_mfma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>>
+        {
+            // Base implementation
+            using Impl = detail::amdgcn_mfma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>;
+
+            // Operand types
+            using InputTA = InputTA_In;
+            using InputTB = InputTB_In;
+            using ComputeT = ComputeT_In;
+
+            // Raw input / output types
+            using ARegsT = typename Impl::ARegsT;
+            using BRegsT = typename Impl::BRegsT;
+            using CRegsT = typename Impl::CRegsT;
+            using DRegsT = typename Impl::DRegsT;
+
+            // Geometric block sizes
+            constexpr static uint32_t BlockM = BlockM_In;
+            constexpr static uint32_t BlockN = BlockN_In;
+            constexpr static uint32_t BlockK = BlockK_In;
+
+            // Vector sizes per block (packed)
+            constexpr static uint32_t BlockSizeA = VecTraits<ARegsT>::size();
+            constexpr static uint32_t BlockSizeB = VecTraits<BRegsT>::size();
+            constexpr static uint32_t BlockSizeC = VecTraits<CRegsT>::size();
+
+            // Backend flags
+            constexpr static bool is_wmma = false;
+            constexpr static bool is_mfma = is_mfma_v<Impl>;
+            constexpr static bool is_supported = is_mfma_supported_v<Impl>;
+        };
+
+        // MmaTraits implemented for mfma backend
+        template<typename MmaOp>
+        struct MmaTraits<MmaOp, enable_if_t<is_mfma_v<MmaOp>>>
+        : public mfma_traits<MmaOp>
+        {};
+
+    } // namespace MmaTraits_impl
 
 } // namespace rocwmma
 

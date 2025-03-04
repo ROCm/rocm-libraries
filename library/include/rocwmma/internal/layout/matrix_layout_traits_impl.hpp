@@ -561,6 +561,7 @@ namespace rocwmma
         {
             using type = ColInlineInt<BlockDim, BlockK, DataT, MmaDim, SplitK>;
         };
+        
         template <typename MatrixLayout>
         struct layout_traits<MatrixLayout, enable_if_t<is_matrix_layout_v<MatrixLayout>>>
             : public matrix_layout_traits<MatrixLayout>

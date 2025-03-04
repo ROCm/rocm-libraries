@@ -27,6 +27,8 @@
 #define ROCWMMA_MFMA_HPP
 
 #include "mma.hpp"
+#include "mma_traits.hpp"
+#include "mma_selector.hpp"
 #include "mfma_impl.hpp"
 
 namespace rocwmma
@@ -36,10 +38,22 @@ namespace rocwmma
              typename InputTB,
              typename ComputeT,
              uint32_t BlockM,
-             uint32_t BlockN>
-    using Mfma_impl = detail::amdgcn_mfma<InputTA, InputTB, ComputeT, BlockM, BlockN>;
+             uint32_t BlockN,
+             uint32_t BlockK>
+    using Mfma_impl = detail::amdgcn_mfma<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>;
 
-    // Mfma interface through Mma
+    // Create a backend selector class for mfma backend. Given fixed BlockM and BlockN,
+    // will try to find the highest BlockK throughput instruction if it exists.
+    template<typename InputTA,
+             typename InputTB,
+             typename ComputeT,
+             uint32_t BlockM,
+             uint32_t BlockN,
+             uint32_t BlockKTest = 64u> // Current max possible K-value for mfma instr (most efficient)
+    struct MfmaSelector : public MmaSelector<Mfma_impl, InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>{};
+
+    // Given a fixed frag size and BlockM and BlockN values, the mfma class will select the mfma backend if it exists
+    // and then forward it to the Mma base class driver.
     template <uint32_t FragM,
               uint32_t FragN,
               uint32_t FragK,
@@ -47,49 +61,24 @@ namespace rocwmma
               typename InputTB,
               typename ComputeT,
               uint32_t BlockM,
-              uint32_t BlockN = BlockM,
+              uint32_t BlockN,
+              uint32_t BlockK = FragK, // Default K throughput search
               MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
-    struct Mfma : public Mma<FragM, FragN, FragK, Mfma_impl<InputTA, InputTB, ComputeT, BlockM, BlockN>, AccumPolicy>
+    struct Mfma 
+    : public Mma<FragM,
+                 FragN,
+                 FragK,
+                 typename MfmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
+                 AccumPolicy>
     {
-        // Interface:
+        // Sanity check
+        using SelectedOp = typename MfmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp;
+
+        //static_assert(is_same_v<void, SelectedOp>, "NOPE");
+
+        // Driver interface from base class Mma:
         // template <typename VecTA, typename VecTB, typename VecTC>
         // ROCWMMA_DEVICE static inline decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC& accum);
-    };
-
-    template<typename InputTA_In,
-             typename InputTB_In,
-             typename ComputeT_In,
-             uint32_t BlockM_In,
-             uint32_t BlockN_In>
-    struct MmaTraits<Mfma_impl<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In>>
-    {
-        // Base implementation
-        using Base = Mfma_impl<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In>;
-
-        // Operand types
-        using InputTA = InputTA_In;
-        using InputTB = InputTB_In;
-        using ComputeT = ComputeT_In;
-
-        // Raw input / output types
-        using ARegsT = typename Base::ARegsT;
-        using BRegsT = typename Base::BRegsT;
-        using CRegsT = typename Base::CRegsT;
-        using DRegsT = typename Base::DRegsT;
-
-        // Geometric block sizes
-        constexpr static uint32_t BlockM = BlockM_In;
-        constexpr static uint32_t BlockN = BlockN_In;
-        constexpr static uint32_t BlockK = Base::KPerMma;
-
-        // Vector sizes per block (packed)
-        constexpr static uint32_t BlockSizeA = VecTraits<ARegsT>::size();
-        constexpr static uint32_t BlockSizeB = VecTraits<BRegsT>::size();
-        constexpr static uint32_t BlockSizeC = VecTraits<CRegsT>::size();
-
-        // Backend flag
-        constexpr static bool is_wmma = false;
-        constexpr static bool is_mfma = true;
     };
 
 } // namespace rocwmma
