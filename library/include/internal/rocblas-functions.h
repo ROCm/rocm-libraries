@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21823,8 +21823,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_zgeam_strided_batched_64(rocblas_handle   
     solution_index
               [int32_t]
               if algo is rocblas_gemm_algo_solution_index, this controls which solution is used.
-              When algo is not rocblas_gemm_algo_solution_index, or if solution_index <= 0, the default solution is used.
-              This parameter was unused in previous releases and instead always used the default solution
+              When algo is not rocblas_gemm_algo_solution_index, or if solution_index = 0, the default solution is used.
+              Passing rocblas_gemm_algo_solution_index and solution_index < 0 to use the default solution is deprecated.
     @param[in]
     flags     [uint32_t]
               optional gemm flags.
@@ -22044,8 +22044,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_ex_64(rocblas_handle    handle,
     solution_index
               [int32_t]
               if algo is rocblas_gemm_algo_solution_index, this controls which solution is used.
-              When algo is not rocblas_gemm_algo_solution_index, or if solution_index <= 0, the default solution is used.
-              This parameter was unused in previous releases and instead always used the default solution
+              When algo is not rocblas_gemm_algo_solution_index, or if solution_index = 0, the default solution is used.
+              Passing rocblas_gemm_algo_solution_index and solution_index < 0 to use the default solution is deprecated.
     @param[in]
     flags     [uint32_t]
               optional gemm flags.
@@ -22230,8 +22230,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_gemm_batched_ex_64(rocblas_handle    handl
     solution_index
               [int32_t]
               if algo is rocblas_gemm_algo_solution_index, this controls which solution is used.
-              When algo is not rocblas_gemm_algo_solution_index, or if solution_index <= 0, the default solution is used.
-              This parameter was unused in previous releases and instead always used the default solution
+              When algo is not rocblas_gemm_algo_solution_index, or if solution_index = 0, the default solution is used.
+              Passing rocblas_gemm_algo_solution_index and solution_index < 0 to use the default solution is deprecated.
     @param[in]
     flags     [uint32_t]
               optional gemm flags.
