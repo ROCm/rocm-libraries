@@ -13,6 +13,10 @@ subtrees:
     title: rocPyDecode prerequisites
   - file: install/rocPyDecode-install
     title: Installing rocPyDecode
+  - file: install/rocPyDecode-cmake-install
+    title: Installing rocPyDecode with CMake
+  - file: install/rocPyDecode-pip-install
+    title: Installing rocPyDecode with pip
 
 - caption: Conceptual
   entries:
@@ -38,7 +42,7 @@ subtrees:
     subtrees:
     - entries:
       - file: reference/structures.rst
-        title: rocPyDecode Structs
+        title: rocPyDecode Structures
       - file: reference/decoderClass.rst
       - file: reference/demuxerClass.rst
 

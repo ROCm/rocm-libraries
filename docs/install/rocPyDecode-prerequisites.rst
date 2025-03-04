@@ -6,7 +6,7 @@
 rocPyDecode prerequisites
 ********************************************************************
 
-rocPyDecode requires Ubuntu 22.04 or 24.04, and ROCm 6.3 or later running on `accelerators based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
+rocPyDecode requires Ubuntu 22.04 or 24.04 with ROCm running on `accelerators based on the CDNA architecture <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`_.
 
 ROCm needs to be installed using the `AMDGPU installer <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/amdgpu-install.html>`_ with the ``rocm`` usecase:
 
@@ -17,7 +17,8 @@ ROCm needs to be installed using the `AMDGPU installer <https://rocm.docs.amd.co
 rocPyDecode has the following prerequisites:
 
 * CMake 3.12 or later
-* Python3 and Python3 PIP
+* Python3 3.9 or later
+* Python3 pip
 * PyBind11
 * rocDecode
 * pkg-config

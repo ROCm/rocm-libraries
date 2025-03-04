@@ -20,7 +20,9 @@ The rocPyDecode public repository is located at `https://github.com/ROCm/rocPyDe
   .. grid-item-card:: Install
 
     * :doc:`rocPyDecode prerequisites <./install/rocPyDecode-prerequisites>`
-    * :doc:`rocPyDecode installation <./install/rocPyDecode-install>`
+    * :doc:`rocPyDecode installation overview <./install/rocPyDecode-install>`
+    * :doc:`rocPyDecode CMake installation <./install/rocPyDecode-cmake-install>`
+    * :doc:`rocPyDecode pip installation <./install/rocPyDecode-pip-install>`
 
 .. grid:: 2
   :gutter: 3
@@ -40,8 +42,8 @@ The rocPyDecode public repository is located at `https://github.com/ROCm/rocPyDe
 
   .. grid-item-card:: Reference
 
-    * :doc:`Supported codecs and hardware <reference/rocPyDecode-codecs-and-hardware>`
-    * :doc:`API reference<reference/rocPyDecode>`
+    * :doc:`rocDecode supported codecs and hardware <reference/rocPyDecode-codecs-and-hardware>`
+    * :doc:`rocPyDecode API reference<reference/rocPyDecode>`
       
       * :doc:`rocPyDecode structures <./reference/structures>`
       * :doc:`rocPyDecode decoder class <./reference/decoderClass>`
