@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -283,35 +283,19 @@ void testing_dense_to_sparse_csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm-up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_dense_to_sparse(handle,
-                                                            mat_dense,
-                                                            mat_sparse,
-                                                            rocsparse_dense_to_sparse_alg_default,
-                                                            &buffer_size,
-                                                            d_temp_buffer));
-        }
-
-        double gpu_time_used = get_time_us();
-        {
-            // Performance run
-            for(int iter = 0; iter < number_hot_calls; ++iter)
-            {
-                CHECK_ROCSPARSE_ERROR(
-                    rocsparse_dense_to_sparse(handle,
-                                              mat_dense,
-                                              mat_sparse,
-                                              rocsparse_dense_to_sparse_alg_default,
-                                              &buffer_size,
-                                              d_temp_buffer));
-            }
-        }
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        double gpu_time_used;
+        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+            return rocsparse_dense_to_sparse(handle,
+                                             mat_dense,
+                                             mat_sparse,
+                                             rocsparse_dense_to_sparse_alg_default,
+                                             &buffer_size,
+                                             d_temp_buffer);
+        });
 
         double gbyte_count = dense2csx_gbyte_count<rocsparse_direction_row, T>(m, n, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

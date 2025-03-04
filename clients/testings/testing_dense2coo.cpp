@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -174,42 +174,23 @@ void testing_dense2coo(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm-up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_dense2coo<T>(handle,
-                                                         M,
-                                                         N,
-                                                         descr,
-                                                         d_dense_val,
-                                                         LD,
-                                                         d_nnz_per_row,
-                                                         (T*)d_coo_val,
-                                                         d_coo_row_ind,
-                                                         d_coo_col_ind));
-        }
-
-        double gpu_time_used = get_time_us();
-        {
-            // Performance run
-            for(int iter = 0; iter < number_hot_calls; ++iter)
-            {
-                CHECK_ROCSPARSE_ERROR(rocsparse_dense2coo<T>(handle,
-                                                             M,
-                                                             N,
-                                                             descr,
-                                                             d_dense_val,
-                                                             LD,
-                                                             d_nnz_per_row,
-                                                             d_coo_val,
-                                                             d_coo_row_ind,
-                                                             d_coo_col_ind));
-            }
-        }
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        double gpu_time_used;
+        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+            return rocsparse_dense2coo<T>(handle,
+                                          M,
+                                          N,
+                                          descr,
+                                          d_dense_val,
+                                          LD,
+                                          d_nnz_per_row,
+                                          (T*)d_coo_val,
+                                          d_coo_row_ind,
+                                          d_coo_col_ind);
+        });
 
         double gbyte_count = dense2coo_gbyte_count<T>(M, N, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

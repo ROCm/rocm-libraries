@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -277,58 +277,31 @@ void testing_gebsr2gebsr(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        const int number_cold_calls  = 2;
+        const int number_hot_calls_2 = arg.iters_inner;
+        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_gebsr2gebsr<T>(handle,
-                                                           direction,
-                                                           dA.mb,
-                                                           dA.nb,
-                                                           dA.nnzb,
-                                                           descr_A,
-                                                           dA.val,
-                                                           dA.ptr,
-                                                           dA.ind,
-                                                           row_block_dim_A,
-                                                           col_block_dim_A,
-                                                           descr_C,
-                                                           dC.val,
-                                                           dC.ptr,
-                                                           dC.ind,
-                                                           row_block_dim_C,
-                                                           col_block_dim_C,
-                                                           dbuffer));
-        }
-
-        double gpu_time_used = get_time_us();
-
-        // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_gebsr2gebsr<T>(handle,
-                                                           direction,
-                                                           dA.mb,
-                                                           dA.nb,
-                                                           dA.nnzb,
-                                                           descr_A,
-                                                           dA.val,
-                                                           dA.ptr,
-                                                           dA.ind,
-                                                           row_block_dim_A,
-                                                           col_block_dim_A,
-                                                           descr_C,
-                                                           dC.val,
-                                                           dC.ptr,
-                                                           dC.ind,
-                                                           row_block_dim_C,
-                                                           col_block_dim_C,
-                                                           dbuffer));
-        }
-
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        double gpu_time_used;
+        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
+            return rocsparse_gebsr2gebsr<T>(handle,
+                                            direction,
+                                            dA.mb,
+                                            dA.nb,
+                                            dA.nnzb,
+                                            descr_A,
+                                            dA.val,
+                                            dA.ptr,
+                                            dA.ind,
+                                            row_block_dim_A,
+                                            col_block_dim_A,
+                                            descr_C,
+                                            dC.val,
+                                            dC.ptr,
+                                            dC.ind,
+                                            row_block_dim_C,
+                                            col_block_dim_C,
+                                            dbuffer);
+        });
 
         double gbyte_count = gebsr2gebsr_gbyte_count<T>(dA.mb,
                                                         dC.mb,
