@@ -149,6 +149,7 @@ set(DEFAULT_GPUS
   gfx908
   gfx90a
   gfx942
+  gfx950
   gfx1030
   gfx1100
   gfx1101
