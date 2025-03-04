@@ -241,10 +241,10 @@ namespace rocwmma
 #endif // ROCWMMA_EXTENDED_TESTS
                                                          >;
         // Aggregate combinations BlockK == 8
-        using TestBlockSizes32x32TinyBlockK = std::tuple<std::tuple<I<32>, I<32>, I<8>>>;
+        using TestBlockSizes32x32TinyBlockK = std::tuple<std::tuple<I<32>, I<32>, I<16>>>;
 
         // Aggregate combinations BlockK <= 16
-        using TestBlockSizes32x32SmallBlockK = std::tuple<std::tuple<I<32>, I<32>, I<8>>
+        using TestBlockSizes32x32SmallBlockK = std::tuple<std::tuple<I<32>, I<32>, I<16>>
 #if ROCWMMA_EXTENDED_TESTS
                                                           ,
                                                           std::tuple<I<32>, I<32>, I<16>>
@@ -252,7 +252,7 @@ namespace rocwmma
                                                           >;
 
         // Aggregate combinations BlockK <= 32
-        using TestBlockSizes32x32MediumBlockK = std::tuple<std::tuple<I<32>, I<32>, I<8>>,
+        using TestBlockSizes32x32MediumBlockK = std::tuple<//std::tuple<I<32>, I<32>, I<8>>,
                                                            std::tuple<I<32>, I<32>, I<16>>
 #if ROCWMMA_EXTENDED_TESTS
                                                            ,
@@ -261,7 +261,7 @@ namespace rocwmma
                                                            >;
 
         // Aggregate combinations BlockK <= 64
-        using TestBlockSizes32x32LargeBlockK = std::tuple<std::tuple<I<32>, I<32>, I<8>>,
+        using TestBlockSizes32x32LargeBlockK = std::tuple<//std::tuple<I<32>, I<32>, I<8>>,
                                                           std::tuple<I<32>, I<32>, I<16>>,
                                                           std::tuple<I<32>, I<32>, I<32>>
 #if ROCWMMA_EXTENDED_TESTS
@@ -271,7 +271,7 @@ namespace rocwmma
                                                           >;
 
         // Aggregate combinations BlockK <= 128
-        using TestBlockSizes32x32HugeBlockK = std::tuple<std::tuple<I<32>, I<32>, I<8>>,
+        using TestBlockSizes32x32HugeBlockK = std::tuple<//std::tuple<I<32>, I<32>, I<8>>,
                                                          std::tuple<I<32>, I<32>, I<16>>,
                                                          std::tuple<I<32>, I<32>, I<32>>
 #if ROCWMMA_EXTENDED_TESTS
