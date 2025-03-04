@@ -88,7 +88,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::SOA,
                                                               Format::WMMA_INPUT_GFX11,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -113,7 +113,7 @@ namespace rocwmma
                                                               LayoutTraits>;
                 using xform1
                     = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -138,7 +138,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::SOA,
                                                               Format::WMMA_ACC_GFX11,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -163,7 +163,7 @@ namespace rocwmma
                                                               LayoutTraits>;
                 using xform1
                     = register_layout_transform_impl<Format::SOA, Format::AOS, LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -331,7 +331,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::SOA_INT,
                                                               Format::WMMA_INPUT_GFX11,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -361,7 +361,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::SOA_INT,
                                                               Format::AOS_INT,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -377,7 +377,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
                                                               Format::WMMA_ACC_GFX11,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -393,7 +393,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
                                                               Format::WMMA_ACC_GFX11,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -409,7 +409,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
                                                               Format::SOA_INT,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
@@ -425,7 +425,7 @@ namespace rocwmma
                 using xform1 = register_layout_transform_impl<Format::ACC_INT_A_MAJOR,
                                                               Format::AOS_INT,
                                                               LayoutTraits>;
-                return xform1::exec(xform0(forward<VecT>(v)));
+                return xform1::exec(xform0::exec(forward<VecT>(v)));
             }
         };
 
