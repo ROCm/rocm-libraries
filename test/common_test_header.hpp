@@ -35,7 +35,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <sstream>
 
 #include "../common/utils.hpp"
 
@@ -60,8 +59,11 @@
         }                                                                                   \
         if (error != hipSuccess)                                                            \
         {                                                                                   \
-            [error]() { FAIL() << "HIP error: " << hipGetErrorString(error)                 \
-                               << " line: " << __LINE__; }();                               \
+            [error]()                                                                       \
+            {                                                                               \
+                FAIL() << "HIP error: " << hipGetErrorString(error) << std::endl            \
+                       << "File: " << __FILE__ << " line: " << __LINE__;                    \
+            }();                                                                            \
             exit(error);                                                                    \
         }                                                                                   \
     }
