@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -112,14 +113,8 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
         ::rocprim::less<key_type> lesser_op;
         rocprim::empty_type*      values_ptr = nullptr;
@@ -127,8 +122,8 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                     d_keys_output,
+            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input.get(),
+                                                                     d_keys_output.get(),
                                                                      values_ptr,
                                                                      values_ptr,
                                                                      size,
@@ -151,8 +146,8 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
 
             for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                         d_keys_output,
+                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input.get(),
+                                                                         d_keys_output.get(),
                                                                          values_ptr,
                                                                          values_ptr,
                                                                          size,
@@ -177,9 +172,6 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
 
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 
     // pairs benchmark
@@ -205,23 +197,11 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        value_type* d_values_input;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<value_type> d_values_output(size);
 
         ::rocprim::less<key_type> lesser_op;
         unsigned int              items_per_block;
@@ -232,10 +212,10 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         for(size_t i = 0; i < warmup_size; ++i)
         {
 
-            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                     d_keys_output,
-                                                                     d_values_input,
-                                                                     d_values_output,
+            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input.get(),
+                                                                     d_keys_output.get(),
+                                                                     d_values_input.get(),
+                                                                     d_values_output.get(),
                                                                      size,
                                                                      items_per_block,
                                                                      lesser_op,
@@ -256,10 +236,10 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
 
             for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                         d_keys_output,
-                                                                         d_values_input,
-                                                                         d_values_output,
+                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input.get(),
+                                                                         d_keys_output.get(),
+                                                                         d_values_input.get(),
+                                                                         d_values_output.get(),
                                                                          size,
                                                                          items_per_block,
                                                                          lesser_op,
@@ -283,11 +263,6 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size
                                 * (sizeof(key_type) + sizeof(value_type)));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values_output));
     }
 
     void run(benchmark::State&   state,

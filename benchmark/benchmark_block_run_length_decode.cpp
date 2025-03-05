@@ -23,6 +23,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_run_length_decode.hpp>
@@ -127,22 +128,11 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     }
     const OffsetT output_length = run_offsets.back();
 
-    ItemT* d_run_items{};
-    HIP_CHECK(hipMalloc(&d_run_items, run_items.size() * sizeof(ItemT)));
-    HIP_CHECK(hipMemcpy(d_run_items,
-                        run_items.data(),
-                        run_items.size() * sizeof(ItemT),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<ItemT> d_run_items(run_items);
 
-    OffsetT* d_run_offsets{};
-    HIP_CHECK(hipMalloc(&d_run_offsets, run_offsets.size() * sizeof(OffsetT)));
-    HIP_CHECK(hipMemcpy(d_run_offsets,
-                        run_offsets.data(),
-                        run_offsets.size() * sizeof(OffsetT),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<OffsetT> d_run_offsets(run_offsets);
 
-    ItemT* d_output{};
-    HIP_CHECK(hipMalloc(&d_output, output_length * sizeof(ItemT)));
+    common::device_ptr<ItemT> d_output(output_length);
 
     state.run(gbench_state,
               [&]
@@ -154,18 +144,14 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                                                  DecodedItemsPerThread,
                                                  Trials>
                       <<<dim3(num_runs / runs_per_block), dim3(BlockSize), 0, stream>>>(
-                          d_run_items,
-                          d_run_offsets,
-                          d_output);
+                          d_run_items.get(),
+                          d_run_offsets.get(),
+                          d_output.get());
                   HIP_CHECK(hipPeekAtLastError());
                   HIP_CHECK(hipDeviceSynchronize());
               });
 
     state.set_items_processed_per_iteration<ItemT>(gbench_state, output_length * Trials);
-
-    HIP_CHECK(hipFree(d_run_items));
-    HIP_CHECK(hipFree(d_run_offsets));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                      \

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_DEVICE_TRANSFORM_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -89,21 +91,14 @@ struct device_transform_benchmark : public config_autotune_interface
         const std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-        T*           d_input;
-        output_type* d_output = nullptr;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            input.size() * sizeof(input[0]),
-                            hipMemcpyHostToDevice));
-
-        HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
+        common::device_ptr<T>           d_input(input);
+        common::device_ptr<output_type> d_output(size);
 
         const auto launch = [&]
         {
             auto transform_op = [](T v) { return v + T(5); };
-            return rocprim::transform<Config>(d_input,
-                                              d_output,
+            return rocprim::transform<Config>(d_input.get(),
+                                              d_output.get(),
                                               size,
                                               transform_op,
                                               stream,
@@ -148,9 +143,6 @@ struct device_transform_benchmark : public config_autotune_interface
 
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
     }
 };
 

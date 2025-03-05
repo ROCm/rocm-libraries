@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,11 +25,12 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
 // HIP API
-#include <cstdint>
 #include <hip/hip_runtime.h>
 
 // rocPRIM HIP API
@@ -114,44 +115,33 @@ struct device_merge_benchmark : public config_autotune_interface
         std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
         std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
 
-        key_type* d_keys_input1;
-        key_type* d_keys_input2;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            size1 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_keys_input2,
-                            keys_input2.data(),
-                            size2 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input1(keys_input1);
+        common::device_ptr<key_type> d_keys_input2(keys_input2);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                          temporary_storage_bytes,
-                                         d_keys_input1,
-                                         d_keys_input2,
-                                         d_keys_output,
+                                         d_keys_input1.get(),
+                                         d_keys_input2.get(),
+                                         d_keys_output.get(),
                                          size1,
                                          size2,
                                          compare_op,
                                          stream,
                                          false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
 
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                              temporary_storage_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
-                                             d_keys_output,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
+                                             d_keys_output.get(),
                                              size1,
                                              size2,
                                              compare_op,
@@ -172,11 +162,11 @@ struct device_merge_benchmark : public config_autotune_interface
 
             for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                                  temporary_storage_bytes,
-                                                 d_keys_input1,
-                                                 d_keys_input2,
-                                                 d_keys_output,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
                                                  size1,
                                                  size2,
                                                  compare_op,
@@ -199,11 +189,6 @@ struct device_merge_benchmark : public config_autotune_interface
 
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input1));
-        HIP_CHECK(hipFree(d_keys_input2));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 
     // pairs benchmark
@@ -245,59 +230,43 @@ struct device_merge_benchmark : public config_autotune_interface
         std::iota(values_input1.begin(), values_input1.end(), 0);
         std::iota(values_input2.begin(), values_input2.end(), size1);
 
-        key_type*   d_keys_input1;
-        key_type*   d_keys_input2;
-        key_type*   d_keys_output;
-        value_type* d_values_input1;
-        value_type* d_values_input2;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input1), size1 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input2), size2 * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_values_input1), size1 * sizeof(value_type)));
-        HIP_CHECK(
-            hipMalloc(reinterpret_cast<void**>(&d_values_input2), size2 * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input1,
-                            keys_input1.data(),
-                            size1 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_keys_input2,
-                            keys_input2.data(),
-                            size2 * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type>   d_keys_input1(keys_input1);
+        common::device_ptr<key_type>   d_keys_input2(keys_input2);
+        common::device_ptr<key_type>   d_keys_output(size);
+        common::device_ptr<value_type> d_values_input1(size1);
+        common::device_ptr<value_type> d_values_input2(size2);
+        common::device_ptr<value_type> d_values_output(size);
 
-        void*  d_temporary_storage     = nullptr;
+        common::device_ptr<void> d_temporary_storage;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                          temporary_storage_bytes,
-                                         d_keys_input1,
-                                         d_keys_input2,
-                                         d_keys_output,
-                                         d_values_input1,
-                                         d_values_input2,
-                                         d_values_output,
+                                         d_keys_input1.get(),
+                                         d_keys_input2.get(),
+                                         d_keys_output.get(),
+                                         d_values_input1.get(),
+                                         d_values_input2.get(),
+                                         d_values_output.get(),
                                          size1,
                                          size2,
                                          compare_op,
                                          stream,
                                          false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+            HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                              temporary_storage_bytes,
-                                             d_keys_input1,
-                                             d_keys_input2,
-                                             d_keys_output,
-                                             d_values_input1,
-                                             d_values_input2,
-                                             d_values_output,
+                                             d_keys_input1.get(),
+                                             d_keys_input2.get(),
+                                             d_keys_output.get(),
+                                             d_values_input1.get(),
+                                             d_values_input2.get(),
+                                             d_values_output.get(),
                                              size1,
                                              size2,
                                              compare_op,
@@ -318,14 +287,14 @@ struct device_merge_benchmark : public config_autotune_interface
 
             for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
                                                  temporary_storage_bytes,
-                                                 d_keys_input1,
-                                                 d_keys_input2,
-                                                 d_keys_output,
-                                                 d_values_input1,
-                                                 d_values_input2,
-                                                 d_values_output,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
+                                                 d_values_input1.get(),
+                                                 d_values_input2.get(),
+                                                 d_values_output.get(),
                                                  size1,
                                                  size2,
                                                  compare_op,
@@ -349,14 +318,6 @@ struct device_merge_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size
                                 * (sizeof(key_type) + sizeof(value_type)));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input1));
-        HIP_CHECK(hipFree(d_keys_input2));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input1));
-        HIP_CHECK(hipFree(d_values_input2));
-        HIP_CHECK(hipFree(d_values_output));
     }
 
     void run(benchmark::State&   state,
