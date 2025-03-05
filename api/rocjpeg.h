@@ -319,12 +319,12 @@ RocJpegStatus ROCJPEGAPI rocJpegDecode(RocJpegHandle handle, RocJpegStreamHandle
  * @ingroup group_amd_rocjpeg
  * @brief Decodes a batch of JPEG images using the rocJPEG library.
  *
- * Decodes a batch of JPEG images using the rocJPEG library.
+ * This function decodes a batch of JPEG images using the rocJPEG library.
  *
  * @param handle The rocJPEG handle.
  * @param jpeg_stream_handles An array of rocJPEG stream handles representing the input JPEG streams.
  * @param batch_size The number of JPEG streams in the batch.
- * @param decode_params The decode parameters for the JPEG decoding process.
+ * @param decode_params An array of RocJpegDecodeParams structs representing the decode parameters for the batch of JPEG images.
  * @param destinations An array of rocJPEG images representing the output decoded images.
  * @return The status of the JPEG decoding operation.
  */

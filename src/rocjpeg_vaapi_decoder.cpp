@@ -711,11 +711,11 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
                 return ROCJPEG_STATUS_JPEG_NOT_SUPPORTED;
             }
 
-        if ((decode_params->output_format == ROCJPEG_OUTPUT_RGB || decode_params->output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_streams_params[i].chroma_subsampling != CSS_440) {
-            if (decode_params->output_format == ROCJPEG_OUTPUT_RGB) {
+        if ((decode_params[i].output_format == ROCJPEG_OUTPUT_RGB || decode_params[i].output_format == ROCJPEG_OUTPUT_RGB_PLANAR) && current_vcn_jpeg_spec_.can_convert_to_rgb && jpeg_streams_params[i].chroma_subsampling != CSS_440) {
+            if (decode_params[i].output_format == ROCJPEG_OUTPUT_RGB) {
                 jpeg_stream_key.surface_format = VA_RT_FORMAT_RGB32;
                 jpeg_stream_key.pixel_format = VA_FOURCC_RGBA;
-            } else if (decode_params->output_format == ROCJPEG_OUTPUT_RGB_PLANAR) {
+            } else if (decode_params[i].output_format == ROCJPEG_OUTPUT_RGB_PLANAR) {
                 jpeg_stream_key.surface_format = VA_RT_FORMAT_RGBP;
                 jpeg_stream_key.pixel_format = VA_FOURCC_RGBP;
             }
@@ -770,8 +770,6 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
 
     uint32_t roi_width;
     uint32_t roi_height;
-    roi_width = decode_params->crop_rectangle.right - decode_params->crop_rectangle.left;
-    roi_height = decode_params->crop_rectangle.bottom - decode_params->crop_rectangle.top;
 
     // Iterate through all entries of jpeg_stream_groups.
     // Check if there is a matching entry in the memory pool.
@@ -805,16 +803,18 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
         for (int idx : indices) {
             // if the HW JPEG decoder has a built-in ROI-decode capability then fill the requested crop rectangle to the picture parameter buffer
             void* picture_parameter_buffer = &jpeg_streams_params[idx].picture_parameter_buffer;
+            roi_width = decode_params[idx].crop_rectangle.right - decode_params[idx].crop_rectangle.left;
+            roi_height = decode_params[idx].crop_rectangle.bottom - decode_params[idx].crop_rectangle.top;
             if (current_vcn_jpeg_spec_.can_roi_decode && roi_width > 0 && roi_height > 0 &&
                 roi_width <= jpeg_streams_params[idx].picture_parameter_buffer.picture_width &&
                 roi_height <= jpeg_streams_params[idx].picture_parameter_buffer.picture_height) {
 #if VA_CHECK_VERSION(1, 21, 0)
-            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.x = decode_params->crop_rectangle.left;
-            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.y = decode_params->crop_rectangle.top;
+            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.x = decode_params[idx].crop_rectangle.left;
+            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.y = decode_params[idx].crop_rectangle.top;
             reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.width = roi_width;
             reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->crop_rectangle.height = roi_height;
 #else
-            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->va_reserved[0] = decode_params->crop_rectangle.top << 16 | decode_params->crop_rectangle.left;
+            reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->va_reserved[0] = decode_params[idx].crop_rectangle.top << 16 | decode_params[idx].crop_rectangle.left;
             reinterpret_cast<VAPictureParameterBufferJPEGBaseline*>(picture_parameter_buffer)->va_reserved[1] = roi_height << 16 | roi_width;
 #endif
             }
