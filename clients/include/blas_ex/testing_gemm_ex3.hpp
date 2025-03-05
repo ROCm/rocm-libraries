@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc.
  * ************************************************************************ */
 
 #pragma once
@@ -213,7 +213,7 @@ void testing_gemm_ex3_bad_arg(const Arguments& arg)
         rocblas_init_matrix(hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
         dC.transfer_from(hC);
 
-        if(rocblas_handle(handle)->getArch() < 940 || rocblas_handle(handle)->getArch() >= 1000)
+        if(rocblas_handle(handle)->getArch() < 942 || rocblas_handle(handle)->getArch() >= 1000)
         {
             // check for invalid arch
             EXPECT_ROCBLAS_STATUS(rocblas_gemm_ex3_fn(handle,

@@ -82,8 +82,6 @@ enum class Processor : int
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
-    gfx940  = 940,
-    gfx941  = 941,
     gfx942  = 942,
     gfx1010 = 1010,
     gfx1011 = 1011,

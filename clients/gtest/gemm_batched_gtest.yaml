@@ -360,7 +360,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: F8HS_family_batched
   category: quick
@@ -380,7 +380,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: F8F8S_family_batched
   category: quick
@@ -401,7 +401,7 @@ Tests:
   # flags: [0 , stochastic_rounding]
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_unit_batched
   category: quick
@@ -422,7 +422,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
   api: [ C, FORTRAN ]
 
 - name: stage1_small_batched
@@ -440,7 +440,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_unit_SR_batched
   category: quick
@@ -461,7 +461,7 @@ Tests:
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_small_SR_batched
   category: quick
@@ -479,7 +479,7 @@ Tests:
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_res_batched
   category: quick
@@ -499,7 +499,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_res_SR_batched
   category: quick
@@ -520,7 +520,7 @@ Tests:
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage2_unit_batched
   category: quick
@@ -540,7 +540,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
   api: [ C, FORTRAN ]
 
 - name: stage2_small_batched
@@ -558,7 +558,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage2_res_batched
   category: quick
@@ -578,7 +578,7 @@ Tests:
   norm_check: 0
   initialization: rand_int_zero_one
   batch_count: [ -1, 0, 1, 3 ]
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: gemm_batched_small_complex
   category: quick

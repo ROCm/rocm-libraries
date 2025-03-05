@@ -3538,7 +3538,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: F8HS_family
   category: quick
@@ -3557,7 +3557,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: F8F8S_family
   category: quick
@@ -3577,7 +3577,7 @@ Tests:
   norm_check: 0
   # flags: [0 , stochastic_rounding] TODO
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_unit
   category: quick
@@ -3597,7 +3597,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
   api: [ C, FORTRAN ]
 
 - name: stage1_small
@@ -3614,7 +3614,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_unit_SR
   category: quick
@@ -3634,7 +3634,7 @@ Tests:
   norm_check: 0
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_small_SR
   category: quick
@@ -3651,7 +3651,7 @@ Tests:
   norm_check: 0
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_res
   category: quick
@@ -3670,7 +3670,7 @@ Tests:
   res_check: 1
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage1_res_SR
   category: quick
@@ -3690,7 +3690,7 @@ Tests:
   norm_check: 0
   flags: [stochastic_rounding]
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage2_unit
   category: quick
@@ -3709,7 +3709,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
   api: [ C, FORTRAN ]
 
 - name: stage2_small
@@ -3726,7 +3726,7 @@ Tests:
   res_check: 0
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: stage2_res
   category: quick
@@ -3745,7 +3745,7 @@ Tests:
   res_check: 1
   norm_check: 0
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: gemm_f8_resnet50_NN
   category: nightly
@@ -3777,7 +3777,7 @@ Tests:
   norm_check: 0
   res_check: 1
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: gemm_f8_resnet50_NT
   category: nightly
@@ -3809,7 +3809,7 @@ Tests:
   norm_check: 0
   res_check: 1
   initialization: rand_int_zero_one
-  gpu_arch: '94?'
+  gpu_arch: '942'
 
 - name: gemm_zerok
   category: quick

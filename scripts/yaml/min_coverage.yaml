@@ -458,7 +458,7 @@ Tests:
     arguments: *gemm_common_args
     initialization: rand_int_zero_one
     unit_check: 1
-    gpu_arch: '94?'
+    gpu_arch: '942'
 
   - name: gemm_batched_L3_pre_checkin
     category: pre_checkin
@@ -480,7 +480,7 @@ Tests:
     batch_count: *batch_count_range
     initialization: rand_int_zero_one
     unit_check: 1
-    gpu_arch: '94?'
+    gpu_arch: '942'
 
   - name: gemm_strided_batched_L3_nightly
     category: nightly
@@ -502,7 +502,7 @@ Tests:
     batch_count: *batch_count_range
     initialization: rand_int_zero_one
     unit_check: 1
-    gpu_arch: '94?'
+    gpu_arch: '942'
 
 # trmm
   - name: trmm_L3_quick

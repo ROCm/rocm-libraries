@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -99,7 +99,7 @@ void testing_gemm_batched_ex3_bad_arg(const Arguments& arg)
             hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix);
         dC.transfer_from(hC);
 
-        if(rocblas_handle(handle)->getArch() < 940 || rocblas_handle(handle)->getArch() >= 1000)
+        if(rocblas_handle(handle)->getArch() < 942 || rocblas_handle(handle)->getArch() >= 1000)
         {
             // check for invalid arch
             EXPECT_ROCBLAS_STATUS(rocblas_gemm_batched_ex3_fn(handle,

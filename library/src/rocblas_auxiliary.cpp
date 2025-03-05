@@ -909,9 +909,7 @@ bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode)
     hipDeviceProp_t deviceProperties;
     hipGetDeviceProperties(&deviceProperties, deviceId);
     std::string deviceString(deviceProperties.gcnArchName);
-    return ((deviceString.find("gfx942") != std::string::npos)
-            || (deviceString.find("gfx941") != std::string::npos)
-            || (deviceString.find("gfx940") != std::string::npos));
+    return (deviceString.find("gfx942") != std::string::npos);
 }
 
 // exported. Get architecture name

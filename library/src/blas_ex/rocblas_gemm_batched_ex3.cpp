@@ -64,7 +64,7 @@ try
 
     rocblas_internal_logger logger;
 
-    if(handle->getArch() >= 940 && handle->getArch() < 1000)
+    if(handle->getArch() >= 942 && handle->getArch() < 1000)
     {
 
         // Copy alpha and beta to host if on device

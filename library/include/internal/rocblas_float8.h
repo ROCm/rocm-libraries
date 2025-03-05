@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,7 @@ struct ROCBLAS_EXPORT rocblas_f8
     // default constructor
     HIP_HOST_DEVICE rocblas_f8() = default;
 
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
     // device specific optimized F8 down-conversion code
 
     template <bool stochastic_rounding = false>
@@ -109,10 +109,10 @@ struct ROCBLAS_EXPORT rocblas_f8
         return i8data;
     }
 
-#endif // __gfx940__
+#endif // __gfx942__
 
     // constructor from float
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
 
     // NOTE: ON-DEVICE... always optimal bias
     explicit HIP_DEVICE rocblas_f8(float                        v,
@@ -130,7 +130,7 @@ struct ROCBLAS_EXPORT rocblas_f8
     // Host only implementation using s/w simulation
     explicit HIP_HOST
 #else
-    // both Host and DEVICE for non-gfx940 using s/w simulation
+    // both Host and DEVICE for non-gfx942 using s/w simulation
     explicit HIP_HOST_DEVICE
 #endif
         rocblas_f8(float                        v,
@@ -182,7 +182,7 @@ struct ROCBLAS_EXPORT rocblas_f8
     }
 
     // convert to float
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
     // upcast using device specific intrinsic
     explicit inline HIP_DEVICE operator float() const
     {
@@ -196,7 +196,7 @@ struct ROCBLAS_EXPORT rocblas_f8
     }
 
     explicit inline HIP_HOST operator float() const
-#else // non gfx940
+#else // non __gfx942__
     explicit inline HIP_HOST_DEVICE operator float() const
 #endif
     {
@@ -253,7 +253,7 @@ struct ROCBLAS_EXPORT rocblas_bf8
     // default constructor
     HIP_HOST_DEVICE rocblas_bf8() = default;
 
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
     // device specific optimized F8 down-conversion code
 
     template <bool stochastic_rounding = false>
@@ -290,10 +290,10 @@ struct ROCBLAS_EXPORT rocblas_bf8
         return i8data;
     }
 
-#endif // __gfx940__
+#endif // __gfx942__
 
     // constructor from float
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
 
     // NOTE: ON-DEVICE... always optimal bias
     explicit HIP_DEVICE rocblas_bf8(float                        v,
@@ -311,7 +311,7 @@ struct ROCBLAS_EXPORT rocblas_bf8
     // Host only implementation using s/w simulation
     explicit HIP_HOST
 #else
-    // both Host and DEVICE for non-gfx940 using s/w simulation
+    // both Host and DEVICE for non-gfx942 using s/w simulation
     explicit HIP_HOST_DEVICE
 #endif
         rocblas_bf8(float                        v,
@@ -363,7 +363,7 @@ struct ROCBLAS_EXPORT rocblas_bf8
     }
 
     // convert to float
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
     // upcast using device specific intrinsic
     explicit inline HIP_DEVICE operator float() const
     {
@@ -377,7 +377,7 @@ struct ROCBLAS_EXPORT rocblas_bf8
     }
 
     explicit inline HIP_HOST operator float() const
-#else // non gfx940
+#else // non __gfx942__
     explicit inline HIP_HOST_DEVICE operator float() const
 #endif
     {
@@ -725,7 +725,7 @@ inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng = 0)
     return a;
 }
 
-// Use h/w intrinsic and optimized version when __gfx940__
+// Use h/w intrinsic and optimized version when __gfx942__
 template <
     typename T,
     typename Ta,
@@ -736,7 +736,7 @@ template <
     = 0>
 inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng)
 {
-#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+#if defined(__gfx942__)
     // NOTE: we are directly calling cast_to_f8_from_f32 instead of constructor to optimize away one runtime branch
     T val;
     if(std::is_same<T, rocblas_f8>::value)
@@ -744,12 +744,12 @@ inline __host__ __device__ T explicit_downcast(Ta a, uint32_t rng)
     else
         val.data = rocblas_bf8::cast_to_bf8_from_f32<stochastic_rounding>(float(a), rng);
     return val;
-#else // non gfx940
+#else // non __gfx942__
     return T(float(a),
              stochastic_rounding ? T::rocblas_hip_f8_rounding_mode::stochastic
                                  : T::rocblas_hip_f8_rounding_mode::standard,
              rng);
-#endif // __gfx940__
+#endif // __gfx942__
 }
 
 // NOTE NOTE: The above code is good if we don't consider HIP-GEMM code and only consider the quantization

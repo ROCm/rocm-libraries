@@ -893,7 +893,7 @@ constexpr double rocblas_internal_value_category(const T& beta)
 bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle);
 
 // Internal use, whether Device supports xDL math op
-// We assume true if the value is between 940 to 1000
+// We assume true if the value is between 942 to 1000
 ROCBLAS_INTERNAL_EXPORT bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode);
 
 // for internal use during testing, fetch arch name
