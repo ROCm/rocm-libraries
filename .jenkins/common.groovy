@@ -33,7 +33,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
 }
 
 
-def runTestCommand (platform, project, gfilter, String dirmode = "release")
+def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, String dirmode = "release")
 {
     //Temporary workaround due to bug in container
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
@@ -57,6 +57,34 @@ def runTestCommand (platform, project, gfilter, String dirmode = "release")
             """
 
     platform.runCommand(this, command)
+    //ROCM-Examples
+    if (rocmExamples){
+        String buildString = ""
+        if (platform.os.contains("ubuntu")){
+            buildString += "sudo dpkg -i *.deb"
+        }
+        else {
+            buildString += "sudo rpm -i *.rpm"
+        }
+        testCommand = """#!/usr/bin/env bash
+                    set -ex
+                    cd ${project.paths.project_build_prefix}/build/release/package
+                    ${buildString}
+                    cd ../../..
+                    testDirs=("Libraries/rocSPARSE")
+                    git clone https://github.com/ROCm/rocm-examples.git
+                    rocm_examples_dir=\$(readlink -f rocm-examples)
+                    for testDir in \${testDirs[@]}; do
+                        cd \${rocm_examples_dir}/\${testDir}
+                        cmake -S . -B build
+                        cmake --build build
+                        cd ./build
+                        ctest --output-on-failure
+                    done
+                """
+        platform.runCommand(this, testCommand, "ROCM Examples")  
+
+    }
 }
 
 def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "release")
