@@ -544,10 +544,12 @@ void testing_logging(const Arguments& arg)
 #endif // BUILD_WITH_TENSILE
     }
 
-#ifdef BUILD_WITH_TENSILE
+#ifdef BUILD_WITH_HIPBLASLT
 
     if(arg.algo == 1)
     {
+        // internal API test requires hipblaslt backend to be used, see hardcoded results section
+
         // GEMM internal API trace 8
         setenv_status = setenv("ROCBLAS_LAYER", "8", true);
         ASSERT_EQ(setenv_status, 0);
@@ -561,7 +563,7 @@ void testing_logging(const Arguments& arg)
             handle, transA, transB, m, n, k, alpha, da, lda, db, ldb, beta, dc, ldc));
     }
 
-#endif // BUILD_WITH_TENSILE
+#endif // BUILD_WITH_HIPBLASLT
 
     setenv_status = setenv("ROCBLAS_LAYER", "0", true);
     ASSERT_EQ(setenv_status, 0);
@@ -1086,7 +1088,7 @@ void testing_logging(const Arguments& arg)
     // Auxiliary function
     trace_ofs2 << "rocblas_destroy_handle,atomics_allowed\n";
 
-#ifdef BUILD_WITH_TENSILE
+#ifdef BUILD_WITH_HIPBLASLT
     if(arg.algo == 1)
     {
         //
@@ -1099,7 +1101,7 @@ void testing_logging(const Arguments& arg)
                    << ldc << ",atomics_allowed\n"; // logs d info as also for gemm_ex
     }
 
-#endif // BUILD_WITH_TENSILE
+#endif // BUILD_WITH_HIPBLASLT
 
     // excluded trtri as it is an internal function
     //  trace_ofs2 << "\n" << replaceX<T>("rocblas_Xtrtri")  << "," << uplo << "," << diag << "," <<
