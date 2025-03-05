@@ -907,4 +907,33 @@ void median_perf(double& gpu_time_used,
         = number_hot_calls % 2 == 0 ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
 }
 
+#define MEDIAN_PERF(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, func)  \
+    {                                                                                              \
+        for(int iter = 0; iter < number_cold_calls; ++iter)                                        \
+        {                                                                                          \
+            CHECK_ROCSPARSE_ERROR(func);                                                           \
+        }                                                                                          \
+                                                                                                   \
+        std::vector<double> gpu_time(number_hot_calls);                                            \
+                                                                                                   \
+        timer t;                                                                                   \
+                                                                                                   \
+        for(int iter = 0; iter < number_hot_calls; ++iter)                                         \
+        {                                                                                          \
+            t.start();                                                                             \
+            for(int iter2 = 0; iter2 < number_hot_calls_2; ++iter2)                                \
+            {                                                                                      \
+                CHECK_ROCSPARSE_ERROR(func);                                                       \
+            }                                                                                      \
+            float time = t.stop();                                                                 \
+                                                                                                   \
+            gpu_time[iter] = 1000 * time / number_hot_calls_2;                                     \
+        }                                                                                          \
+                                                                                                   \
+        std::sort(gpu_time.begin(), gpu_time.end());                                               \
+        const int mid = number_hot_calls / 2;                                                      \
+        gpu_time_used                                                                              \
+            = number_hot_calls % 2 == 0 ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid]; \
+    }
+
 #endif // UTILITY_HPP
