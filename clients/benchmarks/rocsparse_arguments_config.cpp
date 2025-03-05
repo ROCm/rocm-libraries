@@ -344,7 +344,7 @@ void rocsparse_arguments_config::set_description(options_description& desc)
      "Total iterations to run inside timing loop")
 
      ("iters_inner",
-      value<rocsparse_int>(&this->iters_inner)->default_value(5),
+      value<rocsparse_int>(&this->iters_inner)->default_value(50),
       "Inner iterations to run inside timing loop")
 
     ("nfreeiter",

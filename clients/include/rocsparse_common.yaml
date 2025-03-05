@@ -663,7 +663,7 @@ Defaults:
   unit_check: 1
   timing: 0
   iters: 10
-  iters_inner: 5
+  iters_inner: 50
   nfreeiter: 20
   nmaxiter: 1000
   denseld: -1

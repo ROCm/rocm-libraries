@@ -156,3 +156,49 @@ double get_time_us_sync(hipStream_t stream)
         = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
     return (static_cast<double>(duration));
 };
+
+timer::timer()
+{
+    auto status = hipEventCreate(&this->m_start);
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+    status = hipEventCreate(&this->m_stop);
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+}
+
+void timer::start()
+{
+    CHECK_HIP_ERROR(hipEventRecord(this->m_start));
+}
+
+float timer::stop()
+{
+    float time;
+    auto  status = hipEventRecord(this->m_stop);
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+    status = hipEventSynchronize(this->m_stop);
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+    status = hipEventElapsedTime(&time, this->m_start, this->m_stop);
+    if(status != hipSuccess)
+    {
+        throw status;
+    }
+    return time;
+}
+
+timer::~timer()
+{
+    std::ignore = hipEventDestroy(this->m_start);
+    std::ignore = hipEventDestroy(this->m_stop);
+}

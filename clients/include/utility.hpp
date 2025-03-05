@@ -857,6 +857,18 @@ std::string rocsparse_exepath();
 /*! \brief Return path where the test data file (rocsparse_test.data) is located */
 std::string rocsparse_datapath();
 
+struct timer
+{
+private:
+    hipEvent_t m_start, m_stop;
+
+public:
+    timer();
+    void  start();
+    float stop();
+    ~timer();
+};
+
 /*! \brief  repeated performance runs of a function with a set of arguments that computes
  * the median of the mean of the wall-clock time.
  */
@@ -875,15 +887,18 @@ void median_perf(double& gpu_time_used,
 
     std::vector<double> gpu_time(number_hot_calls);
 
+    timer t;
+
     for(int iter = 0; iter < number_hot_calls; ++iter)
     {
-        auto t0 = get_time_us();
+        t.start();
         for(int iter2 = 0; iter2 < number_hot_calls_2; ++iter2)
         {
             CHECK_ROCSPARSE_ERROR(func(arg...));
         }
-        auto t1        = get_time_us();
-        gpu_time[iter] = (t1 - t0) / number_hot_calls_2;
+        float time = t.stop();
+
+        gpu_time[iter] = 1000 * time / number_hot_calls_2;
     }
 
     std::sort(gpu_time.begin(), gpu_time.end());
