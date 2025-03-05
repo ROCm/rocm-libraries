@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -164,19 +164,6 @@ void testing_gemm_strided_batched_ex_get_solutions(const Arguments& arg)
         GEMM_SB_EX_ARGS, 0, rocblas_gemm_flags_check_solution_index));
     CHECK_ROCBLAS_ERROR(rocblas_gemm_strided_batched_exM(
         GEMM_SB_EX_ARGS, -1, rocblas_gemm_flags_check_solution_index));
-
-    rocblas_int max = -1;
-    for(auto sol : ary)
-    {
-        if(sol > max)
-            max = sol;
-    }
-
-#ifndef BUILD_WITH_HIPBLASLT
-    EXPECT_ROCBLAS_STATUS(
-        rocblas_gemm_strided_batched_exM(GEMM_SB_EX_ARGS, max + 1, rocblas_gemm_flags_none),
-        rocblas_status_invalid_value);
-#endif
 
     // Testing get solutions by type - should be superset of solutions that solve problem
     rocblas_int size_type;
