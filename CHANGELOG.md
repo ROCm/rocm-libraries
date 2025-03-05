@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.19 (unreleased)
 
+### Added
+
+* Added gfx950 support.
+
 ### Removed
 
 * Remove support for the gfx940 and gfx941 targets from the client programs.
@@ -16,8 +20,7 @@ Documentation for hipFFT is available at
 * Implemented the `hipfftMpAttachComm`, `hipfftXtSetDistribution`, and `hipfftXtSetSubformatDefault` APIs to allow
   computing FFTs that are distributed between multiple MPI (Message Passing Interface) processes.  These APIs can be enabled
   with the `HIPFFT_MPI_ENABLE` CMake option, which defaults to `OFF`.
-
-  The backend FFT library called by hipFFT must support MPI for these APIs to work.
+* The backend FFT library called by hipFFT must support MPI for these APIs to work.
 
 ### Changed
 
