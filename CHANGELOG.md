@@ -8,12 +8,12 @@ rocBLAS documentation is available at
 ### Added
 
 * `ROCBLAS_LAYER = 8` internal API logging for `gemm` debugging
-* Support for AOCL 5.0 gcc build as client reference library 
+* Support for AOCL 5.0 gcc build as a client reference library 
 * Allow `PkgConfig` for client reference library fallback detection 
 
 ### Changed
 
-* `CMAKE_CXX_COMPILER` now passed on during compilation for Tensile build 
+* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build 
 
 ### Removed
 
@@ -22,18 +22,18 @@ rocBLAS documentation is available at
 ### Optimized
 
 * Optimized `gemm` by using `gemv` kernels when applicable 
-* Optimized `gemv` for small m and n with large batch count on gfx942 
+* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942 
 
 ### Resolved issues
 
-* Fixed environment variable path based logging to append multiple handle output to same file 
+* Fixed environment variable path-based logging to append multiple handle output to the same file 
 * Support numerics when `trsm` is running with `rocblas_status_perf_degraded` 
-* Fixed build dependency installation of `joblib` on some OS 
-* Return rocblas_status_internal_error when rocblas_[set,get]_ [matrix,vector] called with host pointer in place of device pointer 
+* Fixed the build dependency installation of `joblib` on some operating systems
+* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer 
 
 ### Upcoming changes
 
-* Deprecated use of negative indices to indicate use default solution for `gemm_ex` with `rocblas_gemm_algo_solution_index` 
+* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index` 
 
 ## rocBLAS 4.4.0 for ROCm 6.4
 
