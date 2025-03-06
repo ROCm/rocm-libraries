@@ -170,7 +170,7 @@ namespace detail
 #define ROCPRIM_ATOMIC_LOAD(inst, mod, wait, ptr) \
     asm volatile(inst " %0, %1 " mod "\t\n" wait : "=v"(result) : "v"(ptr) : "memory")
 
-#if ROCPRIM_TARGET_CDNA3
+#if ROCPRIM_TARGET_CDNA4 || ROCPRIM_TARGET_CDNA3
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
@@ -280,7 +280,7 @@ namespace detail
 #define ROCPRIM_ATOMIC_STORE(inst, mod, wait, ptr) \
     asm volatile(inst " %0, %1 " mod "\t\n" wait : : "v"(ptr), "v"(value) : "memory")
 
-#if ROCPRIM_TARGET_CDNA3
+#if ROCPRIM_TARGET_CDNA4 || ROCPRIM_TARGET_CDNA3
     #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
         ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "sc1", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \
