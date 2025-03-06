@@ -71,10 +71,8 @@ namespace rocwmma
                  typename MfmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
                  AccumPolicy>
     {
-        // Sanity check
+        // Op cache
         using SelectedOp = typename MfmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp;
-
-        //static_assert(is_same_v<void, SelectedOp>, "NOPE");
 
         // Driver interface from base class Mma:
         // template <typename VecTA, typename VecTB, typename VecTC>
