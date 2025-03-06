@@ -246,7 +246,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
 
   rocm_create_package(
     NAME rocprim
-    DESCRIPTION "Radeon Open Compute Parallel Primitives Library"
+    DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY
   )
