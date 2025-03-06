@@ -36,8 +36,19 @@ namespace rocwmma
              typename InputTB,
              typename ComputeT,
              uint32_t BlockM,
-             uint32_t BlockN>
-    using Wmma_impl = detail::amdgcn_wmma<InputTA, InputTB, ComputeT, BlockM, BlockN>;
+             uint32_t BlockN,
+             uint32_t BlockK>
+    using Wmma_impl = detail::amdgcn_wmma<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>;
+
+    // Create a backend selector class for wmma backend. Given fixed BlockM and BlockN,
+    // will try to find the highest BlockK throughput instruction if it exists.
+    template<typename InputTA,
+             typename InputTB,
+             typename ComputeT,
+             uint32_t BlockM,
+             uint32_t BlockN,
+             uint32_t BlockKTest = 32u> // Current max possible K-value for wmma instr (most efficient)
+    struct WmmaSelector : public MmaSelector<Wmma_impl, InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>{};
 
     // Wmma interface through Mma
     template <uint32_t FragM,
@@ -47,49 +58,19 @@ namespace rocwmma
               typename InputTB,
               typename ComputeT,
               uint32_t BlockM,
-              uint32_t BlockN = BlockM,
+              uint32_t BlockN,
+              uint32_t BlockK = FragK, // Default K throughput search
               MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
-    struct Wmma : public Mma<FragM, FragN, FragK, Wmma_impl<InputTA, InputTB, ComputeT, BlockM, BlockN>, AccumPolicy>
+    struct Wmma
+    : public Mma<FragM,
+                 FragN,
+                 FragK,
+                 typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
+                 AccumPolicy>
     {
-        // Interface:
+        // Driver interface from base class Mma:
         // template <typename VecTA, typename VecTB, typename VecTC>
         // ROCWMMA_DEVICE static inline decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC& accum);
-    };
-
-    template<typename InputTA_In,
-             typename InputTB_In,
-             typename ComputeT_In,
-             uint32_t BlockM_In,
-             uint32_t BlockN_In>
-    struct MmaTraits<Wmma_impl<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In>>
-    {
-        // Base implementation
-        using Base = Wmma_impl<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In>;
-
-        // Operand types
-        using InputTA = InputTA_In;
-        using InputTB = InputTB_In;
-        using ComputeT = ComputeT_In;
-
-        // Raw input / output types
-        using ARegsT = typename Base::ARegsT;
-        using BRegsT = typename Base::BRegsT;
-        using CRegsT = typename Base::CRegsT;
-        using DRegsT = typename Base::DRegsT;
-
-        // Geometric block sizes
-        constexpr static uint32_t BlockM = BlockM_In;
-        constexpr static uint32_t BlockN = BlockN_In;
-        constexpr static uint32_t BlockK = Base::KPerMma;
-
-        // Vector sizes per block (packed)
-        constexpr static uint32_t BlockSizeA = VecTraits<ARegsT>::size();
-        constexpr static uint32_t BlockSizeB = VecTraits<BRegsT>::size();
-        constexpr static uint32_t BlockSizeC = VecTraits<CRegsT>::size();
-
-        // Backend flag
-        constexpr static bool is_wmma = true;
-        constexpr static bool is_mfma = false;
     };
 
 } // namespace rocwmma

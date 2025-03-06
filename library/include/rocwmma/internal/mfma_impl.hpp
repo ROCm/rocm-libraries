@@ -171,6 +171,8 @@ namespace rocwmma
             }
         };
 
+#if ROCWMMA_ARCH_GFX9
+
         // fp16
         template <typename GfxTarget>
         struct amdgcn_mfma<float16_t,
@@ -799,7 +801,7 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline auto
                 exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
             {
-                
+
                 DRegsT result;
                 result.data
                     = {__builtin_amdgcn_mfma_i32_16x16x64_i8(regsA.data,
@@ -1588,6 +1590,8 @@ namespace rocwmma
                 return result;
             }
         };
+
+#endif // ROCWMMA_ARCH_GFX9
 
     } // namespace detail
 

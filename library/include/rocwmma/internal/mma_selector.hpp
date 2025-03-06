@@ -30,7 +30,7 @@
 
 namespace rocwmma
 {
-    
+
     // Inputs BlockM and BlockN are expected to be fixed (e.g., determined previously by other means).
     // This class will attempt to find appropriate BlockK and map to a backend if it exists.
     template<template<typename, typename, typename, uint32_t, uint32_t, uint32_t> class Mma_impl,
@@ -47,12 +47,13 @@ namespace rocwmma
 
         // Candidate operation for the current params
         using CandidateOp = Mma_impl<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>;
-        using Traits = MmaTraits<CandidateOp>;
+        using CandidateTraits = MmaTraits<CandidateOp>;
 
         public:
         // If the candidate is supported (e.g., a backend implementation exists), then select it.
-        // Otherwise, test another implementation with a smaller BlockK.
-        using SelectedOp = conditional_t<Traits::is_supported, 
+        // Otherwise, test another smaller BlockK. If no existing implementations, keep the current
+        // candidate.
+        using SelectedOp = conditional_t<CandidateTraits::is_supported,
                                         CandidateOp,
                                         typename MmaSelector<Mma_impl, InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest / 2u>::SelectedOp>;
     };
