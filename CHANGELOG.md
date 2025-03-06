@@ -23,6 +23,10 @@ rocBLAS documentation is available at
 
 * Optimized `gemm` by using `gemv` kernels when applicable 
 * Optimized `gemv` for small `m` and `n` with a large batch count on gfx942 
+* Improved the performance of Level 1 `dot` for all precisions and variants when `N > 100000000` on gfx942
+* Improved the performance of Level 1 `asum` and `nrm2` for all precisions and variants on gfx942
+* Improved the performance of Level 2 `sger` (single precision) on gfx942
+* Improved the performance of Level 3 `dgmm` for all precisions and variants on gfx942
 
 ### Resolved issues
 
