@@ -25,7 +25,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
 # project name
 PROJECT(rocfft_samples CXX)
 
-find_package(HIP REQUIRED)
+find_package( hip REQUIRED )
 find_package(rocfft)
 
 set (samples complex_1d complex_2d complex_3d real2complex_1d real2complex_2d real2complex_3d)

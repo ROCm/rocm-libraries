@@ -49,7 +49,7 @@ if( NOT TARGET rocfft )
 endif( )
 
 if( NOT HIP_FOUND )
-  find_package( HIP REQUIRED )
+  find_package( hip REQUIRED )
 endif()
 
 if( NOT MPI_FOUND )
