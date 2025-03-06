@@ -43,7 +43,7 @@ namespace rocwmma
     struct MmaSelector
     {
         private:
-        static_assert((BlockKTest & (BlockKTest - 1) == 0u), "BlockK must be a power of 2");
+        static_assert((BlockKTest & (BlockKTest - 1)) == 0u, "BlockK must be a power of 2");
 
         // Candidate operation for the current params
         using CandidateOp = Mma_impl<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>;
