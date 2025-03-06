@@ -44,78 +44,94 @@ template <uint32_t FragM, \
     template <typename VecTA, typename VecTB, typename VecTC>
     ROCWMMA_DEVICE inline decltype(auto) Mma<MMA_TPARAMS>::exec_row_major(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        // Iterate through accum blocks in row_major order.
-        // FOR each row of C:
-        return vector_for_each<AccumRowSize>(
-            forward<VecTC>(accum),
-            [](auto&& row_c, auto&& row_idx, auto&& input_a, auto&& input_b)
-            {
-                // A input is constant per row, for which we can cache
-                constexpr auto rowId = decay_t<decltype(row_idx)>::value;
-                auto itA = makeVectorIterator<BlockSizeA * BlocksK>(forward<VecTA>(input_a)).it(rowId);
+        if constexpr (BlockWiseMmaTraits::is_supported)
+        {
+            // Iterate through accum blocks in row_major order.
+            // FOR each row of C:
+            return vector_for_each<AccumRowSize>(
+                forward<VecTC>(accum),
+                [](auto&& row_c, auto&& row_idx, auto&& input_a, auto&& input_b)
+                {
+                    // A input is constant per row, for which we can cache
+                    constexpr auto rowId = decay_t<decltype(row_idx)>::value;
+                    auto itA = makeVectorIterator<BlockSizeA * BlocksK>(forward<VecTA>(input_a)).it(rowId);
 
-                // FOR each block of C:
-                return vector_for_each<BlockSizeC>(row_c,
-                    [](auto&& block_c, auto&& col_idx, auto&& block_a, auto&& input_b)
-                    {
-                        // B input is constant per col
-                        constexpr auto colId = decay_t<decltype(col_idx)>::value;
-                        auto itB = makeVectorIterator<BlockSizeB * BlocksK>(forward<VecTB>(input_b)).it(colId);
+                    // FOR each block of C:
+                    return vector_for_each<BlockSizeC>(row_c,
+                        [](auto&& block_c, auto&& col_idx, auto&& block_a, auto&& input_b)
+                        {
+                            // B input is constant per col
+                            constexpr auto colId = decay_t<decltype(col_idx)>::value;
+                            auto itB = makeVectorIterator<BlockSizeB * BlocksK>(forward<VecTB>(input_b)).it(colId);
 
-                        // FOR each K-iteration: invoke Mma
-                        return vector_reduce2<BlockSizeA, BlockSizeB>(
-                            block_a,
-                            *itB,
-                            block_c,
-                            [](auto&& a, auto&& b, auto&& accum, auto&& idx)
-                            {
-                                return BlockWiseMma::exec(a, b, accum);
-                            });
-                    },
-                    *itA,
-                    forward<VecTB>(input_b));
-            },
-            forward<VecTA>(a),
-            forward<VecTB>(b));
+                            // FOR each K-iteration: invoke Mma
+                            return vector_reduce2<BlockSizeA, BlockSizeB>(
+                                block_a,
+                                *itB,
+                                block_c,
+                                [](auto&& a, auto&& b, auto&& accum, auto&& idx)
+                                {
+                                    return BlockWiseMma::exec(a, b, accum);
+                                });
+                        },
+                        *itA,
+                        forward<VecTB>(input_b));
+                },
+                forward<VecTA>(a),
+                forward<VecTB>(b));
+        }
+        else
+        {
+            // Not supported
+            return forward<VecTC>(accum);
+        }
     }
 
     MMA_TPARAMS_DECL
     template <typename VecTA, typename VecTB, typename VecTC>
     ROCWMMA_DEVICE inline decltype(auto) Mma<MMA_TPARAMS>::exec_col_major(VecTA&& a, VecTB&& b, VecTC&& accum)
     {
-        // Iterate through accum blocks in col_major order.
-        // FOR each col of C:
-        return vector_for_each<AccumColSize>(
-            forward<VecTC>(accum),
-            [](auto&& col_c, auto&& col_idx, auto&& input_a, auto&& input_b)
-            {
-                // B input is constant per col, for which we can cache
-                constexpr auto colId = decay_t<decltype(col_idx)>::value;
-                auto itB = makeVectorIterator<BlockSizeB * BlocksK>(forward<VecTB>(input_b)).it(colId);
+        if constexpr (BlockWiseMmaTraits::is_supported)
+        {
+            // Iterate through accum blocks in col_major order.
+            // FOR each col of C:
+            return vector_for_each<AccumColSize>(
+                forward<VecTC>(accum),
+                [](auto&& col_c, auto&& col_idx, auto&& input_a, auto&& input_b)
+                {
+                    // B input is constant per col, for which we can cache
+                    constexpr auto colId = decay_t<decltype(col_idx)>::value;
+                    auto itB = makeVectorIterator<BlockSizeB * BlocksK>(forward<VecTB>(input_b)).it(colId);
 
-                // FOR each block of C:
-                return vector_for_each<BlockSizeC>(col_c,
-                    [](auto&& block_c, auto&& row_idx, auto&& input_a, auto&& block_b)
-                    {
-                        // A input is constant per row
-                        constexpr auto rowId = decay_t<decltype(row_idx)>::value;
-                        auto itA = makeVectorIterator<BlockSizeA * BlocksK>(forward<VecTA>(input_a)).it(rowId);
+                    // FOR each block of C:
+                    return vector_for_each<BlockSizeC>(col_c,
+                        [](auto&& block_c, auto&& row_idx, auto&& input_a, auto&& block_b)
+                        {
+                            // A input is constant per row
+                            constexpr auto rowId = decay_t<decltype(row_idx)>::value;
+                            auto itA = makeVectorIterator<BlockSizeA * BlocksK>(forward<VecTA>(input_a)).it(rowId);
 
-                        // FOR each K-iteration: invoke Mma
-                        return vector_reduce2<BlockSizeA, BlockSizeB>(
-                            *itA,
-                            block_b,
-                            block_c,
-                            [](auto&& a, auto&& b, auto&& accum, auto&& idx)
-                            {
-                                return BlockWiseMma::exec(a, b, accum);
-                            });
-                    },
-                    forward<VecTA>(input_a),
-                    *itB);
-            },
-            forward<VecTA>(a),
-            forward<VecTB>(b));
+                            // FOR each K-iteration: invoke Mma
+                            return vector_reduce2<BlockSizeA, BlockSizeB>(
+                                *itA,
+                                block_b,
+                                block_c,
+                                [](auto&& a, auto&& b, auto&& accum, auto&& idx)
+                                {
+                                    return BlockWiseMma::exec(a, b, accum);
+                                });
+                        },
+                        forward<VecTA>(input_a),
+                        *itB);
+                },
+                forward<VecTA>(a),
+                forward<VecTB>(b));
+        }
+        else
+        {
+            // Not supported
+            return forward<VecTC>(accum);
+        }
     }
 
     MMA_TPARAMS_DECL

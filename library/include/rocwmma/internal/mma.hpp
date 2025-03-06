@@ -40,6 +40,16 @@ namespace rocwmma
         COL_MAJOR = 1u,
     };
 
+    /*! \class Mma
+    *   \brief Driver for the wave-tile Mma operation. Given a backend block-wise mma implementation (e.g., mfma or wmma),
+    * this class performs block-wise decomposition to matrix-multiply input fragments of (A: FragM x FragK) x (B: FragK x FragN)
+    * and accumulates results into output fragment (C: FragM x FragN).
+    *  @tparam FragM Mma fragment M dimension
+    *  @tparam FragN Mma fragment K dimension
+    *  @tparam FragK Mma fragment M dimension
+    *  @tparam MmaImpl The backend wrapper class that will perform block-wise mma op (e.g., mfma or wmma)
+    *  @tparam MmaAccumPolicy The block order of the accumulation registers (row major or col major block order)
+    */
     template <uint32_t FragM,
             uint32_t FragN,
             uint32_t FragK,

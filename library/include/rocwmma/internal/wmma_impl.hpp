@@ -66,20 +66,23 @@ namespace rocwmma
                  typename ComputeT,
                  uint32_t BlockM,
                  uint32_t BlockN,
+                 uint32_t BlockK,
                  typename GfxTarget = conditional_t<(bool)ROCWMMA_ARCH_GFX11, Gfx11, conditional_t<(bool)ROCWMMA_ARCH_GFX12, Gfx12, Unsupported>>,
                  typename TargetEnable = GfxTarget>
         struct amdgcn_wmma
         {
-            // Choose reasonable minimal default params to satisfy static checks
-            constexpr static uint32_t KPerMma = 16u;
+            // This is a pass-through implementation that isn't supported, and doesn't
+            // do anything practical. The following trait will allow us to identify
+            // unsupported instances, as we won't include it in the overloads to follow.
+            using Unsupported = Unsupported;
 
         private:
             using PackTraitsA = PackTraits<InputTA>;
             using PackTraitsB = PackTraits<InputTB>;
             using PackTraitsAcc = PackTraits<ComputeT>;
 
-            constexpr static uint32_t InputASize = BlockM * KPerMma / (Constants::AMDGCN_WAVE_SIZE * PackTraitsA::PackRatio);
-            constexpr static uint32_t InputBSize = BlockN * KPerMma / (Constants::AMDGCN_WAVE_SIZE * PackTraitsB::PackRatio);
+            constexpr static uint32_t InputASize = BlockM * BlockK / (Constants::AMDGCN_WAVE_SIZE * PackTraitsA::PackRatio);
+            constexpr static uint32_t InputBSize = BlockN * BlockK / (Constants::AMDGCN_WAVE_SIZE * PackTraitsB::PackRatio);
             constexpr static uint32_t AccumSize = BlockM * BlockM / (Constants::AMDGCN_WAVE_SIZE * PackTraitsAcc::PackRatio);
 
         public:
@@ -88,13 +91,9 @@ namespace rocwmma
             using BRegsT = VecT<typename PackTraitsB::PackedT, InputBSize>;
             using CRegsT = VecT<typename PackTraitsAcc::PackedT, AccumSize>;
             using DRegsT = VecT<typename PackTraitsAcc::PackedT, AccumSize>;
-
-            template <typename RegsA, typename RegsB, typename RegsC>
-            ROCWMMA_DEVICE static inline decltype(auto) exec(RegsA&& regsA, RegsB&& regsB, RegsC&& regsC)
-            {
-                return regsC;
-            }
         };
+
+#if ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12
 
         enum struct WmmaCtrlFlags: bool
         {
@@ -111,9 +110,8 @@ namespace rocwmma
 
         // gfx11 implementations
         template <typename GfxTarget>
-        struct amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
+        struct amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -133,9 +131,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
+        struct amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -155,9 +152,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<bfloat16_t, bfloat16_t, float32_t, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
+        struct amdgcn_wmma<bfloat16_t, bfloat16_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -177,9 +173,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<bfloat16_t, bfloat16_t, bfloat16_t, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
+        struct amdgcn_wmma<bfloat16_t, bfloat16_t, bfloat16_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -199,9 +194,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<int8_t, int8_t, int32_t, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
+        struct amdgcn_wmma<int8_t, int8_t, int32_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -227,9 +221,8 @@ namespace rocwmma
 
         // gfx12 implementations
         template <typename GfxTarget>
-        struct amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -249,9 +242,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -271,9 +263,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<bfloat16_t, bfloat16_t, float32_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<bfloat16_t, bfloat16_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -293,9 +284,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<bfloat16_t, bfloat16_t, bfloat16_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<bfloat16_t, bfloat16_t, bfloat16_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -315,9 +305,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<int8_t, int8_t, int32_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<int8_t, int8_t, int32_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -342,9 +331,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<float8_t, float8_t, float32_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<float8_t, float8_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -373,9 +361,8 @@ namespace rocwmma
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
+        struct amdgcn_wmma<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx12_t<GfxTarget>>
         {
-            constexpr static uint32_t KPerMma = 16u;
             constexpr static WmmaCtrlFlags InputSign = WmmaCtrlFlags::SIGNED;
             constexpr static WmmaCtrlFlags AccumBits = WmmaCtrlFlags::LOW;
             constexpr static WmmaCtrlFlags AccumSign = WmmaCtrlFlags::SIGNED;
@@ -405,20 +392,101 @@ namespace rocwmma
 
         // Derivative implementations
         template <typename GfxTarget>
-        struct amdgcn_wmma<hfloat16_t, hfloat16_t, float32_t, 16u, 16u, GfxTarget, enable_gfx11_gfx12_t<GfxTarget,
+        struct amdgcn_wmma<hfloat16_t, hfloat16_t, float32_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_gfx12_t<GfxTarget,
                                                                                                 !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u>
+            : public amdgcn_wmma<float16_t, float16_t, float32_t, 16u, 16u, 16u>
         {
         };
 
         template <typename GfxTarget>
-        struct amdgcn_wmma<hfloat16_t, hfloat16_t, hfloat16_t, 16u, 16u, GfxTarget, enable_gfx11_gfx12_t<GfxTarget,
+        struct amdgcn_wmma<hfloat16_t, hfloat16_t, hfloat16_t, 16u, 16u, 16u, GfxTarget, enable_gfx11_gfx12_t<GfxTarget,
                                                                                                 !(bool)ROCWMMA_NO_HALF>>
-            : public amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u>
+            : public amdgcn_wmma<float16_t, float16_t, float16_t, 16u, 16u, 16u>
         {
         };
 
+#endif // ROCWMMA_ARCH_GFX11 || ROCWMMA_ARCH_GFX12
+
     } // namespace detail
+
+    namespace MmaTraits_impl
+    {
+        template<typename WmmaOp>
+        struct is_wmma : public false_type{};
+
+        template <typename InputTA_In,
+                  typename InputTB_In,
+                  typename ComputeT_in,
+                  uint32_t BlockM_In,
+                  uint32_t BlockN_In,
+                  uint32_t BlockK_In>
+        struct is_wmma<detail::amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_in, BlockM_In, BlockN_In, BlockK_In>>
+        : public true_type{};
+
+        template <typename WmmaOp>
+        constexpr static bool is_wmma_v = is_wmma<WmmaOp>::value;
+
+        // All of the overrides won't have the Unsupported tag
+        template<typename WmmaOp, typename Enabler = void>
+        struct is_wmma_supported
+        : public true_type {};
+
+        // Default implementation will have the Unsupported tag
+        template<typename WmmaOp>
+        struct is_wmma_supported<WmmaOp, enable_if_t<is_same_v<typename WmmaOp::Unsupported, detail::Unsupported>>>
+        : public false_type {};
+
+        template <typename WmmaOp>
+        constexpr static bool is_wmma_supported_v = is_wmma_supported<WmmaOp>::value;
+
+        template <typename MfmaOp>
+        struct wmma_traits;
+
+        template <typename InputTA_In,
+                  typename InputTB_In,
+                  typename ComputeT_In,
+                  uint32_t BlockM_In,
+                  uint32_t BlockN_In,
+                  uint32_t BlockK_In>
+        struct wmma_traits<detail::amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>>
+        {
+            // Base implementation
+            using Impl = detail::amdgcn_wmma<InputTA_In, InputTB_In, ComputeT_In, BlockM_In, BlockN_In, BlockK_In>;
+
+            // Operand types
+            using InputTA = InputTA_In;
+            using InputTB = InputTB_In;
+            using ComputeT = ComputeT_In;
+
+            // Raw input / output types
+            using ARegsT = typename Impl::ARegsT;
+            using BRegsT = typename Impl::BRegsT;
+            using CRegsT = typename Impl::CRegsT;
+            using DRegsT = typename Impl::DRegsT;
+
+            // Geometric block sizes
+            constexpr static uint32_t BlockM = BlockM_In;
+            constexpr static uint32_t BlockN = BlockN_In;
+            constexpr static uint32_t BlockK = BlockK_In;
+
+            // Vector sizes per block (packed)
+            constexpr static uint32_t BlockSizeA = VecTraits<ARegsT>::size();
+            constexpr static uint32_t BlockSizeB = VecTraits<BRegsT>::size();
+            constexpr static uint32_t BlockSizeC = VecTraits<CRegsT>::size();
+
+            // Backend flags
+            constexpr static bool is_wmma = is_wmma_v<Impl>;
+            constexpr static bool is_mfma = false;
+            constexpr static bool is_supported = is_wmma_supported_v<Impl>;
+        };
+
+        // MmaTraits implemented for mfma backend
+        template<typename MmaOp>
+        struct MmaTraits<MmaOp, enable_if_t<is_wmma_v<MmaOp>>>
+        : public wmma_traits<MmaOp>
+        {};
+
+    } // namespace MmaTraits_impl
 
 } // namespace rocwmma
 

@@ -28,6 +28,7 @@
 
 #include "layout/register_layout_transforms.hpp"
 #include "io_config.hpp"
+#include "mma_traits.hpp"
 #include "mfma.hpp"
 #include "pack_util.hpp"
 #include "types.hpp"
@@ -35,6 +36,11 @@
 
 namespace rocwmma
 {
+
+    // The purpose of this class is to interface from fragment level traits
+    // into specific Mma operations.
+    // Mma operations can be classified into transforms (e.g., pre / post mma)
+    // and mma function hooks.
     template <uint32_t FragM,
               uint32_t FragN,
               uint32_t FragK,
@@ -57,15 +63,7 @@ namespace rocwmma
         using IOLayoutC = typename IOConfigC::IOLayout;
         using IOLayoutD = typename IOConfigD::IOLayout;
 
-        constexpr static uint32_t MmaDimM = IOLayoutA::MmaDim;
-        constexpr static uint32_t MmaDimN = IOLayoutB::MmaDim;
-
-        // Sanity checks:
-        // - For now, MmaDimM/N/Acc must match
-        // - MmaLayout for input A/B must match
-        // - MmaLayout for accumulators must match
-        static_assert(MmaDimM == MmaDimN, "MmaDims must match");
-        static_assert((MmaDimN == IOLayoutC::MmaDim) && (MmaDimN == IOLayoutD::MmaDim), "Mismatched accumulator MmaDim");
+        // Sanity checks
         static_assert(is_layout_same_v<typename IOLayoutA::MmaLayout, typename IOLayoutB::MmaLayout>, "Input fragment register layouts do not match");
         static_assert(is_layout_same_v<typename IOLayoutC::MmaLayout, typename IOLayoutD::MmaLayout>, "Accumulator fragment register layouts do not match");
 
@@ -99,6 +97,18 @@ namespace rocwmma
         using PackA = typename IOConfigA::PackUtil;
         using PackC = typename IOConfigC::PackUtil;
         using PackD = typename IOConfigD::PackUtil;
+
+        // Mma block size selections come from the layout config
+        // BlockK selection will come from the Mma classes below
+        constexpr static uint32_t MmaDimM = IOLayoutA::MmaDim;
+        constexpr static uint32_t MmaDimN = IOLayoutB::MmaDim;
+
+        // Sanity checks:
+        // - For now, MmaDimM/N/Acc must match
+        // - MmaLayout for input A/B must match
+        // - MmaLayout for accumulators must match
+        static_assert(MmaDimM == MmaDimN, "MmaDims must match");
+        static_assert((MmaDimN == IOLayoutC::MmaDim) && (MmaDimN == IOLayoutD::MmaDim), "Mismatched accumulator MmaDim");
 
         // Gfx9 uses MFMA, gfx11/12 uses WMMA
         using Mma = conditional_t<(bool)ROCWMMA_ARCH_GFX9,
