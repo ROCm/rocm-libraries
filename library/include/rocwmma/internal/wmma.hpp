@@ -68,6 +68,10 @@ namespace rocwmma
                  typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
                  AccumPolicy>
     {
+
+        // Op cache
+        using SelectedOp = typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp;
+
         // Driver interface from base class Mma:
         // template <typename VecTA, typename VecTB, typename VecTC>
         // ROCWMMA_DEVICE static inline decltype(auto) exec(VecTA&& a, VecTB&& b, VecTC& accum);
