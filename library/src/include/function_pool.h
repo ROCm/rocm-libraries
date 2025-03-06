@@ -25,7 +25,7 @@
 
 #include "../../../shared/rocfft_complex.h"
 #include "../device/kernels/common.h"
-#include "tree_node.h"
+#include "function_map_key.h"
 #include <sstream>
 #include <unordered_map>
 
@@ -111,7 +111,7 @@ struct FFTKernel
     }
 };
 
-class function_pool
+struct function_pool_data
 {
     // when AOT generator adds a default key-kernel,
     // we get the keys of two version: empty-config vs full-config
@@ -119,87 +119,90 @@ class function_pool
     std::unordered_map<FMKey, FMKey, SimpleHash>     def_key_pool;
     std::unordered_map<FMKey, FFTKernel, SimpleHash> function_map;
 
-    ROCFFT_DEVICE_EXPORT function_pool();
+    function_pool_data();
 
-private:
-    static const FMKey& get_actual_key(const FMKey& key)
+    static function_pool_data& get_function_pool_data()
     {
-        function_pool& func_pool = get_function_pool();
+        static function_pool_data data;
+        return data;
+    }
+};
 
+class function_pool
+{
+    unsigned int                                      max_lds_bytes;
+    std::unordered_map<FMKey, FMKey, SimpleHash>&     def_key_pool;
+    std::unordered_map<FMKey, FFTKernel, SimpleHash>& function_map;
+
+    const FMKey& get_actual_key(const FMKey& key) const
+    {
         // - for keys that we are querying with no/empty kernel-config, actually we are refering to
         //   the default kernel-configs in kernel-generator.py. So get the actual keys to look-up
         //   the pool.
         // - if not in the def_key_pool, then we simply use itself (for dynamically added kernel)
-        if(func_pool.def_key_pool.count(key) > 0)
-            return func_pool.def_key_pool.at(key);
+        if(def_key_pool.count(key) > 0)
+            return def_key_pool.at(key);
         else
             return key;
     }
 
 public:
-    function_pool(const function_pool&) = delete;
-
-    function_pool& operator=(const function_pool&) = delete;
-
-    static function_pool& get_function_pool()
+    function_pool(unsigned int max_lds_bytes)
+        : max_lds_bytes(max_lds_bytes)
+        , def_key_pool(function_pool_data::get_function_pool_data().def_key_pool)
+        , function_map(function_pool_data::get_function_pool_data().function_map)
     {
-        static function_pool func_pool;
-        return func_pool;
+        // We would only see zero if we received a
+        // default-constructed device prop struct, which means
+        // someone forgot to initialize the struct somewhere.
+        if(max_lds_bytes == 0)
+            throw std::runtime_error("function_pool: max_lds_bytes not initialized");
     }
 
-    ~function_pool() {}
+    function_pool(const hipDeviceProp_t& prop)
+        : function_pool(prop.sharedMemPerBlock)
+    {
+    }
+
+    function_pool(function_pool& p) = delete;
+    function_pool& operator=(const function_pool&) = delete;
+
+    ~function_pool() = default;
 
     // add a new kernel in runtime
-    static bool add_new_kernel(const FMKey& new_key)
+    bool add_new_kernel(const FMKey& new_key)
     {
         // already has this kernel
         if(has_function(new_key))
             return true;
 
-        function_pool& func_pool = get_function_pool();
-        return std::get<1>(
-            func_pool.function_map.emplace(new_key, FFTKernel(new_key.kernel_config)));
+        return std::get<1>(function_map.emplace(new_key, FFTKernel(new_key.kernel_config)));
     }
 
-    // add an alternative kernel with different kernel config from base FMKey
-    static bool add_alternative_kernel(const FMKey&            base_FMKey,
-                                       const KernelConfig&     alt_config,
-                                       std::unique_ptr<FMKey>& out_FMKey)
+    bool has_function(const FMKey& key) const
     {
-        if(!has_function(base_FMKey))
+        auto real_key = get_actual_key(key);
+        if(!real_key.base_lds_usage_fits(max_lds_bytes))
             return false;
-
-        out_FMKey = std::make_unique<FMKey>(base_FMKey);
-
-        out_FMKey->kernel_config = alt_config;
-
-        function_pool& func_pool = get_function_pool();
-        return std::get<1>(func_pool.function_map.emplace(*out_FMKey, FFTKernel(alt_config)));
+        return function_map.count(real_key) > 0;
     }
 
-    static bool has_function(const FMKey& key)
+    size_t get_largest_length(rocfft_precision precision) const
     {
-        function_pool& func_pool = get_function_pool();
-
-        auto real_key = function_pool::get_actual_key(key);
-        return func_pool.function_map.count(real_key) > 0;
-    }
-
-    static size_t get_largest_length(rocfft_precision precision)
-    {
-        auto supported = function_pool::get_lengths(precision, CS_KERNEL_STOCKHAM);
+        auto supported = get_lengths(precision, CS_KERNEL_STOCKHAM);
         auto itr       = std::max_element(supported.cbegin(), supported.cend());
         if(itr != supported.cend())
             return *itr;
         return 0;
     }
 
-    static std::vector<size_t> get_lengths(rocfft_precision precision, ComputeScheme scheme)
+    std::vector<size_t> get_lengths(rocfft_precision precision, ComputeScheme scheme) const
     {
-        const function_pool& func_pool = get_function_pool();
-        std::vector<size_t>  lengths;
-        for(auto const& kv : func_pool.function_map)
+        std::vector<size_t> lengths;
+        for(auto const& kv : function_map)
         {
+            if(!kv.first.base_lds_usage_fits(max_lds_bytes))
+                continue;
             if(kv.first.lengths[1] == 0 && kv.first.precision == precision
                && kv.first.scheme == scheme && kv.first.sbrcTrans == NONE)
             {
@@ -210,28 +213,28 @@ public:
         return lengths;
     }
 
-    static FFTKernel get_kernel(const FMKey& key)
+    FFTKernel get_kernel(const FMKey& key) const
     {
-        function_pool& func_pool = get_function_pool();
-
-        auto real_key = function_pool::get_actual_key(key);
-        return func_pool.function_map.at(real_key);
+        auto real_key = get_actual_key(key);
+        if(!real_key.base_lds_usage_fits(max_lds_bytes))
+            throw std::out_of_range("kernel not found in map");
+        return function_map.at(real_key);
     }
 
     // helper for common used
-    static bool has_SBCC_kernel(size_t length, rocfft_precision precision)
+    bool has_SBCC_kernel(size_t length, rocfft_precision precision) const
     {
         return has_function(FMKey(length, precision, CS_KERNEL_STOCKHAM_BLOCK_CC));
     }
 
-    static bool has_SBRC_kernel(size_t              length,
-                                rocfft_precision    precision,
-                                SBRC_TRANSPOSE_TYPE trans_type = TILE_ALIGNED)
+    bool has_SBRC_kernel(size_t              length,
+                         rocfft_precision    precision,
+                         SBRC_TRANSPOSE_TYPE trans_type = TILE_ALIGNED) const
     {
         return has_function(FMKey(length, precision, CS_KERNEL_STOCKHAM_BLOCK_RC, trans_type));
     }
 
-    static bool has_SBCR_kernel(size_t length, rocfft_precision precision)
+    bool has_SBCR_kernel(size_t length, rocfft_precision precision) const
     {
         return has_function(FMKey(length, precision, CS_KERNEL_STOCKHAM_BLOCK_CR));
     }

@@ -41,7 +41,8 @@ protected:
     BluesteinType DecideBlueType();
 
 public:
-    static size_t FindBlue(size_t len, rocfft_precision precision, bool forcePow2);
+    static size_t
+        FindBlue(const function_pool& pool, size_t len, rocfft_precision precision, bool forcePow2);
 };
 
 /*****************************************************
@@ -60,7 +61,7 @@ protected:
 
 public:
     // check if the specified 1D length fits into single-kernel Bluestein
-    static bool SizeFits(size_t length, rocfft_precision precision);
+    static bool SizeFits(const function_pool& pool, size_t length, rocfft_precision precision);
 
     bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) override
     {

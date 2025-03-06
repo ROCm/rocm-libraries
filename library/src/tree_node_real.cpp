@@ -58,7 +58,8 @@ static void set_complex_length(TreeNode&                   node,
 }
 
 // check if we have an SBCC kernel along the specified dimension
-static bool SBCC_dim_available(const std::vector<size_t>& length,
+static bool SBCC_dim_available(function_pool&             pool,
+                               const std::vector<size_t>& length,
                                size_t                     sbcc_dim,
                                rocfft_precision           precision)
 {
@@ -68,17 +69,17 @@ static bool SBCC_dim_available(const std::vector<size_t>& length,
     // do we have a purpose-built sbcc kernel
     bool  have_sbcc = false;
     FMKey sbcc_key(length[sbcc_dim], precision, CS_KERNEL_STOCKHAM_BLOCK_CC);
-    if(function_pool::has_function(sbcc_key))
+    if(pool.has_function(sbcc_key))
     {
-        numTrans  = function_pool::get_kernel(sbcc_key).transforms_per_block;
+        numTrans  = pool.get_kernel(sbcc_key).transforms_per_block;
         have_sbcc = true;
     }
     else
     {
         FMKey normal_key(length[sbcc_dim], precision);
-        if(!function_pool::has_function(normal_key))
+        if(!pool.has_function(normal_key))
             return false;
-        numTrans = function_pool::get_kernel(normal_key).transforms_per_block;
+        numTrans = pool.get_kernel(normal_key).transforms_per_block;
     }
 
     // NB:
@@ -102,11 +103,12 @@ static bool SBCC_dim_available(const std::vector<size_t>& length,
 }
 
 // check if we have an SBCR kernel along the specified dimension
-static bool SBCR_dim_available(const std::vector<size_t>& length,
+static bool SBCR_dim_available(const function_pool&       pool,
+                               const std::vector<size_t>& length,
                                size_t                     sbcr_dim,
                                rocfft_precision           precision)
 {
-    return function_pool::has_SBCR_kernel(length[sbcr_dim], precision);
+    return pool.has_SBCR_kernel(length[sbcr_dim], precision);
 }
 
 /*****************************************************
@@ -466,7 +468,7 @@ void Real2DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     //
 
     // if we have SBCC for the higher dimension, use that and avoid transpose
-    solution = SBCC_dim_available(length, 1, precision) ? INPLACE_SBCC : TR_PAIR;
+    solution = SBCC_dim_available(pool, length, 1, precision) ? INPLACE_SBCC : TR_PAIR;
 
     // but if we have 2D_SINGLE available, then we use it
     // NB: use the check function in NodeFactory to make sure lds limit
@@ -475,13 +477,13 @@ void Real2DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     if(inArrayType == rocfft_array_type_real) //forward
     {
         nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(nodeData))
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData))
             solution = REAL_2D_SINGLE;
     }
     else
     {
         nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(nodeData))
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData))
             solution = REAL_2D_SINGLE;
     }
 
@@ -534,7 +536,7 @@ void Real2DEvenNode::BuildTree_internal_2D_SINGLE()
 
 void Real2DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
 {
-    bool haveSBCC   = function_pool::has_SBCC_kernel(length[1], precision);
+    bool haveSBCC   = pool.has_SBCC_kernel(length[1], precision);
     auto sbccScheme = haveSBCC ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
     bool noSolution = child_scheme_trees.empty();
 
@@ -1001,7 +1003,8 @@ void Real3DEvenNode::Build_solution()
     if(forward)
     {
         nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(nodeData) && SBCC_dim_available(length, 2, precision)
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData)
+           && SBCC_dim_available(pool, length, 2, precision)
            && (planInStrideUnit && planOutStrideUnit))
         {
             solution = REAL_2D_SINGLE_SBCC;
@@ -1011,7 +1014,8 @@ void Real3DEvenNode::Build_solution()
     else
     {
         nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(nodeData) && SBCC_dim_available(outputLength, 2, precision)
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData)
+           && SBCC_dim_available(pool, outputLength, 2, precision)
            && (planInStrideUnit && planOutStrideUnit))
         {
             solution = REAL_2D_SINGLE_SBCC;
@@ -1031,9 +1035,9 @@ void Real3DEvenNode::Build_solution()
         //    2. Enable for gfx908 and gfx90a only. Need more tuning for Navi arch.
         std::vector<size_t> c2r_length = {outputLength[0] / 2, outputLength[1], outputLength[2]};
         if((is_device_gcn_arch(deviceProp, "gfx908") || is_device_gcn_arch(deviceProp, "gfx90a"))
-           && (SBCR_dim_available(c2r_length, 0, precision))
-           && (SBCR_dim_available(c2r_length, 1, precision))
-           && (SBCR_dim_available(c2r_length, 2, precision))
+           && (SBCR_dim_available(pool, c2r_length, 0, precision))
+           && (SBCR_dim_available(pool, c2r_length, 1, precision))
+           && (SBCR_dim_available(pool, c2r_length, 2, precision))
            && (placement
                == rocfft_placement_notinplace) // In-place SBCC is faster than SBCR solution for in-place
            && (inStride[0] == 1 && outStride[0] == 1
@@ -1048,8 +1052,8 @@ void Real3DEvenNode::Build_solution()
     }
 
     // if we have SBCC kernels for the other two dimensions, transform them using SBCC and avoid transposes.
-    bool sbcc_inplace
-        = SBCC_dim_available(length, 1, precision) && SBCC_dim_available(length, 2, precision);
+    bool sbcc_inplace = SBCC_dim_available(pool, length, 1, precision)
+                        && SBCC_dim_available(pool, length, 2, precision);
 #if 0
     // ensure the fastest dimensions are big enough to get enough
     // column tiles to perform well
@@ -1061,9 +1065,9 @@ void Real3DEvenNode::Build_solution()
     // if all 3 lengths are SBRC-able, then R2C will already be 3
     // kernel.  SBRC should be slightly better since row accesses
     // should be a bit nicer in general than column accesses.
-    if(function_pool::has_SBRC_kernel(length[0] / 2, precision)
-       && function_pool::has_SBRC_kernel(length[1], precision)
-       && function_pool::has_SBRC_kernel(length[2], precision))
+    if(pool.has_SBRC_kernel( length[0] / 2, precision)
+       && pool.has_SBRC_kernel( length[1], precision)
+       && pool.has_SBRC_kernel( length[2], precision))
     {
         sbcc_inplace = false;
     }
@@ -1086,7 +1090,7 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
         xyPlan->outputLength = xyPlan->length;
         xyPlan->outputLength.front() += 1;
 
-        bool haveSBCC_Z     = function_pool::has_SBCC_kernel(length[2], precision);
+        bool haveSBCC_Z     = pool.has_SBCC_kernel(length[2], precision);
         auto scheme         = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         auto sbccZ          = NodeFactory::CreateNodeFromScheme(scheme, this);
         sbccZ->length       = {length[2], (length[0] / 2 + 1), length[1]};
@@ -1098,7 +1102,7 @@ void Real3DEvenNode::BuildTree_internal_2D_SINGLE_CC()
     }
     else
     {
-        bool haveSBCC_Z  = function_pool::has_SBCC_kernel(outputLength[2], precision);
+        bool haveSBCC_Z  = pool.has_SBCC_kernel(outputLength[2], precision);
         auto scheme      = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         auto sbccZ       = NodeFactory::CreateNodeFromScheme(scheme, this);
         sbccZ->length    = {outputLength[2], (outputLength[0] / 2 + 1) * outputLength[1]};
@@ -1145,7 +1149,7 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             scheme = use_SBCC_192 ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         else
         {
-            bool haveSBCC_Z = function_pool::has_SBCC_kernel(remainingLength[2], precision);
+            bool haveSBCC_Z = pool.has_SBCC_kernel(remainingLength[2], precision);
             scheme          = haveSBCC_Z ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         }
         scheme        = (determined_scheme_dimZ == CS_NONE) ? scheme : determined_scheme_dimZ;
@@ -1161,7 +1165,7 @@ void Real3DEvenNode::BuildTree_internal_SBCC(SchemeTreeVec& child_scheme_trees)
             scheme = use_SBCC_192 ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         else
         {
-            bool haveSBCC_Y = function_pool::has_SBCC_kernel(remainingLength[1], precision);
+            bool haveSBCC_Y = pool.has_SBCC_kernel(remainingLength[1], precision);
             scheme          = haveSBCC_Y ? CS_KERNEL_STOCKHAM_BLOCK_CC : CS_KERNEL_STOCKHAM;
         }
         scheme        = (determined_scheme_dimY == CS_NONE) ? scheme : determined_scheme_dimY;

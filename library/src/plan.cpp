@@ -918,6 +918,8 @@ void set_bluestein_strides(const rocfft_plan plan, NodeMetaData& planData)
     size_t                inDistBlue     = 0;
     size_t                outDistBlue    = 0;
 
+    function_pool pool{planData.deviceProp};
+
     const auto precision     = plan->precision;
     const auto transformType = plan->transformType;
     const auto rank          = plan->rank;
@@ -931,9 +933,9 @@ void set_bluestein_strides(const rocfft_plan plan, NodeMetaData& planData)
     auto fftLength
         = transformType == rocfft_transform_type_real_inverse ? plan->outputLengths : plan->lengths;
 
-    lengthsBlue[0] = NodeFactory::SupportedLength(precision, fftLength[0])
+    lengthsBlue[0] = NodeFactory::SupportedLength(pool, precision, fftLength[0])
                          ? fftLength[0]
-                         : NodeFactory::GetBluesteinLength(precision, fftLength[0]);
+                         : NodeFactory::GetBluesteinLength(pool, precision, fftLength[0]);
     for(size_t i = 1; i < dimension; i++)
         lengthsBlue[i] = fftLength[i];
 
@@ -1060,8 +1062,6 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
     {
         execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE, nullptr);
 
-        execPlan.rootPlan->deviceProp = execPlan.deviceProp;
-
         execPlan.rootPlan->length    = length;
         execPlan.rootPlan->dimension = 2;
 
@@ -1071,8 +1071,6 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
     case 3:
     {
         execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, nullptr);
-
-        execPlan.rootPlan->deviceProp = execPlan.deviceProp;
 
         execPlan.rootPlan->length    = length;
         execPlan.rootPlan->dimension = 3;
@@ -1084,8 +1082,6 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
     case 4:
     {
         execPlan.rootPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_TRANSPOSE_XY_Z, nullptr);
-
-        execPlan.rootPlan->deviceProp = execPlan.deviceProp;
 
         execPlan.rootPlan->length    = length;
         execPlan.rootPlan->dimension = 4;
@@ -2959,8 +2955,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
         {
             NodeMetaData rootPlanData(nullptr);
             set_rootplan_params(plan, rootPlanData);
-            set_bluestein_strides(plan, rootPlanData);
             rootPlanData.deviceProp = get_curr_device_prop();
+            set_bluestein_strides(plan, rootPlanData);
 
             auto singleDevicePlan = BuildSingleDevicePlan(rootPlanData,
                                                           0,
@@ -3328,7 +3324,6 @@ void TreeNode::CopyNodeData(const TreeNode& srcNode)
     outArrayType     = srcNode.outArrayType;
     allowInplace     = srcNode.allowInplace;
     allowOutofplace  = srcNode.allowOutofplace;
-    deviceProp       = srcNode.deviceProp;
 
     // conditional
     large1D        = srcNode.large1D;
@@ -3375,7 +3370,6 @@ void TreeNode::CopyNodeData(const NodeMetaData& data)
     direction        = data.direction;
     inArrayType      = data.inArrayType;
     outArrayType     = data.outArrayType;
-    deviceProp       = data.deviceProp;
 }
 
 bool TreeNode::isPlacementAllowed(rocfft_result_placement test_placement) const
@@ -3497,9 +3491,9 @@ void TreeNode::SanityCheck(SchemeTree* solution_scheme, std::vector<FMKey>& kern
 
 bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_Z_XY()
 {
-    if(function_pool::has_SBRC_kernel(length[0], precision))
+    if(pool.has_SBRC_kernel(length[0], precision))
     {
-        auto kernel = function_pool::get_kernel(
+        auto kernel = pool.get_kernel(
             FMKey(length[0], precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
         size_t bwd = kernel.transforms_per_block;
         if((length[1] >= bwd) && (length[2] >= bwd) && (length[1] * length[2] % bwd == 0))
@@ -3511,7 +3505,7 @@ bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_Z_XY()
 
 bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_XY_Z()
 {
-    if(function_pool::has_SBRC_kernel(length[0], precision))
+    if(pool.has_SBRC_kernel(length[0], precision))
     {
         if((length[0] == length[2]) // limit to original "cubic" case
            && (length[0] / 2 + 1 == length[1])
@@ -3524,7 +3518,7 @@ bool TreeNode::fuse_CS_KERNEL_TRANSPOSE_XY_Z()
 
 bool TreeNode::fuse_CS_KERNEL_STK_R2C_TRANSPOSE()
 {
-    if(function_pool::has_SBRC_kernel(length[0], precision)) // kernel available
+    if(pool.has_SBRC_kernel(length[0], precision)) // kernel available
     {
         if((length[0] * 2 == length[1]) // limit to original "cubic" case
            && (length.size() == 2 || length[1] == length[2]) // 2D or 3D

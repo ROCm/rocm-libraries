@@ -39,8 +39,7 @@ RTCKernel::RTCGenerator RTCKernelBluesteinSingle::generate_from_node(const LeafN
     auto lengthBlue = node.lengthBlue;
 
     // find kernel config from function pool
-    auto& pool   = function_pool::get_function_pool();
-    auto  config = pool.get_kernel(FMKey(lengthBlue, node.precision));
+    auto config = node.pool.get_kernel(FMKey(lengthBlue, node.precision));
 
     // get factors from the leaf node, which might have overridden what's in the pool
     auto&                     leafNode = static_cast<const LeafNode&>(node);

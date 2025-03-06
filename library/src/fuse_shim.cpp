@@ -23,18 +23,13 @@
 #include "function_pool.h"
 #include "node_factory.h"
 
-size_t TransformsPerThreadblock(const FMKey& kernel_key)
-{
-    return function_pool::get_kernel(kernel_key).transforms_per_block;
-}
-
 bool canOptimizeWithStride(TreeNode* stockham)
 {
     // for 3D pow2 sizes, manipulating strides looks like it loses to
     // diagonal transpose
     if(IsPo2(stockham->length[0]) && stockham->length.size() >= 3)
         return false;
-    size_t numTrans = TransformsPerThreadblock(stockham->GetKernelKey());
+    size_t numTrans = stockham->pool.get_kernel(stockham->GetKernelKey()).transforms_per_block;
 
     // ensure we are doing enough rows to coalesce properly. 4
     // seems to be enough for double-precision, whereas some

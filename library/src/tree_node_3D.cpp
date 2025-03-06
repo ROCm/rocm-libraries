@@ -349,11 +349,11 @@ void BLOCKRC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     {
         // If we have an sbrc kernel for this length, use it,
         // otherwise, fall back to row FFT+transpose
-        bool have_sbrc = function_pool::has_SBRC_kernel(cur_length.front(), precision);
+        bool have_sbrc = pool.has_SBRC_kernel(cur_length.front(), precision);
         // ensure the kernel would be tile-aligned
         if(have_sbrc)
         {
-            auto kernel = function_pool::get_kernel(
+            auto kernel = pool.get_kernel(
                 FMKey(cur_length[0], precision, CS_KERNEL_STOCKHAM_BLOCK_RC, TILE_ALIGNED));
 
             size_t otherDim = use_ZXY_sbrc ? cur_length[1] : cur_length[2];
@@ -732,7 +732,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         }
         else
         {
-            if(function_pool::has_SBCC_kernel(length[2], precision))
+            if(pool.has_SBCC_kernel(length[2], precision))
             {
                 zPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
                 zPlan->length    = zPlanData.length;
@@ -802,9 +802,9 @@ FMKey SBRCTranspose3DNode::GetKernelKey() const
         // if we have the base kernel, then we set the exact sbrc_trans_type and return the real key
         // if we don't, then we simply return a key with NONE sbrc_trans_type
         // which will make KernelCheck() trigger an exception
-        if(function_pool::has_function(baseKey))
+        if(pool.has_function(baseKey))
         {
-            auto bwd      = function_pool::get_kernel(baseKey).transforms_per_block;
+            auto bwd      = pool.get_kernel(baseKey).transforms_per_block;
             sbrcTranstype = sbrc_transpose_type(bwd);
         }
     }
@@ -885,7 +885,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
 void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -900,7 +900,7 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -915,7 +915,7 @@ void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 void RealCmplxTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     // this kernel always does real-complex processing and needs one

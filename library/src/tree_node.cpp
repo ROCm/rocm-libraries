@@ -105,7 +105,7 @@ FMKey LeafNode::GetKernelKey() const
 void LeafNode::GetKernelFactors()
 {
     FMKey key     = GetKernelKey();
-    kernelFactors = function_pool::get_kernel(key).factors;
+    kernelFactors = pool.get_kernel(key).factors;
 
     // Hard-coded kernel factors for len 64x64x64 partial-pass
     // TODO: Remove this hard-coded logic once
@@ -189,7 +189,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
             // get sbrc_trans_type from assignedKey (for sbrc)
             sbrcTranstype = assignedKey.sbrcTrans;
 
-            function_pool::add_new_kernel(assignedKey);
+            pool.add_new_kernel(assignedKey);
             specified_key = std::make_unique<FMKey>(assignedKey);
         }
     }
@@ -198,7 +198,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     // Note that the check is trivial if we are using "specified_key"
     // since we definitly have the kernel, but not trivial if it's the auto-gen key
     FMKey key = GetKernelKey();
-    if(!function_pool::has_function(key))
+    if(!pool.has_function(key))
     {
         if(LOG_TRACE_ENABLED())
             (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
@@ -206,7 +206,7 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
         return false;
     }
 
-    dir2regMode = (function_pool::get_kernel(key).direct_to_from_reg)
+    dir2regMode = (pool.get_kernel(key).direct_to_from_reg)
                       ? DirectRegType::TRY_ENABLE_IF_SUPPORT
                       : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 
@@ -287,9 +287,9 @@ void LeafNode::SetupGridParam(GridParam& gp)
     gp.lds_bytes = lds * complex_type_size(precision);
     if(scheme == CS_KERNEL_STOCKHAM && ebtype == EmbeddedType::NONE)
     {
-        if(function_pool::has_function(key))
+        if(pool.has_function(key))
         {
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
 
             // NB:
             // Special case on specific arch:
@@ -312,9 +312,9 @@ void LeafNode::SetupGridParam(GridParam& gp)
     {
         // SBCC support half-lds conditionally
         if((dir2regMode == DirectRegType::TRY_ENABLE_IF_SUPPORT) && (ebtype == EmbeddedType::NONE)
-           && function_pool::has_function(key))
+           && pool.has_function(key))
         {
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
             if(kernel.half_lds)
                 gp.lds_bytes /= 2;
         }
@@ -323,7 +323,7 @@ void LeafNode::SetupGridParam(GridParam& gp)
         if(apply_large_twd && largeTwdBase < 8)
         {
             // append twiddle table to dynamic lds
-            auto kernel = function_pool::get_kernel(key);
+            auto kernel = pool.get_kernel(key);
             gp.lds_bytes += twiddles_large_size;
         }
     }

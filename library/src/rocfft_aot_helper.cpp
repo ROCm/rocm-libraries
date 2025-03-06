@@ -222,8 +222,8 @@ void stockham_combo(ComputeScheme                     scheme,
 
 void build_stockham_function_pool(CompileQueue& queue)
 {
-    // build everything in the function pool
-    function_pool& fp = function_pool::get_function_pool();
+    // build everything in the 64k LDS function pool
+    function_pool fp(65536);
 
     // fused Bluestein kernels are always built at runtime
     auto fuseBlue = BluesteinFuseType::BFT_NONE;

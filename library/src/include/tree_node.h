@@ -32,11 +32,13 @@
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/hip_object_wrapper.h"
 #include "../../../shared/rocfft_complex.h"
+#include "../../shared/device_properties.h"
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "compute_scheme.h"
 #include "enum_printer.h"
 #include "function_map_key.h"
+#include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "rtc_kernel.h"
@@ -162,6 +164,7 @@ static SchemeVec EmptySchemeVec = {};
 
 class TreeNode;
 class LeafNode;
+class function_pool;
 
 // The mininal tree node data needed to decide the scheme
 struct NodeMetaData
@@ -256,13 +259,14 @@ class TreeNode
 protected:
     TreeNode(TreeNode* p)
         : parent(p)
+        , deviceProp(p ? p->deviceProp : get_curr_device_prop())
+        , pool(deviceProp)
     {
         if(p != nullptr)
         {
-            precision  = p->precision;
-            batch      = p->batch;
-            direction  = p->direction;
-            deviceProp = p->deviceProp;
+            precision = p->precision;
+            batch     = p->batch;
+            direction = p->direction;
         }
 
         allowedOutBuf
@@ -393,6 +397,7 @@ public:
     UserCallbacks callbacks;
 
     hipDeviceProp_t deviceProp = {};
+    function_pool   pool;
 
     // comments inserted by optimization passes to explain changes done
     // to the node

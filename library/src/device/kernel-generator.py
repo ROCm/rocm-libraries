@@ -161,7 +161,7 @@ def generate_cpu_function_pool_main(num_files):
         call_list += Call(name=f'function_pool_init_{i}', arguments=call_args)
     return StatementList(
         Include('"../include/function_pool.h"'), fwd_declarations,
-        Function(name='function_pool::function_pool',
+        Function(name='function_pool_data::function_pool_data',
                  value=False,
                  arguments=ArgumentList(),
                  body=call_list))

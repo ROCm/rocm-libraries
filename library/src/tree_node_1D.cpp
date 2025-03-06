@@ -901,7 +901,7 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
         batch_accum *= length[j];
 
     auto key    = GetKernelKey();
-    auto kernel = function_pool::get_kernel(key);
+    auto kernel = pool.get_kernel(key);
 
     if(applyPartialPass)
     {
@@ -982,7 +982,7 @@ bool SBCCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     if(large1D > 0)
     {
         FMKey key      = GetKernelKey();
-        auto  kernel   = function_pool::get_kernel(key);
+        auto  kernel   = pool.get_kernel(key);
         largeTwd3Steps = kernel.use_3steps_large_twd;
         get_large_twd_base_steps(large1D, largeTwd3Steps, largeTwdBase, ltwdSteps);
     }
@@ -1119,7 +1119,7 @@ void SBCCNode::TuneIntrinsicMode()
 
 void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
 
@@ -1182,9 +1182,9 @@ FMKey SBRCNode::GetKernelKey() const
         // if we have the base kernel, then we set the exact sbrc_trans_type and return the real key
         // if we don't, then we simply return a key with NONE sbrc_trans_type
         // which will make KernelCheck() trigger an exception
-        if(function_pool::has_function(baseKey))
+        if(pool.has_function(baseKey))
         {
-            auto bwd      = function_pool::get_kernel(baseKey).transforms_per_block;
+            auto bwd      = pool.get_kernel(baseKey).transforms_per_block;
             sbrcTranstype = sbrc_transpose_type(bwd);
         }
     }
@@ -1258,7 +1258,7 @@ void SBRCNode::TuneDirectRegType()
 void SBRCNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -1374,7 +1374,7 @@ void SBCRNode::TuneIntrinsicMode()
 
 void SBCRNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = function_pool::get_kernel(GetKernelKey());
+    auto kernel = pool.get_kernel(GetKernelKey());
     wgs         = kernel.workgroup_size;
     bwd         = kernel.transforms_per_block;
 

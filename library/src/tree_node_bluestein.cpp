@@ -25,7 +25,10 @@
 #include "node_factory.h"
 #include <numeric>
 
-size_t BluesteinNode::FindBlue(size_t len, rocfft_precision precision, bool forcePow2)
+size_t BluesteinNode::FindBlue(const function_pool& pool,
+                               size_t               len,
+                               rocfft_precision     precision,
+                               bool                 forcePow2)
 {
     if(forcePow2)
     {
@@ -51,7 +54,7 @@ size_t BluesteinNode::FindBlue(size_t len, rocfft_precision precision, bool forc
 
     for(length = minLenBlue; length < lenPow2Blue; ++length)
     {
-        auto lenSupported = NodeFactory::NonPow2LengthSupported(precision, length);
+        auto lenSupported = NodeFactory::NonPow2LengthSupported(pool, precision, length);
         auto lenRatio     = static_cast<double>(length) / static_cast<double>(lenPow2Blue);
 
         if(lenSupported && lenRatio < lenCutOffRatio)
@@ -63,12 +66,12 @@ size_t BluesteinNode::FindBlue(size_t len, rocfft_precision precision, bool forc
 
 BluesteinType BluesteinNode::DecideBlueType()
 {
-    bool useSingleKernel = BluesteinSingleNode::SizeFits(length[0], precision);
+    bool useSingleKernel = BluesteinSingleNode::SizeFits(pool, length[0], precision);
 
     // single kernel sticks to pow2 lengthBlue.  the kernel does many
     // other things besides FFTs, so keep radices simple to reduce
     // VGPR usage.
-    lengthBlue = FindBlue(length[0], precision, useSingleKernel);
+    lengthBlue = FindBlue(pool, length[0], precision, useSingleKernel);
 
     if(useSingleKernel)
         return BluesteinType::BT_SINGLE_KERNEL;
@@ -78,7 +81,7 @@ BluesteinType BluesteinNode::DecideBlueType()
     bluePlanData.direction = direction;
     bluePlanData.batch     = batch;
 
-    auto scheme = NodeFactory::DecideNodeScheme(bluePlanData, this);
+    auto scheme = NodeFactory::DecideNodeScheme(pool, bluePlanData, this);
 
     if(scheme == CS_L1D_CC)
     {
@@ -413,10 +416,12 @@ BluesteinSingleNode::BluesteinSingleNode(TreeNode* p, ComputeScheme s)
     need_twd_table = true;
 }
 
-bool BluesteinSingleNode::SizeFits(size_t length, rocfft_precision precision)
+bool BluesteinSingleNode::SizeFits(const function_pool& pool,
+                                   size_t               length,
+                                   rocfft_precision     precision)
 {
     // 2N - 1 must fit into a single kernel
-    return 2 * length - 1 < function_pool::get_largest_length(precision);
+    return 2 * length - 1 < pool.get_largest_length(precision);
 }
 
 size_t BluesteinSingleNode::GetTwiddleTableLength()
@@ -438,6 +443,5 @@ void BluesteinSingleNode::GetKernelFactors()
     else if(lengthBlue == 4096)
         kernelFactors = {8, 8, 8, 8};
     else
-        kernelFactors
-            = function_pool::get_kernel(FMKey(lengthBlue, precision, CS_KERNEL_STOCKHAM)).factors;
+        kernelFactors = pool.get_kernel(FMKey(lengthBlue, precision, CS_KERNEL_STOCKHAM)).factors;
 }

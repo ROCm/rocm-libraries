@@ -34,7 +34,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                                               bool               enable_callbacks)
 {
     RTCStockhamGenerator generator;
-    function_pool&       pool = function_pool::get_function_pool();
 
     std::optional<StockhamGeneratorSpecs> specs;
     std::optional<StockhamGeneratorSpecs> specs2d;
@@ -75,7 +74,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         // these go into the function pool normally and are passed to
         // the generator as-is
-        kernel = pool.get_kernel(key);
+        kernel = node.pool.get_kernel(key);
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
@@ -93,7 +92,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     }
     case CS_KERNEL_2D_SINGLE:
     {
-        kernel = pool.get_kernel(key);
+        kernel = node.pool.get_kernel(key);
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
