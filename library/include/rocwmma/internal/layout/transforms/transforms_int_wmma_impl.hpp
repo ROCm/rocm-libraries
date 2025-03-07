@@ -50,12 +50,12 @@ namespace Transforms
             using BuffT = typename VecTraits::template VecT<DataT, VecSize * 2u>;
             auto buff = BuffT{};
 
-            // For each set of inputs, duplicate them and store back to the 
+            // For each set of inputs, duplicate them and store back to the
             // buffer in correct order.
             vector_for_each<InputBlockSize>(
                 forward<VecT>(v),
-                [](auto&& v, auto&& idx, auto&& buff) 
-                { 
+                [](auto&& v, auto&& idx, auto&& buff)
+                {
                     using Idx = decay_t<decltype(idx)>;
                     auto wIt = makeVectorIterator<InputBlockSize * 2u>(forward<BuffT&>(buff)).it(Idx::value);
                     *wIt = to_wmma_input_gfx11(v);
@@ -102,8 +102,8 @@ namespace Transforms
             // Iterate over duplicate sets from input and discard duplicates
             vector_for_each<InputBlockSize * 2u>(
                 forward<VecT>(v),
-                [](auto&& v, auto&& idx, auto&& buff) 
-                { 
+                [](auto&& v, auto&& idx, auto&& buff)
+                {
                     using Idx = decay_t<decltype(idx)>;
                     auto wIt = makeVectorIterator<InputBlockSize>(forward<BuffT&>(buff)).it(Idx::value);
                     *wIt = from_wmma_input_gfx11(v);

@@ -41,7 +41,7 @@ namespace rocwmma
         {
             // Additional input traits for layout
             static constexpr uint32_t InputBlockSize = LayoutTraits::MmaDim * LayoutTraits::KDim / Constants::AMDGCN_WAVE_SIZE;
-            
+
             // Additional acc traits for layout
             static constexpr uint32_t AccVecSize = LayoutTraits::MmaDim * LayoutTraits::MmaDim / Constants::AMDGCN_WAVE_SIZE;
             static constexpr uint32_t MmaBlocksA = LayoutTraits::KDim / LayoutTraits::MmaDim;
@@ -52,7 +52,7 @@ namespace rocwmma
                                                                         typename LayoutTraits::DataT,
                                                                         void>::Result;
         };
-        
+
 
         // Specific transform from one format to another
         template <RegisterLayout::Format Src, RegisterLayout::Format Dst, typename... Traits>
@@ -220,7 +220,7 @@ namespace rocwmma
             ROCWMMA_DEVICE constexpr static inline decltype(auto) exec(VecT&& v)
             {
                 using Helper = InterleavedParamHelper<LayoutTraits>;
-                
+
                 return Transforms::aos_int_to_mma_acc_int_a_major<
                     Helper::AccVecSize,
                     Helper::MmaBlocksA,

@@ -134,7 +134,7 @@ namespace Transforms
         {
             // Step 1: Transform from aos_int -> soa_int
             // Step 2: Transform to wmma_input.
-            return soa_to_wmma_input_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
+            return to_wmma_input_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
         }
         else
         {
@@ -162,7 +162,7 @@ namespace Transforms
         {
             // Step 1: Transform from wmma_input_gfx11 -> soa
             // Step 2: Transform from soa -> aos
-            return soa_to_aos<BlockDim, MaxVectorWidth>(wmma_input_gfx11_to_soa(forward<VecT>(v)));
+            return soa_to_aos<BlockDim, MaxVectorWidth>(from_wmma_input_gfx11(forward<VecT>(v)));
         }
         else
         {
@@ -190,7 +190,7 @@ namespace Transforms
         {
             // Step 1: Transform from aos -> soa
             // Then transform to wmma_input.
-            return soa_to_wmma_acc_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
+            return to_wmma_acc_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
         }
         else
         {
@@ -218,7 +218,7 @@ namespace Transforms
         {
             // First need to transform from aos_int -> soa_int
             // Then transform to wmma_input.
-            return soa_to_aos<BlockDim, MaxVectorWidth>(wmma_acc_gfx11_to_soa(forward<VecT>(v)));
+            return soa_to_aos<BlockDim, MaxVectorWidth>(from_wmma_acc_gfx11(forward<VecT>(v)));
         }
         else
         {

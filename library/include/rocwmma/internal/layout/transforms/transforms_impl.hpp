@@ -45,7 +45,7 @@ namespace rocwmma
         {
             return Transforms::AosToSoa<BlockDim, MaxVectorWidth>::exec(forward<VecT>(v));
         }
-    
+
     } // namespace Transforms
 
 } // namespace rocwmma
