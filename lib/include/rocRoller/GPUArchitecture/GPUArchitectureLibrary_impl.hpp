@@ -75,6 +75,7 @@ namespace rocRoller
 
         for(auto target : m_gpuArchitectures)
         {
+            //cppcheck-suppress useStlAlgorithm
             result.push_back(target.first);
         }
 
@@ -90,6 +91,21 @@ namespace rocRoller
         for(auto target : m_gpuArchitectures)
         {
             if(target.second.HasCapability(GPUCapability::HasMFMA))
+                result.push_back(target.first);
+        }
+
+        return result;
+    }
+
+    inline std::vector<GPUArchitectureTarget> GPUArchitectureLibrary::getWMMASupportedISAs()
+    {
+        TIMER(t, "GPUArchitectureLibrary::getWMMASupportedISAs");
+
+        std::vector<GPUArchitectureTarget> result;
+
+        for(auto target : m_gpuArchitectures)
+        {
+            if(target.second.HasCapability(GPUCapability::HasWMMA))
                 result.push_back(target.first);
         }
 

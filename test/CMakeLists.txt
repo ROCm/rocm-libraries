@@ -145,6 +145,8 @@ set(
     unit/VectorAddBenchmark.cpp
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
+    unit/WMMAHazardObserverTest.cpp
+    unit/WMMAUnitObserverTest.cpp
     unit/StreamTest.cpp
     unit/EnumToStringTest.cpp
 )

@@ -220,6 +220,8 @@ set(rocroller_src
     source/Observers/VALUWriteVCCVDIVFMAS.cpp
     source/Observers/VCMPXWrite94x.cpp
     source/Observers/WaitcntObserver.cpp
+    source/Observers/WMMAObserver.cpp
+    source/Observers/WMMAWrite.cpp
     source/Observers/XDLReadSrcC908.cpp
     source/Observers/XDLReadSrcC90a.cpp
     source/Observers/XDLReadSrcC94x.cpp

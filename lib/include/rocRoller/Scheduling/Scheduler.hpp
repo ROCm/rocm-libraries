@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include <concepts>
 #include <string>
 #include <vector>
 
@@ -44,7 +43,7 @@ namespace rocRoller
         class LockState
         {
         public:
-            LockState(ContextPtr ctx);
+            explicit LockState(ContextPtr ctx);
             LockState(ContextPtr ctx, Dependency dependency);
 
             void add(Instruction const& instr);

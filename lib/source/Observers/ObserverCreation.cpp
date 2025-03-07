@@ -32,6 +32,7 @@
 #include <rocRoller/Scheduling/Observers/SupportedInstructionObserver.hpp>
 
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
+#include <rocRoller/Scheduling/Observers/FunctionalUnit/WMMAObserver.hpp>
 
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRReadWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/ACCVGPRWriteWrite.hpp>
@@ -53,6 +54,7 @@
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteSGPRVMEM.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteVCCVDIVFMAS.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VCMPXWrite94x.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -65,6 +67,7 @@ namespace rocRoller
                 AllocatingObserver,
                 WaitcntObserver,
                 MFMAObserver,
+                WMMAObserver,
                 // Hazard Observers
                 ACCVGPRReadWrite,
                 ACCVGPRWriteWrite,
@@ -80,6 +83,7 @@ namespace rocRoller
                 VALUWriteSGPRVMEM,
                 VALUWriteVCCVDIVFMAS,
                 VCMPXWrite94x,
+                WMMAWrite,
                 XDLReadSrcC908,
                 XDLReadSrcC90a,
                 XDLReadSrcC94x,

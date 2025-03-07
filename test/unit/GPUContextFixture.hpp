@@ -84,6 +84,23 @@ inline auto mfmaSupportedISAValues()
 }
 
 /**
+ * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller, that
+ * has WMMA instructions.
+ *
+ * Useful if you want to parameterize a test with combinations of each ISA with other
+ * parameters. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          ::testing::Combine(wmmaSupportedISAValues(),
+ *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+ */
+inline auto wmmaSupportedISAValues()
+{
+    return ::testing::ValuesIn(
+        rocRoller::GPUArchitectureLibrary::getInstance()->getWMMASupportedISAs());
+}
+
+/**
  * Returns a (googletest) Generator that will yield just the local GPU ISA.
  *
  * Useful if you want to parameterize a test with combinations of each ISA with other parameters. Example:

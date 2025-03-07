@@ -176,11 +176,15 @@ namespace rocRoller
                 }
             }
 
+            // TODO Investigate why cppcheck isn't ensuring that this macro
+            // is expanded correctly, requiring the derefInvalidIterator
+            // suppression.
             AssertFatal(foundIter != m_entries.end(),
                         Base::Basename,
                         ": No valid component found: ",
                         ShowValue(arg));
 
+            // cppcheck-suppress derefInvalidIterator
             return *foundIter;
         }
 

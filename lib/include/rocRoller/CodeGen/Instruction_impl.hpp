@@ -31,6 +31,7 @@
 #include <memory>
 #include <string>
 
+#include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -402,6 +403,33 @@ namespace rocRoller
         os << m_directive;
     }
 
+    inline bool Instruction::requiresVnopForHazard() const
+    {
+        // TODO: Reevalute this method for retrieving/passing the context.
+        ContextPtr ctx = nullptr;
+        for(const auto& r : m_src)
+        {
+            if(r && r->context())
+            {
+                ctx = r->context();
+                break;
+            }
+        }
+        if(nullptr == ctx)
+        {
+            for(const auto& r : m_dst)
+            {
+                if(r && r->context())
+                {
+                    ctx = r->context();
+                    break;
+                }
+            }
+        }
+        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU()
+               && m_opcode.rfind("v_wmma", 0) == 0;
+    }
+
     inline void Instruction::functionalString(std::ostream& os, LogLevel level) const
     {
         auto pos = os.tellp();
@@ -417,14 +445,22 @@ namespace rocRoller
         if(m_nopCount > 0)
         {
             int count = m_nopCount;
-            while(count > 16)
+            if(requiresVnopForHazard())
             {
-                // s_nop can only handle values from 0 to 0xf
-                os << "s_nop 0xf\n";
-                count -= 16;
+                for(int i = 0; i < count; i++)
+                    os << "v_nop\n";
             }
-            // Note: "s_nop 0" is 1 nop, "s_nop 0xf" is 16 nops
-            os << "s_nop " << (count - 1) << "\n";
+            else
+            {
+                while(count > 16)
+                {
+                    // s_nop can only handle values from 0 to 0xf
+                    os << "s_nop 0xf\n";
+                    count -= 16;
+                }
+                // Note: "s_nop 0" is 1 nop, "s_nop 0xf" is 16 nops
+                os << "s_nop " << (count - 1) << "\n";
+            }
         }
 
         coreInstructionString(os);

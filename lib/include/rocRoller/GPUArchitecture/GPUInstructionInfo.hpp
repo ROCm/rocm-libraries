@@ -216,10 +216,11 @@ namespace rocRoller
         /**
          * Static functions below are for checking instruction type.
          * The input to these functions is the op name.
-     * @{
-     */
+         * @{
+         */
         static bool isDLOP(std::string const& inst);
         static bool isMFMA(std::string const& inst);
+        static bool isWMMA(std::string const& inst);
         static bool isVCMPX(std::string const& inst);
         static bool isVCMP(std::string const& inst);
 

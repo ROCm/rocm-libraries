@@ -177,6 +177,8 @@ namespace rocRoller
          */
         void coreInstructionString(std::ostream& oss) const;
 
+        bool requiresVnopForHazard() const;
+
         /**
          * When this instruction is scheduled, perform this register allocation.
          */

@@ -99,6 +99,9 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::HasMFMA_32x32x16_bf16,
              {"v_mfma_f32_32x32x16_bf16 a[0:15], v[32:35], v[36:39], a[0:15]", ""}},
 
+            {rocRoller::GPUCapability::HasWMMA,
+             {"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]", ""}},
+
             {rocRoller::GPUCapability::HasAccumOffset,
              {".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
               ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n  .amdhsa_accum_offset "
@@ -272,6 +275,17 @@ namespace GPUArchitectureGenerator
             rocRoller::SupportedArchitectures.end(),
             std::back_inserter(retval),
             [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNAGPU(); });
+        return retval;
+    }
+
+    inline std::vector<rocRoller::GPUArchitectureTarget> gfx120XISAs()
+    {
+        std::vector<rocRoller::GPUArchitectureTarget> retval;
+        std::copy_if(
+            rocRoller::SupportedArchitectures.begin(),
+            rocRoller::SupportedArchitectures.end(),
+            std::back_inserter(retval),
+            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isRDNA4GPU(); });
         return retval;
     }
 
@@ -981,6 +995,16 @@ namespace GPUArchitectureGenerator
                                                /*implicitAccess*/ false,
                                                /*branch*/ false,
                                                (1 << 16) - 1),
+             }},
+            {gfx120XISAs(),
+             {
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_f16", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf16", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_wmma_f16_16x16x16_f16", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_wmma_bf16_16x16x16_bf16", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_fp8_bf8", 0, {}, 8),
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf8_fp8", 0, {}, 8),
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf8_bf8", 0, {}, 8),
              }},
             {gfx9ISAs(),
              {

@@ -9,6 +9,7 @@ Architectures:
       HasGlobalOffset: 0
       HasLshlOr: 0
       HasSMulHi: 0
+      HasWMMA: 0
       HasWave32: 0
       HasWave64: 0
       MaxExpcnt: 7
@@ -12983,57 +12984,57 @@ Architectures:
         ImplicitAccess: false
         Instruction: v_wmma_bf16_16x16x16_bf16
         IsBranch: false
-        Latency: 0
+        Latency: 16
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f16_16x16x16_f16:
         ImplicitAccess: false
         Instruction: v_wmma_f16_16x16x16_f16
         IsBranch: false
-        Latency: 0
+        Latency: 16
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_bf16:
         ImplicitAccess: false
         Instruction: v_wmma_f32_16x16x16_bf16
         IsBranch: false
-        Latency: 0
+        Latency: 16
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_bf8_bf8:
         ImplicitAccess: false
         Instruction: v_wmma_f32_16x16x16_bf8_bf8
         IsBranch: false
-        Latency: 0
+        Latency: 8
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_bf8_fp8:
         ImplicitAccess: false
         Instruction: v_wmma_f32_16x16x16_bf8_fp8
         IsBranch: false
-        Latency: 0
+        Latency: 8
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_f16:
         ImplicitAccess: false
         Instruction: v_wmma_f32_16x16x16_f16
         IsBranch: false
-        Latency: 0
+        Latency: 16
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_fp8_bf8:
         ImplicitAccess: false
         Instruction: v_wmma_f32_16x16x16_fp8_bf8
         IsBranch: false
-        Latency: 0
+        Latency: 8
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_f32_16x16x16_fp8_fp8:
         ImplicitAccess: false

@@ -66,6 +66,7 @@ namespace rocRoller
         std::vector<GPUArchitectureTarget> getAllSupportedISAs();
         std::vector<GPUArchitectureTarget> getCDNAISAs();
         std::vector<GPUArchitectureTarget> getMFMASupportedISAs();
+        std::vector<GPUArchitectureTarget> getWMMASupportedISAs();
 
         std::map<GPUArchitectureTarget, GPUArchitecture> LoadLibrary();
 

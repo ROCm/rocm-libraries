@@ -38,6 +38,11 @@ namespace rocRoller
         return opCode.rfind("v_mfma", 0) == 0;
     }
 
+    bool GPUInstructionInfo::isWMMA(std::string const& opCode)
+    {
+        return opCode.rfind("v_wmma", 0) == 0;
+    }
+
     bool GPUInstructionInfo::isVCMPX(std::string const& opCode)
     {
         return opCode.rfind("v_cmpx_", 0) == 0;
