@@ -29,14 +29,6 @@
 // inside a class member for variables we need all the time
 struct StockhamKernel : public StockhamGeneratorSpecs
 {
-    // Currently, we aim for minimum occupancy of 2 for these
-    // kernels.  Assuming current hardware has 64kiB of LDS, that
-    // limits our kernels to 32 kiB.
-    //
-    // This byte limit is a constant now, but could be turned into an
-    // input parameter or be made changeable by derived classes.
-    static const unsigned int LDS_BYTE_LIMIT    = 32 * 1024;
-    static const unsigned int BYTES_PER_ELEMENT = 16;
     StockhamKernel(const StockhamGeneratorSpecs& specs)
         : StockhamGeneratorSpecs(specs)
     {
@@ -47,7 +39,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         }
         else
         {
-            auto bytes_per_batch = length * BYTES_PER_ELEMENT;
+            auto bytes_per_batch = length * bytes_per_element;
 
             if(half_lds)
                 bytes_per_batch /= 2;
@@ -69,7 +61,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                 }
             }
 
-            transforms_per_block = LDS_BYTE_LIMIT / bytes_per_batch;
+            transforms_per_block = lds_byte_limit / bytes_per_batch;
             while(threads_per_transform * transforms_per_block > workgroup_size)
                 --transforms_per_block;
             if(!factors2d.empty())

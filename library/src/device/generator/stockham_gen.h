@@ -66,6 +66,12 @@ struct StockhamGeneratorSpecs
     // Particularly useful when tuning or running a tuned kernel. (RTC-ing)
     // We don't want them to be overwritten by StockhamKernel.
     bool wgs_is_derived = false;
+
+    // by default, aim for occupancy 2 assuming device has 64kiB LDS
+    unsigned int lds_byte_limit = 32 * 1024;
+    // by default, assume double-precision complex elements when
+    // computing how much FFT data will fit into LDS
+    unsigned int bytes_per_element = 16;
 };
 
 // generate default stockham variants for ahead-of-time compilation
