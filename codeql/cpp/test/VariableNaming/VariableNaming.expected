@@ -1,9 +1,9 @@
-| VariableNamingSelected.cpp:3:9:3:18 | snake_case | `snake_case` nonstatic private or protected variables should be in m_camelCase |
-| VariableNamingSelected.cpp:4:9:4:18 | PascalCase | `PascalCase` nonstatic private or protected variables should be in m_camelCase |
-| VariableNamingSelected.cpp:5:9:5:17 | camelCase | `camelCase` nonstatic private or protected variables should be in m_camelCase |
-| VariableNamingSelected.cpp:8:9:8:19 | m_camelCase | `m_camelCase` nonstatic public variables should be in camelCase |
-| VariableNamingSelected.cpp:9:9:9:19 | snake_cases | `snake_cases` nonstatic public variables should be in camelCase |
-| VariableNamingSelected.cpp:10:9:10:19 | PascalCases | `PascalCases` nonstatic public variables should be in camelCase |
+| VariableNamingSelected.cpp:29:9:29:18 | snake_case | `snake_case` nonstatic private or protected variables should be in m_camelCase |
+| VariableNamingSelected.cpp:30:9:30:18 | PascalCase | `PascalCase` nonstatic private or protected variables should be in m_camelCase |
+| VariableNamingSelected.cpp:31:9:31:17 | camelCase | `camelCase` nonstatic private or protected variables should be in m_camelCase |
+| VariableNamingSelected.cpp:34:9:34:19 | m_camelCase | `m_camelCase` nonstatic public variables should be in camelCase |
+| VariableNamingSelected.cpp:35:9:35:19 | snake_cases | `snake_cases` nonstatic public variables should be in camelCase |
+| VariableNamingSelected.cpp:36:9:36:19 | PascalCases | `PascalCases` nonstatic public variables should be in camelCase |
 | file://:0:0:0:0 | fp_offset | `fp_offset` nonstatic private or protected variables should be in m_camelCase |
 | file://:0:0:0:0 | gp_offset | `gp_offset` nonstatic private or protected variables should be in m_camelCase |
 | file://:0:0:0:0 | overflow_arg_area | `overflow_arg_area` nonstatic private or protected variables should be in m_camelCase |

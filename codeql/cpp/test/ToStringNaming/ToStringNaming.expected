@@ -1,3 +1,3 @@
-| ToStringNamingSelected.cpp:1:6:1:13 | ToString | function should be renamed to `toString` |
-| ToStringNamingSelected.cpp:2:6:2:13 | tostring | function should be renamed to `toString` |
-| ToStringNamingSelected.cpp:3:6:3:13 | ToStRiNg | function should be renamed to `toString` |
+| ToStringNamingSelected.cpp:27:6:27:13 | ToString | function should be renamed to `toString` |
+| ToStringNamingSelected.cpp:28:6:28:13 | tostring | function should be renamed to `toString` |
+| ToStringNamingSelected.cpp:29:6:29:13 | ToStRiNg | function should be renamed to `toString` |
