@@ -5,70 +5,77 @@
 .. _hipfft-overview:
 
 ********************************************************************
-hipFFT Overview
+hipFFT overview
 ********************************************************************
 
 hipFFT is a GPU FFT marshalling library that supports
-either `rocFFT`_ or NVIDIA `cuFFT`_ as the backend.
+either :doc:`rocFFT <rocfft:index>` or NVIDIA CUDA `cuFFT`_ as the backend.
 
 hipFFT exports an interface that does not require the client to
-change, regardless of the chosen backend.  It sits between the
+change, regardless of the chosen backend. It sits between the
 application and the backend FFT library, marshalling inputs into the
 backend and results back to the application.
 
 =====================
-Basic usage of hipFFT
+Basic hipFFT usage
 =====================
 
-1. **Create a transform plan for the FFT:**
-   - To create a plan, use the functions :cpp:func:`hipfftPlan1d`, :cpp:func:`hipfftPlan2d`, or :cpp:func:`hipfftPlan3d`, depending on the dimensions of the FFT.
+To use hipFFT, follow this step-by-step process:
 
-   - For a 1D FFT, use:
+#. Create a transform plan for the FFT.
 
-     .. code-block:: cpp
+   To create a plan, use the functions :cpp:func:`hipfftPlan1d`, :cpp:func:`hipfftPlan2d`, or :cpp:func:`hipfftPlan3d`,
+   depending on the dimensions of the FFT.
 
-        hipfftHandle plan;
-        hipfftPlan1d(&plan, N, HIPFFT_C2C, 1);
+   For a 1D FFT, use the following code:
 
-   - For higher-dimensions plans, use :cpp:func:`hipfftPlan2d` or :cpp:func:`hipfftPlan3d`.
+   .. code-block:: cpp
 
-2. **Allocate a work buffer (optional):**
+      hipfftHandle plan;
+      hipfftPlan1d(&plan, N, HIPFFT_C2C, 1);
 
-   - hipFFT generally handles memory allocation internally, so work buffers aren't explicitly required like in rocFFT. However, if you want to manually manage memory (for example, if you are working with very large datasets), you can still allocate buffers before execution.
+   For higher-dimension plans, use :cpp:func:`hipfftPlan2d` or :cpp:func:`hipfftPlan3d`.
 
-3. **Execute the plan:**
+#. Allocate a work buffer (optional)
 
-   - To execute the FFT computation, use :cpp:func:`hipfftExecC2C`, :cpp:func:`hipfftExecR2C`, or :cpp:func:`hipfftExecC2R`, depending on the type of transform:
+   hipFFT generally handles memory allocation internally, so work buffers aren't explicitly required.
+   However, to manually manage memory, you can still
+   allocate buffers before execution. You might want to do this, for example,
+   if you have multiple plans that need work buffers and you want them to share a single buffer.
+   Otherwise, each plan will allocate its own work memory, which might be wasteful.
 
-     .. code-block:: cpp
+#. Execute the plan
 
-        hipfftExecC2C(plan, x, x, HIPFFT_FORWARD);
+   To execute the FFT computation, use :cpp:func:`hipfftExecC2C`, :cpp:func:`hipfftExecR2C`, or :cpp:func:`hipfftExecC2R`,
+   depending on the type of transform. You can reuse the same plan for multiple executions,
+   changing the data pointers as necessary.
 
-   - You can reuse the same plan for multiple executions, changing the data pointers as necessary.
+   .. code-block:: cpp
 
-4. **Destroy the plan:**
+      hipfftExecC2C(plan, x, x, HIPFFT_FORWARD);
 
-   - After you are done with the plan, destroy it to free associated resources:
+#. Destroy the plan
+
+   After you are done with the plan, destroy it to free the associated resources:
      
-     .. code-block:: cpp
+   .. code-block:: cpp
 
-        hipfftDestroy(plan);
+      hipfftDestroy(plan);
 
-5. **Free any device memory (if applicable):**
+#. Free any device memory (if applicable)
 
-   - If you allocated any buffers for storing input/output data or intermediate results, free them using ``hipFree```:
+   If you allocated any buffers for storing input/output data or intermediate results, free them using ``hipFree``:
 
-     .. code-block:: cpp
+   .. code-block:: cpp
 
-        hipFree(x);
+      hipFree(x);
 
-6. **Terminate the library:**
+#. Terminate the library
 
-   - No specific cleanup function is required for hipFFT, but ensure that any HIP memory is freed, and the HIP runtime is cleaned up appropriately after all computations are done.
+   No specific cleanup function is required for hipFFT, but ensure that any HIP memory is freed
+   and the HIP runtime is cleaned up appropriately after all computations are done.
 
-
-Example
-=======
+The following code sample illustrates how to apply these steps:
 
 .. code-block:: cpp
 
@@ -127,24 +134,24 @@ Example
       return 0;
    }
 
-
-Advanced usage of hipFFT
+========================
+Advanced hipFFT usage
 ========================
 
 For transforms that require advanced input layouts, use the :cpp:func:`hipfftPlanMany` function, setting these parameters:
 
-- ``int rank``: The number of dimensions for the FFT (1D, 2D, or 3D).
-- ``int* n``: Array specifying the size of the FFT in each dimension.
-- ``int* inembed``: Specifies the dimensions of the input data layout in memory.
-- ``int istride``: Stride between elements in the input array.
-- ``int idist``: Distance between consecutive FFTs in the input array.
-- ``int* onembed``: Specifies the dimensions of the output data layout in memory.
-- ``int ostride``: Stride between elements in the output array.
-- ``int odist``: Distance between consecutive FFTs in the output array.
-- ``hipfftType type``: Type of FFT (for example, ``HIPFFT_C2C``, ``HIPFFT_R2C``).
-- ``int batch``: Number of FFTs to compute in parallel.
+*  ``int rank``: The number of dimensions for the FFT (1D, 2D, or 3D).
+*  ``int* n``: Array specifying the size of the FFT in each dimension.
+*  ``int* inembed``: The dimensions of the input data layout in memory.
+*  ``int istride``: Stride between elements in the input array.
+*  ``int idist``: Distance between consecutive FFTs in the input array.
+*  ``int* onembed``: The dimensions of the output data layout in memory.
+*  ``int ostride``: Stride between elements in the output array.
+*  ``int odist``: Distance between consecutive FFTs in the output array.
+*  ``hipfftType type``: Type of FFT (for example, ``HIPFFT_C2C`` or ``HIPFFT_R2C``).
+*  ``int batch``: Number of FFTs to compute in parallel.
 
-Here is an example of a 2D single-precision real-to-complex transform using the hipFFT advanced interface.
+Here's an example of a 2D single-precision real-to-complex transform using the hipFFT advanced interface:
 
 .. code-block:: cpp
 
@@ -284,26 +291,28 @@ Here is an example of a 2D single-precision real-to-complex transform using the 
       return 0;
    }
 
-
+======================
 Overlapping input data
 ======================
 
-There are applications in signal processing tasks, such as sliding window FFTs, 
+There are signal processing tasks, such as sliding window FFTs, 
 where overlapping data can improve computational efficiency. 
 Care must be taken to ensure proper memory management and alignment when using 
 overlapping input layouts.  
 
 The following example demonstrates the use of overlapping input data by configuring 
 the ``inembed``, ``istride``, and ``idist`` parameters in the :cpp:func:`hipfftMakePlanMany` 
-function. These parameters are set to create a memory layout where portions of 
+function. Set these parameters to create a memory layout where portions of 
 the input data are reused across multiple FFT batches: 
 
-- ``inembed`` specifies the physical layout of the input data in memory, with 
-  extra padding (for example, ``2240``) to allow for overlapping rows.
-- ``istride`` ensures continuous reading of data within each row (set to ``1``).
-- ``idist`` defines the distance between starting points of consecutive batches 
-  (for example, set to ``432``), which is smaller than the total memory implied by 
-  ``xformSz`` and ``inembed``.
+*  ``inembed`` specifies the physical layout of the input data in memory, with 
+   extra padding to accommodate overlapping rows (for example, ``2240``).
+
+*  ``istride`` ensures continuous reading of data within each row (if set to ``1``).
+
+*  ``idist`` defines the distance between the starting points of consecutive batches 
+   (for example, ``432``), which is smaller than the total memory implied by 
+   ``xformSz`` and ``inembed``.
 
 
 .. code-block:: cpp
@@ -421,28 +430,39 @@ the input data are reused across multiple FFT batches:
       return EXIT_SUCCESS;
    }
 
+=================
 Multi-GPU example
 =================
 
-The following example demonstrates a **Multi-GPU 2D double-precision complex-to-complex transform** using the hipFFT library. It showcases how to perform a 2D Fast Fourier Transform (FFT) in double precision (complex-to-complex) across two GPUs. The following concepts and API calls are used:
+The following example demonstrates a multi-GPU 2D double-precision complex-to-complex transform using the hipFFT library.
+It showcases how to perform a 2D Fast Fourier Transform (FFT) in double precision (complex-to-complex) across two GPUs.
+The following concepts and API calls are used:
 
-- :cpp:func:`hipfftXt`: This API allows users to execute FFTs across multiple GPUs by managing multi-GPU plans. hipfftXt provides an extended version of the hipFFT API to handle GPU-specific operations, such as memory allocation and execution across multiple devices.
+*  ``hipfftXt``: This API lets users execute FFTs across multiple GPUs by managing multi-GPU plans.
+   ``hipfftXt`` provides an extended version of the hipFFT API to handle GPU-specific operations, such as memory allocation
+   and execution across multiple devices. For more details, see the :doc:`API reference <../reference/fft-api-usage>`.
 
-- :cpp:func:`hipfftCreate`: Creates a hipFFT plan that contains the FFT configuration. This plan is used to configure the FFT transform operation.
+*  :cpp:func:`hipfftCreate`: Creates a hipFFT plan that contains the FFT configuration. This plan is used to configure
+   the FFT transform operation.
 
-- ``hipStreamCreate``: Creates a stream for managing GPU work concurrently, allowing the multi-GPU plan to be executed in parallel on multiple GPUs.
+*  ``hipStreamCreate``: Creates a stream for managing GPU work concurrently. This enables execution of the multi-GPU plan
+   in parallel on multiple GPUs. For more details, see :doc:`HIP <hip:index>`.
   
-- :cpp:func:`hipfftXtSetGPUs`: This function assigns the GPUs (in this case, two GPUs) to the hipFFT plan, enabling multi-GPU computation for the FFT.
+*  :cpp:func:`hipfftXtSetGPUs`: Assigns the GPUs (in this case, two GPUs) to the hipFFT plan,
+   enabling multi-GPU computation for the FFT.
   
-- :cpp:func:`hipfftMakePlan2d`: Creates a 2D FFT plan for the specified input/output size (Nx, Ny), specifying the transform type (complex-to-complex in this case).
+*  :cpp:func:`hipfftMakePlan2d`: Creates a 2D FFT plan for the specified input/output size (``Nx``, ``Ny``), specifying
+   the transform type (complex-to-complex in this case).
   
-- :cpp:func:`hipfftXtMalloc`: Allocates memory on the GPUs for storing the FFT input and output data.
+*  :cpp:func:`hipfftXtMalloc`: Allocates memory on the GPUs for storing the FFT input and output data.
   
-- :cpp:func:`hipfftXtMemcpy`: Copies data between the host and GPU memory, supporting both host-to-device and device-to-host operations.
+*  :cpp:func:`hipfftXtMemcpy`: Copies data between the host and GPU memory, supporting both host-to-device and
+   device-to-host operations.
   
-- :cpp:func:`hipfftXtExecDescriptor`: Executes the FFT operation based on the input descriptor (``desc``), which holds the input data and transform configuration.
+*  :cpp:func:`hipfftXtExecDescriptor`: Executes the FFT operation based on the input descriptor ``desc``,
+   which holds the input data and transform configuration.
   
-- :cpp:func:`hipfftXtFree`: Frees the memory allocated for the input/output descriptors after the computation is completed.
+*  :cpp:func:`hipfftXtFree`: Frees the memory allocated for the input/output descriptors after the computation is completed.
 
 For detailed API usage, see :ref:`hipfft-api-usage`.
 

@@ -5,20 +5,20 @@
 .. _hipfft-api-usage:
 
 ********************************************************************
-hipFFT API Usage
+hipFFT API usage
 ********************************************************************
 
-This section describes usage of the hipFFT library API.  The hipFFT
-API follows the NVIDIA `cuFFT`_ API.
+This section describes how to use the hipFFT library API. The hipFFT
+API follows the NVIDIA CUDA `cuFFT`_ API.
 
 .. _cuFFT: https://docs.nvidia.com/cuda/cufft/
 
-Types
-=====
+Data types
+==========
 
-There are a few data structures that are internal to the library.  The
-pointer types to these structures are given below.  The user would
-need to use these types to create handles and pass them between
+There are a few data structures that are internal to the library. The
+pointer types to these structures are listed below. Use these types to
+create handles and pass them between
 different library functions.
 
 .. doxygendefine:: HIPFFT_FORWARD
@@ -36,7 +36,7 @@ Simple plans
 ============
 
 These planning routines allocate a plan for you.  If execution of the
-plan requires a work buffer, it will be created (and destroyed)
+plan requires a work buffer, it will be created and destroyed
 automatically.
 
 .. doxygenfunction:: hipfftPlan1d
@@ -50,10 +50,7 @@ User managed simple plans
 -------------------------
 
 These planning routines assume that you have allocated a plan
-(`hipfftHandle`) yourself; and that you will manage a work area as
-well.
-
-If you want to manage your own work buffer... XXX
+(``hipfftHandle``) yourself and that you will manage a work area.
 
 .. doxygenfunction:: hipfftCreate
 
@@ -79,12 +76,12 @@ Advanced plans
 Estimating work area sizes
 ==========================
 
-These call return estimates of the work area required to support a
+These calls return estimates of the work area required to support a
 plan generated with the same parameters (either with the simple or
-extensible API).  Callers who choose to manage work area allocation
-within their application must use this call after plan generation, and
-after any hipfftSet*() calls subsequent to plan generation, if those
-calls might alter the required work space size.
+extensible API). Applications that manage the work area allocation
+themselves must use this call after plan generation and
+after any ``hipfftSet*()`` calls subsequent to the plan generation if those
+calls can alter the required work space size.
 
 .. doxygenfunction:: hipfftEstimate1d
 
@@ -99,7 +96,7 @@ Accurate work area sizes
 ------------------------
 
 After plan generation is complete, an accurate work area size can be
-obtained with these routines.
+obtained using these routines.
 
 .. doxygenfunction:: hipfftGetSize1d
 
@@ -115,12 +112,8 @@ obtained with these routines.
 Executing plans
 ===============
 
-Once you have created an FFT plan, you can execute it using one of the
-`hipfftExec*` functions.
-
-For real-to-complex transforms, the output buffer XXX
-
-For complex-to-real transforms, the output buffer XXX
+After you have created an FFT plan, you can execute it using one of the
+``hipfftExec*`` functions.
 
 .. doxygenfunction:: hipfftExecC2C
 
@@ -142,8 +135,8 @@ HIP graph support for hipFFT
 ============================
 
 hipFFT supports capturing kernels launched during FFT execution into
-HIP graph nodes.  This way, users can capture FFT execution, along
-with other work, into a HIP graph and launch the work in the graph
+HIP graph nodes. This way, you can capture the FFT execution and other work
+into a HIP graph and launch the work in the graph
 multiple times.
 
 The following hipFFT APIs can be used with graph capture:
@@ -160,17 +153,19 @@ The following hipFFT APIs can be used with graph capture:
 
 * :cpp:func:`hipfftExecZ2D`
 
-Note that each launch of a HIP graph will provide the same arguments
-to the kernels in the graph.  In particular, this implies that all of
-the parameters to the above APIs remain valid while the HIP graph is
-in use:
+.. note::
 
-* The hipFFT plan
+   Each launch of a HIP graph provides the same arguments
+   to the kernels in the graph. This implies that all of
+   the parameters to the above APIs remain valid while the HIP graph is
+   in use, including:
 
-* The input and output buffers
+   *  The hipFFT plan
 
-hipFFT does not support capturing work performed by other API
-functions aside from those listed above.
+   *  The input and output buffers
+
+   hipFFT does not support capturing work performed by other API
+   functions other than those listed above.
 
 Callbacks
 =========
@@ -180,19 +175,19 @@ Callbacks
 .. doxygenfunction:: hipfftXtSetCallbackSharedSize
 
 		     
-Single-process Multi-GPU Transforms
+Single-process multi-GPU transforms
 ===================================
 
 hipFFT offers experimental support for distributing a transform
 across multiple GPUs in a single process.
 
-The API usage works as follows:
+To implement this functionality, use the API as follows:
 
-1. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+#. Create a hipFFT plan handle using :cpp:func:`hipfftCreate`.
 
-2. Associate a set of GPU devices to the plan by calling :cpp:func:`hipfftXtSetGPUs`.
+#. Associate a set of GPU devices to the plan by calling :cpp:func:`hipfftXtSetGPUs`.
 
-3. Make the plan by calling one of:
+#. Make the plan by calling one of:
 
    * :cpp:func:`hipfftMakePlan1d`
    * :cpp:func:`hipfftMakePlan2d`
@@ -201,13 +196,13 @@ The API usage works as follows:
    * :cpp:func:`hipfftMakePlanMany64`
    * :cpp:func:`hipfftXtMakePlanMany`
 
-4. Allocate memory for the data on the devices with
+#. Allocate memory for the data on the devices with
    :cpp:func:`hipfftXtMalloc`, which returns the allocated memory as
    a :cpp:struct:`hipLibXtDesc` descriptor.
 
-5. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
+#. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
 
-6. Execute the plan by calling one of:
+#. Execute the plan by calling one of:
 
    * :cpp:func:`hipfftXtExecDescriptor`
    * :cpp:func:`hipfftXtExecDescriptorC2C`
@@ -219,11 +214,11 @@ The API usage works as follows:
 
    Pass the descriptor as input and output.
 
-7. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
+#. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
 
-8. Free the descriptor with :cpp:func:`hipfftXtFree`.
+#. Free the descriptor using :cpp:func:`hipfftXtFree`.
 
-9. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
+#. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
 
 .. doxygenfunction:: hipfftXtSetGPUs
 
@@ -239,43 +234,43 @@ The API usage works as follows:
 Multi-process transforms
 ========================
 
-hipFFT has experimental support for transforms distributed across MPI (Message 
+hipFFT has experimental support for transforms that are distributed across MPI (Message 
 Passing Interface) processes.
 
-Support for MPI transforms was introduced in ROCm 6.4 with hipFFT 1.0.18.
+Support for MPI transforms was introduced in ROCm 6.4 as part of hipFFT 1.0.18.
+
+MPI must be initialized before creating a multi-process hipFFT plan.
 
 .. note::
 
    hipFFT MPI support is only available when the library is built
-   with the `HIPFFT_MPI_ENABLE` CMake option enabled. By default, it
+   with the ``HIPFFT_MPI_ENABLE`` CMake option enabled. By default, MPI support
    is off.
 
-   Additionally, hipFFT MPI support requires its backend FFT library
-   to also support MPI.  This means that either an MPI-enabled rocFFT
+   In addition, hipFFT MPI support requires the backend FFT library
+   to also support MPI. This means that either an MPI-enabled rocFFT
    library or cuFFTMp must be used.
 
    Finally, hipFFT API calls made on different ranks might return
-   different values.  Users must take care to ensure that all ranks
+   different values. You must take care to ensure that all ranks
    have successfully created their plans before attempting to execute
-   a distributed transform, and it is possible for one rank to fail
-   to create/execute a plan while the others succeed.
-
-MPI must be initialized before creating multi-process hipFFT plans.
+   a distributed transform. It's possible for one rank to fail
+   to create and execute a plan while the others succeed.
 
 Built-in decomposition
 ----------------------
 
-hipFFT can automatically decide the data decomposition for
-distributed transforms.  The API usage is similar to the
+hipFFT can automatically decide on the data decomposition for
+distributed transforms. The API usage is similar to the
 single-process, multi-GPU case described above.
 
-1. On all ranks in the MPI communicator:
+#. On all ranks in the MPI communicator:
 
-   i. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+   #. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
 
-   ii. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
+   #. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
 
-   iii. Make the plan by calling one of:
+   #. Make the plan by calling one of:
 
       * :cpp:func:`hipfftMakePlan1d`
       * :cpp:func:`hipfftMakePlan2d`
@@ -284,16 +279,16 @@ single-process, multi-GPU case described above.
       * :cpp:func:`hipfftMakePlanMany64`
       * :cpp:func:`hipfftXtMakePlanMany`
 
-      .. note::
+   .. note::
 
-         Not all backend FFT libraries support distributing all
-         transforms.  Check the documentation for the backend FFT library
-         for any restrictions on distributed transform types, placement,
-         sizes, or data layouts.
+      Not all backend FFT libraries support distributing all
+      transforms. Check the documentation for the backend FFT library
+      for any restrictions on distributed transform types, placement,
+      sizes, or data layouts.
 
-2. Copy data from the host to the descriptor with :cpp:func:`hipfftXtMemcpy`.
+#. Copy data from the host to the descriptor using :cpp:func:`hipfftXtMemcpy`.
 
-3. Execute the plan by calling one of:
+#. Execute the plan by calling one of:
 
    * :cpp:func:`hipfftXtExec`
    * :cpp:func:`hipfftXtExecDescriptorC2C`
@@ -303,32 +298,30 @@ single-process, multi-GPU case described above.
    * :cpp:func:`hipfftXtExecDescriptorD2Z`
    * :cpp:func:`hipfftXtExecDescriptorZ2D`
 
-4. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
+#. Copy the output from the descriptor back to the host with :cpp:func:`hipfftXtMemcpy`.
 
-5. Free the descriptor with :cpp:func:`hipfftXtFree`.
+#. Free the descriptor with :cpp:func:`hipfftXtFree`.
 
-6. On all ranks in the MPI communicator:
-
-   i. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
+#. On all ranks in the MPI communicator, clean up the plan by calling :cpp:func:`hipfftDestroy`.
 
 Custom decomposition
 --------------------
 
 hipFFT also allows an arbitrary decomposition of the FFT into 1D, 2D, or
-3D bricks.  Each MPI rank calls :cpp:func:`hipfftXtSetDistribution`
+3D bricks. Each MPI rank calls :cpp:func:`hipfftXtSetDistribution`
 during plan creation to declare which input and output brick resides
 on that rank.
 
-The same API calls are made on each rank in the MPI communicator, as follows:
+The same API calls are made on each rank in the MPI communicator as follows:
 
-1. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
+#. Create a hipFFT plan handle with :cpp:func:`hipfftCreate`.
 
-2. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
+#. Attach the MPI communicator to the plan with :cpp:func:`hipfftMpAttachComm`.
 
-3. Call :cpp:func:`hipfftXtSetDistribution` to specify the input and output brick for the current rank.
+#. Call :cpp:func:`hipfftXtSetDistribution` to specify the input and output brick for the current rank.
 
    Bricks are specified by their lower and upper coordinates in
-   the input/output index space.  The lower coordinate is
+   the input/output index space. The lower coordinate is
    inclusive (contained within the brick) and the upper
    coordinate is exclusive (first index past the end of the
    brick).
@@ -336,41 +329,41 @@ The same API calls are made on each rank in the MPI communicator, as follows:
    Strides for the input/output data are also provided, to
    describe how the bricks are laid out in physical memory.
 
-   Each coordinate and stride contains the same number of elements as
-   the number of dimensions in the FFT.  Note that this also implies
+   Each coordinate and stride contain the same number of elements as
+   the number of dimensions in the FFT. This also implies
    that batched FFTs are not supported when using MPI, because the
    coordinates and strides do not contain information about the batch
    dimension.
 
-4. Make the plan by calling one of:
+#. Make the plan by calling one of:
 
    * :cpp:func:`hipfftMakePlan1d`
    * :cpp:func:`hipfftMakePlan2d`
    * :cpp:func:`hipfftMakePlan3d`
 
-   "PlanMany" APIs enable batched FFTs and are not usable with
+   The "PlanMany" APIs enable batched FFTs and are not usable with
    MPI.
 
    .. note::
 
       Not all backend FFT libraries support distributing all
-      transforms.  Check the documentation for the backend FFT library
+      transforms. Consult the documentation for the backend FFT library
       for any restrictions on distributed transform types, placement,
       sizes, or data layouts.
 
-5. Call :cpp:func:`hipfftXtMalloc` with
+#. Call :cpp:func:`hipfftXtMalloc` with
    :cpp:enum:`HIPFFT_XT_FORMAT_DISTRIBUTED_INPUT` to
-   allocate the input brick on the current rank.  The allocated
+   allocate the input brick on the current rank. The allocated
    memory is returned as a :cpp:struct:`hipLibXtDesc` descriptor.
 
-6. Call :cpp:func:`hipfftXtMalloc` with
+#. Call :cpp:func:`hipfftXtMalloc` with
    :cpp:enum:`HIPFFT_XT_FORMAT_DISTRIBUTED_OUTPUT` to
-   allocate the output brick on the current rank.  The allocated
+   allocate the output brick on the current rank. The allocated
    memory is returned as a :cpp:struct:`hipLibXtDesc` descriptor.
 
-7. Initialize the memory pointed to by the descriptor.
+#. Initialize the memory pointed to by the descriptor.
 
-8. Execute the plan by calling one of:
+#. Execute the plan by calling one of:
 
    * :cpp:func:`hipfftXtExecDescriptor`
    * :cpp:func:`hipfftXtExecDescriptorC2C`
@@ -382,11 +375,11 @@ The same API calls are made on each rank in the MPI communicator, as follows:
 
    Pass the input descriptor as input and the output descriptor as output.
 
-9. Use the transformed data pointed to by the output descriptor.
+#. Use the transformed data pointed to by the output descriptor.
 
-10. Free the descriptors with :cpp:func:`hipfftXtFree`.
+#. Free the descriptors with :cpp:func:`hipfftXtFree`.
 
-11. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
+#. Clean up the plan by calling :cpp:func:`hipfftDestroy`.
 
 .. doxygenfunction:: hipfftMpAttachComm
 .. doxygenfunction:: hipfftXtSetDistribution

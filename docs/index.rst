@@ -8,23 +8,37 @@
 hipFFT documentation
 ********************************************************************
 
-Welcome to the hipFFT documentation home page. hipFFT is an FFT marshalling library. Currently, hipFFT supports either rocFFT_ or NVIDIA cuFFT_ as the backend, as explained in :ref:`hipfft-overview`.
+hipFFT is an FFT (fast Fourier transform) marshalling library. It supports either :doc:`rocFFT <rocfft:index>` or
+NVIDIA CUDA cuFFT_ as the backend. hipFFT sits between the
+application and the backend FFT library, marshalling inputs into the
+backend and results back to the application.
+For more information, see the :ref:`hipfft-overview`.
 
 .. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
 .. _cuFFT: https://developer.nvidia.com/cufft
 
-The hipFFT documentation is structured as follows:
+The hipFFT public repository is located at `<https://github.com/ROCm/hipFFT>`_.
 
 .. grid:: 2
   :gutter: 3
 
-  .. grid-item-card:: Reference
+  .. grid-item-card:: Install
 
-    * :ref:`hipfft-overview`
-    * :ref:`hipfft-api-usage`
-    * :ref:`genindex`
+    * :doc:`Installation guide <./install/building-installing-hipfft>`
 
+  .. grid-item-card:: Conceptual
 
-To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+    * :doc:`hipFFT overview <./conceptual/overview>`
+
+  .. grid-item-card:: Examples
+
+    * `hipFFT examples <https://github.com/ROCm/hipFFT/tree/develop/clients/samples>`_
+
+  .. grid-item-card:: API Reference
+
+    * :doc:`API and usage notes <./reference/fft-api-usage>`
+    * :ref:`API Index <genindex>`
+
+To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.
