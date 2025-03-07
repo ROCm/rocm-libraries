@@ -30,6 +30,7 @@
 #include "../../swizzle.hpp"
 #include "../../pack_util.hpp"
 #include "../../vector.hpp"
+#include "transforms_int_impl.hpp"
 
 namespace rocwmma
 {
@@ -106,6 +107,118 @@ namespace Transforms
             // f32 -> nop
             using PackUtil = PackUtil<typename VecTraits::DataT>;
             return PackUtil::template unpad<>(PackUtil::pack(v));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template <typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_input_gfx11(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            return to_wmma_input_gfx11(forward<VecT>(v));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_input_gfx11(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            // Step 1: Transform from aos_int -> soa_int
+            // Step 2: Transform to wmma_input.
+            return soa_to_wmma_input_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template <typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_soa(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            return from_wmma_acc_gfx11(forward<VecT>(v));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_aos(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            // Step 1: Transform from wmma_input_gfx11 -> soa
+            // Step 2: Transform from soa -> aos
+            return soa_to_aos<BlockDim, MaxVectorWidth>(wmma_input_gfx11_to_soa(forward<VecT>(v)));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template <typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_acc_gfx11(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            return to_wmma_acc_gfx11(forward<VecT>(v));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_acc_gfx11(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            // Step 1: Transform from aos -> soa
+            // Then transform to wmma_input.
+            return soa_to_wmma_acc_gfx11(aos_to_soa<BlockDim, MaxVectorWidth>(forward<VecT>(v)));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template <typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_soa(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            return from_wmma_acc_gfx11(forward<VecT>(v));
+        }
+        else
+        {
+            return forward<VecT>(v);
+        }
+    }
+
+    template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+    ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_aos(VecT&& v)
+    {
+        if constexpr((bool)ROCWMMA_ARCH_GFX11)
+        {
+            // First need to transform from aos_int -> soa_int
+            // Then transform to wmma_input.
+            return soa_to_aos<BlockDim, MaxVectorWidth>(wmma_acc_gfx11_to_soa(forward<VecT>(v)));
         }
         else
         {

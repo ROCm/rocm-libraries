@@ -122,7 +122,6 @@ namespace rocwmma
             }
             else
             {
-                //static_assert(0, "Shouldn't get here");
                 return forward<VecT>(v);
             }
         }

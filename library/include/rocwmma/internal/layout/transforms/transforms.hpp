@@ -32,33 +32,33 @@ namespace rocwmma
 {
     namespace Transforms
     {
-        // Specific transforms for non-interleaved layouts
-        template<uint32_t KPerThread, typename VecT>
+        // Transforms for non-interleaved layouts
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_aos(VecT&& v);
 
-        template<uint32_t DimPerThread, typename VecT>
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_soa(VecT&& v);
 
-        // Specific transforms for interleaved layouts
-        template<uint32_t KPerThread, typename VecT>
+        // Transforms for interleaved layouts
+        template <uint32_t KPerThread, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_aos_int(VecT&& v);
 
-        template<uint32_t DimPerThread, typename VecT>
+        template <uint32_t DimPerThread, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_soa_int(VecT&& v);
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MaxVW, typename VecT>
+        template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_mma_acc_int_a_major(VecT&& v);
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t MaxVW, typename VecT>
+        template <uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_soa_int(VecT&& v);
 
-        template<uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MmaBlocksB, uint32_t MaxVW, typename VecT>
+        template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_mma_acc_int_a_major(VecT&& v);
 
-        template<uint32_t AccVecSize, uint32_t MaxVW, typename VecT>
+        template <uint32_t AccVecSize, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_aos_int(VecT&& v);
 
-        // Specific transforms for wmma layouts
+        // Transforms for wmma layouts (gfx11)
         template<typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) to_wmma_input_gfx11(VecT&& v);
 
@@ -71,11 +71,68 @@ namespace rocwmma
         template<typename VecT>
         ROCWMMA_DEVICE constexpr static inline decltype(auto) from_wmma_acc_gfx11(VecT&& v);
 
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_input_gfx11(VecT&& v);
+
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_input_gfx11(VecT&& v);
+
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_soa(VecT&& v);
+
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_aos(VecT&& v);
+
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_to_wmma_acc_gfx11(VecT&& v);
+
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_to_wmma_acc_gfx11(VecT&& v);
+
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_soa(VecT&& v);
+
+        template<uint32_t BlockDim, uint32_t MaxVectorWidth, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_aos(VecT&& v);
+
+        // Transforms for interleaved wmma layouts (gfx11)
+        template <uint32_t InputBlockSize, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_wmma_input_gfx11(VecT&& v);
+
+        template <uint32_t DimPerThread, uint32_t InputBlockSize, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_wmma_input_gfx11(VecT&& v);
+
+        template <uint32_t InputBlockSize, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_soa_int(VecT&& v);
+
+        template <uint32_t KPerThread, uint32_t InputBlockSize, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_input_gfx11_to_aos_int(VecT&& v);
+
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) mma_acc_int_a_major_to_wmma_acc_gfx11(VecT&& v);
+
+        template <typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_mma_acc_int_a_major(VecT&& v);
+
+        template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) soa_int_to_wmma_acc_gfx11(VecT&& v);
+
+        template <uint32_t AccVecSize, uint32_t MmaBlocksA, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) aos_int_to_wmma_acc_gfx11(VecT&& v);
+
+        template <uint32_t AccVecSize, uint32_t MmaBlocksB, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_soa_int(VecT&& v);
+
+        template <uint32_t AccVecSize, uint32_t AccMaxVW, uint32_t MmaDim, typename VecT>
+        ROCWMMA_DEVICE constexpr static inline decltype(auto) wmma_acc_gfx11_to_aos_int(VecT&& v);
+
     } // namespace Transforms
 
 } // namespace rocwmma
 
+#include "transforms_impl.hpp"
 #include "transforms_int_impl.hpp"
+#include "transforms_int_wmma_impl.hpp"
 #include "transforms_wmma_impl.hpp"
 
 #endif // ROCWMMA_LAYOUT_TRANSFORMS_HPP
