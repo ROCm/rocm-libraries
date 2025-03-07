@@ -44,38 +44,56 @@ ROCSOLVER_BEGIN_NAMESPACE
 /************************************************************************************/
 
 template <typename S, typename T, typename I>
-static void swap_template(I const n, T* x, I const incx, T* y, I const incy, hipStream_t stream)
+static void swap_template(rocblas_handle handle,
+                          I const n,
+                          T* x,
+                          I const incx,
+                          T* y,
+                          I const incy,
+                          hipStream_t stream)
 {
     auto nthreads = warpSize * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
-    hipLaunchKernelGGL((swap_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0, stream,
-                       n, x, incx, y, incy);
+    ROCSOLVER_LAUNCH_KERNEL((swap_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
+                            stream, n, x, incx, y, incy);
 }
 
 template <typename S, typename T, typename I>
-static void
-    rot_template(I const n, T* x, I const incx, T* y, I const incy, S const c, S const s, hipStream_t stream)
+static void rot_template(rocblas_handle handle,
+                         I const n,
+                         T* x,
+                         I const incx,
+                         T* y,
+                         I const incy,
+                         S const c,
+                         S const s,
+                         hipStream_t stream)
 {
     auto nthreads = warpSize * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
-    hipLaunchKernelGGL((rot_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0, stream,
-                       n, x, incx, y, incy, c, s);
+    ROCSOLVER_LAUNCH_KERNEL((rot_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
+                            stream, n, x, incx, y, incy, c, s);
 }
 
 template <typename S, typename T, typename I>
-static void scal_template(I const n, S const da, T* const x, I const incx, hipStream_t stream)
+static void scal_template(rocblas_handle handle,
+                          I const n,
+                          S const da,
+                          T* const x,
+                          I const incx,
+                          hipStream_t stream)
 {
     auto nthreads = warpSize * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
-    hipLaunchKernelGGL((scal_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0, stream,
-                       n, da, x, incx);
+    ROCSOLVER_LAUNCH_KERNEL((scal_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
+                            stream, n, da, x, incx);
 }
 
 /** Call to lasr functionality.
-    lasr_body can be executed as a host or device function **/
+    run_lasr can be executed as a host or device function **/
 template <typename S, typename T, typename I>
 static void call_lasr(rocblas_side& side,
                       rocblas_pivot& pivot,
@@ -90,7 +108,7 @@ static void call_lasr(rocblas_side& side,
     I const tid = 0;
     I const i_inc = 1;
 
-    lasr_body<T, S, I>(side, pivot, direct, m, n, &c, &s, &A, lda, tid, i_inc);
+    run_lasr<T, S, I>(side, pivot, direct, m, n, &c, &s, &A, lda, tid, i_inc);
 }
 
 /************************************************************************************/
@@ -121,15 +139,16 @@ static void bdsqr_single_template(rocblas_handle handle,
     // Lambda expressions used as helpers
     // -------------------------------------
     auto call_swap_gpu = [=](I n, T& x, I incx, T& y, I incy) {
-        swap_template<S, T, I>(n, &x, incx, &y, incy, stream);
+        swap_template<S, T, I>(handle, n, &x, incx, &y, incy, stream);
     };
 
     auto call_rot_gpu = [=](I n, T& x, I incx, T& y, I incy, S cosl, S sinl) {
-        rot_template<S, T, I>(n, &x, incx, &y, incy, cosl, sinl, stream);
+        rot_template<S, T, I>(handle, n, &x, incx, &y, incy, cosl, sinl, stream);
     };
 
-    auto call_scal_gpu
-        = [=](I n, auto da, T& x, I incx) { scal_template<S, T, I>(n, da, &x, incx, stream); };
+    auto call_scal_gpu = [=](I n, auto da, T& x, I incx) {
+        scal_template<S, T, I>(handle, n, da, &x, incx, stream);
+    };
 
     auto call_lasr_gpu_nocopy
         = [=](rocblas_side const side, rocblas_pivot const pivot, rocblas_direct const direct,

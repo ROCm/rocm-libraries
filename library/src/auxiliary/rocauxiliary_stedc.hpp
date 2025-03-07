@@ -892,6 +892,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_solve_kernel(const roc
     rocblas_int tid = hipBlockIdx_x;
     // thread index
     rocblas_int tidb = hipThreadIdx_x;
+    rocblas_int tidb_inc = hipBlockDim_x;
     /* --------------------------------------------------- */
 
     // select batch instance to work with
@@ -961,11 +962,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM) stedc_solve_kernel(const roc
             sbs = ns[tid];
             p2 = ps[tid];
 
-            // (Until STEQR is parallelized, only the first thread associated
-            // with each sub-block does computations)
-            if(tidb == 0)
-                run_steqr(sbs, D + p2, E + p2, C + p2 + p2 * ldc, ldc, info, W + p2 * 2, 30 * bs,
-                          eps, ssfmin, ssfmax, false);
+            run_steqr(tidb, tidb_inc, sbs, D + p2, E + p2, C + p2 + p2 * ldc, ldc, info, W + p2 * 2,
+                      30 * bs, eps, ssfmin, ssfmax, false);
             __syncthreads();
         }
     }

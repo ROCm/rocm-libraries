@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2013
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,17 +45,17 @@ ROCSOLVER_BEGIN_NAMESPACE
 /********************************************************************************/
 
 template <typename T, typename S, typename I>
-__host__ __device__ static void lasr_body(const rocblas_side side,
-                                          const rocblas_pivot pivot,
-                                          const rocblas_direct direct,
-                                          I const m,
-                                          I const n,
-                                          S* c,
-                                          S* s,
-                                          T* A,
-                                          I const lda,
-                                          I const tid,
-                                          I const t_inc)
+__host__ __device__ static void run_lasr(const rocblas_side side,
+                                         const rocblas_pivot pivot,
+                                         const rocblas_direct direct,
+                                         I const m,
+                                         I const n,
+                                         S* c,
+                                         S* s,
+                                         T* A,
+                                         I const lda,
+                                         I const tid,
+                                         I const t_inc)
 {
     // ---------------------
     // determine path case
@@ -383,7 +383,7 @@ __global__ static void __launch_bounds__(LASR_MAX_NTHREADS)
         S* C_ = CA + bid * strideC;
         S* S_ = SA + bid * strideS;
 
-        lasr_body(side, pivot, direct, m, n, C_, S_, A_, lda, tid, t_inc);
+        run_lasr(side, pivot, direct, m, n, C_, S_, A_, lda, tid, t_inc);
     }
 }
 
@@ -469,9 +469,9 @@ rocblas_status rocsolver_lasr_template(rocblas_handle handle,
     auto const mn = (is_side_left) ? n : m;
     auto const nblocks = (mn - 1) / nthreads + 1;
 
-    hipLaunchKernelGGL((lasr_kernel<T>), dim3(nblocks, 1, batch_count), dim3(nthreads, 1, 1), 0,
-                       stream, side, pivot, direct, m, n, CA, strideC, SA, strideS, AA, shiftA, lda,
-                       strideA, batch_count);
+    ROCSOLVER_LAUNCH_KERNEL((lasr_kernel<T>), dim3(nblocks, 1, batch_count), dim3(nthreads, 1, 1),
+                            0, stream, side, pivot, direct, m, n, CA, strideC, SA, strideS, AA,
+                            shiftA, lda, strideA, batch_count);
 
     return rocblas_status_success;
 }
