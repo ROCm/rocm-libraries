@@ -162,6 +162,12 @@ set(rocsolver_lapack_source
   lapack/roclapack_gesvd.cpp
   lapack/roclapack_gesvd_batched.cpp
   lapack/roclapack_gesvd_strided_batched.cpp
+  #- divide-and-conquer
+  lapack/roclapack_gesdd.cpp
+  lapack/roclapack_gesdd_batched.cpp
+  lapack/roclapack_gesdd_strided_batched.cpp
+  # lapack/roclapack_gesdd_notransv.cpp
+  # lapack/roclapack_gesdd_notransv_strided_batched.cpp
   #- jacobi
   lapack/roclapack_gesvdj.cpp
   lapack/roclapack_gesvdj_batched.cpp

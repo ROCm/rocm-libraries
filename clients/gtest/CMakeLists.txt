@@ -56,6 +56,7 @@ set(roclapack_test_source
   lapack/sygsx_hegsx_gtest.cpp
   # singular value decomposition
   lapack/gesvd_gtest.cpp
+  lapack/gesdd_gtest.cpp
   lapack/gesvdj_gtest.cpp
   lapack/gesvdx_gtest.cpp
   # symmetric eigensolvers

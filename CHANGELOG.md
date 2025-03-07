@@ -8,6 +8,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Hybrid computation support for existing routines:
     - STERF
+* SVD for general matrices based on Cuppen's Divide and Conquer algorithm:
+    - GESDD (with batched and strided\_batched versions)
 
 ### Changed
 ### Removed

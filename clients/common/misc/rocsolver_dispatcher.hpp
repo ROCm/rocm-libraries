@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -73,6 +73,7 @@
 #include "common/lapack/testing_geql2_geqlf.hpp"
 #include "common/lapack/testing_geqr2_geqrf.hpp"
 #include "common/lapack/testing_gerq2_gerqf.hpp"
+#include "common/lapack/testing_gesdd.hpp"
 #include "common/lapack/testing_gesv.hpp"
 #include "common/lapack/testing_gesvd.hpp"
 #include "common/lapack/testing_gesvdj.hpp"
@@ -250,6 +251,10 @@ class rocsolver_dispatcher
             {"gesvd", testing_gesvd<false, false, T>},
             {"gesvd_batched", testing_gesvd<true, true, T>},
             {"gesvd_strided_batched", testing_gesvd<false, true, T>},
+            // gesdd
+            {"gesdd", testing_gesdd<false, false, T>},
+            {"gesdd_batched", testing_gesdd<true, true, T>},
+            {"gesdd_strided_batched", testing_gesdd<false, true, T>},
             // gesvdj
             {"gesvdj", testing_gesvdj<false, false, T>},
             {"gesvdj_batched", testing_gesvdj<true, true, T>},
