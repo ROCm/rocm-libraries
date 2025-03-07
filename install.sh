@@ -334,6 +334,7 @@ build_dir_user=build
 tensile_no_lazy_library_loading=false
 enable_hipsparselt_marker=false
 enable_tensile_marker=false
+blis_dir=
 
 if ! [ -z ${ROCM_PATH+x} ]; then
     rocm_path=${ROCM_PATH}
@@ -473,29 +474,36 @@ fi
 build_dir=$(readlink -m ${build_dir_user})
 
 printf "\033[32mCreating project build directory in: \033[33m${build_dir}\033[0m\n"
+
 install_blis()
 {
-    #Download prebuilt AMD multithreaded blis
-    if [[ ! -e "${build_dir}/deps/blis/lib/libblis.a" ]]; then
-      case "${ID}" in
-          centos|rhel|sles|opensuse-leap)
-              wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-centos-2.0.tar.gz
-              ;;
-          ubuntu)
-              wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
-              ;;
-          *)
-              echo "Unsupported OS for this script"
-              wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
-              ;;
-      esac
+    if [[ ! -e "/opt/AMD/aocl/aocl-linux-gcc-4.2.0/gcc/lib_ILP64/libblis-mt.a" ]] &&
+        [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.1.0/aocc/lib_ILP64/libblis-mt.a" ]] &&
+        [[ ! -e "/opt/AMD/aocl/aocl-linux-aocc-4.0/lib_ILP64/libblis-mt.a"  ]] &&
+        [[ ! -e "/usr/local/lib/libblis.a" ]]; then
+      #Download prebuilt AMD multithreaded blis
+      if [[ ! -e "${build_dir}/deps/blis/lib/libblis.a" ]]; then
+          case "${ID}" in
+              centos|rhel|sles|opensuse-leap)
+                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-centos-2.0.tar.gz
+                  ;;
+              ubuntu)
+                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
+                  ;;
+              *)
+                  echo "Unsupported OS for this script"
+                  wget -nv -O blis.tar.gz https://github.com/amd/blis/releases/download/2.0/aocl-blis-mt-ubuntu-2.0.tar.gz
+                  ;;
+          esac
 
-      tar -xvf blis.tar.gz
-      rm -rf blis/amd-blis-mt
-      mv amd-blis-mt blis
-      rm blis.tar.gz
-      cd blis/lib
-      ln -sf libblis-mt.a libblis.a
+          tar -xvf blis.tar.gz
+          rm -rf blis/amd-blis-mt
+          mv amd-blis-mt blis
+          rm blis.tar.gz
+          cd blis/lib
+          ln -sf libblis-mt.a libblis.a
+      fi
+      blis_dir=${build_dir}
     fi
 }
 
@@ -624,7 +632,10 @@ pushd .
       mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
       install_blis
       popd
-      cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON -DLINK_BLIS=${LINK_BLIS} -DBUILD_DIR=${build_dir}"
+      cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCHMARKS=ON -DLINK_BLIS=${LINK_BLIS}"
+      if [[ -n "${blis_dir}" ]]; then
+        cmake_common_options="${cmake_common_options} -DBUILD_DIR=${blis_dir}"
+      fi
   fi
 
   if [[ -n "${tensile_fork}" ]]; then
