@@ -4,6 +4,9 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
+### Removed
+* This release removes support for custom builds on gfx940 and gfx941.
+
 ### Added
 
 * Added gfx950 support.

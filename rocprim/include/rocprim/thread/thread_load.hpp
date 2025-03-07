@@ -109,9 +109,7 @@ T asm_thread_load(void* ptr)
     ROCPRIM_ASM_THREAD_LOAD(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_load_dwordx2, v, wait_inst, wait_cmd);
     // clang-format on
 
-    #if defined(__gfx940__) || defined(__gfx941__)
-ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc1", "s_waitcnt", "");
-    #elif defined(__gfx942__) || defined(__gfx950__)
+    #if defined(__gfx942__) || defined(__gfx950__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "sc0 nt", "s_waitcnt", "");
     #elif defined(__gfx1200__) || defined(__gfx1201__)
 ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cg, "th:TH_DEFAULT scope:SCOPE_DEV", "s_wait_loadcnt_dscnt", "");
