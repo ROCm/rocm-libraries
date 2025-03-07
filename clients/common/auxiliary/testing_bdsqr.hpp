@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -478,7 +478,7 @@ void testing_bdsqr(Arguments& argus)
     rocblas_fill uplo = char2rocblas_fill(uploC);
     rocblas_int hot_calls = argus.iters;
 
-    if(argus.alg_mode)
+    if(argus.alg_mode == 1)
     {
         EXPECT_ROCBLAS_STATUS(
             rocsolver_set_alg_mode(handle, rocsolver_function_bdsqr, rocsolver_alg_mode_hybrid),

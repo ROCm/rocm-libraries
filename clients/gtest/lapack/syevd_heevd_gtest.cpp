@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,6 +81,7 @@ Arguments syevd_heevd_setup_arguments(syevd_heevd_tuple tup)
     return arg;
 }
 
+template <rocblas_int MODE>
 class SYEVD_HEEVD : public ::TestWithParam<syevd_heevd_tuple>
 {
 protected:
@@ -93,6 +94,7 @@ protected:
     void run_tests()
     {
         Arguments arg = syevd_heevd_setup_arguments(GetParam());
+        arg.alg_mode = MODE;
 
         if(arg.peek<rocblas_int>("n") == 0 && arg.peek<char>("evect") == 'N'
            && arg.peek<char>("uplo") == 'L')
@@ -103,11 +105,19 @@ protected:
     }
 };
 
-class SYEVD : public SYEVD_HEEVD
+class SYEVD : public SYEVD_HEEVD<0>
 {
 };
 
-class HEEVD : public SYEVD_HEEVD
+class HEEVD : public SYEVD_HEEVD<0>
+{
+};
+
+class SYEVD_HYBRID : public SYEVD_HEEVD<1>
+{
+};
+
+class HEEVD_HYBRID : public SYEVD_HEEVD<1>
 {
 };
 
@@ -129,6 +139,26 @@ TEST_P(HEEVD, __float_complex)
 }
 
 TEST_P(HEEVD, __double_complex)
+{
+    run_tests<false, false, rocblas_double_complex>();
+}
+
+TEST_P(SYEVD_HYBRID, __float)
+{
+    run_tests<false, false, float>();
+}
+
+TEST_P(SYEVD_HYBRID, __double)
+{
+    run_tests<false, false, double>();
+}
+
+TEST_P(HEEVD_HYBRID, __float_complex)
+{
+    run_tests<false, false, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_HYBRID, __double_complex)
 {
     run_tests<false, false, rocblas_double_complex>();
 }
@@ -155,6 +185,26 @@ TEST_P(HEEVD, batched__double_complex)
     run_tests<true, true, rocblas_double_complex>();
 }
 
+TEST_P(SYEVD_HYBRID, batched__float)
+{
+    run_tests<true, true, float>();
+}
+
+TEST_P(SYEVD_HYBRID, batched__double)
+{
+    run_tests<true, true, double>();
+}
+
+TEST_P(HEEVD_HYBRID, batched__float_complex)
+{
+    run_tests<true, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_HYBRID, batched__double_complex)
+{
+    run_tests<true, true, rocblas_double_complex>();
+}
+
 // strided_batched tests
 
 TEST_P(SYEVD, strided_batched__float)
@@ -177,13 +227,49 @@ TEST_P(HEEVD, strided_batched__double_complex)
     run_tests<false, true, rocblas_double_complex>();
 }
 
+TEST_P(SYEVD_HYBRID, strided_batched__float)
+{
+    run_tests<false, true, float>();
+}
+
+TEST_P(SYEVD_HYBRID, strided_batched__double)
+{
+    run_tests<false, true, double>();
+}
+
+TEST_P(HEEVD_HYBRID, strided_batched__float_complex)
+{
+    run_tests<false, true, rocblas_float_complex>();
+}
+
+TEST_P(HEEVD_HYBRID, strided_batched__double_complex)
+{
+    run_tests<false, true, rocblas_double_complex>();
+}
+
 // daily_lapack tests normal execution with medium to large sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack, SYEVD, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack, HEEVD, Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SYEVD_HYBRID,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         HEEVD_HYBRID,
+                         Combine(ValuesIn(large_size_range), ValuesIn(op_range)));
 
 // checkin_lapack tests normal execution with small sizes, invalid sizes,
 // quick returns, and corner cases
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, SYEVD, Combine(ValuesIn(size_range), ValuesIn(op_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, HEEVD, Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SYEVD_HYBRID,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         HEEVD_HYBRID,
+                         Combine(ValuesIn(size_range), ValuesIn(op_range)));

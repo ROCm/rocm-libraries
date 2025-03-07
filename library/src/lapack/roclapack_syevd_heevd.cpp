@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc.
  * *************************************************************************/
 
 #include "roclapack_syevd_heevd.hpp"
@@ -53,7 +53,7 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
     size_t size_tau;
 
     rocsolver_syevd_heevd_getMemorySize<false, T, S>(
-        evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
+        handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
         &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
