@@ -254,7 +254,7 @@ TYPED_TEST(WarpExchangeTest, WarpExchange)
     common::device_ptr<T> d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_exchange_kernel<items_per_thread, warp_size, exchange_op>),
             dim3(1),
@@ -307,7 +307,7 @@ TYPED_TEST(WarpExchangeTest, WarpExchangeNotInplace)
     common::device_ptr<T> d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_exchange_kernel<items_per_thread, warp_size, exchange_op>),
             dim3(1),
@@ -423,7 +423,7 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
     common::device_ptr<T>       d_output(items_count);
     HIP_CHECK(hipMemset(d_output.get(), 0, items_count * sizeof(T)));
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_exchange_scatter_kernel<items_per_thread, warp_size>),
             dim3(1),

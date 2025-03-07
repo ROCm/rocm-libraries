@@ -61,7 +61,7 @@ typed_test_def(suite_name, name_suffix, BlockOffset)
         common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_offset_kernel<block_size, type>),
                                dim3(grid_size),
                                dim3(block_size),
@@ -117,7 +117,7 @@ typed_test_def(suite_name, name_suffix, BlockRotate)
         common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_rotate_kernel<block_size, type>),
                                dim3(grid_size),
                                dim3(block_size),
@@ -177,7 +177,7 @@ typed_test_def(suite_name, name_suffix, BlockUp)
         common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_up_kernel<block_size, ItemsPerThread, type>),
                                dim3(grid_size),
                                dim3(block_size),
@@ -241,7 +241,7 @@ typed_test_def(suite_name, name_suffix, BlockDown)
         common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_down_kernel<block_size, ItemsPerThread, type>),
                                dim3(grid_size),
                                dim3(block_size),

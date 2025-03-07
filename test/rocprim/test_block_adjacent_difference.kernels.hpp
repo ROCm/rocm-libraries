@@ -439,7 +439,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::t
         common::device_ptr<long long> device_heads(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
@@ -542,7 +542,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::t
         common::device_ptr<long long> device_tails(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
@@ -661,7 +661,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::t
         common::device_ptr<long long> device_tails(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
                                                flag_type,
                                                flag_op_type,
@@ -752,7 +752,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::t
         common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_kernel<T,
                                                Output,
                                                stored_type,
@@ -841,7 +841,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 4>::t
         common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_kernel<T,
                                                Output,
                                                stored_type,
@@ -944,7 +944,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 5>::t
         common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_partial_kernel<T,
                                                Output,
                                                stored_type,
@@ -1048,7 +1048,7 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 6>::t
         common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_partial_kernel<T,
                                                Output,
                                                stored_type,

@@ -102,7 +102,7 @@ struct static_run_algo
         );
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(reduce_kernel<BlockSize, Algorithm, T, BinaryOp>),
                 dim3(grid_size), dim3(BlockSize), 0, 0,
@@ -176,7 +176,7 @@ struct static_run_valid
         );
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(reduce_valid_kernel<BlockSize, Algorithm, T, BinaryOp>),
                 dim3(grid_size), dim3(BlockSize), 0, 0,
@@ -288,7 +288,7 @@ void test_block_reduce_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     reduce_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),

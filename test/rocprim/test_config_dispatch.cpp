@@ -75,7 +75,7 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 
     common::device_ptr<target_arch> device_arch_ptr(1);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             write_target_arch,
             dim3(1),

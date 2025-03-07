@@ -472,6 +472,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
                                                      hipStream_t             stream = 0,
                                                      bool debug_synchronous         = false)
 {
+    // Clear any existing error
+    (void) hipGetLastError();
+
     return detail::run_length_encode::run_length_encode_non_trivial_runs_impl<Config>(
         temporary_storage,
         storage_size,

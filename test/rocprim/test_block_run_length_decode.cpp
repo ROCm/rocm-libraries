@@ -233,7 +233,7 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         common::device_ptr<ItemT>   d_decoded_runs(expected.size());
         common::device_ptr<LengthT> d_decoded_offsets(expected.size());
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(block_run_length_decode_kernel<ItemT,
                                        LengthT,

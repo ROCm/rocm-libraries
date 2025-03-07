@@ -100,7 +100,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
         common::device_ptr<T> d_output(output);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(test_hip_warp_sort<items_per_thread, block_size, logical_warp_size, T>),
                 dim3(grid_size),
@@ -190,7 +190,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
         common::device_ptr<T> d_output_value(output_value);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<items_per_thread,
                                                block_size,
                                                logical_warp_size,

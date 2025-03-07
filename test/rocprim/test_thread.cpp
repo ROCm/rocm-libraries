@@ -115,7 +115,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
         common::device_ptr<Type> device_output(block_size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(flat_id_kernel<block_size_x, block_size_y, block_size_z>),
                 dim3(1),
@@ -183,7 +183,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
         // Preparing device
         common::device_ptr<Type> device_output(block_size);
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(block_id_kernel<block_size_x, block_size_y, block_size_z>),
                 dim3(block_size_x, block_size_y, block_size_z),

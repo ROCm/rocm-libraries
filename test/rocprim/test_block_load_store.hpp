@@ -85,7 +85,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
         common::device_ptr<Type> device_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     load_store_kernel<Type, load_method, store_method, block_size, items_per_thread>),
@@ -171,7 +171,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
         common::device_ptr<Type> device_output(output);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_kernel<Type,
                                                load_method,
                                                store_method,
@@ -259,7 +259,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
         common::device_ptr<Type> device_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_default_kernel<Type,
                                                load_method,
                                                store_method,

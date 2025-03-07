@@ -195,7 +195,7 @@ void test_block_radix_rank()
         common::device_ptr<unsigned int> d_ranks_output(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     rank_kernel<T, block_size, items_per_thread, max_radix_bits, algorithm>),

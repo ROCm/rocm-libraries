@@ -255,7 +255,7 @@ struct static_run_algo
         );
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(scan_kernel<Method, BlockSize, Algorithm, T>),
                 dim3(grid_size), dim3(BlockSize), 0, 0,
@@ -567,7 +567,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output(output);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size,
                                                items_per_thread,
                                                algorithm,
@@ -650,7 +650,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size,
                                                items_per_thread,
                                                algorithm,
@@ -736,7 +736,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_bp(output_block_prefixes);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(inclusive_scan_array_prefix_callback_kernel<block_size,
                                 items_per_thread,
@@ -821,7 +821,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output(output);
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size,
                                                items_per_thread,
                                                algorithm,
@@ -911,7 +911,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_kernel<block_size,
                                                items_per_thread,
                                                algorithm,
@@ -1003,7 +1003,7 @@ auto test_block_scan_input_arrays()
         common::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         // Launching kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(exclusive_scan_prefix_callback_array_kernel<block_size,
                                 items_per_thread,

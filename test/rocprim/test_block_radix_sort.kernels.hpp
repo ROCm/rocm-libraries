@@ -243,7 +243,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
         // Preparing device
         common::device_ptr<key_type> device_keys_output(keys_output, size);
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(sort_key_kernel<block_size, items_per_thread, radix_bits_per_pass, key_type>),
                 dim3(grid_size),
@@ -356,19 +356,25 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
         common::device_ptr<value_type> device_values_output(values_output);
 
         // Running kernel
-        HIP_CHECK_LAUNCH((sort_key_value_kernel<block_size,
-                              items_per_thread,
-                              radix_bits_per_pass,
-                              key_type,
-                              value_type>
-            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output.get(),
-                                                          device_values_output.get(),
-                                                          to_striped,
-                                                          descending,
-                                                          start_bit,
-                                                          end_bit
+        HIP_CHECK_LAUNCH_SYNC(
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(sort_key_value_kernel<block_size,
+                                items_per_thread,
+                                radix_bits_per_pass,
+                                key_type,
+                                value_type>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                0,
+                device_keys_output.get(),
+                device_values_output.get(),
+                to_striped,
+                descending,
+                start_bit,
+                end_bit
             )
-        ));
+        );
 
         // Getting results to host
         keys_output   = device_keys_output.load_to_unique_ptr();

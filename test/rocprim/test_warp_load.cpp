@@ -264,7 +264,7 @@ TYPED_TEST(WarpLoadTest, WarpLoad)
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(items_count);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_load_kernel<block_size, items_per_thread, warp_size, method>),
             dim3(1),
@@ -308,7 +308,7 @@ TYPED_TEST(WarpLoadTest, WarpLoadGuarded)
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(items_count);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(warp_load_guarded_kernel<block_size, items_per_thread, warp_size, method>),
             dim3(1),

@@ -144,7 +144,7 @@ TYPED_TEST(RocprimThreadOperationTests, Load)
         common::device_ptr<T> device_input(input);
         common::device_ptr<T> device_output(input.size());
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_load_kernel<T>),
                 grid_size,
@@ -276,7 +276,7 @@ TYPED_TEST(RocprimThreadOperationTests, StoreNontemporal)
         common::device_ptr<T> device_input(input);
         common::device_ptr<T> device_output(input.size());
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_store_kernel<T>),
                 grid_size,
@@ -353,7 +353,7 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
         common::device_ptr<T> device_input(input);
         common::device_ptr<T> device_output(input.size());
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_reduce_kernel<T, length>),
                 grid_size,
@@ -427,7 +427,7 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         common::device_ptr<T> device_input(input);
         common::device_ptr<T> device_output(input.size());
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_scan_kernel<T, length>),
                 grid_size,
@@ -541,7 +541,7 @@ void merge_path_search_test()
         common::device_ptr<OffsetT> device_output_oob_x(1);
         common::device_ptr<OffsetT> device_output_oob_y(1);
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_search_kernel<T, OffsetT, BinaryFunction, length>),
                 grid_size,
@@ -558,7 +558,7 @@ void merge_path_search_test()
             )
         );
 
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(thread_search_out_of_bounds_kernel<T, OffsetT, BinaryFunction>),
                 grid_size,

@@ -168,7 +168,7 @@ void test_block_histogram_input_arrays()
         common::device_ptr<BinType> device_output_bin(output_bin);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     histogram_kernel<block_size, items_per_thread, bin, algorithm, T, BinType>),

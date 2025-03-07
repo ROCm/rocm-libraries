@@ -263,7 +263,7 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_heads(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     flag_heads_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
@@ -350,7 +350,7 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_tails(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(
                     flag_tails_kernel<type, flag_type, flag_op_type, block_size, items_per_thread>),
@@ -449,7 +449,7 @@ auto test_block_discontinuity()
         common::device_ptr<flag_type> device_tails(size);
 
         // Running kernel
-        HIP_CHECK_LAUNCH(
+        HIP_CHECK_LAUNCH_SYNC(
             hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
                                                flag_type,
                                                flag_op_type,

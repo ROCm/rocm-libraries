@@ -117,7 +117,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
                     dim3(grid_size),
@@ -131,7 +131,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
                     dim3(grid_size),
@@ -356,7 +356,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_inclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
@@ -372,7 +372,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
         }
         else if(current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_inclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
@@ -611,7 +611,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
                     dim3(grid_size),
@@ -626,7 +626,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
                     dim3(grid_size),
@@ -847,7 +847,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScanWoInit)
         // Launching kernel
         if(current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_exclusive_scan_wo_init_kernel<T, block_size_ws32, logical_warp_size>),
@@ -862,7 +862,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScanWoInit)
         }
         else if(current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_exclusive_scan_wo_init_kernel<T, block_size_ws64, logical_warp_size>),
@@ -983,7 +983,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_exclusive_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
@@ -1000,7 +1000,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(
                         warp_exclusive_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
@@ -1127,7 +1127,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScanWoInit)
         // Launching kernel
         if(current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
                                     block_size_ws32,
@@ -1144,7 +1144,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScanWoInit)
         }
         else if(current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_exclusive_scan_reduce_wo_init_kernel<T,
                                     block_size_ws64,
@@ -1267,7 +1267,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws32, logical_warp_size>),
                     dim3(grid_size),
@@ -1283,7 +1283,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_scan_kernel<T, block_size_ws64, logical_warp_size>),
                     dim3(grid_size),
@@ -1405,7 +1405,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws32, logical_warp_size>),
                     dim3(grid_size),
@@ -1422,7 +1422,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_scan_reduce_kernel<T, block_size_ws64, logical_warp_size>),
                     dim3(grid_size),
@@ -1546,7 +1546,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
         // Launching kernel
         if (current_device_warp_size == ws32)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws32, logical_warp_size>),
                     dim3(grid_size),
@@ -1560,7 +1560,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
         }
         else if (current_device_warp_size == ws64)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, block_size_ws64, logical_warp_size>),
                     dim3(grid_size),

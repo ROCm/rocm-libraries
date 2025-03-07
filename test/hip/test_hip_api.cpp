@@ -57,7 +57,7 @@ TEST(HIPTests, Saxpy)
     common::device_ptr<float> d_x(x);
     common::device_ptr<float> d_y(y);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(HIP_KERNEL_NAME(saxpy_kernel<float>),
                            dim3((N + 255) / 256),
                            dim3(256),

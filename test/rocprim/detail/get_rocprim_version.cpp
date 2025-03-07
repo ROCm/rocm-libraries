@@ -37,7 +37,7 @@ unsigned int get_rocprim_version_on_device()
 {
     common::device_ptr<unsigned int> d_version(1);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             get_version_kernel,
             dim3(1),

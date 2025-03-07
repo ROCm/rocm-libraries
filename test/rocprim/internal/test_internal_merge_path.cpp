@@ -29,7 +29,7 @@ void serial_merge(std::vector<T>& input,
 
     common::device_ptr<T> device_data(input);
 
-    HIP_CHECK_LAUNCH(
+    HIP_CHECK_LAUNCH_SYNC(
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(merge_kernel<IPT>),
             dim3(1),

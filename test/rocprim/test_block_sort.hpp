@@ -114,7 +114,7 @@ void TestSortKeyValue()
         // Running kernel, ignored if invalid size
         if(size > 0)
         {
-            HIP_CHECK_LAUNCH(
+            HIP_CHECK_LAUNCH_SYNC(
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(sort_pairs_kernel<block_size,
                                                    items_per_thread,
                                                    key_type,

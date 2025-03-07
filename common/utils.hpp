@@ -69,11 +69,35 @@
 
 // GoogleTest-compatible HIP_CHECK macro that can be used for calls that don't return
 // a hipError (eg. kernel launches).
+// This version does not synchronize after the launch. That means that any errors that
+// occur during kernel execution will not be caught. To catch those, the caller should
+// invoke hipStreamSynchronize and check its return value after the launch.
 #define HIP_CHECK_LAUNCH(launch)                                                        \
     {                                                                                   \
         (void) hipGetLastError();                                                       \
         launch;                                                                         \
         hipError_t error = hipGetLastError();                                           \
+        {                                                                               \
+            if (error != hipSuccess)                                                    \
+            {                                                                           \
+                std::ostringstream err_stream;                                          \
+                err_stream << "HIP error: " << hipGetErrorString(error) << std::endl    \
+                           << "File: " << __FILE__ << " line: " << __LINE__;            \
+                const std::string err_msg = err_stream.str();                           \
+                PRINT_ERROR(err_msg);                                                   \
+                exit(error);                                                            \
+            }                                                                           \
+        }                                                                               \
+    }
+
+// GoogleTest-compatible HIP_CHECK macro that can be used for calls that don't return
+// a hipError (eg. kernel launches).
+// Note: we use hipGetLastError to retrieve pre-launch errors (eg. kernel argument issues)
+// and hipDeviceSynchronize to retrieve in-kernel errors.
+#define HIP_CHECK_LAUNCH_SYNC(launch)                                                   \
+    {                                                                                   \
+        (void) hipGetLastError();                                                       \
+        launch;                                                                         \
         for (const hipError_t& error : {hipGetLastError(), hipDeviceSynchronize()})     \
         {                                                                               \
             if (error != hipSuccess)                                                    \
