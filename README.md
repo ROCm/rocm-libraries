@@ -201,6 +201,7 @@ mkdir ./build
 cd ./build
 cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
 make -j GPUArchitecture_def
+find ./share/rocRoller/split_yamls/ -type f -name "*.yaml" -exec realpath {} \; | xargs -I {} ../scripts/format_yaml.py -f {} {}
 rm -rf ../GPUArchitectureGenerator/pregenerated/*.yaml
 cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
 ```
