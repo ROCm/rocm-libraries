@@ -24,6 +24,7 @@
 #include "hostbuf.h"
 #include "increment.h"
 #include <algorithm>
+#include <iomanip>
 #include <vector>
 
 // Output a formatted general-dimensional array with given length and stride in batches
@@ -46,7 +47,7 @@ inline void printbuffer(const Toutput*         output,
         {
             const int i
                 = std::inner_product(index.begin(), index.end(), stride.begin(), i_base + offset);
-            stream << output[i] << " ";
+            stream << std::fixed << std::setprecision(14) << output[i] << " ";
             for(int li = index.size(); li-- > 0;)
             {
                 if(index[li] == (length[li] - 1))
