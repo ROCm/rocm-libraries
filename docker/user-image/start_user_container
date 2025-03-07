@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 ################################################################################
-# Copyright 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -244,7 +244,7 @@ def main():
             printAndRun(["docker", "rm", "-f", container_name])
 
         build_args = []
-        for arg in ["AMDGPU_URL", "AMDGPU_BUILD_NUMBER", "AMDGPU_BUILD_URI"]:
+        for arg in ["ROCROLLER_AMDGPU_URL", "ROCROLLER_AMDGPU_BUILD_NUMBER", "ROCROLLER_AMDGPU_BUILD_URI"]:
             if arg in os.environ:
                 build_args.append(arg + "=" + os.environ[arg])
 

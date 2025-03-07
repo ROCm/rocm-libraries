@@ -261,6 +261,7 @@ def bench(
         build_dir = rrperf.run.get_build_dir()
         env = rrperf.run.get_arch_env(build_dir)
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
+        env["OMP_NUM_THREADS"] = str(1)
 
         cmd = problem.command(device=device, yaml=result_path.absolute())
 

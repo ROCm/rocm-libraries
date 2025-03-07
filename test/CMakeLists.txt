@@ -55,7 +55,6 @@ set(
     unit/ArithmeticTest.cpp
     unit/AssemblerTest.cpp
     unit/AssertTest.cpp
-    unit/BranchGeneratorTest.cpp
     unit/BufferDescriptorTest.cpp
     unit/CommandTest.cpp
     unit/CommonSubexpressionElimTest.cpp
@@ -169,6 +168,7 @@ set(
     catch/TestKernels.cpp
 
     catch/BinaryExpressionTest.cpp
+    catch/BranchGeneratorTest.cpp
     catch/CommandArgumentValueTest.cpp
     catch/CommandTest.cpp
     catch/CustomAssertionTest.cpp

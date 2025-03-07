@@ -91,15 +91,15 @@ RUN apt-get update && apt-get install -y \
 ##
 
 # ROCm
-ARG AMDGPU_URL=https://repo.radeon.com/amdgpu-install/6.2.2/ubuntu/jammy/amdgpu-install_6.2.60202-1_all.deb
-ARG AMDGPU_BUILD_NUMBER=
-ARG AMDGPU_BUILD_URI=
+ARG ROCROLLER_AMDGPU_URL=https://repo.radeon.com/amdgpu-install/6.2.2/ubuntu/jammy/amdgpu-install_6.2.60202-1_all.deb
+ARG ROCROLLER_AMDGPU_BUILD_NUMBER=
+ARG ROCROLLER_AMDGPU_BUILD_URI=
 
-RUN wget -nv --show-progress --progress=dot:mega -O /tmp/amdgpu_install.deb ${AMDGPU_URL} \
+RUN wget -nv --show-progress --progress=dot:mega -O /tmp/amdgpu_install.deb ${ROCROLLER_AMDGPU_URL} \
     && apt-get update \
     && apt-get install -y /tmp/amdgpu_install.deb \
     && rm /tmp/amdgpu_install.deb \
-    && if test -n "${AMDGPU_BUILD_NUMBER}"; then amdgpu-repo --amdgpu-build=${AMDGPU_BUILD_NUMBER} --rocm-build=${AMDGPU_BUILD_URI}; fi \
+    && if test -n "${ROCROLLER_AMDGPU_BUILD_NUMBER}"; then amdgpu-repo --amdgpu-build=${ROCROLLER_AMDGPU_BUILD_NUMBER} --rocm-build=${ROCROLLER_AMDGPU_BUILD_URI}; fi \
     && amdgpu-install -y --usecase=rocmdev --no-dkms
 RUN apt-get update && apt-get install -y rocm-llvm-dev
 
