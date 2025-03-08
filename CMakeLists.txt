@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -163,7 +163,14 @@ else()
       set( Tensile_ARCHITECTURE "${AMDGPU_TARGETS}" CACHE STRING "Tensile to use which architecture?" FORCE)
 
       set( Tensile_LOGIC "asm_full" CACHE STRING "Tensile to use which logic?")
-      set( Tensile_CODE_OBJECT_VERSION "4" CACHE STRING "Tensile code_object_version")
+
+      if ((Tensile_CODE_OBJECT_VERSION MATCHES "default") OR (Tensile_CODE_OBJECT_VERSION MATCHES "V4"))
+        set( Tensile_CODE_OBJECT_VERSION "4" STRING "Tensile code_object_version")
+      elseif(Tensile_CODE_OBJECT_VERSION MATCHES "V5")
+        set( Tensile_CODE_OBJECT_VERSION "5" STRING "Tensile code_object_version")
+      else()
+        set( Tensile_CODE_OBJECT_VERSION "4" CACHE STRING "Tensile code_object_version")
+      endif()
       set( Tensile_COMPILER "amdclang++" CACHE STRING "Tensile compiler")
       set( Tensile_LIBRARY_FORMAT "msgpack" CACHE STRING "Tensile library format")
       set( Tensile_CPU_THREADS "" CACHE STRING "Number of threads for Tensile parallel build")
