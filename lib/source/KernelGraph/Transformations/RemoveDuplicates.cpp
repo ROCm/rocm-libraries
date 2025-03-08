@@ -316,9 +316,9 @@ namespace rocRoller
 
                 GraphReindexer expressionReindexer;
 
-                for(auto [existingOp, duplicateOps] : duplicates)
+                for(auto [originalOp, duplicateOps] : duplicates)
                 {
-                    auto topExistingOp = getTopSetCoordinate(graph, existingOp);
+                    auto topOriginalOp = getTopSetCoordinate(graph, originalOp);
                     for(auto duplicateOp : duplicateOps)
                     {
                         auto topDuplicateOp = getTopSetCoordinate(graph, duplicateOp);
@@ -337,18 +337,19 @@ namespace rocRoller
                                    "{} (top of {}).  NOP is {}.",
                                    topDuplicateOp,
                                    duplicateOp,
-                                   topExistingOp,
-                                   existingOp,
+                                   topOriginalOp,
+                                   originalOp,
                                    nop);
 
                         // Mark for update: references to the
                         // duplicate tile need to be updated to the
-                        // existing tile.
-                        auto tileTag = original.mapper.get<MacroTile>(duplicateOp);
-                        if(tileTag != -1)
+                        // original tile.
+                        auto duplicateTileTag = original.mapper.get<MacroTile>(duplicateOp);
+                        if(duplicateTileTag != -1)
                         {
-                            auto existingTileTag = original.mapper.get<MacroTile>(existingOp);
-                            expressionReindexer.coordinates.emplace(tileTag, existingTileTag);
+                            auto originalTileTag = original.mapper.get<MacroTile>(originalOp);
+                            expressionReindexer.coordinates.emplace(duplicateTileTag,
+                                                                    originalTileTag);
                         }
                     }
                 }
@@ -357,9 +358,7 @@ namespace rocRoller
                 auto kernel = *graph.control.roots().begin();
                 reindexExpressions(graph, kernel, expressionReindexer);
 
-                // ZZZ Remove old tiles
-
-                // Update tile connections
+                // Update tile connections and remove old tiles
                 for(auto [oldTag, newTag] : expressionReindexer.coordinates)
                 {
                     auto connections = graph.mapper.getCoordinateConnections(oldTag);
@@ -368,6 +367,18 @@ namespace rocRoller
                     {
                         conn.coordinate = newTag;
                         graph.mapper.connect(conn);
+                    }
+
+                    AssertFatal(newTag == oldTag
+                                || graph.mapper.getCoordinateConnections(oldTag).empty());
+
+                    if(graph.mapper.getCoordinateConnections(oldTag).empty())
+                    {
+                        for(auto const& child : graph.coordinates.getLocation(oldTag).incoming)
+                            graph.coordinates.deleteElement(child);
+                        for(auto const& child : graph.coordinates.getLocation(oldTag).outgoing)
+                            graph.coordinates.deleteElement(child);
+                        graph.coordinates.deleteElement(oldTag);
                     }
                 }
                 return graph;

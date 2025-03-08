@@ -213,10 +213,10 @@ set(
     catch/HazardObserverTest.cpp
     catch/IdentifyParallelDimensionsTest.cpp
     catch/KernelArgumentsTest.cpp
+    catch/KernelGraphColouringTest.cpp
     catch/KernelGraphConstraintsTest.cpp
     catch/KernelGraphRemoveDuplicatesTest.cpp
     catch/KernelGraphSimplifyTest.cpp
-    catch/KernelGraphUtilsTest.cpp
     catch/LargerLDSTest.cpp
     catch/MultipleLDSAllocationTest.cpp
     catch/mxDataGeneratorTest.cpp

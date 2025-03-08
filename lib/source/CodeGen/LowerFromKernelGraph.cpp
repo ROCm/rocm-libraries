@@ -576,14 +576,13 @@ namespace rocRoller
                 Register::ValuePtr dest;
                 if(!deferred)
                 {
-                    // ZZZ
                     auto valueCount = assign.valueCount;
                     if(valueCount == 0)
                     {
                         auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
                         valueCount = tmp->valueCount();
                     }
-                    Log::debug("  immediate: count {}", assign.valueCount);
+                    Log::debug("  immediate: count {}", valueCount);
                     if(assign.regType == Register::Type::Accumulator)
                     {
                         // ACCVGPR should always be contiguous

@@ -132,7 +132,6 @@ namespace rocRoller
 
                 for(auto loadOp : location.loadOps)
                 {
-                    // ZZZ VALUE COUNT
                     auto convertNode = graph.control.addElement(Assign{
                         Register::Type::Vector, Expression::convert(unsegmented, dataFlow), 0});
                     graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);

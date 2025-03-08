@@ -1166,8 +1166,14 @@ namespace rocRoller
 
             auto workgroupSizes = context->kernel()->workgroupSize();
 
-            auto numWorkitems           = product(workgroupSizes);
-            auto numElements            = product(sizes);
+            auto numWorkitems = product(workgroupSizes);
+            auto numElements  = product(sizes);
+            AssertFatal(
+                numElements >= numWorkitems && numElements % numWorkitems == 0,
+                "The number of elements must be an integer multiple of the number of workitems",
+                ShowValue(numElements),
+                ShowValue(numWorkitems));
+
             auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
