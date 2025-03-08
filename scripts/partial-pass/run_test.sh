@@ -1,22 +1,23 @@
 #!/bin/bash
 
- test_mode_1="full-3d"
- test_mode_2="direction_1"
- test_mode_3="direction_2"
- test_mode_4="step_1_2"
- test_mode_5="step_3_4"
- test_mode_6="direction_1_step_1_2"
- test_mode_7="direction_2_step_3_4"
+test_mode_1='full-3d'
+
+# requires changing code generator to skip steps 1-2
+test_mode_2='direction_1' 
+
+test_mode_3='direction_1_step_1_2'
+
+test_mode_4='direction_1_step_1_2_3_4' 
 
 # -------------------------------------------------------------------
 # input parameters
 # -------------------------------------------------------------------
 
 length=( 64 64 64 )
-batch=( 1 )
+batch=( 5 )
 pp_dim=( 2 )
-pp_radices=( 4 16 )
-test_mode=$test_mode_1
+pp_radices=( 16 4 )
+test_mode=$test_mode_2
 # -------------------------------------------------------------------
 
 in_len_file="in_len.txt"
@@ -47,10 +48,16 @@ cd $rocfft_script_dir
 
 if [ $test_mode = $test_mode_1 ]; then
     buffer_arg_1=0
-    buffer_arg_2=4
-elif [ $test_mode = $test_mode_6 ]; then
+    buffer_arg_2=2
+elif [ $test_mode = $test_mode_2 ]; then
     buffer_arg_1=0
     buffer_arg_2=1
+elif [ $test_mode = $test_mode_3 ]; then
+    buffer_arg_1=0
+    buffer_arg_2=1
+elif [ $test_mode = $test_mode_4 ]; then
+    buffer_arg_1=0
+    buffer_arg_2=2
 fi
 
 ./rocfft_to_octave.sh 1 $buffer_arg_1 ${rocfft_exec_dir}out.txt

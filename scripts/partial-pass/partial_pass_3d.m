@@ -2,15 +2,11 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
 
   test_mode_1 = 'full-3d';
   test_mode_2 = 'direction_1';
-  test_mode_3 = 'direction_2';
-  test_mode_4 = 'step_1_2';
-  test_mode_5 = 'step_3_4';
-  test_mode_6 = 'direction_1_step_1_2';
-  test_mode_7 = 'direction_2_step_3_4';
+  test_mode_3 = 'direction_1_step_1_2';
+  test_mode_4 = 'direction_1_step_1_2_3_4';
 
-  if ~(strcmp(test_mode,test_mode_1) || strcmp(test_mode,test_mode_2) || strcmp(test_mode,test_mode_3)...
-      || strcmp(test_mode,test_mode_4) || strcmp(test_mode,test_mode_5) || strcmp(test_mode,test_mode_6)...
-      || strcmp(test_mode,test_mode_7))
+  if ~(strcmp(test_mode,test_mode_1) || strcmp(test_mode,test_mode_2) || ...
+       strcmp(test_mode,test_mode_3) || strcmp(test_mode,test_mode_4))
       display(test_mode);
     error('Invalid test mode');
   endif
@@ -18,7 +14,7 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
   format longG;
   ordering='column-major';
   data_empty_value = -123456789;
- 
+
   N = prod(in_length);
 
   pp_mode = 'four-step';
@@ -37,30 +33,49 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
     endif
 
     % 3D-FFT (MATLAB built-in)
-    if (strcmp(test_mode,test_mode_1))
-      out = fftn(in);
-      out = convert_3d_to_1d(out, ordering);
-      out_ = convert_3d_to_1d(out_, ordering);
-      linf_rocfft_vs_octave_built_in = norm(out-out_,'inf');
-      disp(['l-inf norm: '  num2str(linf_rocfft_vs_octave_built_in)]);
-      return;
-    endif
-
-    % CS_3D_RC from rocFFT (with partial pass)
-    [out_3d_rc, out_3d_rc_pp_1, out_3d_rc_pp_2] = run_CS_3D_RC(in_length, in, pp_dim, pp_radices, pp_mode);
-    out_3d_rc = convert_3d_to_1d(out_3d_rc, ordering);
-    out_3d_rc_pp_1 = convert_3d_to_1d(out_3d_rc_pp_1, ordering);
-    out_3d_rc_pp_2 = convert_3d_to_1d(out_3d_rc_pp_2, ordering);
+    out = fftn(in);
+    out = convert_3d_to_1d(out, ordering);
     out_ = convert_3d_to_1d(out_, ordering);
 
-    linf_rocfft_vs_octave_3d_rc_pp = norm(out_3d_rc-out_,'inf');
-    disp(['l-inf norm: '  num2str(linf_rocfft_vs_octave_3d_rc_pp)]);
+    if (strcmp(test_mode,test_mode_1))
+      linf_rocfft_vs_octave_built_in = norm(out-out_,'inf');
+      disp(['l-inf norm: '  num2str(linf_rocfft_vs_octave_built_in)]);
+    else
+      % CS_3D_RC from rocFFT (with partial pass)
+      [out_3d_rc, out_3d_rc_1, out_3d_rc_pp_1, out_3d_rc_pp_2] = run_CS_3D_RC(in_length, in, pp_dim, pp_radices, pp_mode);
+
+      out_3d_rc = convert_3d_to_1d(out_3d_rc, ordering);
+      linf_test = norm(out_3d_rc-out,'inf');
+      if (linf_test > 1E-8)
+        error("Error: partial-pass 3D-RC failed accuracy test");
+      endif
+
+      if (strcmp(test_mode,test_mode_2))
+        out_3d_rc_1 = convert_3d_to_1d(out_3d_rc_1, ordering);
+        linf_test = norm(out_3d_rc_1-out_,'inf');
+        disp(['l-inf norm: '  num2str(linf_test)]);
+      endif
+
+      if (strcmp(test_mode,test_mode_3))
+        out_3d_rc_pp_1 = convert_3d_to_1d(out_3d_rc_pp_1, ordering);
+        linf_test = norm(out_3d_rc_pp_1-out_,'inf');
+        disp(['l-inf norm: '  num2str(linf_test)]);
+      endif
+
+      if (strcmp(test_mode,test_mode_4))
+        out_3d_rc_pp_2 = convert_3d_to_1d(out_3d_rc_pp_2, ordering);
+        linf_test = norm(out_3d_rc_pp_2-out_,'inf');
+        disp(['l-inf norm: '  num2str(linf_test)]);
+      endif
+    endif
   endfor
 
-  display('');
-
-  function [out, out_pp_1, out_pp_2] = run_CS_3D_RC(in_length, in, pp_dim, pp_radices, pp_mode)
+  function [out, out_1, out_pp_1, out_pp_2] = run_CS_3D_RC(in_length, in, pp_dim, pp_radices, pp_mode)
     n = in_length(pp_dim);
+
+    % Flip radices, as the radix order is reversed in steps 1-2 and 3-4
+    pp_radices = flip(pp_radices);
+    
     n1 = pp_radices(1);
     n2 = pp_radices(2);
 
@@ -73,6 +88,7 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
     if (pp_dim == 1)
       % 1st kernel (2nd dimension)
       out = fft(out,[], 2);
+      out_1 = out;
       out = partial_pass_step_1_2(out, 1, n1, n2, F_n1, F_n2, F_n, pp_mode);
       out_pp_1 = out;
 
@@ -83,10 +99,14 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
     endif
 
     if (pp_dim == 2)
+      % Correct ordering for intermediate results comparison
+      transp_order_comp = [3 1 2];
+
       % 1st kernel (1st dimension)
       out = fft(out,[], 1);
+      out_1 = permute(out, transp_order_comp);
       out = partial_pass_step_1_2(out, 2, n1, n2, F_n1, F_n2, F_n, pp_mode);
-      out_pp_1 = out;
+      out_pp_1 = permute(out, transp_order_comp); 
 
       % 2nd kernel (3rd dimension)
       transp_order = [3 2 1];
@@ -103,6 +123,7 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
     if (pp_dim == 3)
       % 1st kernel (1st dimension)
       out = fft(out,[], 1);
+      out_1 = out;
       out = partial_pass_step_1_2(out, 3, n1, n2, F_n1, F_n2, F_n, pp_mode);
       out_pp_1 = out;
 
