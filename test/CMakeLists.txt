@@ -125,30 +125,6 @@ add_test(
 
 add_test(
   NAME
-    jpeg-decode-threads-fmt-native
-  COMMAND
-    "${CMAKE_CTEST_COMMAND}"
-            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodePerf"
-                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodePerf"
-            --build-generator "${CMAKE_GENERATOR}"
-            --test-command "jpegdecodeperf"
-            -i ${ROCM_PATH}/share/rocjpeg/images/
-)
-
-add_test(
-  NAME
-    jpeg-decode-batch-fmt-native
-  COMMAND
-    "${CMAKE_CTEST_COMMAND}"
-            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
-                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
-            --build-generator "${CMAKE_GENERATOR}"
-            --test-command "jpegdecodebatched"
-            -i ${ROCM_PATH}/share/rocjpeg/images/
-)
-
-add_test(
-  NAME
     jpeg-decode-crop-fmt-native
   COMMAND
     "${CMAKE_CTEST_COMMAND}"
@@ -209,7 +185,67 @@ add_test(
 
 add_test(
   NAME
-    jpeg-decode-crop-batch-fmt-native
+    jpeg-decode-batch-fmt-native
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-fmt-yuv-planar
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-fmt-y
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-fmt-rgb
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-fmt-rgb-planar
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-crop-fmt-native
   COMMAND
     "${CMAKE_CTEST_COMMAND}"
             --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
@@ -217,4 +253,64 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "jpegdecodebatched"
             -i ${ROCM_PATH}/share/rocjpeg/images/ -crop 960,540,2880,1620
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-crop-fmt-yuv-planar
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt yuv_planar -crop 960,540,2880,1620
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-crop-fmt-y
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt y -crop 960,540,2880,1620
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-crop-fmt-rgb
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb -crop 960,540,2880,1620
+)
+
+add_test(
+  NAME
+    jpeg-decode-batch-crop-fmt-rgb-planar
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodeBatched"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodeBatched"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodebatched"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -fmt rgb_planar -crop 960,540,2880,1620
+)
+
+add_test(
+  NAME
+    jpeg-decode-perf-fmt-native
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecodePerf"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecodePerf"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecodeperf"
+            -i ${ROCM_PATH}/share/rocjpeg/images/
 )

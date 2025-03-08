@@ -35,7 +35,7 @@ extern "C" {
 #endif
 #define ROCJPEG_MAJOR_VERSION 0
 #define ROCJPEG_MINOR_VERSION 10
-#define ROCJPEG_MICRO_VERSION 0
+#define ROCJPEG_MICRO_VERSION 1
 
 
 /**

@@ -40,7 +40,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 
 # NOTE: Match version with api/rocjpeg_version.h
-set(VERSION "0.10.0")
+set(VERSION "0.10.1")
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
 
