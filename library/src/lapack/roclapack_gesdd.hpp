@@ -201,7 +201,8 @@ rocblas_status rocsolver_gesdd_argCheck(rocblas_handle handle,
 
 /** Helper to calculate workspace sizes **/
 template <bool BATCHED, typename T, typename SS>
-void rocsolver_gesdd_getMemorySize(const rocblas_svect left_svect,
+void rocsolver_gesdd_getMemorySize(rocblas_handle handle,
+                                   const rocblas_svect left_svect,
                                    const rocblas_svect right_svect,
                                    const rocblas_int m,
                                    const rocblas_int n,
@@ -263,8 +264,8 @@ void rocsolver_gesdd_getMemorySize(const rocblas_svect left_svect,
     {
         // Requirements for Divide-and-Conquer eigensolver
         rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-            rocblas_evect_original, rocblas_fill_upper, n, batch_count, &a1, &b1, &c1, &d1, &e1,
-            &f1, &g1, &h1, size_workArr2);
+            handle, rocblas_evect_original, rocblas_fill_upper, n, batch_count, &a1, &b1, &c1, &d1,
+            &e1, &f1, &g1, &h1, size_workArr2);
 
         // Requirements for QR factorization
         rocsolver_geqrf_getMemorySize<BATCHED, T>(m, n, batch_count, &a2, &b2, &c2, &d2, &f2);
@@ -281,8 +282,8 @@ void rocsolver_gesdd_getMemorySize(const rocblas_svect left_svect,
     {
         // Requirements for Divide-and-Conquer eigensolver
         rocsolver_syevd_heevd_getMemorySize<BATCHED, T, SS>(
-            rocblas_evect_original, rocblas_fill_upper, m, batch_count, &a1, &b1, &c1, &d1, &e1,
-            &f1, &g1, &h1, size_workArr2);
+            handle, rocblas_evect_original, rocblas_fill_upper, m, batch_count, &a1, &b1, &c1, &d1,
+            &e1, &f1, &g1, &h1, size_workArr2);
 
         // Requirements for LQ factorization
         rocsolver_gelqf_getMemorySize<BATCHED, T>(m, n, batch_count, &a2, &b2, &c2, &d2, &f2);
