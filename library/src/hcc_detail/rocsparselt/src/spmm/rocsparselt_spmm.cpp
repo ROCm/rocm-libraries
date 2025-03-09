@@ -485,5 +485,7 @@ GENERATE_DEFINITIONS(hip_bfloat16, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
+GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
+GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
 
 #undef GENERATE_DEFINITIONS

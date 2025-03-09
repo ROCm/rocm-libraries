@@ -1325,16 +1325,14 @@ rocsparselt_status
             else if(in_type == HIP_R_8F_E4M3 && out_type == HIP_R_32F
                     && compute_type == rocsparselt_compute_f32)
             {
-                // @TODO, implement the f8 soluction.
-                // assume we find one soluction
-                config_max_id = 1;
+                status = findTopConfigs<__hip_fp8_e4m3, float, float>(
+                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
             }
             else if(in_type == HIP_R_8F_E5M2 && out_type == HIP_R_32F
                     && compute_type == rocsparselt_compute_f32)
             {
-                // @TODO, implement the f8 soluction.
-                // assume we find one soluction
-                config_max_id = 1;
+                status = findTopConfigs<__hip_fp8_e5m2, float, float>(
+                    _matmulDescr, &(tmpAlgSelection.configs[0]), &config_max_id, requestConfigs);
             }
             if(status != rocsparselt_status_success)
                 return status;

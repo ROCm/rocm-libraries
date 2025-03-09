@@ -111,7 +111,7 @@ namespace
     };
 
     /********************************************************************
-     * Variable template to map a rocsparselt type into a Tensile::DataType *
+     * Variable template to map a rocsparselt type into a TensileLite::DataType *
      ********************************************************************/
     template <typename>
     constexpr auto tensile_datatype = nullptr;
@@ -128,6 +128,12 @@ namespace
 
     template <>
     constexpr auto tensile_datatype<float> = TensileLite::DataType::Float;
+
+    template <>
+    constexpr auto tensile_datatype<__hip_fp8_e4m3> = TensileLite::DataType::Float8;
+
+    template <>
+    constexpr auto tensile_datatype<__hip_fp8_e5m2> = TensileLite::DataType::BFloat8;
 
     /*************************************************************************
      * Class for converting alpha and beta between rocsparselt and Tensile types *
@@ -162,6 +168,10 @@ namespace
             return TensileLite::DataType::BFloat16;
         case HIP_R_8I:
             return TensileLite::DataType::Int8;
+        case HIP_R_8F_E4M3:
+            return TensileLite::DataType::Float8;
+        case HIP_R_8F_E5M2:
+            return TensileLite::DataType::BFloat8;
         default:
             assert(!"hipblasltDatatype_to_tensile_type: non-supported type");
             return TensileLite::DataType::None;
@@ -299,8 +309,8 @@ namespace
         // set batch mode
         tensileProblem.setStridedBatched(prob.strided_batch);
 
-        // alpha and beta are stored by value in Tensile::TypedContractionInputs
-        // alpha and beta are copied from host to Tensile::TypedContractionInputs
+        // alpha and beta are stored by value in TensileLite::TypedContractionInputs
+        // alpha and beta are copied from host to TensileLite::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set tensileAlpha=0
         // Not positive if this is necessary here as well
         typename AlphaBeta<Ti, To, Tc>::tensile_type tensileAlpha;
@@ -428,8 +438,8 @@ namespace
         if(prob.alpha_vector_scaling)
             inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.alpha);
 
-        // alpha and beta are stored by value in Tensile::TypedContractionInputs
-        // alpha and beta are copied from host to Tensile::TypedContractionInputs
+        // alpha and beta are stored by value in TensileLite::TypedContractionInputs
+        // alpha and beta are copied from host to TensileLite::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set inputs.alpha=0
         if(prob.k)
         {
@@ -482,6 +492,10 @@ namespace
         else if(deviceString.find("gfx942") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx942;
+        }
+        else if(deviceString.find("gfx950") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx950;
         }
         else if(deviceString.find("gfx1010") != std::string::npos)
         {
@@ -1119,5 +1133,7 @@ GENERATE_DEFINITIONS(hip_bfloat16, hip_bfloat16, float)
 GENERATE_DEFINITIONS(int8_t, int8_t, float)
 GENERATE_DEFINITIONS(int8_t, __half, float)
 GENERATE_DEFINITIONS(int8_t, hip_bfloat16, float)
+GENERATE_DEFINITIONS(__hip_fp8_e4m3, float, float)
+GENERATE_DEFINITIONS(__hip_fp8_e5m2, float, float)
 
 #undef GENERATE_DEFINITIONS

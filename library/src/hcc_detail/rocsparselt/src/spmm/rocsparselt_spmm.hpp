@@ -173,6 +173,28 @@ inline rocsparselt_status rocsparselt_spmm_template(const char*                 
             }
         }
     }
+    else if(a_type == HIP_R_8F_E4M3 && b_type == HIP_R_8F_E4M3)
+    {
+        if(c_type == HIP_R_32F && d_type == HIP_R_32F)
+        {
+            if(compute_type == rocsparselt_compute_f32)
+            {
+                rs_status
+                    = spmm_typecasting<__hip_fp8_e4m3, float, float>(EX_TYPECASTING_PARM);
+            }
+        }
+    }
+    else if(a_type == HIP_R_8F_E5M2 && b_type == HIP_R_8F_E5M2)
+    {
+        if(c_type == HIP_R_32F && d_type == HIP_R_32F)
+        {
+            if(compute_type == rocsparselt_compute_f32)
+            {
+                rs_status
+                    = spmm_typecasting<__hip_fp8_e5m2, float, float>(EX_TYPECASTING_PARM);
+            }
+        }
+    }
     else
     {
         rs_status = rocsparselt_status_not_implemented;
