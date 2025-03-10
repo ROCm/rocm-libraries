@@ -23,7 +23,7 @@ Tests:
   precision: *single_precision
   algo: 1
   arguments:
-    - { N: 1, incx: 1, incy:1}
+    - { N: 1, incx: 1, incy: 1 }
   function:
   - set_get_vector
   - set_get_vector_async
@@ -32,10 +32,10 @@ Tests:
   category: quick
   precision: *single_precision
   arguments:
-    - { N:  0, incx: 1, incy:1}
-    - { N: -1, incx: 1, incy:1}
-    - { N:  1, incx: 0, incy:1}
-    - { N:  1, incx: 1, incy:0}
+    - { N:  0, incx: 1, incy: 1 }
+    - { N: -1, incx: 1, incy: 1 }
+    - { N:  1, incx: 0, incy: 1 }
+    - { N:  1, incx: 1, incy: 0 }
   function:
   - set_get_vector
   - set_get_vector_async
