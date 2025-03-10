@@ -332,7 +332,7 @@ namespace rocwmma
                            16u,
                            8u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget>>
+                           enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
         {
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
@@ -375,7 +375,7 @@ namespace rocwmma
                            32u,
                            4u,
                            GfxTarget,
-                           enable_gfx9_t<GfxTarget>>
+                           enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
         {
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
@@ -640,7 +640,7 @@ namespace rocwmma
             16u,
             16u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget>>
+            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
         {
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
@@ -671,7 +671,7 @@ namespace rocwmma
             32u,
             8u,
             GfxTarget,
-            enable_gfx9_t<GfxTarget>>
+            enable_gfx9_t<GfxTarget, ((bool)ROCWMMA_ARCH_GFX908 || (bool)ROCWMMA_ARCH_GFX90A)>>
         {
             constexpr static MfmaCtrlFlags Cbsz    = MfmaCtrlFlags::DEFAULT;
             constexpr static MfmaCtrlFlags Abid    = MfmaCtrlFlags::DEFAULT;
