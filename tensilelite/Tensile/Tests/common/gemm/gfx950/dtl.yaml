@@ -1,0 +1,225 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+
+GlobalParameters:
+  NumElementsToValidate: -1
+  MinimumRequiredVersion: 4.14.0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: True
+  Device: 0
+  CMakeBuildType: Release
+  MergeFiles: False
+  KernelTime: True
+  MaxWorkspaceSize: 13421772800
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  BoundsCheck: 2
+  #MaxFileName: 256
+  KeepBuildTmp: True
+  #GenerateSourcesAndExit: True
+
+BenchmarkProblems:
+
+  ########################################
+  # F8F8S TN DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [16, 16, 32, 1,  1,   1, 1,  1,1 ]
+          - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          #- [32, 32, 64, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 128, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 32, 1,  1,   2, 2,  2,2 ]
+          #- [16, 16, 32, 1,  1,   4, 2,  2,2 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4, 16]
+        - GlobalReadVectorWidthB: [4, 16]
+        - PrefetchGlobalRead: [1]#[1,2] # DTL needs PGR=1
+        #- PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - LocalReadVectorWidth: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
+          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
+          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]
+
+  ########################################
+  # F8F8S NN DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 0
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [16, 16, 32, 1,  1,   1, 1,  1,1 ]
+          - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          #- [32, 32, 64, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 128, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 32, 1,  1,   2, 2,  2,2 ]
+          #- [16, 16, 32, 1,  1,   4, 2,  2,2 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4, 16]
+        - GlobalReadVectorWidthB: [4, 16]
+        - PrefetchGlobalRead: [1]#[1,2] # DTL needs PGR=1
+        #- PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - LocalReadVectorWidth: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
+          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
+          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]
+
+
+  ########################################
+  # F8F8S TT DTL
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: f8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 1
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          #- [16, 16, 32, 1,  1,   1, 1,  1,1 ]
+          - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+          #- [32, 32, 64, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 128, 1,  1,   1, 1,  2,2 ]
+          #- [16, 16, 32, 1,  1,   2, 2,  2,2 ]
+          #- [16, 16, 32, 1,  1,   4, 2,  2,2 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [4, 16]
+        - GlobalReadVectorWidthB: [4, 16]
+        - PrefetchGlobalRead: [1]#[1,2] # DTL needs PGR=1
+        #- PrefetchLocalRead: [1,2]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - StaggerU: [4]
+        - StaggerUStride: [256]
+        #- StaggerUMapping: [2]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        #- ExpandPointerSwap: [0,1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        #- GlobalSplitU: [1,2]
+        #- GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
+        - SourceSwap: [1]#[0, 1]
+        - LocalReadVectorWidth: [8]
+        - DirectToLds: [1]
+        - AssertSummationElementMultiple: [4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[16,9,34],   [16,9,34], [1], [4,4,12]]
+          - Range: [[16,9,34],   [16,9,34], [1], [64,4,72]]
+          - Range: [[16,9,34],   [16,9,34], [1], [128,4,140]]

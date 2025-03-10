@@ -62,6 +62,7 @@ namespace TensileLite
             gfx940  = 940,
             gfx941  = 941,
             gfx942  = 942,
+            gfx950  = 950,
             gfx1010 = 1010,
             gfx1011 = 1011,
             gfx1012 = 1012,
@@ -106,6 +107,10 @@ namespace TensileLite
             else if(archName.find("gfx942") != std::string::npos)
             {
                 return Processor::gfx942;
+            }
+            else if(archName.find("gfx950") != std::string::npos)
+            {
+                return Processor::gfx950;
             }
             else if(archName.find("gfx1010") != std::string::npos)
             {
@@ -166,6 +171,8 @@ namespace TensileLite
                 return "gfx941";
             case AMDGPU::Processor::gfx942:
                 return "gfx942";
+            case AMDGPU::Processor::gfx950:
+                return "gfx950";
             case AMDGPU::Processor::gfx1010:
                 return "gfx1010";
             case AMDGPU::Processor::gfx1011:

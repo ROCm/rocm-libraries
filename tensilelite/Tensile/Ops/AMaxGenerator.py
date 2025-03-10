@@ -365,8 +365,8 @@ class AMaxKernelGenerator:
         if self.is_scale:
             if self.scale_type == ti.DataType("F8N"):
                 mod.add(ti.VMovB32(ti.vgpr("Fp8NanInf"), "0x207", "Nan and +/- inf"))
-                mod.add(ti.VMovB32(ti.vgpr("Fp8Max"), "0x43700000", "Fp8 Max value 240 as float32"))
-                mod.add(ti.VMovB32(ti.vgpr("Fp8Min"), "0xc3700000", "Fp8 Min value -240 as float32"))
+                mod.add(ti.VMovB32(ti.vgpr("Fp8Max"), "0x43700000", "Fp8 NANOO Max value 240 as float32"))
+                mod.add(ti.VMovB32(ti.vgpr("Fp8Min"), "0xc3700000", "Fp8 NANOO Min value -240 as float32"))
             elif self.scale_type == ti.DataType("F8"):
                 mod.add(ti.VMovB32(ti.vgpr("Fp8NanInf"), "0x207", "Nan and +/- inf"))
                 mod.add(ti.VMovB32(ti.vgpr("Fp8Max"), "0x43e00000", "Fp8 Max value 448 as float32"))

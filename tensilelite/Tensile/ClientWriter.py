@@ -594,6 +594,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
           param("print-tensor-ref",       1)
         if globalParameters["PrintTensorBias"]:
           param("print-tensor-bias",      1)
+        if globalParameters["PrintTensorScaleAlphaVec"]:
+          param("print-tensor-scale-alpha-vec",      1)
         if globalParameters["PrintTensorAmaxD"]:
           param("print-tensor-amaxd",      1)
         if globalParameters["DumpTensors"]:

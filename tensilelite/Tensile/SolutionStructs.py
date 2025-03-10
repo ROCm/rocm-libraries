@@ -965,9 +965,9 @@ def getBiasDataTypeListDefault(problem: ProblemType) -> List[DataType]:
   bList = []
   for d in ["DataType", "ComputeDataType", "DestDataType"]:
     dtype = DataType(problem[d])
-    # filter out int8, because it is not supported by bias datatype
+    # filter out int8/f8/b8, because it is not supported by bias datatype
     # TODO
-    if not dtype.isInt8():
+    if not dtype.isInt8() and not dtype.is8bitFloat():
       bList.append(dtype)
 
   biasDataTypeList = list(set(bList))
@@ -1998,7 +1998,12 @@ class Solution(collections.abc.Mapping):
   # determine can we use DirectToLds
   @staticmethod
   def isDirectToLdsDoable(state, tc):
-    # x2/x4 support for directToLds (no longer supported)
+
+    numBytes = state["ProblemType"]["DataType"].numBytes()
+    isa = tuple(state["ISA"])
+
+    # x4 support for directToLds
+    canDTLx4 = globalParameters["AsmCaps"][isa]["HasDirectToLdsx4"]
 
     # numelements_perlane = 4/numBytes
     # TN with transposeLDS feature should work as long as state["AssertSummationElementMultiple"] % (numelements_perlane*2) = 0
@@ -2016,9 +2021,13 @@ class Solution(collections.abc.Mapping):
     if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
       return False
 
-    # numBytesPerLoad == 4 only
-    if numBytesPerLoad != 4:
-      reject(state, "DirectToLds can only be used with buffer loads requiring 1 register")
+    # x2 DTL is not supported
+    if numBytesPerLoad == 8:
+      reject(state, "can't use DirectToLds with b64 buffer load")
+      return False
+
+    if numBytesPerLoad == 16 and not canDTLx4:
+      reject(state, "b128 DirectToLds not supported")
       return False
 
     # so far MFMA only (TODO: enable non MFMA case)
@@ -2031,16 +2040,18 @@ class Solution(collections.abc.Mapping):
       reject(state, "DirectToLds does not support StreamK (tentative)")
       return False
 
+    # ToDo: Review def of lrvw and this check
     # DTL + LocalReadVectorWidth > MIInputPerThread does not work
     # Need support for TailLoop
-    if state["LocalReadVectorWidth"] > state["MIInputPerThread"]:
-      reject(state, "DirectToLds does not work with LocalReadVectorWidth > MIInputPerThread")
-      return False
+    if not state["ProblemType"]["Sparse"] and (not globalParameters["AsmCaps"][isa]["HasMFMA_f8f6f4"] or state["MatrixInstK"] <= 32):
+      if state["LocalReadVectorWidth"] > state["MIInputPerThread"]:
+        reject(state, "DirectToLds does not work with LocalReadVectorWidth > MIInputPerThread")
+        return False
 
-    if state["AssertSummationElementMultiple"] % state["GlobalReadVectorWidth%c"%tc]  != 0:
-      reject(state, "can't use DirectToLds with AssertSummationElementMultiple(%u) %% GlobalReadVectorWidth%c(%u)" % \
-            (state["AssertSummationElementMultiple"], tc,  state["GlobalReadVectorWidth%c"%tc]))
-      return False
+    if not state["ProblemType"]["Sparse"] and (not globalParameters["AsmCaps"][isa]["HasMFMA_f8f6f4"] or state["MatrixInstK"] <= 32):
+      if state["ProblemType"]["DataType"].isBFloat16() and state["AssertSummationElementMultiple"] % (2 * state["GlobalReadVectorWidth%c"%tc]) != 0:
+        reject(state, "can't use DirectToLds for BF16 with AssertSummationElementMultiple %u" % state["AssertSummationElementMultiple"])
+        return False
 
     if state["NumThreads"] % state["WavefrontSize"] != 0:
       reject(state, "can't use DirectToLds for NumThreads % WavefrontSize != 0")
@@ -2505,6 +2516,23 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["VectorWidthMetadata"] = state["VectorWidthA"] if state["ProblemType"]["Sparse"] == 1 else state["VectorWidthB"]
 
+    numBytes = state["ProblemType"]["DataType"].numBytes()
+    isa = tuple(state["ISA"])
+    state["enableLDSTrA"] = state["LDSTrInst"] and globalParameters["AsmCaps"][isa]["HasLDSTr"] and numBytes == 2 \
+            and not state["UnrollMajorLDSA"] and not state["DirectToVgprA"]
+    state["enableLDSTrB"] = state["LDSTrInst"] and globalParameters["AsmCaps"][isa]["HasLDSTr"] and numBytes == 2 \
+            and not state["UnrollMajorLDSB"] and not state["DirectToVgprB"]
+
+    if state["enableLDSTrA"]:
+      state["VectorWidthA"] = 1
+
+    if state["enableLDSTrB"]:
+      state["VectorWidthB"] = 1
+
+    if state["LDSTrInst"] and state["1LDSBuffer"] == 0:
+      reject(state, "Current LDS Transpose implementation does not support two LDS buffers")
+      return
+
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, "not implement VectorWidth without SourceSwap")
 
@@ -2537,7 +2565,7 @@ class Solution(collections.abc.Mapping):
             reject(state, "ConvertAfterDS only support DataType half")
             return
         if (state["ProblemType"]["DataTypeA"].isAnyFloat8() == False) and (state["ProblemType"]["DataTypeB"].isAnyFloat8() == False):
-            reject(state, "one of DataTypeA or DataTypeB need to be float8")
+            reject(state, "one of DataTypeA or DataTypeB need to be float8/float8_fnuz")
             return
 
     # DepthU == -1?
@@ -2819,10 +2847,17 @@ class Solution(collections.abc.Mapping):
           if state["TransposeLDS"] and (not state["DirectToLds"]):
             state["LocalReadVectorWidth"] = 16 // state["ProblemType"]["DataType"].numBytes()
           else:
-            state["LocalReadVectorWidth"] = state["MIInputPerThread"]
+            if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16:
+              state["LocalReadVectorWidth"] = 16 // state["ProblemType"]["DataType"].numBytes()
+            else:
+              state["LocalReadVectorWidth"] = state["MIInputPerThread"]
         else:
-          if state["LocalReadVectorWidth"] < state["MIInputPerThread"]:
-            reject(state, "LocalReadVectorWidth < %u" %(state["MIInputPerThread"]))
+          if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16:
+            if state["LocalReadVectorWidth"] < state["MIInputPerThread"] // 2:
+              reject(state, "LocalReadVectorWidth < %u" %(state["MIInputPerThread"] // 2))
+          elif not state["ProblemType"]["Sparse"] and (not globalParameters["AsmCaps"][isa]["HasMFMA_f8f6f4"] or state["MatrixInstK"] <= 32):
+            if state["LocalReadVectorWidth"] < state["MIInputPerThread"]:
+              reject(state, "LocalReadVectorWidth < %u" %(state["MIInputPerThread"]))
           if state["LocalReadVectorWidth"] > state["MIInputPerThread"] and not state["TransposeLDS"]:
             reject(state, "LocalReadVectorWidth require Transpose LDS")
 
@@ -3560,11 +3595,15 @@ class Solution(collections.abc.Mapping):
       if (not state["DirectToVgprA"]) and Solution.isDirectToLdsDoable(state, 'A'):
         state["DirectToLdsA"] = True
         state["LocalWriteUseSgprA"] = True
+        state["LdsPadA"] = 0
+        printWarning("DirectToLdsA enabled, set LdsPadA=0.")
         #print("DirectToLdsA", state["DirectToLdsA"])
 
       if (not state["DirectToVgprB"]) and Solution.isDirectToLdsDoable(state, 'B'):
         state["DirectToLdsB"] = True
         state["LocalWriteUseSgprB"] = True
+        state["LdsPadB"] = 0
+        printWarning("DirectToLdsB enabled, set LdsPadB=0.")
         #print("DirectToLdsB", state["DirectToLdsB"])
 
       # Update parent variable so kernel display is accurate
@@ -3604,7 +3643,8 @@ class Solution(collections.abc.Mapping):
         reject(state, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1")
 
     ldsNumBytesA, ldsNumBytesAlignedA, ldsNumBytesB, ldsNumBytesAlignedB, ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytes(state["LdsPadA"], state["LdsBlockSizePerPadA"], state["LdsPadB"], state["LdsBlockSizePerPadB"])
-
+    state["LdsOffsetA_Blk"]=0
+    state["LdsOffsetB_Blk"]=0
     # todo, can the alignment be a power of 2?
     state["LdsOffsetA"] = 0
     if state["PrefetchGlobalRead"]:
@@ -3992,14 +4032,16 @@ class Solution(collections.abc.Mapping):
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidth"]//state["MIInputPerThread"]
-      if wlrMultiple == 0:
-        reject(state, "LocalReadVectorWidth %u is less than MIInput" % (state["LocalReadVectorWidth"]))
-        return
+      # NOTE: wlrmultiple can be 0 for new MFMA
+      if not state["ProblemType"]["Sparse"] and (not globalParameters["AsmCaps"][isa]["HasMFMA_f8f6f4"] or state["MatrixInstK"] <= 32):
+        if wlrMultiple == 0:
+          reject(state, "LocalReadVectorWidth %u is less than MIInput" % (state["LocalReadVectorWidth"]))
+          return
       # for example, if the original ds_read is b32...
       #   1. if LoopIters = 5 (b32 x 5 times), WLR-Multiple = 2 (b64), then we can fit the WLR
       #   2. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 4 (b128), this is not allowed
       #   3. if LoopIters = 2 (b32 x 2 times), WLR-Multiple = 2 (b64), this is allowed
-      if state["LoopIters"] % wlrMultiple != 0:
+      if wlrMultiple and state["LoopIters"] % wlrMultiple != 0:
         reject(state, "LocalReadVectorWidth %u cannot be distributed evenly, LoopIters %u should be divisible by WLR-Multiple %u" \
           % (state["LocalReadVectorWidth"], state["LoopIters"], wlrMultiple))
 

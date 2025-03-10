@@ -54,3 +54,5 @@ Tensile.egg-info
 
 #clangd
 .cache
+
+build_*

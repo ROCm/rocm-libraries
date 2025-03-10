@@ -266,6 +266,7 @@ class VCmpXInstruction(CommonInstruction):
 
 class VCvtInstruction(CommonInstruction):
     def __init__(self, cvtType: CvtType, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers]=None, \
+#    def __init__(self, cvtType: CvtType, dst, src, sdwa: Optional[SDWAModifiers] = None, \
                  comment="") -> None:
         if isinstance(src, list):
             super().__init__(InstType.INST_CVT, dst, src, sdwa, vop3, comment)
@@ -304,13 +305,13 @@ class MFMAInstruction(Instruction):
         elif iType == InstType.INST_XF32:
             kStr = "xf32"
         elif iType == InstType.INST_F8:
-            kStr = "fp8_fp8"
+            kStr = "f8f6f4" if self.variant[2] > 32 else "fp8_fp8"
         elif iType == InstType.INST_BF8:
-            kStr = "bf8_bf8"
+            kStr = "f8f6f4" if self.variant[2] > 32 else "bf8_bf8"
         elif iType == InstType.INST_F8_BF8:
-            kStr = "fp8_bf8"
+            kStr = "f8f6f4" if self.variant[2] > 32 else "fp8_bf8"
         elif iType == InstType.INST_BF8_F8:
-            kStr = "bf8_fp8"
+            kStr = "f8f6f4" if self.variant[2] > 32 else "bf8_fp8"
         else:
             printExit("Type %s not found"%str(iType))
         return kStr
@@ -335,7 +336,18 @@ class MFMAInstruction(Instruction):
 
     def getArgStr(self) -> str:
         negStr = "" if not self.neg else " neg_lo:[1,1,1]" if self.asmCaps["HasWMMA_V1"] else " neg_lo:[1,1]"
-        return str(self.acc) + ", " + str(self.a) + ", " + str(self.b) + ", " + str(self.acc2) + negStr
+        inputPermuteStr = ""
+        if self.asmCaps["HasMFMA_f8f6f4"]:
+            iType = self.instType
+            if iType == InstType.INST_F8 :
+                inputPermuteStr = " cbsz:0 blgp:0" if self.variant[2] > 32 else ""
+            elif iType == InstType.INST_BF8:
+                inputPermuteStr = " cbsz:1 blgp:1" if self.variant[2] > 32 else ""
+            elif iType == InstType.INST_F8_BF8:
+                inputPermuteStr = " cbsz:0 blgp:1" if self.variant[2] > 32 else ""
+            elif iType == InstType.INST_BF8_F8:
+                inputPermuteStr = " cbsz:1 blgp:0" if self.variant[2] > 32 else ""
+        return str(self.acc) + ", " + str(self.a) + ", " + str(self.b) + ", " + str(self.acc2) + negStr + inputPermuteStr
 
     def toList(self) -> list:
         self.preStr()
@@ -1023,6 +1035,13 @@ class DSLoadB64(DSLoadInstruction):
         super().__init__(InstType.INST_B64, dst, src, ds, comment)
         if ds: ds.na = 1
         self.setInst("ds_load_b64")
+
+class DSLoadB64TrB16(DSLoadInstruction):
+    def __init__(self, dst, src, ds: Optional[DSModifiers] = None, comment="") -> None:
+        super().__init__(InstType.INST_B64, dst, src, ds, comment)
+        if ds: ds.na = 1
+        self.setInst("ds_load_b64_tr_b16")
+
 
 class DSLoadB128(DSLoadInstruction):
     def __init__(self, dst, src, ds: Optional[DSModifiers] = None, comment="") -> None:
@@ -2566,6 +2585,11 @@ class VXorB32(CommonInstruction):
         super().__init__(InstType.INST_B32, dst, [src0, src1], sdwa, None, comment)
         self.setInst("v_xor_b32")
 
+class VPrngB32(CommonInstruction):
+    def __init__(self, dst, src, comment="") -> None:
+        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        self.setInst("v_prng_b32")
+
 # V Convert
 class VCvtF16toF32(VCvtInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
@@ -2611,6 +2635,46 @@ class VCvtPkFP8toF32(VCvtInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
         super().__init__(CvtType.CVT_PK_FP8_to_F32, dst, src, sdwa, vop3, comment)
         self.setInst("v_cvt_pk_f32_fp8")
+        
+class VCvtPkFP8toF16(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_PK_F16_FP8, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_pk_f16_fp8")
+
+class VCvtPkBF8toF16(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_PK_F16_BF8, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_pk_f16_bf8")
+
+class VCvtFP8toF16(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_F16_FP8, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_f16_fp8")
+
+class VCvtPkBF8toF16(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_F16_BF8, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_f16_bf8")
+
+class VCvtPkF16toFP8(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_PK_FP8_F16, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_pk_fp8_f16")
+
+class VCvtPkF16toBF8(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_PK_BF8_F16, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_pk_bf8_f16")
+
+class VCvtSRF16toFP8(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_SR_FP8_F16, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_sr_fp8_f16")
+
+class VCvtSRF16toBF8(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_SCALEF32_SR_BF8_F16, dst, src, sdwa, vop3, comment)
+        self.setInst("v_cvt_scalef32_sr_bf8_f16")
 
 class VCvtPkBF8toF32(VCvtInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
@@ -2638,6 +2702,16 @@ class VCvtSRF32toBF8(VCvtInstruction):
     def __init__(self, dst, src0, src1, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
         super().__init__(CvtType.CVT_SR_F32_to_BF8, dst, [src0, src1], None, vop3, comment)
         self.setInst("v_cvt_sr_bf8_f32")
+
+class PVCvtBF16toFP32(VCvtInstruction):
+    def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_BF16_to_F32, dst, src, sdwa, None, comment)
+        self.setInst("v_cvt_f32_bf16")
+
+class VCvtPkF32toBF16(VCvtInstruction):
+    def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
+        super().__init__(CvtType.CVT_PK_F32_to_BF16, dst, [src0, src1], sdwa, vop3, comment)
+        self.setInst("v_cvt_pk_bf16_f32")
 
 # V Mask
 class VCndMaskB32(CommonInstruction):

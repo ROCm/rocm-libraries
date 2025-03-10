@@ -158,7 +158,7 @@ Real precisions 1 byte dst 1 byte: &real_precisions_1b_fnuz_dst_1b_fnuz
   - *bf8_fnuz_precision_dst_bf8_fnuz
   - *f8bf8_fnuz_precision_dst_bf8_fnuz
   - *bf8f8_fnuz_precision_dst_bf8_fnuz
-#F8 NANO end
+#F8 NANOO end
 
 Real precisions 1 bytes: &real_precisions_1b
   - &f8_precision_dst_fp32
@@ -299,7 +299,7 @@ Real precisions gemm only: &real_precisions_gemm_only
   - &double_precision
     { a_type: f64_r, b_type: f64_r, c_type: f64_r, d_type: f64_r, compute_type: c_f64_r , scale_type: f64_r}
 
-Real mix precisions: &real_mix_precisions
+Real mix precisions: &real_mix_precisions_fnuz
   - &fp8fp16_fnuz_precision_dst_fp16
     { a_type: f8_fnuz_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_f16_r, scale_type: f32_r}
   - &fp16fp8_fnuz_precision_dst_fp16

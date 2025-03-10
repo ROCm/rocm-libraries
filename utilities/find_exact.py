@@ -123,6 +123,8 @@ def dataType2Bench(dataType):
         return "bf16_r"
     elif dataType == "S":
         return "f32_r"
+    elif dataType == "FP8N":
+        return "f8_fnuz_r"
     elif dataType == "FP8":
         return "f8_r"
     else:

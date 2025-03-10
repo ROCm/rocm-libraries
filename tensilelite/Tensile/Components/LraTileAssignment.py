@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -114,7 +114,11 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         module = Module("LraTileAssignmentCode")
 
         # alloc vgpr
+        enableLDSTr = tP["enableLDSTr"]
         dummy   = writer.vgprPool.checkOut(1,"dummy")
+        if enableLDSTr:
+           sReg    = writer.vgprPool.checkOut(1,"sReg") # remainder
+           mReg    = writer.vgprPool.checkOut(1,"mReg") # remainder
 
         isWmma_v1 = writer.states.asmCaps["HasWMMA_V1"]
 
@@ -157,12 +161,34 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         # strider for each type of index
         umlds            = kernel["UnrollMajorLDS%s" % tc]
         mt               = kernel["MacroTile%u" % tile01]
-        strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+        if enableLDSTr:
+           strideTile = 4
+        else:
+           strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
         if isDTVAB:
           strideTile  = 1 # DTV case. Actual stride will be applied later.
+
         strideK          = inputPerThread if umlds else (mt + LdsPad) * inputPerThread
+        if enableLDSTr:
+           strideK1 = mt+LdsPad
+
+        # FIXME SPARSE
+        if kernel["ProblemType"]["Sparse"] != 0:
+            if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataType"].numBytes() > 16:
+              isSparseTrack = (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or tP["isM"]
+              strideK      = (inputPerThread if umlds else (mt + LdsPad) * inputPerThread) * (2 if isSparseTrack and kernel["MIInputPerThread%s"%tc] >  inputPerThread else 1)
+        #special case for new F8 MFMA
+        elif kernel["MatrixInstK"] > 32:
+            if umlds:
+                strideK = 16
+            else:
+                strideK = (mt + LdsPad) * 16
         strideBlock      = kernel["MatrixInstM"] * strideTile
-        strideWave       = kernel["MatrixInstM"] * num1DBlocks * strideTile * vectorWidth
+        if enableLDSTr:
+           strideWave = kernel["MatrixInstM"] * vectorWidth
+        else:
+           strideWave       = kernel["MatrixInstM"] * num1DBlocks * strideTile * vectorWidth
+
         lsu              = kernel["LocalSplitU"]
 
         if isDTVAB:
@@ -173,10 +199,24 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             # tile offset
             module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, \
                 "0. thread id in wave: wtid = tid %% wavelength(%u)" % waveWidth))
-            module.add(vectorStaticRemainder(dummy, tReg, kReg, kernel["MatrixInstN"], tmpVgprRes, tmpSgprInfo, \
-                "1. N offset: nIdx = wtid %% MI_N(%u)" % kernel["MatrixInstN"]))
+            if enableLDSTr:
+               module.add(vectorStaticRemainder(dummy, tReg, kReg, 4, tmpVgprRes, tmpSgprInfo, \
+                                                "1. N offset: nIdx = wtid %% 4"))
+               module.add(vectorStaticRemainder(dummy, sReg, kReg, dividendForKId, tmpVgprRes, tmpSgprInfo, \
+                                                "1. N offset: nIdx = wtid %% MI_M(%d)"%dividendForKId))
+               module.add(vectorStaticDivide(sReg, sReg, 16, tmpVgprRes, \
+                                                "1. thread id in wave: k1Idx = mtid // 4"))
+               module.add(staticMultiply(vgpr(sReg), vgpr(sReg), 16, tmpSgprInfo, \
+                                         "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
+
+            else:
+               module.add(vectorStaticRemainder(dummy, tReg, kReg, kernel["MatrixInstN"], tmpVgprRes, tmpSgprInfo, \
+                                             "1. N offset: nIdx = wtid %% MI_N(%u)" % kernel["MatrixInstN"]))
             module.add(staticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
                 "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
+            if enableLDSTr:
+                module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(sReg), src1=vgpr(tReg), \
+                           comment="1. offset in wave: lrOffset = bnOffset + lrKOffset"))
             # block offset
             if num1DBlocks > 1:
                 module.add(vectorStaticDivide(dummy, kReg, dividedForBlkId, tmpVgprRes, \
@@ -194,13 +234,29 @@ class LraTileAssignmentMFMA(LraTileAssignment):
             # unroll offset
             #if isMfma and (dividendForKId != waveWidth):
             if not isWmma_v1:
+                if (dividendForKId != waveWidth) and (not isDTVAB):
+                    if enableLDSTr:
+                        module.add(vectorStaticRemainder(dummy, mReg, kReg, 16, tmpVgprRes, tmpSgprInfo, \
+                                                        "5.1 thread id in wave: mtid = wtid %% 16"))
+                        module.add(vectorStaticDivide(mReg, mReg, 4, tmpVgprRes, \
+                                                     "5.2 thread id in wave: k1Idx = mtid // 4"))
                 if (dividendForKId != waveWidth) or isDTVAB:
                   # DTVAB case, add this regardless of dividendForKId != waveWidth
-                  module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
-                  "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (kernel["MatrixInstN"], kernel["MatrixInstB"])))
+                    module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
+                        "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (kernel["MatrixInstN"], kernel["MatrixInstB"])))
                 if (dividendForKId != waveWidth) and (not isDTVAB):
-                    module.add(staticMultiplyAdd(vgpr(tReg), vgpr(kReg), strideK, vgpr(tReg), tmpSgprInfo, \
-                                                 "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
+                    if enableLDSTr:
+                        module.add(staticMultiply(vgpr(kReg), vgpr(kReg), strideK, tmpSgprInfo, \
+                                                 "5. K offset: lrKOffset = kIdx * mStride(%u)" % (strideK)))
+                        module.add(staticMultiply(vgpr(mReg), vgpr(mReg), strideK1, tmpSgprInfo, \
+                                                 "5.1 K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
+                        module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(mReg), src1=vgpr(kReg), \
+                                          comment="5.2 offset in wave: lrOffset = bnOffset + lrKOffset"))
+                        module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(kReg), src1=vgpr(tReg), \
+                                          comment="6. offset in wave: lrOffset = bnOffset + lrKOffset"))
+                    else:
+                        module.add(staticMultiplyAdd(vgpr(tReg), vgpr(kReg), strideK, vgpr(tReg), tmpSgprInfo, \
+                                                    "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
 
             # wave offset
             if num1DWaves > 1:
@@ -213,5 +269,8 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
         # release register
         writer.vgprPool.checkIn(dummy)
+        if enableLDSTr:
+           writer.vgprPool.checkIn(sReg)
+           writer.vgprPool.checkIn(mReg)
 
         return module

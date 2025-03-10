@@ -36,7 +36,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 16, 1,  1,  2, 2,  2, 2] #64x64
-          - [32, 32, 16, 1,  1,  1, 1,  2, 2] #64x64
+          - [32, 32, 8, 1,  1,  1, 1,  2, 2] #64x64
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ClusterLocalRead: [1]

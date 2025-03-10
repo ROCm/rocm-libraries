@@ -65,16 +65,20 @@ def initAsmCaps(isaVersion, assemblerPath, isDebug) -> dict:
 
     rv["HasDirectToLds"]    = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dword v36, s[24:27], s28 offen offset:0 lds", isDebug) \
                                 or _tryAssembler(isaVersion, assemblerPath, "buffer_load_b32 v36, s[24:27], s28 offen offset:0 lds", isDebug)
+    rv["HasDirectToLdsx4"]  = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v36, s[24:27], s28 offen offset:0 lds", isDebug) \
+                                or _tryAssembler(isaVersion, assemblerPath, "buffer_load_b128 v36, s[24:27], s28 offen offset:0 lds", isDebug)
     rv["HasAddLshl"]        = _tryAssembler(isaVersion, assemblerPath, "v_add_lshl_u32 v47, v36, v34, 0x2", isDebug)
     rv["HasLshlOr"]         = _tryAssembler(isaVersion, assemblerPath, "v_lshl_or_b32 v47, v36, 0x2, v34", isDebug)
     rv["HasSMulHi"]         = _tryAssembler(isaVersion, assemblerPath, "s_mul_hi_u32 s47, s36, s34", isDebug)
 
     rv["HasMFMA_explictB"]  = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]", isDebug)
     rv["HasMFMA"]           = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, a[0:31]", isDebug) or rv["HasMFMA_explictB"]
-    rv["HasMFMA_f64"]       = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", isDebug) or _tryAssembler(isaVersion, assemblerPath, "v_mfma_f64_16x16x4_f64 v[0:7], v[32:33], v[36:37], v[0:7]", isDebug)
+    rv["HasMFMA_f64"]       = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", isDebug) \
+                                or _tryAssembler(isaVersion, assemblerPath, "v_mfma_f64_16x16x4_f64 v[0:7], v[32:33], v[36:37], v[0:7]", isDebug)
     rv["HasMFMA_bf16_1k"]   = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_32x32x4bf16_1k a[0:31], v[32:33], v[36:37], a[0:31]", isDebug)
     rv["HasMFMA_f8"]        = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_16x16x32_fp8_fp8 a[0:3], v[2:3], v[4:5], a[0:3]", isDebug)
     rv["HasMFMA_b8"]        = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_16x16x32_bf8_bf8 a[0:3], v[2:3], v[4:5], a[0:3]", isDebug)
+    rv["HasMFMA_f8f6f4"]    = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[0:7], v[8:15], a[0:3]", isDebug)
 
     rv["HasMFMA_xf32"]      = _tryAssembler(isaVersion, assemblerPath, "v_mfma_f32_32x32x4_xf32 a[0:15], v[32:33], v[36:37], a[0:15]", isDebug)
     rv["HasSMFMA"]          = _tryAssembler(isaVersion, assemblerPath, "v_smfmac_f32_32x32x16_f16 a[0:15], v[32:33], v[36:39], v[40]", isDebug)
@@ -115,19 +119,27 @@ def initAsmCaps(isaVersion, assemblerPath, isDebug) -> dict:
 
     rv["v_mov_b64"]         = _tryAssembler(isaVersion, assemblerPath, "v_mov_b64 v[0:1], v[2:3]", isDebug)
 
+    rv["HasBF16CVT"]        = _tryAssembler(isaVersion, assemblerPath, "v_cvt_f32_bf16 v0, v1", isDebug)
+    rv["Hascvtfp8_f16"]     = _tryAssembler(isaVersion, assemblerPath, "v_cvt_scalef32_pk_fp8_f16 v[0], v[1], 0 op_sel:[0,0,0,0]", isDebug)
+    rv["Hascvtf16_fp8"]     = _tryAssembler(isaVersion, assemblerPath, "v_cvt_scalef32_f16_fp8 v[0], v[1], 0 op_sel:[0,0,0,0]", isDebug)
+    
+    rv["HasLDSTr"]          = _tryAssembler(isaVersion, assemblerPath,  "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug)
+
+    rv["v_prng_b32"]        = _tryAssembler(isaVersion, assemblerPath, "v_prng_b32 v47, v36", isDebug)
+
     rv["HasAtomicAdd"]      = _tryAssembler(isaVersion, assemblerPath, "buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0", isDebug) \
                                 or _tryAssembler(isaVersion, assemblerPath, "buffer_atomic_add_f32 v0, v1, s[0:3], null offen offset:0", isDebug)
     rv["HasGLCModifier"]    = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, glc", isDebug) \
                                 or _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, glc", isDebug)
-    rv["HasMUBUFConst"]    = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dword v40, v36, s[24:27], 1 offen offset:0", isDebug) \
+    rv["HasMUBUFConst"]     = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dword v40, v36, s[24:27], 1 offen offset:0", isDebug) \
                                 or _tryAssembler(isaVersion, assemblerPath, "buffer_load_b32 v40, v36, s[24:27], 1 offen offset:0", isDebug)
     rv["HasSCMPK"]          = _tryAssembler(isaVersion, assemblerPath, "s_cmpk_gt_u32 s56, 0x0", isDebug)
 
     rv["HasGLCModifier"]    = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, glc", isDebug)
 
-    rv["HasNTModifier"]    = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt", isDebug)
+    rv["HasNTModifier"]     = _tryAssembler(isaVersion, assemblerPath, "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt", isDebug)
 
-    rv["HasNewBarrier"]    = _tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug)
+    rv["HasNewBarrier"]     = _tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug)
     # fmt: on
 
     if _tryAssembler(isaVersion, assemblerPath, "s_waitcnt vmcnt(63)", isDebug):
@@ -149,19 +161,20 @@ def initAsmCaps(isaVersion, assemblerPath, isDebug) -> dict:
 def initArchCaps(isaVersion) -> dict:
     rv = {}
     # fmt: off
-    rv["HasEccHalf"]         = (isaVersion in [(9,0,6), (9,0,8), (9,0,10), (9,4,0), (9,4,1), (9,4,2)])
-    rv["Waitcnt0Disabled"]   = (isaVersion in [(9,0,8), (9,0,10), (9,4,0), (9,4,1), (9,4,2)])
+    rv["HasEccHalf"]         = (isaVersion in [(9,0,6), (9,0,8), (9,0,10), (9,4,0), (9,4,1), (9,4,2), (9,5,0)])
+    rv["Waitcnt0Disabled"]   = (isaVersion in [(9,0,8), (9,0,10), (9,4,0), (9,4,1), (9,4,2), (9,5,0)])
+    rv["HasLDSGT64K"]        = (isaVersion in [(9,5,0)])
     rv["SeparateVscnt"]      = isaVersion[0] in (10, 11)
     rv["SeparateLGKMcnt"]    = isaVersion[0] == (12)
     rv["SeparateVMcnt"]      = isaVersion[0] == (12)
     rv["CMPXWritesSGPR"]     = isaVersion[0] not in (10, 11, 12)
     rv["HasWave32"]          = isaVersion[0] in (10, 11, 12)
-    rv["HasAccCD"]           = (isaVersion in [(9,0,10), (9,4,0), (9,4,1), (9,4,2)])
-    rv["ArchAccUnifiedRegs"] = (isaVersion in [(9,0,10), (9,4,0), (9,4,1), (9,4,2)])
-    rv["CrosslaneWait"]      = (isaVersion in [(9,4,0), (9,4,1), (9,4,2)])
+    rv["HasAccCD"]           = (isaVersion in [(9,0,10), (9,4,0), (9,4,1), (9,4,2), (9,5,0)])
+    rv["ArchAccUnifiedRegs"] = (isaVersion in [(9,0,10), (9,4,0), (9,4,1), (9,4,2), (9,5,0)])
+    rv["CrosslaneWait"]      = (isaVersion in [(9,4,0), (9,4,1), (9,4,2), (9,5,0)])
     rv["ForceStoreSC1"]      = (isaVersion in [(9,4,0), (9,4,1)])
-    rv["TransOpWait"]        = (isaVersion in [(9,4,0), (9,4,1), (9,4,2)])
-    rv["SDWAWait"]           = (isaVersion in [(9,4,0), (9,4,1), (9,4,2)])
+    rv["TransOpWait"]        = (isaVersion in [(9,4,0), (9,4,1), (9,4,2), (9,5,0)])
+    rv["SDWAWait"]           = (isaVersion in [(9,4,0), (9,4,1), (9,4,2), (9,5,0)])
     rv["VgprBank"]           = (isaVersion[0] in (10, 11, 12))
     rv["DSLow16NotPreserve"]       = isaVersion[0] == (12)
     rv["WrokGroupIdFromTTM"] = isaVersion[0] == (12)

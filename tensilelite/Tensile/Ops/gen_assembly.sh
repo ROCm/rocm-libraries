@@ -72,6 +72,15 @@ for arch in "${archs[@]}"; do
             objs+=($o)
         done
     fi
+    if [[ $arch =~ gfx950 ]]; then
+        for i in "S S F8 256 4" "S S B8 256 4" "S H F8 256 4" "S H B8 256 4"; do
+            set -- $i
+            s=$dst/A_$1_$2_$3_$4_$5_$arch.s
+            o=$dst/A_$1_$2_$3_$4_$5_$arch.o
+            python3 ./AMaxGenerator.py --is-scale -o $s -t $1 -d $2 -s $3 -w $4 -c $5 --arch $arch --toolchain $toolchain &
+            objs+=($o)
+        done
+    fi
     wait
     ${toolchain} -target amdgcn-amdhsa -Xlinker --build-id=$build_id_kind -o $dst/extop_$arch.co ${objs[@]}
     python3 ./ExtOpCreateLibrary.py --src=$dst --co=$dst/extop_$arch.co --output=$dst --arch=$arch

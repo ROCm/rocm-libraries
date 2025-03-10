@@ -534,7 +534,7 @@ namespace hipblaslt_ext
         using std::begin;
         using std::end;
 
-        static const std::string fp8Archs[] = {"gfx942"};
+        static const std::string fp8Archs[] = {"gfx942", "gfx950"};
         const auto               archName   = rocblaslt_internal_get_arch_name();
         return std::find(begin(fp8Archs), end(fp8Archs), archName) != end(fp8Archs);
     }

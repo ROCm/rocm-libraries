@@ -104,6 +104,9 @@ class KernelWriterAssembly(KernelWriter):
   def getSgprOccupancy(self, sgprs):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
+  def getSgprOccupancy(self, sgprs):
+    return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
+
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
     multiplier = int(ceil(max(numThreads, 256) / 256.0)) # example: wg=512 multiplier=2, 1024=4
     maxOccupancy = self.consts.maxOccupancy//multiplier
@@ -362,10 +365,18 @@ class KernelWriterAssembly(KernelWriter):
     localRead2Perpendicular = False
     localReadStrideCoalesced = kernel[tP["tt"]] * tP["bpeDS"] // bpr
     localRead2Coalesced = False
-    localReadInstructionIdx = self.selectMemoryInstruction("LocalRead", localReadWidth, \
-                              False, \
-                              localRead2Coalesced, localRead2Perpendicular,
-                              [localReadStrideCoalesced] )
+    tP["enableLDSTr"] = False
+    if tChar != "Metadata":
+        tP["enableLDSTr"] = kernel["enableLDSTr%s"%tChar]
+    length = len(instructions["LocalRead"])
+
+    if tP["enableLDSTr"]:
+        localReadInstructionIdx = length - 1
+    else:
+        localReadInstructionIdx = self.selectMemoryInstruction("LocalRead", localReadWidth, \
+                                   False, \
+                                   localRead2Coalesced, localRead2Perpendicular,
+                                   [localReadStrideCoalesced] )
     tP["localRead2Coalesced"]      = localRead2Coalesced
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
@@ -1159,7 +1170,7 @@ class KernelWriterAssembly(KernelWriter):
 
     module.add(MacroVDynamicScalarDiv(kernel["WavefrontSize"]))
 
-    if kernel["ProblemType"]["StochasticRounding"]:
+    if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
 
     if not kernel["EnableMatrixInstruction"]:
@@ -3651,6 +3662,25 @@ class KernelWriterAssembly(KernelWriter):
             comment="lwFOB = lwB%s + lwB%s*MT%s + LDS_OFFSET_METADATA=%u" % (tP["tileChar"], \
             self.states.unrollChar, tP["tileChar"], kernel["LdsOffsetMetadata"])))
 
+    if tP["isA"]:
+      if self.states.a.numVgprLocalReadAddr > 1:
+        finalVgpr64K = vgpr("LocalWriteAddr%s+1"%tc)
+        module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr(destVgpr), \
+            comment="Final Offset Plus 64K" ))
+      if self.states.a.numVgprLocalReadAddr > 2:
+        finalVgpr128K = vgpr("LocalWriteAddr%s+2"%tc)
+        module.add(VAddU32(dst=finalVgpr128K, src0= 0x20000, src1= vgpr(destVgpr), \
+            comment="Final Offset Plus 128K" ))
+    else:
+      if self.states.b.numVgprLocalReadAddr > 1:
+        finalVgpr64K = vgpr("LocalWriteAddr%s+1"%tc)
+        module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr(destVgpr), \
+            comment="Final Offset Plus 64K" ))
+      if self.states.b.numVgprLocalReadAddr > 2:
+        finalVgpr128K = vgpr("LocalWriteAddr%s+2"%tc)
+        module.add(VAddU32(dst=finalVgpr128K, src0= 0x20000, src1= vgpr(destVgpr), \
+            comment="Final Offset Plus 128K" ))
+
     #LSC_ * LSP_
     numBytesPerElement = kernel["ProblemType"]["DataType"].numBytes()
     validWIPerLoad     = kernel[tP["lsc"]] * kernel[tP["lsp"]]//tP["glvw"]
@@ -3897,6 +3927,14 @@ class KernelWriterAssembly(KernelWriter):
     if tP["isA"]:
       module.addComment0("N/A")
 
+      if self.states.a.numVgprLocalReadAddr > 1:
+        finalVgpr64K = vgpr("LocalReadAddr%s+1"%tP["tensorChar"])
+        module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), \
+          comment="Final vgprLocalReadAddr%s+1 Offset Plus 64K"%tP["tensorChar"] ))
+      if self.states.a.numVgprLocalReadAddr > 2:
+        finalVgpr128K = vgpr("LocalReadAddr%s+2"%tP["tensorChar"])
+        module.add(VAddU32(dst=finalVgpr128K, src0=0x20000, src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), \
+          comment="Final vgprLocalReadAddr%s+2 Offset Plus 128K"%tP["tensorChar"] ))
     else:
       # no need to generate add code if LdsOffset is 0 or DirectToVgprB
       if kernel["LdsOffset%s"%tP["tensorChar"]] == 0 or tP["isB"] and kernel["DirectToVgprB"]:
@@ -3908,6 +3946,14 @@ class KernelWriterAssembly(KernelWriter):
             src0=hex(kernel["LdsOffset%s"%tP["tensorChar"]]), \
             src1=vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), \
             comment=" += LdsOffset%s (lower)"%tP["tensorChar"]))
+      if self.states.b.numVgprLocalReadAddr > 1:
+        finalVgpr64K = vgpr("LocalReadAddr%s+1"%tP["tensorChar"])
+        module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), \
+          comment="Final vgprLocalReadAddr%s+1 Offset Plus 64K"%tP["tensorChar"] ))
+      if self.states.b.numVgprLocalReadAddr > 2:
+        finalVgpr128K = vgpr("LocalReadAddr%s+2"%tP["tensorChar"])
+        module.add(VAddU32(dst=finalVgpr128K, src0=0x20000, src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), \
+          comment="Final vgprLocalReadAddr%s+2 Offset Plus 128K"%tP["tensorChar"] ))
     return module
 
   ##############################################################################
@@ -4325,12 +4371,12 @@ class KernelWriterAssembly(KernelWriter):
     numG2LB  = 0
     numG2LMetadata  = 0
     if not kernel["DirectToVgprA"]:
-      if kernel["ULSGRODoubleG2L"] == 1:
+      if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
         numG2LA = self.states.a.numVgprG2LAllocated*2
       else:
         numG2LA = self.states.a.numVgprG2LAllocated
     if not kernel["DirectToVgprB"]:
-      if kernel["ULSGRODoubleG2L"] == 1:
+      if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
         numG2LB = self.states.b.numVgprG2LAllocated*2
       else:
         numG2LB = self.states.b.numVgprG2LAllocated
@@ -5786,7 +5832,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def mfmaIter_waitCount(self, kernel):
-    if self.states.version in [(9,4,2)]:
+    if self.states.version in [(9,4,2), (9,5,0)]:
       dataType = kernel["ProblemType"]["DataType"]
       miM = kernel["MatrixInstM"]
       miN = kernel["MatrixInstN"]
@@ -5914,6 +5960,7 @@ class KernelWriterAssembly(KernelWriter):
     mfma_1k          = True if kernel["MFMA_BF16_1K"] else False
     accStoreCIdx     = 0
     # alloc vgpr
+    kReg_first = None
     kReg    = None
     abReg   = None
     tmpVgpr = None
@@ -5940,39 +5987,48 @@ class KernelWriterAssembly(KernelWriter):
     # MIK=1 case, we still need this code for Coalesced case
     if tail and (kernel["MatrixInstK"] > 1 or numReadsIterCoalescedA > 1 or numReadsIterCoalescedB > 1):
       if not is_wmma_v1: #mfma or wmma_v2
-        kReg    = self.vgprPool.checkOut(1,"kReg") # remainder
+        # ToDo: Avoid using extra kReg_first for wmma_v2 case
+        kReg_first  = self.vgprPool.checkOut(1,"kReg_first") # the first vgpr of remainder
+        kReg        = self.vgprPool.checkOut(1,"kReg") # remainder
         if kernel["LocalSplitU"] > 1:
           loopCntSgpr = self.sgprPool.checkOut(1)
         else:
           loopCntSgpr = loopCounterName
 
         with self.allocTmpSgpr(1) as tmpSgprInfo:
-          shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", self.states.kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
-          shiftK.add(vectorStaticDivide(kReg, kReg, dividerFortidInK, tmpVgpr))
-
-        numTmpSgpr = 4 if (vgprPerInput > 2) else 3
+          shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", self.states.kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
+          shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
+        numTmpSgpr = 4 if (vgprPerInput > 2 and is_wmma_v2) else 3 # ToDo: check if this is correct for sparse mfma
 
         with self.allocTmpSgpr(numTmpSgpr, alignment=1) as tmpSgprInfo:
           if tmpSgprInfo.idx % 2 == 0:
             tmpSgprX2 = tmpSgprInfo.idx
             tmpSgprX1 = tmpSgprInfo.idx+2
-            tmpSgprX3 = tmpSgprInfo.idx+3
+            if numTmpSgpr == 4:
+               tmpSgprX3 = tmpSgprInfo.idx+3
           else:
             tmpSgprX2 = tmpSgprInfo.idx+1
             tmpSgprX1 = tmpSgprInfo.idx
-            tmpSgprX3 = tmpSgprInfo.idx+3
+            if numTmpSgpr == 4:
+               tmpSgprX3 = tmpSgprInfo.idx+3
+
+          sparseInputBlocksA = 1
+          sparseInputBlocksB = 1
+          if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16 :
+            sparseInputBlocksA = 2 if kernel["ProblemType"]["Sparse"] == 2 else 1
+            sparseInputBlocksB = 2 if kernel["ProblemType"]["Sparse"] == 1 else 1
 
           # replace 0 for differnet thread
           if kernel["ProblemType"]["Sparse"] == 1 and numMIInput//8 >= 1:
             vgprPerSet0Group = 1
           elif vgprPerInputA <= 2:
-            shiftK.add(staticMultiply(vgpr(kReg), vgpr(kReg), numMIInput * numReadsIterCoalesced, tmpSgprInfo))
+            shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), numMIInput * numReadsIterCoalesced, tmpSgprInfo))
             kStepForCoalesced = (u%numReadsIterCoalesced) * numMIInput
             if kStepForCoalesced > 0:
-              shiftK.add(VAddU32(vgpr(kReg), hex(kStepForCoalesced), vgpr(kReg), "k += (u%%numReadsIterCoalesced) * numMIInput"))
+              shiftK.add(VAddU32(vgpr(kReg_first), hex(kStepForCoalesced), vgpr(kReg_first), "k += (u%%numReadsIterCoalesced) * numMIInput"))
             if kernel["LocalSplitU"] > 1:
               shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
-            shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+            shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg_first), src1=sgpr(loopCntSgpr), comment="check K index >= Size L")) #ToDo: check value of laneSGPRCount
             vgprPerSet0Group = vgprPerInputA
           elif is_wmma_v2 and vgprPerInputA > 2:
             vgprPerSet0Group = 4
@@ -5982,9 +6038,22 @@ class KernelWriterAssembly(KernelWriter):
           for group in range(0, numSet0GroupA):
             if numSet0GroupA > 1 or (is_wmma_v2 and vgprPerInputA > 2):
               if group == 0:
-                shiftK.add(staticMultiply(vgpr(kReg), vgpr(kReg), numMIInput, tmpSgprInfo))
+                if kernel["ProblemType"]["Sparse"] == 1:
+                    multiplyBy = numMIInput//sparseInputBlocksA
+                else:
+                    multiplyBy = numMIInput//2 if vgprPerInputA == 8 else numMIInput
+                shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
+              elif kernel["ProblemType"]["Sparse"] == 2 and group == 2 and sparseInputBlocksA == 2:
+                is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
+                strideK = 3 if kernel["MatrixInstK"]== 32 or (is8bits and kernel["MatrixInstK"]== 64) else 7
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupA*strideK, "add part of K"))
               else:
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupA, "add part of K"))
+                kIncA = numMIInput//numSet0GroupA
+                if self.states.asmCaps["HasMFMA_f8f6f4"]:
+                  if group == 2 and vgprPerInputA == 8: #special layout for F8
+                    kIncA = 56 if kernel["MatrixInstK"] == 128 else 24
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
               if kernel["LocalSplitU"] > 1:
                 shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
               shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
@@ -5997,27 +6066,39 @@ class KernelWriterAssembly(KernelWriter):
                     shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=hex(0), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment="set 0 if K_idx >= sizeL"))
 
           if kernel["ProblemType"]["Sparse"] == 2 and numMIInput//8 >= 1:
-            shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
-            shiftK.add(vectorStaticDivide(kReg, kReg, dividerFortidInK, tmpVgpr))
+            shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
+            shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
             vgprPerSet0Group = 1
           elif vgprPerInputB <= 2:
             vgprPerSet0Group = vgprPerInputB
           elif is_wmma_v2 and vgprPerInputB > 2:
-            shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
-            shiftK.add(vectorStaticDivide(kReg, kReg, dividerFortidInK, tmpVgpr))
+            shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
+            shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
             vgprPerSet0Group = 4
           else:
-            shiftK.add(vectorStaticRemainder(dummy, kReg, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
-            shiftK.add(vectorStaticDivide(kReg, kReg, dividerFortidInK, tmpVgpr))
+            shiftK.add(vectorStaticRemainder(dummy, kReg_first, "Serial", kernel["WavefrontSize"], tmpVgpr, tmpSgprInfo))
+            shiftK.add(vectorStaticDivide(kReg_first, kReg_first, dividerFortidInK, tmpVgpr))
             vgprPerSet0Group = 2
 
           numSet0GroupB = vgprPerInputB//vgprPerSet0Group
           for group in range(0, numSet0GroupB):
             if numSet0GroupB > 1 or (is_wmma_v2 and vgprPerInputB > 2):
               if group == 0:
-                shiftK.add(staticMultiply(vgpr(kReg), vgpr(kReg), numMIInput, tmpSgprInfo))
+                if kernel["ProblemType"]["Sparse"] == 1:
+                    multiplyBy = numMIInput//sparseInputBlocksB
+                else:
+                    multiplyBy = numMIInput//2 if vgprPerInputB == 8 else numMIInput
+                shiftK.add(staticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
+              elif kernel["ProblemType"]["Sparse"] == 1 and group == 2 and sparseInputBlocksB == 2:
+                is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
+                strideK = 3 if kernel["MatrixInstK"]== 32 or (is8bits and kernel["MatrixInstK"]== 64) else 7
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupB*strideK, "add part of K"))
               else:
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupB, "add part of K"))
+                kIncB = numMIInput//numSet0GroupB
+                if group == 2 and vgprPerInputB == 8:
+                   kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
               # replace 0 for differnet thread
               if kernel["LocalSplitU"] > 1:
                 shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
@@ -6030,117 +6111,170 @@ class KernelWriterAssembly(KernelWriter):
 
           # replace 0 for same thread
           if numMIInput > 1 and kernel["AssertSummationElementMultiple"] < 8:
-            abReg   = self.vgprPool.checkOutAligned(vgprPerInput, vgprPerInput, "abReg")
-            shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg), comment="get distance between size and k index"))
-            shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numMIInput, comment="set partial 0 if distance less than input per thread"))
+            alignment = vgprPerInput if is_wmma_v2 else (2 if vgprPerInput > 1 else 1)
+            abReg   = self.vgprPool.checkOutAligned(vgprPerInput, alignment, "abReg")
+            if (vgprPerInput < 4 and is_mfma) or is_wmma_v2:
+              shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg_first), comment="get distance between size and k index"))
+              shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numMIInput, comment="set partial 0 if distance less than input per thread"))
             shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numMIInput-1, comment="get inputs for edge thread"))
             shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numMIInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
             shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
 
             if vgprPerInput == 1:
               VShiftLeft = VLShiftLeftB32
-            elif vgprPerInput == 2:
+            elif vgprPerInput >= 2:   # for 2, 4, 8
               VShiftLeft = VLShiftLeftB64
-            elif vgprPerInput == 4:
-              VShiftLeft = VLShiftLeftB64
+            if vgprPerInput == 4 and is_wmma_v2:
               tmpVgpr2   = self.vgprPool.checkOutAligned(2, 2, "tmpVgpr2")
 
             for a in range(0, kernel["MIWaveTileA"]):
               for iui in range(0, innerUnroll):
                 aStr_base = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a)
                 aStr = vgpr(aStr_base, min(2, vgprPerInput))
-                if vgprPerInput == 4:
-                  a_64_shift = Label(label=self.labels.getNameInc("a_64_Shift"), comment="")
-                  a_32_shift = Label(label=self.labels.getNameInc("a_32_Shift"), comment="")
-                  a_common = Label(label=self.labels.getNameInc("a_shift_end"), comment="")
-                  aStr1 = vgpr(aStr_base + "+1", min(2, vgprPerInput))
-                  aStr2 = vgpr(aStr_base + "+2", min(2, vgprPerInput))
+                if is_wmma_v2:
+                  if vgprPerInput == 4:
+                    a_64_shift = Label(label=self.labels.getNameInc("a_64_Shift"), comment="")
+                    a_32_shift = Label(label=self.labels.getNameInc("a_32_Shift"), comment="")
+                    a_common = Label(label=self.labels.getNameInc("a_shift_end"), comment="")
+                    aStr1 = vgpr(aStr_base + "+1", min(2, vgprPerInput))
+                    aStr2 = vgpr(aStr_base + "+2", min(2, vgprPerInput))
 
-                  shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
-                  shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset > 63"))
-                  shiftK.add(SCBranchSCC1(labelName=a_64_shift.getLabelName(), comment="jump when positive"))
-                  shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset > 32"))
-                  shiftK.add(SCBranchSCC1(labelName=a_32_shift.getLabelName(), comment="jump when positive"))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr2, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(SBranch(a_common.getLabelName()))
-                  shiftK.add(a_32_shift)
-                  shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                  shiftK.add(SBranch(a_common.getLabelName()))
-                  shiftK.add(a_64_shift)
-                  shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(abReg+2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
-                  shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                  shiftK.add(a_common)
-                else:
-                  shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                    shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
+                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset > 63"))
+                    shiftK.add(SCBranchSCC1(labelName=a_64_shift.getLabelName(), comment="jump when positive"))
+                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset > 32"))
+                    shiftK.add(SCBranchSCC1(labelName=a_32_shift.getLabelName(), comment="jump when positive"))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr2, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(SBranch(a_common.getLabelName()))
+                    shiftK.add(a_32_shift)
+                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr1, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                    shiftK.add(SBranch(a_common.getLabelName()))
+                    shiftK.add(a_64_shift)
+                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg+2, 2), shiftHex=sgpr(tmpSgprX3), src=aStr, comment=""))
+                    shiftK.add(SAddU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                    shiftK.add(a_common)
+                  else:
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                  for bk in range(0, vgprPerInput):
+                    aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
+                    shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
+                else: # mfma
 
-                for bk in range(0, vgprPerInput):
-                  aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
-                  shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
+                  if kernel["ProblemType"]["Sparse"]:
+                    if vgprPerInput == 2:
+                      aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                  elif vgprPerInput <= 2:
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                  if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
+                    for ivgpr in range(0, vgprPerInput, 2):
+                      aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=ivgpr), 2)
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                  for bk in range(0, vgprPerInput):
+                    aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a, bk=bk), 1)
+                    if vgprPerInput >= 4:
+                      if bk == 0:
+                        shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupA, "add part of K"))
+                      elif bk % 2 == 0:
+                        kIncA = numMIInput//numSet0GroupA
+                        if bk == 4 and self.states.asmCaps["HasMFMA_f8f6f4"]:
+                          kIncA = 56 if kernel["MatrixInstK"] == 128 else 24
+                        shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
+                      # replace 0 for differnet thread
+                      if kernel["LocalSplitU"] > 1:
+                        shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
+                      shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                    shiftK.add(VCndMaskB32(dst=aStr, src0=aStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
 
             for b in range(0, kernel["MIWaveTileB"]):
               for iui in range(0, innerUnroll):
                 bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b)
                 bStr = vgpr(bStr_base, min(2, vgprPerInput))
-                if vgprPerInput == 4:
-                  b_64_shift = Label(label=self.labels.getNameInc("b_64_Shift"), comment="")
-                  b_32_shift = Label(label=self.labels.getNameInc("b_32_Shift"), comment="")
-                  b_common = Label(label=self.labels.getNameInc("b_shift_end"), comment="")
-                  bStr1 = vgpr(bStr_base + "+1", min(2, vgprPerInput))
-                  bStr2 = vgpr(bStr_base + "+2", min(2, vgprPerInput))
-                  shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
-                  shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset >63"))
-                  shiftK.add(SCBranchSCC1(labelName=b_64_shift.getLabelName(), comment="jump when positive"))
-                  shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset >32"))
-                  shiftK.add(SCBranchSCC1(labelName=b_32_shift.getLabelName(), comment="jump when positive"))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr2, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(SBranch(b_common.getLabelName()))
-                  shiftK.add(b_32_shift)
-                  shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
-                  shiftK.add(SBranch(b_common.getLabelName()))
-                  shiftK.add(b_64_shift)
-                  shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
-                  shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
-                  shiftK.add(VShiftLeft(dst=vgpr(abReg+2,2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
-                  shiftK.add(b_common)
-                else:
-                  shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                if is_wmma_v2:
+                  if vgprPerInput == 4:
+                    b_64_shift = Label(label=self.labels.getNameInc("b_64_Shift"), comment="")
+                    b_32_shift = Label(label=self.labels.getNameInc("b_32_Shift"), comment="")
+                    b_common = Label(label=self.labels.getNameInc("b_shift_end"), comment="")
+                    bStr1 = vgpr(bStr_base + "+1", min(2, vgprPerInput))
+                    bStr2 = vgpr(bStr_base + "+2", min(2, vgprPerInput))
+                    shiftK.add(SMovB32(dst=sgpr(tmpSgprX3), src=sgpr(tmpSgprX1), comment="sgpr used for minic shift 128 bit"))
+                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=64, comment="check offset >63"))
+                    shiftK.add(SCBranchSCC1(labelName=b_64_shift.getLabelName(), comment="jump when positive"))
+                    shiftK.add(SCmpGeI32(src0=sgpr(tmpSgprX3), src1=32, comment="check offset >32"))
+                    shiftK.add(SCBranchSCC1(labelName=b_32_shift.getLabelName(), comment="jump when positive"))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=vgpr(tmpVgpr2),comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr2, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(SBranch(b_common.getLabelName()))
+                    shiftK.add(b_32_shift)
+                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=32, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=vgpr(tmpVgpr2),comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+2), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(tmpVgpr2, 2), shiftHex=sgpr(tmpSgprX3), src=bStr1, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+3), src=vgpr(tmpVgpr2+1),comment=""))
+                    shiftK.add(SBranch(b_common.getLabelName()))
+                    shiftK.add(b_64_shift)
+                    shiftK.add(SSubU32(dst=sgpr(tmpSgprX3), src0=sgpr(tmpSgprX3), src1=64, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg), src=0, comment=""))
+                    shiftK.add(VMovB32(dst=vgpr(abReg+1), src=0, comment=""))
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg+2,2), shiftHex=sgpr(tmpSgprX3), src=bStr, comment=""))
+                    shiftK.add(b_common)
+                  else:
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                  for bk in range(0, vgprPerInput):
+                    bStr = vgpr(self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
+                    shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
+                else: # mfma
 
-                for bk in range(0, vgprPerInput):
-                  bStr = vgpr(self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
-                  shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2, self.states.laneSGPRCount), comment=""))
-
-            if vgprPerInput == 4:
-              if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
-
+                  if kernel["ProblemType"]["Sparse"]:
+                    if vgprPerInput == 2:
+                      aStr = vgpr(self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, a), 2)
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=aStr, comment=""))
+                  elif vgprPerInput <= 2:
+                    shiftK.add(VShiftLeft(dst=vgpr(abReg, vgprPerInput), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                  if vgprPerInput >= 4 and vgprPerInput % 2 == 0:
+                    for ivgpr in range(0, vgprPerInput, 2):
+                      bStr = vgpr(self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=ivgpr), 2)
+                      shiftK.add(VShiftLeft(dst=vgpr(abReg+ivgpr, 2), shiftHex=sgpr(tmpSgprX1), src=bStr, comment=""))
+                  for bk in range(0, vgprPerInput):
+                    bStr = vgpr(self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInput, m, u, iui, b, bk=bk), 1)
+                    if vgprPerInput >= 4:
+                      if bk == 0:
+                        shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), numMIInput//numSet0GroupB, "add part of K"))
+                      elif bk % 2 == 0:
+                        kIncB = numMIInput//numSet0GroupB
+                        if bk == 4: # when vgprPerInput == 8
+                          kIncB = 56 if kernel["MatrixInstK"] == 128 else 24
+                        shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
+                      # replace 0 for differnet thread
+                      if kernel["LocalSplitU"] > 1:
+                        shiftK.add(SMinI32(dst=sgpr(loopCntSgpr), src0=sgpr(loopCounterName), src1=sgpr("LSUTailLoopOffset"), comment="check lsu bound"))
+                      shiftK.add(VCmpGEI32(dst=sgpr(tmpSgprX2,2), src0=vgpr(kReg), src1=sgpr(loopCntSgpr), comment="check K index >= Size L"))
+                    shiftK.add(VCndMaskB32(dst=bStr, src0=bStr, src1=vgpr(abReg+bk), src2=sgpr(tmpSgprX2,2), comment=""))
+          if vgprPerInput == 4 and is_wmma_v2:
+            if tmpVgpr2 is not None: self.vgprPool.checkIn(tmpVgpr2)
         if kernel["LocalSplitU"] > 1:
           self.sgprPool.checkIn(loopCntSgpr)
       else: #wmma
@@ -6337,6 +6471,7 @@ class KernelWriterAssembly(KernelWriter):
             prevAccIdx = accIdx
 
     # release register
+    if kReg_first is not None: self.vgprPool.checkIn(kReg_first)
     if kReg is not None: self.vgprPool.checkIn(kReg)
     if abReg is not None: self.vgprPool.checkIn(abReg)
     if tmpVgpr is not None: self.vgprPool.checkIn(tmpVgpr)
@@ -7012,6 +7147,10 @@ class KernelWriterAssembly(KernelWriter):
                 # this is mandatory for DirectToLds case. Also, it improves tail loop performance.
                 # so far, limit to double only
                 numLoadVectorComp = numLoadVectorComp // kernel["GlobalReadVectorWidth%c"%tc]
+
+              if isLds == True:
+                numLoadVectorComp = 1
+
               int8TempVgpr = numLoadVectorComp - 1
 
               # for each component in vector
@@ -7038,6 +7177,16 @@ class KernelWriterAssembly(KernelWriter):
                   if (not tP["isM"]) and kernel["DirectToLds%c"%tc] and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
                     # Pack four byte values into a single load dword (for DTL only for now)
                     numElementsPerLoad = 4
+                    dataIsByte = False
+                  else:
+                    dataIsByte = True
+
+                  if (not tP["isM"]) and kernel["DirectToLds%c"%tc] and (not tP["tlu"]) and tP["glvw"]>=4 and kernel["AssertSummationElementMultiple"] % 4 == 0:
+                    if tP["glvw"] == 4:
+                      # Pack four byte values into a single load dword (for DTL only for now)
+                      numElementsPerLoad = 4
+                    elif tP["glvw"] == 16:
+                      numElementsPerLoad = 16
                     dataIsByte = False
                   else:
                     dataIsByte = True
@@ -7191,10 +7340,10 @@ class KernelWriterAssembly(KernelWriter):
                   if ((dataType.isInt8() or dataType.is8bitFloat()) \
                                and not tP["isM"]) or (tP["isM"] and destVgprHi != None):
                     # TODO-Int8, Check this:
-                    # if numElementsPerLoad==2:
-                    #   # Pack two FP16 values into a single load dword x2
-                    #   r += 1 # skip next element since we loaded 2X here
-                    #   comment = "load packed 2X half buffer value"
+                    #if numElementsPerLoad==2:
+                      # Pack two FP16 values into a single load dword x2
+                    #  r += 1 # skip next element since we loaded 2X here
+                    #  comment = "load packed 2X half buffer value"
                     if not kernel["DirectToLds%s"%tc]:
                       hi8  = (loopCnt%4) %2 if tP["glvw"]==1 else (r%4) %2
                       hi16 = False if tP["glvw"]==1 else (r%4)//2
@@ -7370,7 +7519,7 @@ class KernelWriterAssembly(KernelWriter):
 
               # for int8:
               # we do the 3 packs, and checking the 3 extra vgprs after loading all components
-              if dataIsByte and int8TempVgpr:
+              if dataIsByte and int8TempVgpr and not isLds:
                 assert packInt8Code != None and destVgprHi != None
                 module.add(packInt8Code)
                 if doTailOpt == 0:
@@ -7990,6 +8139,24 @@ class KernelWriterAssembly(KernelWriter):
               src0=resetMask, \
               src1=vgpr("LocalWriteAddr%s"%tPM["tensorChar"]), \
               comment="reset to Red"))
+          if tP["isA"]:
+            if self.states.a.numVgprLocalWriteAddr > 1:
+              finalVgpr64K = vgpr("LocalWriteAddr%s+1"%tc)
+              module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr("LocalWriteAddr%s"%tP["tensorChar"]), \
+                comment="Final Offset Plus 64K" ))
+            if self.states.a.numVgprLocalWriteAddr > 2:
+              finalVgpr128K = vgpr("LocalWriteAddr%s+2"%tc)
+              module.add(VAddU32(dst=finalVgpr128K, src0=0x20000, src1= vgpr("LocalWriteAddr%s"%tP["tensorChar"]), \
+                comment="Final Offset Plus 128K" ))
+          else:
+            if self.states.b.numVgprLocalWriteAddr > 1:
+              finalVgpr64K = vgpr("LocalWriteAddr%s+1"%tc)
+              module.add(VAddU32(dst=finalVgpr64K, src0=0x10000, src1= vgpr("LocalWriteAddr%s"%tP["tensorChar"]), \
+                comment="Final Offset Plus 64K" ))
+            if self.states.b.numVgprLocalWriteAddr > 2:
+              finalVgpr128K = vgpr("LocalWriteAddr%s+2"%tc)
+              module.add(VAddU32(dst=finalVgpr128K, src0=0x20000, src1= vgpr("LocalWriteAddr%s"%tP["tensorChar"]), \
+                comment="Final Offset Plus 128K" ))
     return module
 
   ##############################################################################
@@ -8423,7 +8590,7 @@ class KernelWriterAssembly(KernelWriter):
               # if tP["glvw"]==1 and instructionCnt%2==1:
               #   isHigh16Bits = True
 
-            # Need cvt
+              # Need cvt
             if tP["bpeDS"] != tP["bpeGR"]:
               assert numBlocks == 1
               if (kernel["ProblemType"]["DataType%s"%tc].isSingle() and kernel["ProblemType"]["DataType"].isHalf()):
@@ -8448,8 +8615,13 @@ class KernelWriterAssembly(KernelWriter):
 
                 newBlockWidth = (tP["bpeGR"] / tP["bpe"]) * blockWidth
                 if newBlockWidth == 0.5:
+                  # We cannot use optimized f16->fp8 instruction here as we have only one half element to be converted
+                  # and we only have a pack instruction which can convert 2 half elements to 2 f8 element
                   if kernel["ProblemType"]["StochasticRounding"]:
-                    vgprTmp = self.vgprPool.checkOutAligned(4, 2)
+                    if self.states.asmCaps["v_prng_b32"]:
+                      vgprTmp = self.vgprPool.checkOutAligned(2, 2)
+                    else:
+                      vgprTmp = self.vgprPool.checkOutAligned(4, 2)
                   else:
                     vgprTmp = self.vgprPool.checkOutAligned(1, 2)
                   src_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
@@ -8462,9 +8634,12 @@ class KernelWriterAssembly(KernelWriter):
 
                   if kernel["ProblemType"]["StochasticRounding"]:
                     vRand = vgprTmp+1 #seed
-                    vTemp0 = vgprTmp+2
-                    vTemp1 = vgprTmp+3
-                    localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp), vTemp0, vTemp1]))
+                    if self.states.asmCaps["v_prng_b32"]:
+                      localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp),comment="Psudo Random Number Generator"))
+                    else:
+                      vTemp0 = vgprTmp+2
+                      vTemp1 = vgprTmp+3
+                      localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp), vTemp0, vTemp1]))
 
                     if (toF8):
                       localWriteCVTCode.add(VCvtSRF32toFP8(dst=paramList[0], src0=vgpr(vgprTmp), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="Convert to FP8"))
@@ -8478,40 +8653,60 @@ class KernelWriterAssembly(KernelWriter):
                   self.vgprPool.checkIn(vgprTmp)
                 else:
                   if kernel["ProblemType"]["StochasticRounding"]:
-                    vgprTmp = self.vgprPool.checkOutAligned(5, 2)
+                    if self.states.asmCaps["v_prng_b32"] :
+                      vgprTmp = self.vgprPool.checkOutAligned(3, 2)
+                    else:
+                      vgprTmp = self.vgprPool.checkOutAligned(5, 2)
                   else:
                     vgprTmp = self.vgprPool.checkOutAligned(2, 2)
                   vgprTmp2 = vgprTmp + 1
                   for vi in range(0, int(newBlockWidth)):
                     sel = 1 if vi %2 == 1 else 0
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                    localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
-
-                    if kernel["ProblemType"]["StochasticRounding"]:
-                      # ScaleA/B, sgpr upper is dummy.
-                      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
-                        localWriteCVTCode.add(VMulPKF32S(dst=vgpr(vgprTmp, 2), src0=vgpr(vgprTmp, 2), src1=sgpr("Scale%s"%tc, 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="Input *= scale %s"%tc))
-                      vRand = vgprTmp+2
-                      vTemp0 = vgprTmp+3
-                      vTemp1 = vgprTmp+4
-                      localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp), vTemp0, vTemp1]))
+                    if self.states.asmCaps["Hascvtfp8_f16"] and not kernel["ProblemType"]["StochasticRounding"] and not kernel["ProblemType"]["UseScaleAB"] == "Scalar":
                       if (toF8):
-                        localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="Convert to FP8"))
-                        localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp2), vTemp0, vTemp1]))
-                        localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,1,sel]), comment="Convert to FP8"))
+                        localWriteCVTCode.add(VCvtPkF16toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), 0x3f800000],\
+                                                              vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="convert F16 to F8"))
                       else:
-                        localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="Convert to BF8"))
-                        localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp2), vTemp0, vTemp1]))
-                        localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,1,sel]), comment="Convert to BF8"))
+                        localWriteCVTCode.add(VCvtPkF16toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), 0x3f800000],\
+                                                              vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="convert F16 to BF8"))
                     else:
-                      # ScaleA/B, sgpr upper is dummy.
-                      if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
-                        localWriteCVTCode.add(VMulPKF32S(dst=vgpr(vgprTmp, 2), src0=vgpr(vgprTmp, 2), src1=sgpr("Scale%s"%tc, 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="Input *= scale %s"%tc))
+                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
+                      localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
 
-                      if (toF8):
-                        localWriteCVTCode.add(VCvtPkF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp2), vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="Convert to FP8"))
+                      if kernel["ProblemType"]["StochasticRounding"]:
+                        # ScaleA/B, sgpr upper is dummy.
+                        if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
+                          localWriteCVTCode.add(VMulPKF32S(dst=vgpr(vgprTmp, 2), src0=vgpr(vgprTmp, 2), src1=sgpr("Scale%s"%tc, 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="Input *= scale %s"%tc))
+                        vRand = vgprTmp+2
+                        if self.states.asmCaps["v_prng_b32"]:
+                          localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp),comment="Psudo Random Number Generator"))
+                        else:
+                          vTemp0 = vgprTmp+3
+                          vTemp1 = vgprTmp+4
+                          localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp), vTemp0, vTemp1]))
+                        if (toF8):
+                          localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="Convert to FP8"))
+                          if self.states.asmCaps["v_prng_b32"]:
+                            localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp2),comment="Psudo Random Number Generator"))
+                          else:
+                            localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp2), vTemp0, vTemp1]))
+                          localWriteCVTCode.add(VCvtSRF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,1,sel]), comment="Convert to FP8"))
+                        else:
+                          localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="Convert to BF8"))
+                          if self.states.asmCaps["v_prng_b32"]:
+                            localWriteCVTCode.add(VPrngB32(dst=vgpr(vRand),src=vgpr(vgprTmp2),comment="Psudo Random Number Generator"))
+                          else:
+                            localWriteCVTCode.add(MacroInstruction(name="PRND_GENERATOR", args=[vRand, vgpr(vgprTmp2), vTemp0, vTemp1]))
+                          localWriteCVTCode.add(VCvtSRF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp2), src1=vgpr(vRand), vop3=VOP3PModifiers(op_sel=[0,0,1,sel]), comment="Convert to BF8"))
                       else:
-                        localWriteCVTCode.add(VCvtPkF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp2), vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="Convert to BF8"))
+                        # ScaleA/B, sgpr upper is dummy.
+                        if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
+                          localWriteCVTCode.add(VMulPKF32S(dst=vgpr(vgprTmp, 2), src0=vgpr(vgprTmp, 2), src1=sgpr("Scale%s"%tc, 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="Input *= scale %s"%tc))
+
+                        if (toF8):
+                          localWriteCVTCode.add(VCvtPkF32toFP8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp2), vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="Convert to FP8"))
+                        else:
+                          localWriteCVTCode.add(VCvtPkF32toBF8(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi//2)), src0=vgpr(vgprTmp), src1=vgpr(vgprTmp2), vop3=VOP3PModifiers(op_sel=[0,0,sel]), comment="Convert to BF8"))
                   self.vgprPool.checkIn(vgprTmp)
 
               elif (kernel["ProblemType"]["DataType%s"%tc].isAnyFloat8() and kernel["ProblemType"]["DataType"].isHalf()):
@@ -8523,8 +8718,12 @@ class KernelWriterAssembly(KernelWriter):
                     new_src.regName.offsets.append(tP["shiftGR"])
                     src_sel = SelectBit.BYTE_2 if isHigh16Bits else SelectBit.BYTE_0
                     dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
-                    localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                    localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                    if self.states.asmCaps["Hascvtf16_fp8"]:
+                      sel = [0,1,1,0] if isHigh16Bits else [0,0,0,0]
+                      localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src, 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="A convert fp8 to f16"))
+                    else:
+                      localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                      localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
                     self.vgprPool.checkIn(vgprTmp)
                   else:
                     if isCvtHighBits and isHigh16Bits:
@@ -8538,43 +8737,76 @@ class KernelWriterAssembly(KernelWriter):
                       new_src.regName.offsets.append(tP["shiftGR"])
                       src_sel = SelectBit.BYTE_0
                     dst_sel = SelectBit.WORD_1 if isHigh16Bits else SelectBit.WORD_0
+                    if self.states.asmCaps["Hascvtf16_fp8"]:
+                        if isHigh16Bits:
+                          if isCvtHighBits:
+                            sel = [1,1,1,0]
+                          else:
+                            sel = [0,1,1,0]
+                        else:
+                          if isCvtHighBits:
+                            sel = [0,1,0,0]
+                          else:
+                            sel = [0,0,0,0]
+
                     if new_src == paramList[0]:
-                      if src_sel == SelectBit.BYTE_0 or src_sel == SelectBit.BYTE_2:
-                        if regTmpVgprBlock == None:
-                          regTmpVgprBlock = self.vgprPool.checkOutAligned(2, 2)
-                        src_sel2 = SelectBit.WORD_0 if src_sel == SelectBit.BYTE_0 else SelectBit.WORD_1
-                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel2), comment="convert C to fp32"))
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                      if self.states.asmCaps["Hascvtf16_fp8"]:
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src , 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="B convert fp8 to f16"))
                       else:
-                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                        if src_sel == SelectBit.BYTE_0 or src_sel == SelectBit.BYTE_2:
+                          if regTmpVgprBlock == None:
+                            regTmpVgprBlock = self.vgprPool.checkOutAligned(2, 2)
+                          src_sel2 = SelectBit.WORD_0 if src_sel == SelectBit.BYTE_0 else SelectBit.WORD_1
+                          localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(regTmpVgprBlock, 2), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel2), comment="convert C to fp32"))
+                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                        else:
+                          localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(regTmpVgprBlock + 1), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
                     else:
                       vgprTmp = self.vgprPool.checkOut(1)
-                      localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
+                      if self.states.asmCaps["Hascvtf16_fp8"]:
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=paramList[0], src=[new_src, 0x3f800000], vop3=VOP3PModifiers(op_sel=sel), comment="C convert fp8 to f16"))
+                      else:
+                        localWriteCVTCode.add(VCvtFP8toF32(dst=vgpr(vgprTmp), src=new_src , sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert C to fp32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=paramList[0], src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=dst_sel), comment="convert C to fp16"))
                       self.vgprPool.checkIn(vgprTmp)
                 elif newBlockWidth == 0.5:
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2)
                   src_sel = SelectBit.WORD_1 if isCvtHighBits else SelectBit.WORD_0
                   modNum = max(1, int(newBlockWidth / blockWidth))
-                  if (not isHigh16Bits) and (g2lIdx % modNum == 0):
-                    localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert to F32"))
-                    localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                    if (newBlockWidth <= blockWidth):
+                  if self.states.asmCaps["Hascvtf16_fp8"]:
+                    sel  = [1,0,0,0] if isCvtHighBits else [0,0,0,0]
+                    localWriteCVTCode.add(VCvtPkFP8toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=[vgpr(destVgprPrefix + "+%u"%(g2lIdx)), 0x3f800000],\
+                                                          vop3=VOP3PModifiers(op_sel=sel), comment="D convert fp8 to f16"))
+                  else:
+                    if (not isHigh16Bits) and (g2lIdx % modNum == 0):
+                      localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert to F32"))
+                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                      if (newBlockWidth <= blockWidth):
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                    elif (newBlockWidth > blockWidth):
                       localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                  elif (newBlockWidth > blockWidth):
-                    localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u"%(g2lIdx)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
                 else:
                   modNum = max(1, int(newBlockWidth / blockWidth))
                   vgprTmp = self.vgprPool.checkOutAligned(2, 2)
                   if (not isHigh16Bits) and (newBlockWidth <= blockWidth):
                     for vi in range(0, int(newBlockWidth)):
-                      localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
-                      localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                      if self.states.asmCaps["Hascvtf16_fp8"]:
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                                                            vop3=VOP3PModifiers(op_sel=[0,0,0,0]), comment="E convert fp8 to f16"))
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)),     src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                                                            vop3=VOP3PModifiers(op_sel=[1,0,1,0]), comment="E convert fp8 to f16"))
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                                                            vop3=VOP3PModifiers(op_sel=[0,1,0,0]), comment="E convert fp8 to f16"))
+                        localWriteCVTCode.add(VCvtFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), 0x3f800000],\
+                                                            vop3=VOP3PModifiers(op_sel=[1,1,1,0]), comment="E convert fp8 to f16"))
+                      else:
+                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_0), comment="convert to F32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=SelectBit.WORD_1), comment="convert to F32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdx, vi * 2 + 1)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                   else:
                     if (not isHigh16Bits):
                       idxMod = g2lIdx % modNum
@@ -8582,10 +8814,16 @@ class KernelWriterAssembly(KernelWriter):
                       vi = idxMod // 2
                       selectBit = SelectBit.WORD_0 if idxMod % 2 == 0 else SelectBit.WORD_1
                       interOffset = 0 if idxMod % 2 == 0 else 1
-                      localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=selectBit), comment="convert to F32"))
-                      localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
-                      if blockWidth != 0.5:
-                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
+                      if self.states.asmCaps["Hascvtf16_fp8"]:
+                        sel = 1 if idxMod % 2 == 0 else 1
+                        localWriteCVTCode.add(VCvtPkFP8toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)),\
+                                                              src=[vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), 0x3f800000],\
+                                                              vop3=VOP3PModifiers(op_sel=[0,0,0,sel]), comment="F convert fp8 to f16"))
+                      else:
+                        localWriteCVTCode.add(VCvtPkFP8toF32(dst=vgpr(vgprTmp, 2), src=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp+tP["shiftGR"], vi)), sdwa=SDWAModifiers(src0_sel=selectBit), comment="convert to F32"))
+                        localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0), comment="Convert to FP16"))
+                        if blockWidth != 0.5:
+                          localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                     elif blockWidth == 0.5:
                       localWriteCVTCode.add(VCvtF32toF16(dst=vgpr(destVgprPrefix + "+%u+%u"%(g2lIdxTmp, vi * 2 + interOffset)), src=vgpr(vgprTmp+1), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1), comment="Convert to FP16"))
                   self.vgprPool.checkIn(vgprTmp)
@@ -8594,8 +8832,18 @@ class KernelWriterAssembly(KernelWriter):
 
             LocalWriteX = tP["localWriteInstruction"].getInst(isHigh16Bits)
             if numBlocks == 1:
+              if (paramList[1] >= 0x20000):
+                  olwa = "LocalWriteAddr%s+2"%tc  # default
+                  dstAddr=vgpr(olwa)
+                  paramList[1] = paramList[1] - 131072
+              elif (paramList[1] >= 0x10000):
+                  olwa = "LocalWriteAddr%s+1"%tc  # default
+                  dstAddr=vgpr(olwa)
+                  paramList[1] = paramList[1] - 65536
+              else:
+                dstAddr=vgpr(lwa)
               ds        = DSModifiers(na=1, offset=paramList[1])
-              writeInst = LocalWriteX(dstAddr=vgpr(lwa), src=paramList[0], ds=ds, comment=comment)
+              writeInst = LocalWriteX(dstAddr=dstAddr, src=paramList[0], ds=ds, comment=comment)
             else:
               ds        = DSModifiers(na=2, offset0=paramList[2], offset1=paramList[3])
               writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=comment)
@@ -8764,15 +9012,28 @@ class KernelWriterAssembly(KernelWriter):
             if tc == "A":
               sparseA = kernel["ProblemType"]["Sparse"] == 1
               lrvw = kernel["LocalReadVectorWidth"] // (2 if sparseA else 1)
-              if (self.states.localReadDoCntA)%(lrvw//kernel["MIInputPerThreadA"]):
+              wlr = lrvw//kernel["MIInputPerThreadA"]
+              wlr = 1 if wlr == 0 else wlr
+              #if (self.states.localReadDoCntA)%(lrvw//kernel["MIInputPerThreadA"]):
+              if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadA"]:
+                if not sparseA:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"])
+              elif (self.states.localReadDoCntA)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadA"]
               else:
-                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"]-kernel["MIInputPerThreadA"]*(lrvw//kernel["MIInputPerThreadA"]-1))
+                if kernel["UnrollMajorLDSA"] == False and kernel["MatrixInstK"] >= 64: # Special handling for new f8 mfmas
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"]-kernel["MIInputPerThreadA"]*(lrvw//kernel["MIInputPerThreadA"]-1))
                 if sparseA:
                   offsetInc //= 2
             elif tc == "Metadata":
               lrvw = kernel["LocalReadVectorWidth"] // 8
-              if (self.states.localReadDoCntMetadata)%(lrvw//kernel["MIInputPerThreadMetadata"]):
+              if lrvw < kernel["MIInputPerThreadMetadata"]:
+                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadMetadata"]) // 4
+              elif (self.states.localReadDoCntMetadata)%(lrvw//kernel["MIInputPerThreadMetadata"]):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadMetadata"]
               else:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadMetadata"]-kernel["MIInputPerThreadMetadata"]*(lrvw//kernel["MIInputPerThreadMetadata"]-1))
@@ -8780,10 +9041,23 @@ class KernelWriterAssembly(KernelWriter):
             else:
               sparseB = kernel["ProblemType"]["Sparse"] == 2
               lrvw = kernel["LocalReadVectorWidth"] // (2 if sparseB else 1)
-              if (self.states.localReadDoCntB)%(lrvw//kernel["MIInputPerThreadB"]):
+              wlr = lrvw//kernel["MIInputPerThreadB"]
+              wlr = 1 if wlr == 0 else wlr
+              #if (self.states.localReadDoCntB)%(lrvw//kernel["MIInputPerThreadB"]):
+              if kernel["ProblemType"]["Sparse"] and lrvw < kernel["MIInputPerThreadB"]:
+                if not sparseB:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"])
+              elif (self.states.localReadDoCntB)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadB"]
+
               else:
-                offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"]-kernel["MIInputPerThreadB"]*(lrvw//kernel["MIInputPerThreadB"]-1))
+                if kernel["UnrollMajorLDSB"] == False and kernel["MatrixInstK"] >= 64: # Special handling for new f8 mfmas:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
+                else:
+                  offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"]-kernel["MIInputPerThreadB"]*(lrvw//kernel["MIInputPerThreadB"]-1))
+
                 if sparseB:
                   offsetInc //= 2
         else:

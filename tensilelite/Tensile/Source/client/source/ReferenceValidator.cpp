@@ -47,13 +47,14 @@ namespace TensileLite
             m_printValids        = args["print-valids"].as<bool>();
             m_printMax           = args["print-max"].as<int>();
 
-            m_printTensorA     = args["print-tensor-a"].as<bool>();
-            m_printTensorB     = args["print-tensor-b"].as<bool>();
-            m_printTensorC     = args["print-tensor-c"].as<bool>();
-            m_printTensorD     = args["print-tensor-d"].as<bool>();
-            m_printTensorRef   = args["print-tensor-ref"].as<bool>();
-            m_printTensorBias  = args["print-tensor-bias"].as<bool>();
-            m_printTensorAmaxD = args["print-tensor-amaxd"].as<bool>();
+            m_printTensorA              = args["print-tensor-a"].as<bool>();
+            m_printTensorB              = args["print-tensor-b"].as<bool>();
+            m_printTensorC              = args["print-tensor-c"].as<bool>();
+            m_printTensorD              = args["print-tensor-d"].as<bool>();
+            m_printTensorRef            = args["print-tensor-ref"].as<bool>();
+            m_printTensorBias           = args["print-tensor-bias"].as<bool>();
+            m_printTensorScaleAlphaVec  = args["print-tensor-scale-alpha-vec"].as<bool>();
+            m_printTensorAmaxD          = args["print-tensor-amaxd"].as<bool>();
 
             m_printAny = m_printTensorA || m_printTensorB || m_printTensorC || m_printTensorD
                          || m_printTensorRef || m_printTensorBias || m_printTensorAmaxD;
@@ -471,6 +472,9 @@ namespace TensileLite
             if(m_printTensorBias)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.bias().totalAllocatedBytes());
+            if(m_printTensorScaleAlphaVec)
+                requiredBufferSize
+                    = std::max(requiredBufferSize, problem.scaleAlphaVec().totalAllocatedBytes());
             if(m_printTensorAmaxD)
                 requiredBufferSize
                     = std::max(requiredBufferSize, problem.amaxd().totalAllocatedBytes());
@@ -579,6 +583,18 @@ namespace TensileLite
                                       m_cpuResultBuffer.get(),
                                       problem.bias(),
                                       result.bias);
+            }
+            if(m_printTensorScaleAlphaVec)
+            {
+                HIP_CHECK_EXC(hipMemcpy(m_cpuResultBuffer.get(),
+                                        result.scaleAlphaVec,
+                                        problem.scaleAlphaVec().totalAllocatedBytes(),
+                                        hipMemcpyDeviceToHost));
+                m_reporter->logTensor(LogLevel::Verbose,
+                                      "scaleAlphaVec",
+                                      m_cpuResultBuffer.get(),
+                                      problem.scaleAlphaVec(),
+                                      result.scaleAlphaVec);
             }
 
             if(m_printTensorAmaxD)

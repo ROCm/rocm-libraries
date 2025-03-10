@@ -236,6 +236,7 @@ globalParameters["PrintTensorRef"] = (
     0  # Print reference tensor.  0x1=after init; 0x2=after copy-back; 0x3=both
 )
 globalParameters["PrintTensorBias"] = 0  # Print TensorBias after initialization
+globalParameters["PrintTensorScaleAlphaVec"] = 0  # Print TensorScaleAlphaVec after initialization
 globalParameters["PrintTensorAmaxD"] = 0  # Print AmaxD after validation
 globalParameters["PrintIndexAssignments"] = 0  # Print the tensor index assignment info
 globalParameters["PrintWinnersOnly"] = False  # Only print the solutions which become the fastest
@@ -267,6 +268,7 @@ globalParameters["SupportedISA"] = [
     (9, 0, 8),
     (9, 0, 10),
     (9, 4, 2),
+    (9, 5, 0),
     (10, 1, 0),
     (10, 1, 1),
     (10, 1, 2),
@@ -428,9 +430,9 @@ for i in validMacroTileSides:
         validMacroTiles.append([i, j])
 
 validMFMA = {}
-validMFMA["H"] = [[32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
+validMFMA["H"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
 validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16]]
-validMFMA["B"] = [[32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
+validMFMA["B"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
 validMFMA["4xi8"] = [
     [32, 32, 4, 2],
     [32, 32, 8, 1],
@@ -452,7 +454,7 @@ validMFMA["I8"] = [
     [4, 4, 4, 16],
 ] + [[32, 32, 16, 1], [16, 16, 32, 1]]
 validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1]]
-validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
+validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
 validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
 validMFMA["B8F8"] = validMFMA["F8"]
@@ -472,7 +474,7 @@ for MFMA in [
     validMFMA["B"],
     validMFMA["D"],
     validMFMA["X"],
-    validMFMA["F8N"],
+    validMFMA["F8"],
     validWMMA,
 ]:
     for MI in MFMA:
@@ -496,16 +498,16 @@ validMatrixInstructions = (
 validMatrixInstructions = validMatrixInstructions + validMFMA["_format9"]
 
 validSMFMA = {}
-validSMFMA["H"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
-validSMFMA["B"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
-validSMFMA["4xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["H"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
+validSMFMA["B"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
+validSMFMA["4xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
 validSMFMA["I8"] = validSMFMA["4xi8"]
-validSMFMA["F8"] = [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["F8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
 validSMFMA["B8"] = validSMFMA["F8"]
 validSMFMA["F8B8"] = validSMFMA["F8"]
 validSMFMA["B8F8"] = validSMFMA["F8"]
-validSMFMA["F8N"] = [[32, 32, 32, 1], [16, 16, 64, 1]]
-validSMFMA["B8N"] = validSMFMA["F8N"]
+validSMFMA["F8N"] = validSMFMA["F8"]
+validSMFMA["B8N"] = validSMFMA["F8"]
 validSMFMA["F8B8N"] = validSMFMA["F8N"]
 validSMFMA["B8F8N"] = validSMFMA["F8N"]
 validSMFMA["_format9"] = []
@@ -1255,6 +1257,8 @@ validParameters = {
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Enable LDS Transpose Instruction
+    "LDSTrInst": [False, True]
 }
 
 
@@ -1354,6 +1358,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
+    {"LDSTrInst": [False]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
@@ -1700,6 +1705,11 @@ def assignGlobalParameters(config, cxxCompiler=None):
         if os.name == "nt":
             globalParameters["CurrentISA"] = (9, 0, 6)
             printWarning("Failed to detect ISA so forcing (gfx906) on windows")
+
+    # TODO Remove this when rocm-smi supports gfx950
+    if globalParameters["CurrentISA"] in [(9,5,0)]:
+        printWarning("HardwareMonitor currently disabled for gfx950")
+        globalParameters["HardwareMonitor"] = False
 
     globalParameters["AsmCaps"] = {}
     globalParameters["ArchCaps"] = {}

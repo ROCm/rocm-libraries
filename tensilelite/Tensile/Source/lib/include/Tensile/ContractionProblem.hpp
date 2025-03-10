@@ -1043,6 +1043,10 @@ namespace TensileLite
         {
             return m_tensors[ContractionProblemGemm::TENSOR::BIAS];
         }
+        TensorDescriptor const& scaleAlphaVec() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
+        }
         TensorDescriptor const& amaxd() const
         {
             return m_tensors[ContractionProblemGemm::TENSOR::AMAXD];

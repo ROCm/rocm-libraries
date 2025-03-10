@@ -8,8 +8,10 @@ MI_ENABLED_KEY: str = "EnableMatrixInstruction"
 
 validMFMA = {}
 validMFMA["H"] = [[32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
+               + [[32, 32, 16, 1], [16, 16, 32, 1]]
 validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16]]
 validMFMA["B"] = [[32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
+               + [[32, 32, 16, 1], [16, 16, 32, 1]]
 validMFMA["4xi8"] = [
     [32, 32, 4, 2],
     [32, 32, 8, 1],
@@ -31,7 +33,7 @@ validMFMA["I8"] = [
     [4, 4, 4, 16],
 ] + [[32, 32, 16, 1], [16, 16, 32, 1]]
 validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1]]
-validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
+validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1]] + [[32, 32, 64, 1], [16, 16, 128, 1]]
 validMFMA["B8"] = validMFMA["F8"]
 validMFMA["F8B8"] = validMFMA["F8"]
 validMFMA["B8F8"] = validMFMA["F8"]
@@ -75,11 +77,11 @@ validMatrixInstructions = (
 validMatrixInstructions = validMatrixInstructions + validMFMA["_format9"]
 
 validSMFMA = {}
-validSMFMA["H"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
-validSMFMA["B"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
-validSMFMA["4xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["H"] = [[32, 32, 16, 1], [16, 16, 32, 1]] + [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["B"] = [[32, 32, 16, 1], [16, 16, 32, 1]] + [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["4xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1]] + [[32, 32, 64, 1], [16, 16, 128, 1]]
 validSMFMA["I8"] = validSMFMA["4xi8"]
-validSMFMA["F8"] = [[32, 32, 32, 1], [16, 16, 64, 1]]
+validSMFMA["F8"] = [[32, 32, 32, 1], [16, 16, 64, 1]] + [[32, 32, 64, 1], [16, 16, 128, 1]]
 validSMFMA["B8"] = validSMFMA["F8"]
 validSMFMA["F8B8"] = validSMFMA["F8"]
 validSMFMA["B8F8"] = validSMFMA["F8"]

@@ -26,8 +26,12 @@ from .DataType import DataType
 from .RegisterPool import RegisterPoolResource
 from .Utils import vgpr, sgpr, log2
 from .Instructions import *
+from .Enums import SelectBit
+from .Base import TensileInstructions
 
-from enum import Enum
+from enum import Enum 
+
+
 from typing import Union
 import sys
 
@@ -330,10 +334,17 @@ def VSaturateCastInt(vgprSumIdxV, tmpVgpr, tmpSgpr, lowerBound, upperBound, type
 ########################################
 
 def VCvtBF16toFP32(dst, src, vgprMask, vi, additionalCmts=""):
-    if (vi % 2) == 1:
-        return VAndB32(dst=vgpr(dst), src0=vgpr(src), src1=vgpr(vgprMask), comment="cvt bf16 to fp32. " + additionalCmts) # mask = hex(0xffff0000)
+    ti = TensileInstructions()
+    if ti.getAsmCaps()["HasBF16CVT"]:
+        select_bit = SelectBit.WORD_0 if vi%2 == 0 else SelectBit.WORD_1
+        sdwa=SDWAModifiers(src0_sel=select_bit);
+        return PVCvtBF16toFP32(dst=vgpr(dst), src=vgpr(src), sdwa=sdwa, comment="cvt bf16 to f32")
     else:
-        return VLShiftLeftB32(dst=vgpr(dst), shiftHex=16, src=vgpr(src), comment="cvt bf16 to fp32. " + additionalCmts)
+        if (vi % 2) == 1:
+            return VAndB32(dst=vgpr(dst), src0=vgpr(src), src1=vgpr(vgprMask), comment="cvt bf16 to fp32. " + additionalCmts) # mask = hex(0xffff0000)
+        else:
+            return VLShiftLeftB32(dst=vgpr(dst), shiftHex=16, src=vgpr(src), comment="cvt bf16 to fp32. " + additionalCmts)
+
 
 ########################################
 # init lds state

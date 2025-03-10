@@ -481,7 +481,8 @@ hipblasStatus_t hipblasltAMaxWithScaleRun(const hipDataType datatype,
                                           hipStream_t       stream)
 {
     if(datatype != HIP_R_32F
-       || scaleDatatype != HIP_R_8F_E4M3_FNUZ && scaleDatatype != HIP_R_8F_E5M2_FNUZ)
+       || scaleDatatype != HIP_R_8F_E4M3_FNUZ && scaleDatatype != HIP_R_8F_E5M2_FNUZ 
+          && scaleDatatype != HIP_R_8F_E4M3 && scaleDatatype != HIP_R_8F_E5M2)
     {
         return HIPBLAS_STATUS_NOT_SUPPORTED;
     }

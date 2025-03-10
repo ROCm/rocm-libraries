@@ -26,8 +26,9 @@ from ..TensileInstructions import Module, SDWAModifiers, SelectBit, UnusedBit, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VOP3PModifiers, VCmpClassF32, VOrB32, VPackF16toB32, \
                             VAndOrB32, VBfeU32, VLShiftLeftB16, SNop, VMed3F32, \
-                            vgpr, sgpr, DataType, TensileInstructions, VAndB32, \
+                            vgpr, sgpr, DataType, TensileInstructions, VCvtPkF32toBF16, VAndB32, \
                             VMovB32, VLShiftLeftB32
+
 from ..Component import PackData
 from ..Common import globalParameters
 
@@ -66,19 +67,25 @@ class PackData_F16(PackData):
 class PackData_BF16(PackData):
     kernel = {"ProblemType": {"ComputeDataType": DataType(DataType.single), "DestDataType": DataType(DataType.bfloat16)}}
     def __call__(self, gwvw, destIdx, elementSumIdx, bf16CVTVgprStruct, tmpS01, laneSGPRC, tmpVgpr=None, inputPrefix="", prefixOffset=0):
-        vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp
-        vgprBf16Inc = bf16CVTVgprStruct.vgprBf16Inc
-        vgprFp32Nan = bf16CVTVgprStruct.vgprFp32Nan
-        vgprBf16Mask = bf16CVTVgprStruct.vgprBf16Mask
+        ti = TensileInstructions()
 
         module = Module("PackData BF16")
         if gwvw == 1:
+            vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp
+            vgprBf16Inc = bf16CVTVgprStruct.vgprBf16Inc
+            vgprFp32Nan = bf16CVTVgprStruct.vgprFp32Nan
+            vgprBf16Mask = bf16CVTVgprStruct.vgprBf16Mask
+
             formatVgpr = formatting(elementSumIdx, inputPrefix, prefixOffset)
-            module.add(VCmpUF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(formatVgpr), comment="check Nan"))
-            module.add(VBfeU32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=16, src2=1, comment="Non-Nan case: store lsb of bf16" ))
-            module.add(VAdd3U32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=vgpr(vgprBf16Temp), src2=vgpr(vgprBf16Inc), comment="Non-Nan case: add lsb and the increment for rounding" ))
-            module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprBf16Temp), src1=vgpr(vgprFp32Nan), src2=sgpr(tmpS01,laneSGPRC)))
-            module.add(VLShiftRightB32(dst=vgpr(destIdx), shiftHex=16, src=vgpr(formatVgpr), comment="convert C to bf16"))
+            if ti.getAsmCaps()["HasBF16CVT"]:
+                module.add(VCvtPkF32toBF16(dst=vgpr(destIdx), src0=vgpr(formatVgpr), src1=vgpr(formatVgpr), \
+                                               comment="convert C to bf16 in gwvw==1"))
+            else:
+                module.add(VCmpUF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(formatVgpr), comment="check Nan"))
+                module.add(VBfeU32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=16, src2=1, comment="Non-Nan case: store lsb of bf16" ))
+                module.add(VAdd3U32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=vgpr(vgprBf16Temp), src2=vgpr(vgprBf16Inc), comment="Non-Nan case: add lsb and the increment for rounding" ))
+                module.add(VCndMaskB32(dst=vgpr(formatVgpr), src0=vgpr(vgprBf16Temp), src1=vgpr(vgprFp32Nan), src2=sgpr(tmpS01,laneSGPRC)))
+                module.add(VLShiftRightB32(dst=vgpr(destIdx), shiftHex=16, src=vgpr(formatVgpr), comment="convert C to bf16"))
             return module
 
         assert (gwvw % 2 == 0)
@@ -92,15 +99,30 @@ class PackData_BF16(PackData):
                 tmpDst   = formatVgpr
                 tmpDst_1 = formatting(sumIdxV-1, inputPrefix, prefixOffset)
 
-            module.add(VCmpUF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(formatVgpr), comment="check Nan"))
-            module.add(VBfeU32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=16, src2=1, comment="Non-Nan case: store lsb of bf16" ))
-            module.add(VAdd3U32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=vgpr(vgprBf16Temp), src2=vgpr(vgprBf16Inc), comment="Non-Nan case: add lsb and the increment for rounding" ))
-            module.add(VCndMaskB32(dst=vgpr(tmpDst), src0=vgpr(vgprBf16Temp), src1=vgpr(vgprFp32Nan), src2=sgpr(tmpS01,laneSGPRC)))
-            if vi%2 == 0:
-                module.add(VLShiftRightB32(dst=vgpr(tmpDst), shiftHex=16, src=vgpr(tmpDst), comment="convert C to bf16"))
-            elif vi%2 == 1:
-                d = destIdx + vi//2
-                module.add(VAndOrB32(dst=vgpr(d), src0=vgpr(tmpDst), src1=vgpr(vgprBf16Mask), src2=vgpr(tmpDst_1), comment="pack two bf16 to dword"))
+            if ti.getAsmCaps()["HasBF16CVT"]:
+#                module.add(VCvtF32toBF16(dst=vgpr(tmpDst), src=vgpr(formatVgpr), comment="convert C to bf16"))
+                if vi%2 == 1:
+                    d = destIdx + vi//2
+                    module.add(VCvtPkF32toBF16(dst=vgpr(d), src0=vgpr(tmpDst_1), src1=vgpr(tmpDst), \
+                                comment="convert C to bf16 and Pack with neighbor"))
+#                    module.add(VAndOrB32(dst=vgpr(d), src0=vgpr(tmpDst), src1=vgpr(vgprBf16Mask), src2=vgpr(tmpDst_1), comment="pack two bf16 to dword"))
+
+            else:
+                vgprBf16Temp = bf16CVTVgprStruct.vgprBf16Temp
+                vgprBf16Inc = bf16CVTVgprStruct.vgprBf16Inc
+                vgprFp32Nan = bf16CVTVgprStruct.vgprFp32Nan
+                vgprBf16Mask = bf16CVTVgprStruct.vgprBf16Mask
+
+                module.add(VCmpUF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(formatVgpr), src1=vgpr(formatVgpr), comment="check Nan"))
+                module.add(VBfeU32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=16, src2=1, comment="Non-Nan case: store lsb of bf16" ))
+                module.add(VAdd3U32(dst=vgpr(vgprBf16Temp), src0=vgpr(formatVgpr), src1=vgpr(vgprBf16Temp), src2=vgpr(vgprBf16Inc), comment="Non-Nan case: add lsb and the increment for rounding" ))
+                module.add(VCndMaskB32(dst=vgpr(tmpDst), src0=vgpr(vgprBf16Temp), src1=vgpr(vgprFp32Nan), src2=sgpr(tmpS01,laneSGPRC)))
+                if vi%2 == 0:
+                    module.add(VLShiftRightB32(dst=vgpr(tmpDst), shiftHex=16, src=vgpr(tmpDst), comment="convert C to bf16"))
+                elif vi%2 == 1:
+                    d = destIdx + vi//2
+                    module.add(VAndOrB32(dst=vgpr(d), src0=vgpr(tmpDst), src1=vgpr(vgprBf16Mask), src2=vgpr(tmpDst_1), comment="pack two bf16 to dword"))
+
         return module
 
 class PackData_FLOAT8(PackData):

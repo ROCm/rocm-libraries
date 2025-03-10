@@ -69,6 +69,10 @@ def clientExecutableEnvironment(builddir: Optional[str], cxxCompiler: str, cComp
                'CMAKE_CXX_COMPILER': os.path.join(globalParameters["ROCmBinPath"], cxxCompiler),
                'CMAKE_C_COMPILER': os.path.join(globalParameters["ROCmBinPath"], cCompiler)}
 
+    if "CCACHE_BASEDIR" in os.environ:
+        options.update({'CMAKE_C_COMPILER_LAUNCHER': 'ccache', 'CMAKE_CXX_COMPILER_LAUNCHER': 'ccache'})
+        print('Is Using CCACHE')
+
     return CMakeEnvironment(sourcedir, builddir, **options)
 
 
@@ -86,4 +90,3 @@ def getClientExecutable(cxxCompiler: str, cCompiler: str, builddir):
         buildEnv.build()
 
     return buildEnv.builtPath("client/tensile_client")
-

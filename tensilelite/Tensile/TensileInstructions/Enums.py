@@ -96,6 +96,15 @@ class CvtType(Enum):
     CVT_PK_F32_to_BF8 = 12
     CVT_SR_F32_to_FP8 = 13
     CVT_SR_F32_to_BF8 = 14
+    CVT_SCALEF32_PK_F16_FP8 = 15
+    CVT_SCALEF32_PK_F16_BF8 = 16
+    CVT_SCALEF32_F16_FP8 = 17
+    CVT_SCALEF32_F16_BF8 = 18
+    CVT_SCALEF32_PK_FP8_F16 = 19
+    CVT_SCALEF32_PK_BF8_F16 = 20
+    CVT_BF16_to_F32   = 21
+    CVT_PK_F32_to_BF16 = 22 
+
 
 class RoundType(Enum):
     ROUND_UP = 0
