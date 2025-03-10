@@ -88,5 +88,5 @@ filenames=`for i in $which;do basename $i;done`
 
 # Run csrgemm for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f csrgemm --precision d --device $dev --sizen $sizen --alpha 1 --iters 200 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir -f csrgemm --precision d --device $dev --sizen $sizen --alpha 1 --iters 4 --rocalution $filename 2>&1 | tee -a $logname
 done

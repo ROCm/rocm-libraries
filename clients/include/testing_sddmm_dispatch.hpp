@@ -620,21 +620,12 @@ public:
 
         if(arg.timing)
         {
-            const int number_cold_calls  = 2;
-            const int number_hot_calls_2 = arg.iters_inner;
-            const int number_hot_calls   = arg.iters / number_hot_calls_2;
-
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
             CHECK_ROCSPARSE_ERROR(rocsparse_sddmm_preprocess(PARAMS(h_alpha, A, B, h_beta, C)));
 
-            double gpu_time_used;
-            median_perf(gpu_time_used,
-                        number_cold_calls,
-                        number_hot_calls,
-                        number_hot_calls_2,
-                        rocsparse_sddmm,
-                        PARAMS(h_alpha, A, B, h_beta, C));
+            const double gpu_time_used = rocsparse_clients::run_benchmark(
+                arg, rocsparse_sddmm, PARAMS(h_alpha, A, B, h_beta, C));
 
             double gflop_count = rocsparse_gflop_count<FORMAT>::sddmm(
                 dC.m, dC.n, dC.nnz, K, *h_beta != static_cast<T>(0));

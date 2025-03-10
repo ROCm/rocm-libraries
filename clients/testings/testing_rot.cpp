@@ -138,16 +138,11 @@ void testing_rot(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_rot(handle, &hc[0], &hs[0], x1, y1);
-        });
+        const double gpu_time_used
+            = rocsparse_clients::run_benchmark(arg, rocsparse_rot, handle, &hc[0], &hs[0], x1, y1);
 
         double gflop_count = roti_gflop_count<I>(nnz);
         double gbyte_count = roti_gbyte_count<T>(nnz);

@@ -200,15 +200,9 @@ void testing_gpsv_interleaved_batch(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_solve_time_used;
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_gpsv_interleaved_batch<T>(PARAMS_SOLVE);
-            });
+        const double gpu_solve_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_gpsv_interleaved_batch<T>, PARAMS_SOLVE);
 
         double gbyte_count = gpsv_interleaved_batch_gbyte_count<T>(m, batch_count);
 

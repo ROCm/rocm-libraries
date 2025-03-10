@@ -425,28 +425,24 @@ void testing_spgemm_reuse_csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_solve_time_used;
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_spgemm(handle,
-                                        trans_A,
-                                        trans_B,
-                                        h_alpha_ptr,
-                                        A,
-                                        B,
-                                        h_beta_ptr,
-                                        D,
-                                        C,
-                                        ttype,
-                                        alg,
-                                        rocsparse_spgemm_stage_numeric,
-                                        &buffer_size,
-                                        dbuffer);
-            });
+        const double gpu_solve_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_spgemm,
+                                               handle,
+                                               trans_A,
+                                               trans_B,
+                                               h_alpha_ptr,
+                                               A,
+                                               B,
+                                               h_beta_ptr,
+                                               D,
+                                               C,
+                                               ttype,
+                                               alg,
+                                               rocsparse_spgemm_stage_numeric,
+                                               &buffer_size,
+                                               dbuffer);
 
         double gflop_count = csrgemm_gflop_count<T, I, J>(
             M, &h_alpha, hA.ptr, hA.ind, hB.ptr, &h_beta, hD.ptr, hA.base);

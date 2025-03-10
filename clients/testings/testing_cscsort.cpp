@@ -166,22 +166,18 @@ void testing_cscsort(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_cscsort(handle,
-                                     M,
-                                     N,
-                                     nnz,
-                                     descr,
-                                     dcsc_col_ptr,
-                                     dcsc_row_ind,
-                                     permute ? dperm : nullptr,
-                                     dbuffer);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_cscsort,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      nnz,
+                                                                      descr,
+                                                                      dcsc_col_ptr,
+                                                                      dcsc_row_ind,
+                                                                      permute ? dperm : nullptr,
+                                                                      dbuffer);
 
         double gbyte_count = cscsort_gbyte_count<T>(N, nnz, permute);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

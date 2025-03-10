@@ -174,23 +174,19 @@ void testing_dense2coo(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_dense2coo<T>(handle,
-                                          M,
-                                          N,
-                                          descr,
-                                          d_dense_val,
-                                          LD,
-                                          d_nnz_per_row,
-                                          (T*)d_coo_val,
-                                          d_coo_row_ind,
-                                          d_coo_col_ind);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_dense2coo<T>,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      descr,
+                                                                      d_dense_val,
+                                                                      LD,
+                                                                      d_nnz_per_row,
+                                                                      (T*)d_coo_val,
+                                                                      d_coo_row_ind,
+                                                                      d_coo_col_ind);
 
         double gbyte_count = dense2coo_gbyte_count<T>(M, N, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

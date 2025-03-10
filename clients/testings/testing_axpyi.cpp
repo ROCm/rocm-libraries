@@ -121,18 +121,11 @@ void testing_axpyi(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_axpyi<T>(handle, nnz, &h_alpha, dx_val, dx_ind, dy_1, base);
-        });
-
-        gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_axpyi<T>, handle, nnz, &h_alpha, dx_val, dx_ind, dy_1, base);
 
         double gflop_count = axpyi_gflop_count(nnz);
         double gbyte_count = axpby_gbyte_count<T>(nnz);

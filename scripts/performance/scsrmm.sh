@@ -89,5 +89,5 @@ which=`ls $matrices_dir/*.csr`
 filenames=`for i in $which;do basename $i;done`
 # Run csrmm for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f csrmm --precision s --device $dev --sizen $sizen --alpha 1 --beta 0 --iters 200 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir -f csrmm --precision s --device $dev --sizen $sizen --alpha 1 --beta 0 --iters 4 --rocalution $filename 2>&1 | tee -a $logname
 done

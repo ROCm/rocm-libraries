@@ -242,28 +242,24 @@ void testing_csr2gebsr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_csr2gebsr<T>(handle,
-                                          direction,
-                                          dA.m,
-                                          dA.n,
-                                          csr_descr,
-                                          dA.val,
-                                          dA.ptr,
-                                          dA.ind,
-                                          bsr_descr,
-                                          dC.val,
-                                          dC.ptr,
-                                          dC.ind,
-                                          row_block_dim,
-                                          col_block_dim,
-                                          dbuffer);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_csr2gebsr<T>,
+                                                                      handle,
+                                                                      direction,
+                                                                      dA.m,
+                                                                      dA.n,
+                                                                      csr_descr,
+                                                                      dA.val,
+                                                                      dA.ptr,
+                                                                      dA.ind,
+                                                                      bsr_descr,
+                                                                      dC.val,
+                                                                      dC.ptr,
+                                                                      dC.ind,
+                                                                      row_block_dim,
+                                                                      col_block_dim,
+                                                                      dbuffer);
 
         double gbyte_count
             = csr2gebsr_gbyte_count<T>(M, Mb, hA.nnz, *hbsr_nnzb, row_block_dim, col_block_dim);

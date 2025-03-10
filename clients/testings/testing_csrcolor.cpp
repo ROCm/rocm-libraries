@@ -305,27 +305,23 @@ void testing_csrcolor(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_csrcolor<T>(handle,
-                                         dA.m,
-                                         dA.nnz,
-                                         csr_descr,
-                                         dA.val,
-                                         dA.ptr,
-                                         dA.ind,
-                                         &fraction_to_color,
-                                         &ncolor,
-                                         dcoloring,
-                                         dreordering,
-                                         mat_info);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_csrcolor<T>,
+                                                                      handle,
+                                                                      dA.m,
+                                                                      dA.nnz,
+                                                                      csr_descr,
+                                                                      dA.val,
+                                                                      dA.ptr,
+                                                                      dA.ind,
+                                                                      &fraction_to_color,
+                                                                      &ncolor,
+                                                                      dcoloring,
+                                                                      dreordering,
+                                                                      mat_info);
 
         display_timing_info(display_key_t::M,
                             dA.m,

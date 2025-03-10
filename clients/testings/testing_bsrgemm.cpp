@@ -682,9 +682,6 @@ void testing_bsrgemm(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
@@ -694,13 +691,8 @@ void testing_bsrgemm(const Arguments& arg)
         d_C.define(
             d_C.dir, d_C.mb, d_C.nb, out_nnz, d_C.row_block_dim, d_C.col_block_dim, d_C.base);
 
-        double gpu_solve_time_used;
-        median_perf(gpu_solve_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_bsrgemm<T>,
-                    PARAMS(h_alpha, h_beta, d_A, d_B, d_C, d_D));
+        const double gpu_solve_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_bsrgemm<T>, PARAMS(h_alpha, h_beta, d_A, d_B, d_C, d_D));
 
         CHECK_HIP_ERROR(hipDeviceSynchronize());
 

@@ -128,29 +128,22 @@ void testing_csr2csc(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_csr2csc<T>,
-                    handle,
-                    M,
-                    N,
-                    nnz,
-                    dA.val,
-                    dA.ptr,
-                    dA.ind,
-                    dC.val,
-                    dC.ind,
-                    dC.ptr,
-                    action,
-                    base,
-                    dbuffer);
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_csr2csc<T>,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      nnz,
+                                                                      dA.val,
+                                                                      dA.ptr,
+                                                                      dA.ind,
+                                                                      dC.val,
+                                                                      dC.ind,
+                                                                      dC.ptr,
+                                                                      action,
+                                                                      base,
+                                                                      dbuffer);
 
         double gbyte_count = csr2csc_gbyte_count<T>(M, N, nnz, action);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

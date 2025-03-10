@@ -94,16 +94,11 @@ void testing_gthr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_gthr<T>(handle, nnz, dy, dx_val_1, dx_ind, base);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_gthr<T>, handle, nnz, dy, dx_val_1, dx_ind, base);
 
         double gbyte_count = gthr_gbyte_count<T>(nnz);
 

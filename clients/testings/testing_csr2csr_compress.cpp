@@ -269,37 +269,33 @@ void testing_csr2csr_compress(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         rocsparse_int nnz_C;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            rocsparse_nnz_compress<T>(
-                handle, M, descr_A, dcsr_val_A, dcsr_row_ptr_A, dnnz_per_row, &nnz_C, tol);
+        CHECK_ROCSPARSE_ERROR(rocsparse_nnz_compress<T>(
+            handle, M, descr_A, dcsr_val_A, dcsr_row_ptr_A, dnnz_per_row, &nnz_C, tol));
 
-            // Allocate device memory for compressed CSR col indices and values array
-            device_vector<rocsparse_int> dcsr_col_ind_C(nnz_C);
-            device_vector<T>             dcsr_val_C(nnz_C);
+        // Allocate device memory for compressed CSR col indices and values array
+        device_vector<rocsparse_int> dcsr_col_ind_C(nnz_C);
+        device_vector<T>             dcsr_val_C(nnz_C);
 
-            return rocsparse_csr2csr_compress<T>(handle,
-                                                 M,
-                                                 N,
-                                                 descr_A,
-                                                 dcsr_val_A,
-                                                 dcsr_row_ptr_A,
-                                                 dcsr_col_ind_A,
-                                                 nnz_A,
-                                                 dnnz_per_row,
-                                                 dcsr_val_C,
-                                                 dcsr_row_ptr_C,
-                                                 dcsr_col_ind_C,
-                                                 tol);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_csr2csr_compress<T>,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      descr_A,
+                                                                      dcsr_val_A,
+                                                                      dcsr_row_ptr_A,
+                                                                      dcsr_col_ind_A,
+                                                                      nnz_A,
+                                                                      dnnz_per_row,
+                                                                      dcsr_val_C,
+                                                                      dcsr_row_ptr_C,
+                                                                      dcsr_col_ind_C,
+                                                                      tol);
 
         double gbyte_count = csr2csr_compress_gbyte_count<T>(M, nnz_A, nnz_C);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

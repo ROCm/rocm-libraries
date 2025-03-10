@@ -100,22 +100,9 @@ void testing_coo2csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_coo2csr,
-                    handle,
-                    dcoo_row_ind,
-                    nnz,
-                    M,
-                    dcsr_row_ptr,
-                    base);
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_coo2csr, handle, dcoo_row_ind, nnz, M, dcsr_row_ptr, base);
 
         double gbyte_count = coo2csr_gbyte_count<T>(M, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

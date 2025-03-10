@@ -163,39 +163,33 @@ void testing_coosort(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         double gpu_time_used;
-
         if(by_row)
         {
-            median_perf(
-                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                    return rocsparse_coosort_by_row(handle,
-                                                    M,
-                                                    N,
-                                                    nnz,
-                                                    dcoo_row_ind,
-                                                    dcoo_col_ind,
-                                                    permute ? dperm : nullptr,
-                                                    dbuffer);
-                });
+            gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                             rocsparse_coosort_by_row,
+                                                             handle,
+                                                             M,
+                                                             N,
+                                                             nnz,
+                                                             dcoo_row_ind,
+                                                             dcoo_col_ind,
+                                                             permute ? dperm : nullptr,
+                                                             dbuffer);
         }
         else
         {
-            median_perf(
-                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                    return rocsparse_coosort_by_column(handle,
-                                                       M,
-                                                       N,
-                                                       nnz,
-                                                       dcoo_row_ind,
-                                                       dcoo_col_ind,
-                                                       permute ? dperm : nullptr,
-                                                       dbuffer);
-                });
+            gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                             rocsparse_coosort_by_column,
+                                                             handle,
+                                                             M,
+                                                             N,
+                                                             nnz,
+                                                             dcoo_row_ind,
+                                                             dcoo_col_ind,
+                                                             permute ? dperm : nullptr,
+                                                             dbuffer);
         }
 
         double gbyte_count = coosort_gbyte_count<T>(nnz, permute);

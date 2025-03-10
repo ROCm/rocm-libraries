@@ -290,19 +290,16 @@ void testing_dense_to_sparse_csc(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_dense_to_sparse(handle,
-                                             mat_dense,
-                                             mat_sparse,
-                                             rocsparse_dense_to_sparse_alg_default,
-                                             &buffer_size,
-                                             d_temp_buffer);
-        });
+        const double gpu_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_dense_to_sparse,
+                                               handle,
+                                               mat_dense,
+                                               mat_sparse,
+                                               rocsparse_dense_to_sparse_alg_default,
+                                               &buffer_size,
+                                               d_temp_buffer);
 
         double gbyte_count = dense2csx_gbyte_count<rocsparse_direction_column, T>(m, n, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

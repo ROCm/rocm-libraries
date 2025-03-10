@@ -68,14 +68,9 @@ void testing_identity(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_create_identity_permutation(handle, N, dp);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_create_identity_permutation, handle, N, dp);
 
         double gbyte_count = identity_gbyte_count<T>(N);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

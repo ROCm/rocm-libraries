@@ -84,5 +84,5 @@ filenames=`for i in $which;do basename $i;done`
 
 # Run csrsv for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f csrsv --precision d --device $dev --alpha 1 --iters 1000 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir -f csrsv --precision d --device $dev --alpha 1 --iters 20 --rocalution $filename 2>&1 | tee -a $logname
 done

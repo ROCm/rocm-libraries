@@ -394,9 +394,6 @@ void testing_bsrgeam(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
@@ -421,52 +418,49 @@ void testing_bsrgeam(const Arguments& arg)
         device_vector<rocsparse_int> dbsr_col_ind_C(nnzb_C);
         device_vector<T>             dbsr_val_C(block_dim * block_dim * nnzb_C);
 
-        double gpu_analysis_time_used;
-        median_perf(
-            gpu_analysis_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_bsrgeam_nnzb(handle,
-                                              dir,
-                                              Mb,
-                                              Nb,
-                                              block_dim,
-                                              descrA,
-                                              nnzb_A,
-                                              dbsr_row_ptr_A,
-                                              dbsr_col_ind_A,
-                                              descrB,
-                                              nnzb_B,
-                                              dbsr_row_ptr_B,
-                                              dbsr_col_ind_B,
-                                              descrC,
-                                              dbsr_row_ptr_C_1,
-                                              &nnzb_C);
-            });
+        const double gpu_analysis_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_bsrgeam_nnzb,
+                                               handle,
+                                               dir,
+                                               Mb,
+                                               Nb,
+                                               block_dim,
+                                               descrA,
+                                               nnzb_A,
+                                               dbsr_row_ptr_A,
+                                               dbsr_col_ind_A,
+                                               descrB,
+                                               nnzb_B,
+                                               dbsr_row_ptr_B,
+                                               dbsr_col_ind_B,
+                                               descrC,
+                                               dbsr_row_ptr_C_1,
+                                               &nnzb_C);
 
-        double gpu_solve_time_used;
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_bsrgeam<T>(handle,
-                                            dir,
-                                            Mb,
-                                            Nb,
-                                            block_dim,
-                                            h_alpha,
-                                            descrA,
-                                            nnzb_A,
-                                            dbsr_val_A,
-                                            dbsr_row_ptr_A,
-                                            dbsr_col_ind_A,
-                                            h_beta,
-                                            descrB,
-                                            nnzb_B,
-                                            dbsr_val_B,
-                                            dbsr_row_ptr_B,
-                                            dbsr_col_ind_B,
-                                            descrC,
-                                            dbsr_val_C,
-                                            dbsr_row_ptr_C_1,
-                                            dbsr_col_ind_C);
-            });
+        const double gpu_solve_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                            rocsparse_bsrgeam<T>,
+                                                                            handle,
+                                                                            dir,
+                                                                            Mb,
+                                                                            Nb,
+                                                                            block_dim,
+                                                                            h_alpha,
+                                                                            descrA,
+                                                                            nnzb_A,
+                                                                            dbsr_val_A,
+                                                                            dbsr_row_ptr_A,
+                                                                            dbsr_col_ind_A,
+                                                                            h_beta,
+                                                                            descrB,
+                                                                            nnzb_B,
+                                                                            dbsr_val_B,
+                                                                            dbsr_row_ptr_B,
+                                                                            dbsr_col_ind_B,
+                                                                            descrC,
+                                                                            dbsr_val_C,
+                                                                            dbsr_row_ptr_C_1,
+                                                                            dbsr_col_ind_C);
 
         double gflop_count
             = bsrgeam_gflop_count<T>(block_dim, nnzb_A, nnzb_B, nnzb_C, h_alpha, h_beta);

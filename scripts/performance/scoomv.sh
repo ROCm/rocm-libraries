@@ -83,5 +83,5 @@ which=`ls $matrices_dir/*.csr`
 filenames=`for i in $which;do basename $i;done`
 # Run coomv for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f coomv --spmv_alg 5 --precision s --device $dev --alpha 1 --beta 0 --iters 1000 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir -f coomv --spmv_alg 5 --precision s --device $dev --alpha 1 --beta 0 --iters 20 --rocalution $filename 2>&1 | tee -a $logname
 done

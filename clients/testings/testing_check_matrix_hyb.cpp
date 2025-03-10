@@ -110,15 +110,17 @@ void testing_check_matrix_hyb(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_check_matrix_hyb(
-                handle, hyb, base, matrix_type, uplo, storage, &data_status, dbuffer);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_check_matrix_hyb,
+                                                                      handle,
+                                                                      hyb,
+                                                                      base,
+                                                                      matrix_type,
+                                                                      uplo,
+                                                                      storage,
+                                                                      &data_status,
+                                                                      dbuffer);
 
         rocsparse_hyb_mat ptr  = hyb;
         test_hyb*         dhyb = reinterpret_cast<test_hyb*>(ptr);

@@ -500,61 +500,56 @@ void testing_bsrsm(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         device_dense_matrix<T> d_alpha(h_alpha);
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_analysis_time_used;
-        median_perf(
-            gpu_analysis_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_bsrsm_analysis<T>(handle,
-                                                   dir,
-                                                   trans_A,
-                                                   trans_X,
-                                                   mb,
-                                                   nrhs,
-                                                   dA.nnzb,
-                                                   descr,
-                                                   dA.val,
-                                                   dA.ptr,
-                                                   dA.ind,
-                                                   block_dim,
-                                                   info,
-                                                   apol,
-                                                   spol,
-                                                   dbuffer);
-            });
+        const double gpu_analysis_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_bsrsm_analysis<T>,
+                                               handle,
+                                               dir,
+                                               trans_A,
+                                               trans_X,
+                                               mb,
+                                               nrhs,
+                                               dA.nnzb,
+                                               descr,
+                                               dA.val,
+                                               dA.ptr,
+                                               dA.ind,
+                                               block_dim,
+                                               info,
+                                               apol,
+                                               spol,
+                                               dbuffer);
 
         rocsparse_bsrsm_zero_pivot(handle, info, analysis_pivot_gold);
 
-        double gpu_solve_time_used;
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_bsrsm_solve<T>(handle,
-                                                dir,
-                                                trans_A,
-                                                trans_X,
-                                                mb,
-                                                nrhs,
-                                                dA.nnzb,
-                                                d_alpha,
-                                                descr,
-                                                dA.val,
-                                                dA.ptr,
-                                                dA.ind,
-                                                block_dim,
-                                                info,
-                                                dB,
-                                                dB.ld,
-                                                dX,
-                                                dX.ld,
-                                                spol,
-                                                dbuffer);
-            });
+        const double gpu_solve_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_bsrsm_solve<T>,
+                                               handle,
+                                               dir,
+                                               trans_A,
+                                               trans_X,
+                                               mb,
+                                               nrhs,
+                                               dA.nnzb,
+                                               d_alpha,
+                                               descr,
+                                               dA.val,
+                                               dA.ptr,
+                                               dA.ind,
+                                               block_dim,
+                                               info,
+                                               dB,
+                                               dB.ld,
+                                               dX,
+                                               dX.ld,
+                                               spol,
+                                               dbuffer);
 
         rocsparse_bsrsm_zero_pivot(handle, info, solve_pivot_gold);
 

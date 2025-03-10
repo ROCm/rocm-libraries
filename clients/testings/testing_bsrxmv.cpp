@@ -314,18 +314,11 @@ void testing_bsrxmv(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-
         double gpu_time_used;
-        MEDIAN_PERF(gpu_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_bsrxmv<T>(PARAMS(h_alpha, dA, dx, h_beta, dy)));
+        ROCSPARSE_CLIENTS_RUN_BENCHMARK(
+            arg, gpu_time_used, rocsparse_bsrxmv<T>(PARAMS(h_alpha, dA, dx, h_beta, dy)));
 
         //
         // Re-use bsrmv gflop and gbyte counts but with different parameters

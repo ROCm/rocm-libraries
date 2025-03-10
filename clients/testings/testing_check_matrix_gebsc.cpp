@@ -433,29 +433,26 @@ void testing_check_matrix_gebsc(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_check_matrix_gebsc<T>(handle,
-                                                   direction,
-                                                   mb,
-                                                   nb,
-                                                   nnzb,
-                                                   row_block_dim,
-                                                   col_block_dim,
-                                                   dbsc_val,
-                                                   dbsc_col_ptr,
-                                                   dbsc_row_ind,
-                                                   base,
-                                                   matrix_type,
-                                                   uplo,
-                                                   storage,
-                                                   &data_status,
-                                                   dbuffer);
-        });
+        const double gpu_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_check_matrix_gebsc<T>,
+                                               handle,
+                                               direction,
+                                               mb,
+                                               nb,
+                                               nnzb,
+                                               row_block_dim,
+                                               col_block_dim,
+                                               dbsc_val,
+                                               dbsc_col_ptr,
+                                               dbsc_row_ind,
+                                               base,
+                                               matrix_type,
+                                               uplo,
+                                               storage,
+                                               &data_status,
+                                               dbuffer);
 
         double gbyte_count
             = check_matrix_gebsc_gbyte_count<T>(nb, nnzb, row_block_dim, col_block_dim);

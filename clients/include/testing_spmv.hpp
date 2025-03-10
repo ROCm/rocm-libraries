@@ -742,16 +742,10 @@ public:
 
         if(arg.timing)
         {
-            const int number_cold_calls  = 2;
-            const int number_hot_calls_2 = arg.iters_inner;
-            const int number_hot_calls   = arg.iters / number_hot_calls_2;
-
-            double gpu_time_used;
-            median_perf(
-                gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                    return rocsparse_spmv(
-                        PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_compute));
-                });
+            const double gpu_time_used = rocsparse_clients::run_benchmark(
+                arg,
+                rocsparse_spmv,
+                PARAMS(h_alpha, matA, x, h_beta, y, rocsparse_spmv_stage_compute));
 
             const double gflop_count = traits::gflop_count(hA, *h_beta != static_cast<T>(0));
             const double gbyte_count = traits::byte_count(hA, *h_beta != static_cast<T>(0));

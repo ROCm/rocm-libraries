@@ -423,9 +423,6 @@ void testing_csrgeam(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
@@ -448,48 +445,45 @@ void testing_csrgeam(const Arguments& arg)
         device_vector<rocsparse_int> dcsr_col_ind_C(nnz_C);
         device_vector<T>             dcsr_val_C(nnz_C);
 
-        double gpu_analysis_time_used;
-        median_perf(
-            gpu_analysis_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_csrgeam_nnz(handle,
-                                             M,
-                                             N,
-                                             descrA,
-                                             nnz_A,
-                                             dcsr_row_ptr_A,
-                                             dcsr_col_ind_A,
-                                             descrB,
-                                             nnz_B,
-                                             dcsr_row_ptr_B,
-                                             dcsr_col_ind_B,
-                                             descrC,
-                                             dcsr_row_ptr_C_1,
-                                             &nnz_C);
-            });
+        const double gpu_analysis_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_csrgeam_nnz,
+                                               handle,
+                                               M,
+                                               N,
+                                               descrA,
+                                               nnz_A,
+                                               dcsr_row_ptr_A,
+                                               dcsr_col_ind_A,
+                                               descrB,
+                                               nnz_B,
+                                               dcsr_row_ptr_B,
+                                               dcsr_col_ind_B,
+                                               descrC,
+                                               dcsr_row_ptr_C_1,
+                                               &nnz_C);
 
-        double gpu_solve_time_used;
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_csrgeam<T>(handle,
-                                            M,
-                                            N,
-                                            h_alpha,
-                                            descrA,
-                                            nnz_A,
-                                            dcsr_val_A,
-                                            dcsr_row_ptr_A,
-                                            dcsr_col_ind_A,
-                                            h_beta,
-                                            descrB,
-                                            nnz_B,
-                                            dcsr_val_B,
-                                            dcsr_row_ptr_B,
-                                            dcsr_col_ind_B,
-                                            descrC,
-                                            dcsr_val_C,
-                                            dcsr_row_ptr_C_1,
-                                            dcsr_col_ind_C);
-            });
+        const double gpu_solve_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                            rocsparse_csrgeam<T>,
+                                                                            handle,
+                                                                            M,
+                                                                            N,
+                                                                            h_alpha,
+                                                                            descrA,
+                                                                            nnz_A,
+                                                                            dcsr_val_A,
+                                                                            dcsr_row_ptr_A,
+                                                                            dcsr_col_ind_A,
+                                                                            h_beta,
+                                                                            descrB,
+                                                                            nnz_B,
+                                                                            dcsr_val_B,
+                                                                            dcsr_row_ptr_B,
+                                                                            dcsr_col_ind_B,
+                                                                            descrC,
+                                                                            dcsr_val_C,
+                                                                            dcsr_row_ptr_C_1,
+                                                                            dcsr_col_ind_C);
 
         double gflop_count = csrgeam_gflop_count<T>(nnz_A, nnz_B, nnz_C, h_alpha, h_beta);
         double gbyte_count = csrgeam_gbyte_count<T>(M, nnz_A, nnz_B, nnz_C, h_alpha, h_beta);

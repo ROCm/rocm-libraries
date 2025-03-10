@@ -155,15 +155,19 @@ void testing_csr2ell(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_csr2ell<T>(
-                handle, M, descrA, dA.val, dA.ptr, dA.ind, descrB, ell_width, dB.val, dB.ind);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_csr2ell<T>,
+                                                                      handle,
+                                                                      M,
+                                                                      descrA,
+                                                                      dA.val,
+                                                                      dA.ptr,
+                                                                      dA.ind,
+                                                                      descrB,
+                                                                      ell_width,
+                                                                      dB.val,
+                                                                      dB.ind);
 
         double gbyte_count = csr2ell_gbyte_count<T>(M, nnz, ell_nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

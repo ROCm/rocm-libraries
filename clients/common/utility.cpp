@@ -157,7 +157,7 @@ double get_time_us_sync(hipStream_t stream)
     return (static_cast<double>(duration));
 };
 
-timer::timer()
+rocsparse_clients::timer::timer()
 {
     auto status = hipEventCreate(&this->m_start);
     if(status != hipSuccess)
@@ -171,12 +171,12 @@ timer::timer()
     }
 }
 
-void timer::start()
+void rocsparse_clients::timer::start()
 {
     CHECK_HIP_ERROR(hipEventRecord(this->m_start));
 }
 
-float timer::stop()
+float rocsparse_clients::timer::stop()
 {
     float time;
     auto  status = hipEventRecord(this->m_stop);
@@ -197,7 +197,7 @@ float timer::stop()
     return time;
 }
 
-timer::~timer()
+rocsparse_clients::timer::~timer()
 {
     std::ignore = hipEventDestroy(this->m_start);
     std::ignore = hipEventDestroy(this->m_stop);

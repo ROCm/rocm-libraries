@@ -516,68 +516,43 @@ void testing_spgemm_bsr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
-
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_analysis_time_used;
-        median_perf(
-            gpu_analysis_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_spgemm(handle,
-                                        trans_A,
-                                        trans_B,
-                                        h_alpha_ptr,
-                                        A,
-                                        B,
-                                        h_beta_ptr,
-                                        D,
-                                        C,
-                                        compute_type,
-                                        alg,
-                                        rocsparse_spgemm_stage_nnz,
-                                        &buffer_size,
-                                        dbuffer);
-            });
-        double gpu_solve_time_used;
+        const double gpu_analysis_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_spgemm,
+                                               handle,
+                                               trans_A,
+                                               trans_B,
+                                               h_alpha_ptr,
+                                               A,
+                                               B,
+                                               h_beta_ptr,
+                                               D,
+                                               C,
+                                               compute_type,
+                                               alg,
+                                               rocsparse_spgemm_stage_nnz,
+                                               &buffer_size,
+                                               dbuffer);
 
-        median_perf(
-            gpu_solve_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-                return rocsparse_spgemm(handle,
-                                        trans_A,
-                                        trans_B,
-                                        h_alpha_ptr,
-                                        A,
-                                        B,
-                                        h_beta_ptr,
-                                        D,
-                                        C,
-                                        compute_type,
-                                        alg,
-                                        rocsparse_spgemm_stage_compute,
-                                        &buffer_size,
-                                        dbuffer);
-            });
-        for(int iter = 0; iter < number_hot_calls; ++iter)
-        {
-            CHECK_ROCSPARSE_ERROR(rocsparse_spgemm(handle,
-                                                   trans_A,
-                                                   trans_B,
-                                                   h_alpha_ptr,
-                                                   A,
-                                                   B,
-                                                   h_beta_ptr,
-                                                   D,
-                                                   C,
-                                                   compute_type,
-                                                   alg,
-                                                   rocsparse_spgemm_stage_compute,
-                                                   &buffer_size,
-                                                   dbuffer));
-        }
-
-        gpu_solve_time_used = (get_time_us() - gpu_solve_time_used) / number_hot_calls;
+        const double gpu_solve_time_used
+            = rocsparse_clients::run_benchmark(arg,
+                                               rocsparse_spgemm,
+                                               handle,
+                                               trans_A,
+                                               trans_B,
+                                               h_alpha_ptr,
+                                               A,
+                                               B,
+                                               h_beta_ptr,
+                                               D,
+                                               C,
+                                               compute_type,
+                                               alg,
+                                               rocsparse_spgemm_stage_compute,
+                                               &buffer_size,
+                                               dbuffer);
 
         double gflop_count = bsrgemm_gflop_count<T, I, J>(
             Mb, hA.row_block_dim, h_alpha_ptr, hA.ptr, hA.ind, hB.ptr, h_beta_ptr, hD.ptr, hA.base);

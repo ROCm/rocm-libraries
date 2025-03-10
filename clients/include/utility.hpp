@@ -857,83 +857,117 @@ std::string rocsparse_exepath();
 /*! \brief Return path where the test data file (rocsparse_test.data) is located */
 std::string rocsparse_datapath();
 
-struct timer
+namespace rocsparse_clients
 {
-private:
-    hipEvent_t m_start, m_stop;
 
-public:
-    timer();
-    void  start();
-    float stop();
-    ~timer();
-};
-
-/*! \brief  repeated performance runs of a function with a set of arguments that computes
- * the median of the mean of the wall-clock time.
- */
-template <typename T, typename... ARG>
-void median_perf(double& gpu_time_used,
-                 int     number_cold_calls,
-                 int     number_hot_calls,
-                 int     number_hot_calls_2,
-                 T       func,
-                 ARG&... arg)
-{
-    for(int iter = 0; iter < number_cold_calls; ++iter)
+    struct timer
     {
-        CHECK_ROCSPARSE_ERROR(func(arg...));
-    }
+    private:
+        hipEvent_t m_start, m_stop;
 
-    std::vector<double> gpu_time(number_hot_calls);
+    public:
+        timer();
+        void  start();
+        float stop();
+        ~timer();
+    };
 
-    timer t;
-
-    for(int iter = 0; iter < number_hot_calls; ++iter)
+    /*! \brief  repeated performance runs of a function with a set of arguments that computes
+   * the median of the mean of the wall-clock time.
+   */
+    template <typename T, typename... ARG>
+    float run_benchmark(const Arguments& arguments, T func, ARG&&... arg)
     {
-        t.start();
-        for(int iter2 = 0; iter2 < number_hot_calls_2; ++iter2)
+        if(arguments.iters_inner == 0)
         {
-            CHECK_ROCSPARSE_ERROR(func(arg...));
+            std::cerr << "error " << __FUNCTION__ << ": arguments.iters_inner is zero, exit program"
+                      << std::endl;
+            exit(rocsparse_status_invalid_value);
         }
-        float time = t.stop();
 
-        gpu_time[iter] = 1000 * time / number_hot_calls_2;
+        if(arguments.iters == 0)
+        {
+            std::cerr << "error " << __FUNCTION__ << ": arguments.iters is zero, exit program."
+                      << std::endl;
+            exit(rocsparse_status_invalid_value);
+        }
+
+        const int32_t n_cold_calls = 2;
+        const int32_t n_sub_calls  = arguments.iters_inner;
+        const int32_t n_calls      = arguments.iters;
+
+        for(int32_t iter = 0; iter < n_cold_calls; ++iter)
+        {
+            const rocsparse_status status = func(arg...);
+            if(status != rocsparse_status_success)
+            {
+                std::cerr << "error " << __FUNCTION__ << ": cold call failed." << std::endl;
+                exit(rocsparse_status_invalid_value);
+            }
+        }
+
+        std::vector<float> gpu_time(n_calls);
+
+        rocsparse_clients::timer t;
+        for(int32_t iter = 0; iter < n_calls; ++iter)
+        {
+            t.start();
+            for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
+            {
+                (void)func(arg...);
+            }
+            const float t_microseconds = (t.stop() * 1000);
+            gpu_time[iter]             = t_microseconds / n_sub_calls;
+        }
+
+        std::sort(gpu_time.begin(), gpu_time.end());
+        const int32_t mid = n_calls / 2;
+        return (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
     }
 
-    std::sort(gpu_time.begin(), gpu_time.end());
-    const int mid = number_hot_calls / 2;
-    gpu_time_used
-        = number_hot_calls % 2 == 0 ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];
 }
 
-#define MEDIAN_PERF(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, func)  \
-    {                                                                                              \
-        for(int iter = 0; iter < number_cold_calls; ++iter)                                        \
-        {                                                                                          \
-            CHECK_ROCSPARSE_ERROR(func);                                                           \
-        }                                                                                          \
-                                                                                                   \
-        std::vector<double> gpu_time(number_hot_calls);                                            \
-                                                                                                   \
-        timer t;                                                                                   \
-                                                                                                   \
-        for(int iter = 0; iter < number_hot_calls; ++iter)                                         \
-        {                                                                                          \
-            t.start();                                                                             \
-            for(int iter2 = 0; iter2 < number_hot_calls_2; ++iter2)                                \
-            {                                                                                      \
-                CHECK_ROCSPARSE_ERROR(func);                                                       \
-            }                                                                                      \
-            float time = t.stop();                                                                 \
-                                                                                                   \
-            gpu_time[iter] = 1000 * time / number_hot_calls_2;                                     \
-        }                                                                                          \
-                                                                                                   \
-        std::sort(gpu_time.begin(), gpu_time.end());                                               \
-        const int mid = number_hot_calls / 2;                                                      \
-        gpu_time_used                                                                              \
-            = number_hot_calls % 2 == 0 ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid]; \
+#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(arguments_, gpu_time_used_, func_)                       \
+    {                                                                                            \
+        if(arguments_.iters_inner == 0)                                                          \
+        {                                                                                        \
+            std::cerr << "error " << __FUNCTION__ << ": arguments_.iters_inner is zero."         \
+                      << std::endl;                                                              \
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);                               \
+        }                                                                                        \
+                                                                                                 \
+        if(arguments_.iters == 0)                                                                \
+        {                                                                                        \
+            std::cerr << "error " << __FUNCTION__ << ": arguments_.iters is zero." << std::endl; \
+            CHECK_ROCSPARSE_ERROR(rocsparse_status_invalid_value);                               \
+        }                                                                                        \
+                                                                                                 \
+        const int32_t n_cold_calls = 2;                                                          \
+        const int32_t n_sub_calls  = arguments_.iters_inner;                                     \
+        const int32_t n_calls      = arguments_.iters;                                           \
+        for(int32_t iter = 0; iter < n_cold_calls; ++iter)                                       \
+        {                                                                                        \
+            CHECK_ROCSPARSE_ERROR(func_);                                                        \
+        }                                                                                        \
+                                                                                                 \
+        std::vector<float> gpu_time(n_calls);                                                    \
+                                                                                                 \
+        rocsparse_clients::timer t;                                                              \
+        for(int32_t iter = 0; iter < n_calls; ++iter)                                            \
+        {                                                                                        \
+            t.start();                                                                           \
+            for(int32_t iter2 = 0; iter2 < n_sub_calls; ++iter2)                                 \
+            {                                                                                    \
+                (void)(func_);                                                                   \
+            }                                                                                    \
+            const float t_microseconds = (t.stop() * 1000);                                      \
+            gpu_time[iter]             = t_microseconds / n_sub_calls;                           \
+        }                                                                                        \
+                                                                                                 \
+        std::sort(gpu_time.begin(), gpu_time.end());                                             \
+        const int32_t mid = n_calls / 2;                                                         \
+        gpu_time_used_                                                                           \
+            = (n_calls % 2 == 0) ? (gpu_time[mid] + gpu_time[mid - 1]) / 2 : gpu_time[mid];      \
     }
 
 #endif // UTILITY_HPP

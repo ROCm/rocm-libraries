@@ -225,23 +225,19 @@ void testing_dense2csx(const Arguments& arg, FUNC& dense2csx)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return dense2csx(handle,
-                             M,
-                             N,
-                             descr,
-                             d_dense_val,
-                             LD,
-                             d_nnz_per_row_columns,
-                             (T*)d_csx_val,
-                             d_csx_row_col_ptr,
-                             d_csx_col_row_ind);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      dense2csx,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      descr,
+                                                                      d_dense_val,
+                                                                      LD,
+                                                                      d_nnz_per_row_columns,
+                                                                      (T*)d_csx_val,
+                                                                      d_csx_row_col_ptr,
+                                                                      d_csx_col_row_ind);
 
         double gbyte_count = dense2csx_gbyte_count<DIRA, T>(M, N, nnz);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);

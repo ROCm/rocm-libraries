@@ -277,19 +277,11 @@ void testing_bsrmv(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used,
-                    number_cold_calls,
-                    number_hot_calls,
-                    number_hot_calls_2,
-                    rocsparse_bsrmv_ex<T>,
-                    PARAMS(h_alpha, dA, dx, h_beta, dy));
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_bsrmv_ex<T>, PARAMS(h_alpha, dA, dx, h_beta, dy));
 
         double gflop_count = spmv_gflop_count(
             M, dA.nnzb * dA.row_block_dim * dA.col_block_dim, *h_beta != static_cast<T>(0));

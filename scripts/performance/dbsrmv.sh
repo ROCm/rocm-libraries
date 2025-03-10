@@ -89,5 +89,5 @@ filenames=`for i in $which;do basename $i;done`
 
 # Run bsrmv for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f bsrmv --precision d --device $dev --blockdim $blockdim --alpha 1 --beta 0 --iters 1000 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir -f bsrmv --precision d --device $dev --blockdim $blockdim --alpha 1 --beta 0 --iters 20 --rocalution $filename 2>&1 | tee -a $logname
 done

@@ -249,26 +249,22 @@ void testing_prune_dense2csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        const int number_cold_calls  = 2;
-        const int number_hot_calls_2 = arg.iters_inner;
-        const int number_hot_calls   = arg.iters / number_hot_calls_2;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        double gpu_time_used;
-        median_perf(gpu_time_used, number_cold_calls, number_hot_calls, number_hot_calls_2, [&] {
-            return rocsparse_prune_dense2csr<T>(handle,
-                                                M,
-                                                N,
-                                                d_A,
-                                                LDA,
-                                                h_threshold,
-                                                descr,
-                                                d_csr_val,
-                                                d_csr_row_ptr,
-                                                d_csr_col_ind,
-                                                d_temp_buffer);
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_prune_dense2csr<T>,
+                                                                      handle,
+                                                                      M,
+                                                                      N,
+                                                                      d_A,
+                                                                      LDA,
+                                                                      h_threshold,
+                                                                      descr,
+                                                                      d_csr_val,
+                                                                      d_csr_row_ptr,
+                                                                      d_csr_col_ind,
+                                                                      d_temp_buffer);
 
         double gbyte_count = prune_dense2csr_gbyte_count<T>(M, N, h_nnz_total_dev_host_ptr[0]);
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
