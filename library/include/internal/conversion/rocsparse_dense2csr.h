@@ -34,8 +34,9 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \brief
-*  This function converts the matrix A in column-oriented dense format into a sparse matrix in CSR format.
-*  All the parameters are assumed to have been pre-allocated by the user and the arrays are filled in based on nnz_per_row, which can be pre-computed with rocsparse_xnnz().
+*  This function converts the matrix \f$A\f$ in column-oriented dense format into a sparse matrix in CSR format.
+*  All the parameters are assumed to have been pre-allocated by the user and the arrays are filled in based 
+*  on nnz_per_row, which can be pre-computed with \ref rocsparse_snnz "rocsparse_Xnnz()".
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -43,35 +44,27 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
-*
+*  handle        handle to the rocsparse library context queue.
 *  @param[in]
-*  m           number of rows of the column-oriented dense matrix \p A.
-*
+*  m             number of rows of the column-oriented dense matrix \p A.
 *  @param[in]
-*  n           number of columns of the column-oriented dense dense matrix \p A.
-*
+*  n             number of columns of the column-oriented dense dense matrix \p A.
 *  @param[in]
-*  descr      the descriptor of the column-oriented dense matrix \p A, the supported matrix type is rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
-*
+*  descr         the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*                \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
-*  A           column-oriented dense matrix of dimensions (\p ld, \p n)
-*
+*  A             column-oriented dense matrix of dimensions (\p ld, \p n)
 *  @param[in]
-*  ld         leading dimension of column-oriented dense matrix \p A.
-*
+*  ld            leading dimension of column-oriented dense matrix \p A.
 *  @param[in]
-*  nnz_per_rows   array of size \p n containing the number of non-zero elements per row.
-*
+*  nnz_per_rows  array of size \p n containing the number of non-zero elements per row.
 *  @param[out]
-*  csr_val
-*              array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
+*  csr_val       array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
 *  @param[out]
-*  csr_row_ptr
-*              integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  csr_row_ptr   integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[out]
-*  csr_col_ind
-*              integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
+*  csr_col_ind   integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of 
+*                matrix \p A.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.

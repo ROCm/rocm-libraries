@@ -33,11 +33,9 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse COO matrix
-*
 *  \details
-*  \p coosort_buffer_size returns the size of the temporary storage buffer that is
-*  required by rocsparse_coosort_by_row() and rocsparse_coosort_by_column(). The
+*  \p rocsparse_coosort_buffer_size returns the size of the temporary storage buffer that is
+*  required by \ref rocsparse_coosort_by_row() and \ref rocsparse_coosort_by_column(). The
 *  temporary storage buffer has to be allocated by the user.
 *
 *  \note
@@ -63,7 +61,7 @@ extern "C" {
 *                  COO matrix.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
-*                  rocsparse_coosort_by_row() and rocsparse_coosort_by_column().
+*                  \ref rocsparse_coosort_by_row() and \ref rocsparse_coosort_by_column().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -88,11 +86,11 @@ rocsparse_status rocsparse_coosort_buffer_size(rocsparse_handle     handle,
 *  \p rocsparse_coosort_by_row sorts a matrix in COO format by row. The sorted
 *  permutation vector \p perm can be used to obtain sorted \p coo_val array. In this
 *  case, \p perm must be initialized as the identity permutation, see
-*  rocsparse_create_identity_permutation().
+*  \ref rocsparse_create_identity_permutation().
 *
 *  \p rocsparse_coosort_by_row requires extra temporary storage buffer that has to be
 *  allocated by the user. Storage buffer size can be determined by
-*  rocsparse_coosort_buffer_size().
+*  \ref rocsparse_coosort_buffer_size().
 *
 *  \note
 *  \p perm can be \p NULL if a sorted permutation vector is not required.
@@ -123,7 +121,7 @@ rocsparse_status rocsparse_coosort_buffer_size(rocsparse_handle     handle,
 *                  \p NULL.
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned by
-*                  rocsparse_coosort_buffer_size().
+*                  \ref rocsparse_coosort_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -201,11 +199,11 @@ rocsparse_status rocsparse_coosort_by_row(rocsparse_handle handle,
 *  \p rocsparse_coosort_by_column sorts a matrix in COO format by column. The sorted
 *  permutation vector \p perm can be used to obtain sorted \p coo_val array. In this
 *  case, \p perm must be initialized as the identity permutation, see
-*  rocsparse_create_identity_permutation().
+*  \ref rocsparse_create_identity_permutation().
 *
 *  \p rocsparse_coosort_by_column requires extra temporary storage buffer that has to be
 *  allocated by the user. Storage buffer size can be determined by
-*  rocsparse_coosort_buffer_size().
+*  \ref rocsparse_coosort_buffer_size().
 *
 *  \note
 *  \p perm can be \p NULL if a sorted permutation vector is not required.
@@ -236,7 +234,7 @@ rocsparse_status rocsparse_coosort_by_row(rocsparse_handle handle,
 *                  \p NULL.
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned by
-*                  rocsparse_coosort_buffer_size().
+*                  \ref rocsparse_coosort_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.

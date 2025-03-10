@@ -33,15 +33,11 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief
-*  This function computes the size of the user allocated temporary storage buffer used when converting and pruning
-*  a dense matrix to a CSR matrix.
-*
 *  \details
-*  \p rocsparse_prune_dense2csr_buffer_size returns the size of the temporary storage buffer
-*  that is required by rocsparse_sprune_dense2csr_nnz(), rocsparse_dprune_dense2csr_nnz(),
-*  rocsparse_sprune_dense2csr(), and rocsparse_dprune_dense2csr(). The temporary
-*  storage buffer must be allocated by the user.
+*  \p rocsparse_prune_dense2csr_buffer_size returns the size of the temporary buffer that
+*  is required by \ref rocsparse_sprune_dense2csr_nnz "rocsparse_Xprune_dense2csr_nnz()" and
+*  \ref rocsparse_sprune_dense2csr "rocsparse_Xprune_dense2csr()". The temporary storage
+*  buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -52,39 +48,29 @@ extern "C" {
 *
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
-*
 *  @param[in]
 *  m           number of rows of the dense matrix \p A.
-*
 *  @param[in]
 *  n           number of columns of the dense matrix \p A.
-*
 *  @param[in]
 *  A           array of dimensions (\p lda, \p n)
-*
 *  @param[in]
 *  lda         leading dimension of dense array \p A.
-*
 *  @param[in]
 *  threshold   pointer to the pruning non-negative threshold which can exist in either host or device memory.
-*
 *  @param[in]
-*  descr      the descriptor of the dense matrix \p A, the supported matrix type is rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
-*
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*              also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
-*  csr_val
-*              array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
+*  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
 *  @param[in]
-*  csr_row_ptr
-*              integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  csr_row_ptr integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[in]
-*  csr_col_ind
-*              integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
-*
+*  csr_col_ind integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
-*              rocsparse_sprune_dense2csr_nnz(), rocsparse_dprune_dense2csr_nnz(),
-*              rocsparse_sprune_dense2csr() and rocsparse_dprune_dense2csr().
+*              \ref rocsparse_sprune_dense2csr_nnz "rocsparse_Xprune_dense2csr_nnz()" and
+*              \ref rocsparse_sprune_dense2csr "rocsparse_Xprune_dense2csr()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -120,47 +106,38 @@ rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle        
 /**@}*/
 
 /*! \ingroup conv_module
-*  \brief
-*  This function computes the number of nonzero elements per row and the total number of nonzero elements in a dense matrix once
-*  elements less than the threshold are pruned from the matrix.
-*
 *  \details
+*  \p rocsparse_prune_dense2csr_nnz computes the number of nonzero elements per row and the total
+*  number of nonzero elements in a sparse CSR matrix once elements less than the threshold are
+*  pruned from the matrix.
+* 
+*  \note
 *  The routine does support asynchronous execution if the pointer mode is set to device.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
-*
+*  handle                 handle to the rocsparse library context queue.
 *  @param[in]
-*  m           number of rows of the dense matrix \p A.
-*
+*  m                      number of rows of the dense matrix \p A.
 *  @param[in]
-*  n           number of columns of the dense matrix \p A.
-*
+*  n                      number of columns of the dense matrix \p A.
 *  @param[in]
-*  A           array of dimensions (\p lda, \p n)
-*
+*  A                      array of dimensions (\p lda, \p n)
 *  @param[in]
-*  lda         leading dimension of dense array \p A.
-*
+*  lda                    leading dimension of dense array \p A.
 *  @param[in]
-*  threshold   pointer to the pruning non-negative threshold which can exist in either host or device memory.
-*
+*  threshold              pointer to the pruning non-negative threshold which can exist in either host or device memory.
 *  @param[in]
-*  descr      the descriptor of the dense matrix \p A.
-*
+*  descr                  the descriptor of the dense matrix \p A.
 *  @param[out]
-*  csr_row_ptr
-*              integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  csr_row_ptr            integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[out]
-*  nnz_total_dev_host_ptr
-*              total number of nonzero elements in device or host memory.
-*
+*  nnz_total_dev_host_ptr total number of nonzero elements in device or host memory.
 *  @param[out]
-*  temp_buffer
-*              buffer allocated by the user whose size is determined by calling rocsparse_xprune_dense2csr_buffer_size().
+*  temp_buffer            buffer allocated by the user whose size is determined by calling 
+*                         \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -195,17 +172,22 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 /**@}*/
 
 /*! \ingroup conv_module
-*  \brief
-*  This function converts the matrix A in dense format into a sparse matrix in CSR format while pruning values
-*  that are less than the threshold. All the parameters are assumed to have been pre-allocated by the user.
+*  \brief Convert and prune dense matrix \f$A\f$ into a sparse CSR matrix \f$C\f$
 *
 *  \details
-*  The user first allocates \p csr_row_ptr to have \p m+1 elements and then calls rocsparse_xprune_dense2csr_nnz()
-*  which fills in the \p csr_row_ptr array and stores the number of elements that are larger than the pruning threshold
-*  in \p nnz_total_dev_host_ptr. The user then allocates \p csr_col_ind and \p csr_val to have size \p nnz_total_dev_host_ptr
-*  and completes the conversion by calling rocsparse_xprune_dense2csr(). A temporary storage buffer is used by both
-*  rocsparse_xprune_dense2csr_nnz() and rocsparse_xprune_dense2csr() and must be allocated by the user and whose size is determined
-*  by rocsparse_xprune_dense2csr_buffer_size().
+*  This function converts the dense matrix \f$A\f$ into a sparse CSR matrix \f$C\f$ by pruning values in \f$A\f$
+*  that are less than a threshold.
+*
+*  The conversion involves three steps. The user first calls 
+*  \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()" 
+*  to determine the size of the temporary storage buffer. The user allocates this buffer as well as the array 
+*  \p csr_row_ptr to have \p m+1 elements. The user then calls 
+*  \ref rocsparse_sprune_dense2csr_nnz "rocsparse_Xprune_dense2csr_nnz()" which fills
+*  in the \p csr_row_ptr array and stores the number of elements that are larger than the pruning \p threshold
+*  in \p nnz_total_dev_host_ptr. Now that the number of nonzeros larger than the pruning \p threshold is known, the 
+*  user uses this information to allocate the \p csr_col_ind and \p csr_val arrays and then calls
+*  \p rocsparse_prune_dense2csr to complete the conversion. Once the conversion is complete, the temporary storage 
+*  buffer can be freed.
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -215,44 +197,123 @@ rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle
 *
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
-*
 *  @param[in]
 *  m           number of rows of the dense matrix \p A.
-*
 *  @param[in]
 *  n           number of columns of the dense matrix \p A.
-*
 *  @param[in]
 *  A           array of dimensions (\p lda, \p n)
-*
 *  @param[in]
 *  lda         leading dimension of dense array \p A.
-*
 *  @param[in]
 *  threshold   pointer to the non-negative pruning threshold which can exist in either host or device memory.
-*
 *  @param[in]
-*  descr      the descriptor of the dense matrix \p A, the supported matrix type is rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
-*
+*  descr       the descriptor of the dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and 
+*              also any valid value of the \ref rocsparse_index_base.
 *  @param[out]
-*  csr_val
-*              array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
+*  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
 *  @param[in]
-*  csr_row_ptr
-*              integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  csr_row_ptr integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
 *  @param[out]
-*  csr_col_ind
-*              integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
-*
+*  csr_col_ind integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
 *  @param[in]
 *  temp_buffer temporary storage buffer allocated by the user, size is returned by
-*              rocsparse_xprune_dense2csr_buffer_size().
+*              \ref rocsparse_sprune_dense2csr_buffer_size "rocsparse_Xprune_dense2csr_buffer_size()" .
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval     rocsparse_status_invalid_size \p m or \p n or \p lda is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p A or \p descr or \p threshold or \p csr_val
 *              or \p csr_row_ptr or \p csr_col_ind or \p temp_buffer pointer is invalid.
+*
+*  \par Example
+*  \code{.c}
+*    //     1 2 0 7
+*    // A = 3 0 0 4
+*    //     5 6 0 4
+*    //     0 4 2 5
+*    rocsparse_int m   = 4;
+*    rocsparse_int n   = 4;
+*    rocsparse_int lda = m;
+*    float threshold = 3.0f;
+*
+*    std::vector<float> hdense = {1.0f, 3.0f, 5.0f, 0.0f, 2.0f, 0.0f, 6.0f, 4.0f, 0.0f, 0.0f, 0.0f, 2.0f, 7.0f, 4.0f, 4.0f, 5.0f};
+*
+*    rocsparse_handle handle;
+*    rocsparse_create_handle(&handle);
+*
+*    rocsparse_mat_descr descr;
+*    rocsparse_create_mat_descr(&descr);
+*
+*    rocsparse_mat_info info;
+*    rocsparse_create_mat_info(&info);
+*
+*    float* ddense = nullptr;
+*    hipMalloc((void**)&ddense, sizeof(float) * lda * n);
+*    hipMemcpy(ddense, hdense.data(), sizeof(float) * lda * n, hipMemcpyHostToDevice);
+*
+*    rocsparse_int* dcsr_row_ptr = nullptr;
+*    hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
+*
+*    // Obtain the temporary buffer size
+*    size_t buffer_size;
+*    rocsparse_sprune_dense2csr_buffer_size(handle,
+*                                           m,
+*                                           n,
+*                                           ddense,
+*                                           lda,
+*                                           &threshold,
+*                                           descr,
+*                                           nullptr,
+*                                           nullptr,
+*                                           nullptr,
+*                                           &buffer_size);
+*
+*    // Allocate temporary buffer
+*    void* temp_buffer;
+*    hipMalloc(&temp_buffer, buffer_size);
+*
+*    rocsparse_int nnz;
+*    rocsparse_sprune_dense2csr_nnz(handle,
+*                                   m,
+*                                   n,
+*                                   ddense,
+*                                   lda,
+*                                   &threshold,
+*                                   descr,
+*                                   dcsr_row_ptr,
+*                                   &nnz,
+*                                   temp_buffer);
+*
+*    rocsparse_int* dcsr_col_ind = nullptr;
+*    float* dcsr_val = nullptr;
+*    hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
+*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
+*
+*    rocsparse_sprune_dense2csr(handle,
+*                               m,
+*                               n,
+*                               ddense,
+*                               lda,
+*                               &threshold,
+*                               descr,
+*                               dcsr_val,
+*                               dcsr_row_ptr,
+*                               dcsr_col_ind,
+*                               temp_buffer);
+*    
+*    rocsparse_destroy_handle(handle);
+*    rocsparse_destroy_mat_descr(descr);
+*    rocsparse_destroy_mat_info(info);
+*
+*    hipFree(temp_buffer);
+*
+*    hipFree(ddense);
+*
+*    hipFree(dcsr_row_ptr);
+*    hipFree(dcsr_col_ind);
+*    hipFree(dcsr_val);
+*  \endcode
 */
 /**@{*/
 ROCSPARSE_EXPORT

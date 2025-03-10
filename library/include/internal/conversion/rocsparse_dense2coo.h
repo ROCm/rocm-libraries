@@ -34,10 +34,9 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \brief
-*
-*  This function converts the matrix A in column-oriented dense format into a sparse matrix in COO format.
+*  This function converts the matrix \f$A\f$ in column-oriented dense format into a sparse matrix in COO format.
 *  All the parameters are assumed to have been pre-allocated by the user and the arrays are
-*  filled in based on nnz_per_rows, which can be pre-computed with rocsparse_xnnz().
+*  filled in based on nnz_per_rows, which can be pre-computed with \ref rocsparse_snnz "rocsparse_Xnnz()".
 *
 *  \note
 *  This function is blocking with respect to the host.
@@ -46,35 +45,27 @@ extern "C" {
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
-*
+*  handle       handle to the rocsparse library context queue.
 *  @param[in]
-*  m           number of rows of the column-oriented dense matrix \p A.
-*
+*  m            number of rows of the column-oriented dense matrix \p A.
 *  @param[in]
-*  n           number of columns of the column-oriented dense matrix \p A.
-*
+*  n            number of columns of the column-oriented dense matrix \p A.
 *  @param[in]
-*  descr      the descriptor of the column-oriented dense matrix \p A, the supported matrix type is rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
-*
+*  descr        the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*               \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
-*  A          column-oriented dense matrix of dimensions (\p ld, \p n)
-*
+*  A            column-oriented dense matrix of dimensions (\p ld, \p n)
 *  @param[in]
-*  ld         leading dimension of column-oriented dense matrix \p A.
-*
+*  ld           leading dimension of column-oriented dense matrix \p A.
 *  @param[in]
-*  nnz_per_rows   array of size \p n containing the number of non-zero elements per row.
-*
+*  nnz_per_rows array of size \p n containing the number of non-zero elements per row.
 *  @param[out]
 *  coo_val
-*              array of nnz nonzero elements of matrix \p A.
+*               array of nnz nonzero elements of matrix \p A.
 *  @param[out]
-*  coo_row_ind
-*              integer array of nnz row indices of the non-zero elements of matrix \p A.
+*  coo_row_ind  integer array of nnz row indices of the non-zero elements of matrix \p A.
 *  @param[out]
-*  coo_col_ind integer array of nnz column indices of the non-zero elements of matrix \p A.
-*
+*  coo_col_ind  integer array of nnz column indices of the non-zero elements of matrix \p A.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.

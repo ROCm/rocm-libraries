@@ -32,11 +32,9 @@
 extern "C" {
 #endif
 /*! \ingroup conv_module
-*  \brief Sort a sparse CSC matrix
-*
 *  \details
 *  \p rocsparse_cscsort_buffer_size returns the size of the temporary storage buffer
-*  required by rocsparse_cscsort(). The temporary storage buffer must be allocated by
+*  required by \ref rocsparse_cscsort(). The temporary storage buffer must be allocated by
 *  the user.
 *
 *  \note
@@ -62,7 +60,7 @@ extern "C" {
 *                  CSC matrix.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
-*                  rocsparse_cscsort().
+*                  \ref rocsparse_cscsort().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -85,10 +83,10 @@ rocsparse_status rocsparse_cscsort_buffer_size(rocsparse_handle     handle,
 *  \details
 *  \p rocsparse_cscsort sorts a matrix in CSC format. The sorted permutation vector
 *  \p perm can be used to obtain sorted \p csc_val array. In this case, \p perm must be
-*  initialized as the identity permutation, see rocsparse_create_identity_permutation().
+*  initialized as the identity permutation, see \ref rocsparse_create_identity_permutation().
 *
 *  \p rocsparse_cscsort requires extra temporary storage buffer that has to be allocated by
-*  the user. Storage buffer size can be determined by rocsparse_cscsort_buffer_size().
+*  the user. Storage buffer size can be determined by \ref rocsparse_cscsort_buffer_size().
 *
 *  \note
 *  \p perm can be \p NULL if a sorted permutation vector is not required.
@@ -122,7 +120,7 @@ rocsparse_status rocsparse_cscsort_buffer_size(rocsparse_handle     handle,
 *                  \p NULL.
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned by
-*                  rocsparse_cscsort_buffer_size().
+*                  \ref rocsparse_cscsort_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.

@@ -39,9 +39,8 @@ extern "C" {
 *  \p rocsparse_csr2coo converts the CSR array containing the row offsets, that point
 *  to the start of every row, into a COO array of row indices.
 *
-*  \note
-*  It can also be used to convert a CSC array containing the column offsets into a COO
-*  array of column indices.
+*  \p rocsparse_csr2coo can also be used to convert a CSC array containing the column offsets 
+*  into a COO array of column indices.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

@@ -33,40 +33,35 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief
-*  This function computes the number of nonzero elements per row or column and the total number of nonzero elements in a dense matrix.
 *  \details
+*  This function computes the number of nonzero elements per row or column and the total number of nonzero elements 
+*  in a dense matrix.
+*  
+*  \note
 *  The routine does support asynchronous execution if the pointer mode is set to device.
+*
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
-*
+*  handle                  handle to the rocsparse library context queue.
 *  @param[in]
-*  dir        direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by \ref rocsparse_direction_column.
-*
+*  dir                     direction that specified whether to count nonzero elements by \ref rocsparse_direction_row or by 
+*                          \ref rocsparse_direction_column.
 *  @param[in]
-*  m           number of rows of the dense matrix \p A.
-*
+*  m                       number of rows of the dense matrix \p A.
 *  @param[in]
-*  n           number of columns of the dense matrix \p A.
-*
+*  n                       number of columns of the dense matrix \p A.
 *  @param[in]
-*  descr      the descriptor of the dense matrix \p A.
-*
+*  descr                   the descriptor of the dense matrix \p A.
 *  @param[in]
-*  A           array of dimensions (\p ld, \p n)
-*
+*  A                       array of dimensions (\p ld, \p n)
 *  @param[in]
-*  ld         leading dimension of dense array \p A.
-*
+*  ld                      leading dimension of dense array \p A.
 *  @param[out]
-*  nnz_per_row_columns
-*              array of size \p m or \p n containing the number of nonzero elements per row or column, respectively.
+*  nnz_per_row_columns     array of size \p m or \p n containing the number of nonzero elements per row or column, respectively.
 *  @param[out]
-*  nnz_total_dev_host_ptr
-*              total number of nonzero elements in device or host memory.
+*  nnz_total_dev_host_ptr  total number of nonzero elements in device or host memory.
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.

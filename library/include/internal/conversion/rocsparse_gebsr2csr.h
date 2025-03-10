@@ -35,11 +35,16 @@ extern "C" {
 *  \brief Convert a sparse general BSR matrix into a sparse CSR matrix
 *
 *  \details
-*  \p rocsparse_gebsr2csr converts a BSR matrix into a CSR matrix. It is assumed,
-*  that \p csr_val, \p csr_col_ind and \p csr_row_ptr are allocated. Allocation size
-*  for \p csr_row_ptr is computed by the number of block rows multiplied by the block
-*  dimension plus one. Allocation for \p csr_val and \p csr_col_ind is computed by the
-*  the number of blocks in the BSR matrix multiplied by the product of the block dimensions.
+*  \p rocsparse_gebsr2csr converts a BSR matrix into a CSR matrix. The input matrix is assumed 
+*  to be allocated such that array \p bsr_row_ptr has length \p mb+1, \p bsr_col_ind has length \p nnzb, and 
+*  \p bsr_val has length \p nnzb*row_block_dim*col_block_dim. The output matrix is assumed to be 
+*  allocated such that array \p csr_row_ptr has length \p m+1, \p csr_col_ind has length \p nnz, and 
+*  \p csr_val has length \p nnz where:
+*  \f[
+*    m = mb * row\_block\_dim \\
+*    n = nb * col\_block\_dim \\
+*    nnz = nnzb * row\_block\_dim * col\_block\_dim
+*  \f]
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

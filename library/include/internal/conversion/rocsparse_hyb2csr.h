@@ -33,12 +33,10 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse HYB matrix into a sparse CSR matrix
-*
 *  \details
 *  \p rocsparse_hyb2csr_buffer_size returns the size of the temporary storage buffer
-*  required by rocsparse_shyb2csr(), rocsparse_dhyb2csr(), rocsparse_chyb2csr() and
-*  rocsparse_dhyb2csr(). The temporary storage buffer must be allocated by the user.
+*  required by \ref rocsparse_shyb2csr "rocsparse_Xhyb2csr()". The temporary storage 
+*  buffer must be allocated by the user.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -59,8 +57,7 @@ extern "C" {
 *                  sparse CSR matrix.
 *  @param[out]
 *  buffer_size     number of bytes of the temporary storage buffer required by
-*                  rocsparse_shyb2csr(), rocsparse_dhyb2csr(), rocsparse_chyb2csr() and
-*                  rocsparse_zhyb2csr().
+*                  \ref rocsparse_shyb2csr "rocsparse_Xhyb2csr()".
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -81,11 +78,14 @@ rocsparse_status rocsparse_hyb2csr_buffer_size(rocsparse_handle          handle,
 *  \brief Convert a sparse HYB matrix into a sparse CSR matrix
 *
 *  \details
-*  \p rocsparse_hyb2csr converts a HYB matrix into a CSR matrix.
+*  \p rocsparse_hyb2csr converts a HYB matrix into a CSR matrix. This requires a HYB input structure, 
+*  \ref rocsparse_hyb_mat, which is created using \ref rocsparse_create_hyb_mat and is filled with data 
+*  using the conversion routine \ref rocsparse_scsr2hyb "rocsparse_Xcsr2hyb()".
 *
-*  \p rocsparse_hyb2csr requires extra temporary storage buffer that has to be allocated
-*  by the user. Storage buffer size can be determined by
-*  rocsparse_hyb2csr_buffer_size().
+*  Converting back to a sparse CSR matrix from a sparse HYB matrix requires two steps. First, the user calls 
+*  \ref rocsparse_hyb2csr_buffer_size in order to determine the size of the required temporary 
+*  storage buffer. Once this is determined, the user allocates this buffer. Finally, the user calls 
+*  \ref rocsparse_shyb2csr "rocsparse_Xhyb2csr()" to complete the conversion.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -110,7 +110,7 @@ rocsparse_status rocsparse_hyb2csr_buffer_size(rocsparse_handle          handle,
 *  csr_col_ind     array containing the column indices of the sparse CSR matrix.
 *  @param[in]
 *  temp_buffer     temporary storage buffer allocated by the user, size is returned by
-*                  rocsparse_hyb2csr_buffer_size().
+*                  \ref rocsparse_hyb2csr_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
@@ -123,35 +123,91 @@ rocsparse_status rocsparse_hyb2csr_buffer_size(rocsparse_handle          handle,
 *  \par Example
 *  This example converts a HYB matrix into a CSR matrix.
 *  \code{.c}
-*      // Create CSR matrix arrays
-*      rocsparse_int* csr_row_ptr;
-*      rocsparse_int* csr_col_ind;
-*      float* csr_val;
+*    //     1 2 3 4 0 0
+*    // A = 3 4 0 0 0 0
+*    //     6 5 3 4 0 0
+*    //     1 2 0 0 0 0
+*    rocsparse_int m   = 4;
+*    rocsparse_int n   = 6;
+*    rocsparse_int nnz = 12;
 *
-*      hipMalloc((void**)&csr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&csr_col_ind, sizeof(rocsparse_int) * nnz);
-*      hipMalloc((void**)&csr_val, sizeof(float) * nnz);
+*    std::vector<rocsparse_int> hcsr_row_ptr = {0, 4, 6, 10, 12}; 
+*    std::vector<rocsparse_int> hcsr_col_ind = {0, 1, 2, 3, 0, 1, 0, 1, 2, 3, 0, 1}; 
+*    std::vector<float> hcsr_val     = {1, 2, 3, 4, 3, 4, 6, 5, 3, 4, 1, 2};
 *
-*      // Get required size of temporary buffer
-*      size_t size;
-*      rocsparse_hyb2csr_buffer_size(handle,
-*                                    descr,
-*                                    hyb,
-*                                    csr_row_ptr,
-*                                    &size);
+*    rocsparse_int* dcsr_row_ptr = nullptr;
+*    rocsparse_int* dcsr_col_ind = nullptr;
+*    float* dcsr_val = nullptr;
+*    hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
+*    hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
+*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
 *
-*      // Allocate temporary buffer
-*      void* buffer;
-*      hipMalloc(&buffer, size);
+*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice);
+*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
+*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
 *
-*      // Perform the conversion
-*      rocsparse_shyb2csr(handle,
-*                         descr,
-*                         hyb,
-*                         csr_val,
-*                         csr_row_ptr,
-*                         csr_col_ind,
-*                         buffer);
+*    rocsparse_handle handle;
+*    rocsparse_create_handle(&handle);
+*
+*    rocsparse_mat_descr descr;
+*    rocsparse_create_mat_descr(&descr);
+*
+*    rocsparse_hyb_mat hyb;
+*    rocsparse_create_hyb_mat(&hyb);
+*
+*    rocsparse_int user_ell_width = 3;
+*    rocsparse_hyb_partition partition_type = rocsparse_hyb_partition_user;
+*    rocsparse_scsr2hyb(handle,
+*                       m,
+*                       n,
+*                       descr,
+*                       dcsr_val,
+*                       dcsr_row_ptr,
+*                       dcsr_col_ind,
+*                       hyb,
+*                       user_ell_width,
+*                       partition_type);
+*
+*    rocsparse_int* dcsr_row_ptr2 = nullptr;
+*    rocsparse_int* dcsr_col_ind2 = nullptr;
+*    float* dcsr_val2 = nullptr;
+*    hipMalloc((void**)&dcsr_row_ptr2, sizeof(rocsparse_int) * (m + 1));
+*    hipMalloc((void**)&dcsr_col_ind2, sizeof(rocsparse_int) * nnz);
+*    hipMalloc((void**)&dcsr_val2, sizeof(float) * nnz);
+*
+*    // Obtain the temporary buffer size
+*    size_t buffer_size;
+*    rocsparse_hyb2csr_buffer_size(handle,
+*                                  descr,
+*                                  hyb,
+*                                  dcsr_row_ptr2,
+*                                  &buffer_size);
+*
+*    // Allocate temporary buffer
+*    void* temp_buffer;
+*    hipMalloc(&temp_buffer, buffer_size);
+*
+*    rocsparse_shyb2csr(handle,
+*                       descr,
+*                       hyb,
+*                       dcsr_val2,
+*                       dcsr_row_ptr2,
+*                       dcsr_col_ind2,
+*                       temp_buffer);
+*    
+*    rocsparse_destroy_handle(handle);
+*    rocsparse_destroy_mat_descr(descr);
+*    rocsparse_destroy_hyb_mat(hyb);
+*
+*    hipFree(temp_buffer);
+*
+*    hipFree(dcsr_row_ptr);
+*    hipFree(dcsr_col_ind);
+*    hipFree(dcsr_val);
+*
+*    hipFree(dcsr_row_ptr2);
+*    hipFree(dcsr_col_ind2);
+*    hipFree(dcsr_val2);
 *  \endcode
 */
 /**@{*/

@@ -33,11 +33,9 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse ELL matrix
-*
 *  \details
 *  \p rocsparse_csr2ell_width computes the maximum of the per row non-zero elements
-*  over all rows, the ELL \p width, for a given CSR matrix.
+*  over all rows, the \p ell_width, for a given CSR matrix.
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.

@@ -38,6 +38,11 @@ extern "C" {
  *  \p rocsparse_csr2csr_compress converts a CSR matrix into a compressed CSR matrix by
  *  removing entries in the input CSR matrix that are below a non-negative threshold \p tol
  *
+ *  Compressing a CSR matrix involves two steps. First we use 
+ *  \ref rocsparse_snnz_compress "rocsparse_Xnnz_compress()" to determine how many entries will 
+ *  be in the final compressed CSR matrix. Then we call \p rocsparse_csr2csr_compress to finish 
+ *  the compression and fill in the column indices and values arrays of the compressed CSR matrix.
+ *
  *  \note
  *  In the case of complex matrices only the magnitude of the real part of \p tol is used.
  *
@@ -91,9 +96,7 @@ extern "C" {
  *              \p nnz_per_row pointer is invalid.
  *
  *  \par Example
- *  This example demonstrates how to compress a CSR matrix. Compressing a CSR matrix involves two steps. First we use
- *  nnz_compress() to determine how many entries will be in the final compressed CSR matrix. Then we call csr2csr_compress()
- *  to finish the compression and fill in the column indices and values arrays of the compressed CSR matrix.
+ *  This example demonstrates how to compress a CSR matrix. 
  *  \code{.c}
  *      //     1 2 0 3 0
  *      // A = 0 4 5 0 0

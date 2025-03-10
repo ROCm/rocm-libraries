@@ -37,12 +37,12 @@ extern "C" {
  *
  *  \details
  *  \p rocsparse_coo2csr converts the COO array containing the row indices into a
- *  CSR array of row offsets, that point to the start of every row.
+ *  CSR array of row offsets that point to the start of every row.
  *  It is assumed that the COO row index array is sorted.
  *
- *  \note It can also be used, to convert a COO array containing the column indices into
- *  a CSC array of column offsets, that point to the start of every column. Then, it is
- *  assumed that the COO column index array is sorted, instead.
+ *  \p rocsparse_coo2csr can also be used, to convert a COO array containing the column 
+ *  indices into a CSC array of column offsets that point to the start of every column. 
+ *  In this case it is assumed that the COO column index array is sorted instead.
  *
  *  \note
  *  This function is non blocking and executed asynchronously with respect to the host.

@@ -45,26 +45,23 @@ extern "C" {
 *
 *  @param[in]
 *  handle      handle to the rocsparse library context queue.
-*
 *  @param[in]
 *  m           number of rows of the column-oriented dense matrix \p A.
-*
 *  @param[in]
 *  n           number of columns of the column-oriented dense matrix \p A.
-*
 *  @param[in]
-*  descr       the descriptor of the column-oriented dense matrix \p A, the supported matrix type is \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
-*
+*  descr       the descriptor of the column-oriented dense matrix \p A, the supported matrix type is 
+*              \ref rocsparse_matrix_type_general and also any valid value of the \ref rocsparse_index_base.
 *  @param[in]
 *  csr_val     array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) nonzero elements of matrix \p A.
 *  @param[in]
-*  csr_row_ptr integer array of \p m+1 elements that contains the start of every row and the end of the last row plus one.
+*  csr_row_ptr integer array of \p m+1 elements that contains the start of every row and the end of the last 
+*              row plus one.
 *  @param[in]
-*  csr_col_ind integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero elements of matrix \p A.
-*
+*  csr_col_ind integer array of nnz ( = \p csr_row_ptr[m] - \p csr_row_ptr[0] ) column indices of the non-zero 
+*              elements of matrix \p A.
 *  @param[out]
 *  A           array of dimensions (\p ld, \p n)
-*
 *  @param[out]
 *  ld          leading dimension of column-oriented dense matrix \p A.
 *
@@ -73,6 +70,61 @@ extern "C" {
 *  \retval     rocsparse_status_invalid_size \p m or \p n or \p ld is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p A or \p csr_val \p csr_row_ptr or \p csr_col_ind
 *              pointer is invalid.
+*
+*  \par Example
+*  \code{.c}
+*    // 1 2 3 0
+*    // 0 0 4 5
+*    // 0 6 0 0
+*    // 7 0 0 8
+*    rocsparse_int m = 4;
+*    rocsparse_int n = 4;
+*    rocsparse_int nnz = 8;
+*    rocsparse_int ld = m;
+*
+*    std::vector<rocsparse_int> hcsr_row_ptr = {0, 3, 5, 6, 8};
+*    std::vector<rocsparse_int> hcsr_col_ind = {0, 1, 2, 2, 3, 1, 0, 3};
+*    std::vector<float> hcsr_val = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f};
+*
+*    rocsparse_int* dcsr_row_ptr = nullptr;
+*    rocsparse_int* dcsr_col_ind = nullptr;
+*    float* dcsr_val = nullptr;
+*    hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
+*    hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
+*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
+*
+*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice);
+*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(rocsparse_int) * nnz, hipMemcpyHostToDevice);
+*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
+*
+*    float* ddense = nullptr;
+*    hipMalloc((void**)&ddense, sizeof(float) * ld * n);
+*
+*    rocsparse_handle handle;
+*    rocsparse_create_handle(&handle);
+*
+*    rocsparse_mat_descr descr;
+*    rocsparse_create_mat_descr(&descr);
+*
+*    rocsparse_scsr2dense(handle,
+*                         m,
+*                         n,
+*                         descr,
+*                         dcsr_val,
+*                         dcsr_row_ptr,
+*                         dcsr_col_ind,
+*                         ddense,
+*                         ld);
+*
+*    rocsparse_destroy_handle(handle);
+*    rocsparse_destroy_mat_descr(descr);
+*
+*    hipFree(dcsr_row_ptr);
+*    hipFree(dcsr_col_ind);
+*    hipFree(dcsr_val);
+*
+*    hipFree(ddense);
+*  \endcode
 */
 /**@{*/
 ROCSPARSE_EXPORT

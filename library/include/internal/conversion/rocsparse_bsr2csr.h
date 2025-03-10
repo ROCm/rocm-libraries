@@ -37,9 +37,16 @@ extern "C" {
 *  \details
 *  \p rocsparse_bsr2csr converts a BSR matrix into a CSR matrix. It is assumed,
 *  that \p csr_val, \p csr_col_ind and \p csr_row_ptr are allocated. Allocation size
-*  for \p csr_row_ptr is computed by the number of block rows multiplied by the block
-*  dimension plus one. Allocation for \p csr_val and \p csr_col_ind is computed by the
-*  the number of blocks in the BSR matrix multiplied by the block dimension squared.
+*  for \p csr_row_ptr is \p m+1 where:
+*  \f[
+*    m = mb * block\_dim \\
+*    n = nb * block\_dim
+*  \f]
+*  Allocation for \p csr_val and \p csr_col_ind is computed by the
+*  the number of blocks in the BSR matrix multiplied by the block dimension squared:
+*  \f[
+*    nnz = nnzb * block\_dim * block\_dim
+*  \f]
 *
 *  \note
 *  This function is non blocking and executed asynchronously with respect to the host.
@@ -89,58 +96,84 @@ extern "C" {
 *  \par Example
 *  This example converts a BSR matrix into an CSR matrix.
 *  \code{.c}
-*      //     1 4 0 0 0 0
-*      // A = 0 2 3 0 0 0
-*      //     5 0 0 7 8 0
-*      //     0 0 9 0 6 0
+*    //     1 4 2 1 0 0
+*    // A = 0 2 3 5 0 0
+*    //     5 2 2 7 8 6
+*    //     9 3 9 1 6 1
+*    rocsparse_int mb = 2;
+*    rocsparse_int nb = 3;
+*    rocsparse_int block_dim = 2;
+*    rocsparse_int m = mb * block_dim;
+*    rocsparse_int n = nb * block_dim;
+*    rocsparse_int nnzb = 5;
+*    rocsparse_int nnz = nnzb * block_dim * block_dim;
 *
-*      rocsparse_int mb   = 2;
-*      rocsparse_int nb   = 3;
-*      rocsparse_int block_dim = 2;
-*      rocsparse_int m = Mb * block_dim;
-*      rocsparse_int n = Nb * block_dim;
+*    std::vector<rocsparse_int> hbsr_row_ptr = {0, 2, 5};
+*    std::vector<rocsparse_int> hbsr_col_ind = {0, 1, 0, 1, 2};
+*    std::vector<float> hbsr_val = {1.0f, 0.0f, 4.0f, 2.0f, 
+*                                   2.0f, 3.0f, 1.0f, 5.0f, 
+*                                   5.0f, 9.0f, 2.0f, 3.0f,
+*                                   2.0f, 9.0f, 7.0f, 1.0f,
+*                                   8.0f, 6.0f, 6.0f, 1.0f};
 *
-*      bsr_row_ptr[mb+1]                 = {0, 2, 5};                                                    // device memory
-*      bsr_col_ind[nnzb]                 = {0, 1, 0, 1, 2};                                              // device memory
-*      bsr_val[nnzb*block_dim*block_dim] = {1, 0, 4, 2, 0, 3, 0, 0, 5, 0, 0, 0, 0, 9, 7, 0, 8, 6, 0, 0}; // device memory
+*    rocsparse_int* dbsr_row_ptr = nullptr;
+*    rocsparse_int* dbsr_col_ind = nullptr;
+*    float* dbsr_val = nullptr;
+*    hipMalloc((void**)&dbsr_row_ptr, sizeof(rocsparse_int) * (mb + 1));
+*    hipMalloc((void**)&dbsr_col_ind, sizeof(rocsparse_int) * nnzb);
+*    hipMalloc((void**)&dbsr_val, sizeof(float) * nnzb * block_dim * block_dim);
 *
-*      rocsparse_int nnzb = bsr_row_ptr[mb] - bsr_row_ptr[0];
+*    hipMemcpy(dbsr_row_ptr, hbsr_row_ptr.data(), sizeof(rocsparse_int) * (mb + 1), hipMemcpyHostToDevice);
+*    hipMemcpy(dbsr_col_ind, hbsr_col_ind.data(), sizeof(rocsparse_int) * nnzb, hipMemcpyHostToDevice);
+*    hipMemcpy(dbsr_val, hbsr_val.data(), sizeof(float) * nnzb * block_dim * block_dim, hipMemcpyHostToDevice);
 *
-*      // Create CSR arrays on device
-*      rocsparse_int* csr_row_ptr;
-*      rocsparse_int* csr_col_ind;
-*      float* csr_val;
-*      hipMalloc((void**)&csr_row_ptr, sizeof(rocsparse_int) * (m + 1));
-*      hipMalloc((void**)&csr_col_ind, sizeof(rocsparse_int) * nnzb * block_dim * block_dim);
-*      hipMalloc((void**)&csr_val, sizeof(float) * nnzb * block_dim * block_dim);
+*    // Create CSR arrays on device
+*    rocsparse_int* dcsr_row_ptr = nullptr;
+*    rocsparse_int* dcsr_col_ind = nullptr;
+*    float* dcsr_val = nullptr;
+*    hipMalloc((void**)&dcsr_row_ptr, sizeof(rocsparse_int) * (m + 1));
+*    hipMalloc((void**)&dcsr_col_ind, sizeof(rocsparse_int) * nnz);
+*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
 *
-*      // Create rocsparse handle
-*      rocsparse_handle handle;
-*      rocsparse_create_handle(&handle);
+*    // Create rocsparse handle
+*    rocsparse_handle handle;
+*    rocsparse_create_handle(&handle);
 *
-*      rocsparse_mat_descr bsr_descr = nullptr;
-*      rocsparse_create_mat_descr(&bsr_descr);
+*    rocsparse_mat_descr bsr_descr = nullptr;
+*    rocsparse_create_mat_descr(&bsr_descr);
 *
-*      rocsparse_mat_descr csr_descr = nullptr;
-*      rocsparse_create_mat_descr(&csr_descr);
+*    rocsparse_mat_descr csr_descr = nullptr;
+*    rocsparse_create_mat_descr(&csr_descr);
 *
-*      rocsparse_set_mat_index_base(bsr_descr, rocsparse_index_base_zero);
-*      rocsparse_set_mat_index_base(csr_descr, rocsparse_index_base_zero);
+*    rocsparse_set_mat_index_base(bsr_descr, rocsparse_index_base_zero);
+*    rocsparse_set_mat_index_base(csr_descr, rocsparse_index_base_zero);
 *
-*      // Format conversion
-*      rocsparse_sbsr2csr(handle,
-*                         rocsparse_direction_column,
-*                         mb,
-*                         nb,
-*                         bsr_descr,
-*                         bsr_val,
-*                         bsr_row_ptr,
-*                         bsr_col_ind,
-*                         block_dim,
-*                         csr_descr,
-*                         csr_val,
-*                         csr_row_ptr,
-*                         csr_col_ind);
+*    // Format conversion
+*    rocsparse_sbsr2csr(handle,
+*                        rocsparse_direction_column,
+*                        mb,
+*                        nb,
+*                        bsr_descr,
+*                        dbsr_val,
+*                        dbsr_row_ptr,
+*                        dbsr_col_ind,
+*                        block_dim,
+*                        csr_descr,
+*                        dcsr_val,
+*                        dcsr_row_ptr,
+*                        dcsr_col_ind);
+*
+*    rocsparse_destroy_handle(handle);
+*    rocsparse_destroy_mat_descr(csr_descr);
+*    rocsparse_destroy_mat_descr(bsr_descr);
+*
+*    hipFree(dbsr_row_ptr);
+*    hipFree(dbsr_col_ind);
+*    hipFree(dbsr_val);
+*
+*    hipFree(dcsr_row_ptr);
+*    hipFree(dcsr_col_ind);
+*    hipFree(dcsr_val);
 *  \endcode
 */
 /**@{*/
