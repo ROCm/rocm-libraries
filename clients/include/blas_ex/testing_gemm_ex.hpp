@@ -812,6 +812,7 @@ void testing_gemm_ex(const Arguments& arg)
 
     rocblas_gemm_algo algo = rocblas_gemm_algo(arg.algo);
 
+#ifdef BUILD_WITH_TENSILE // tensile or hipblaslt only for now
     if(compare_solutions && algo == rocblas_gemm_algo_solution_index)
     {
         arguments = &run_arg; // override
@@ -851,6 +852,7 @@ void testing_gemm_ex(const Arguments& arg)
             solutions_that_solve.push_back(0);
         }
     }
+#endif
 
     for(auto sol : solutions_that_solve)
     {

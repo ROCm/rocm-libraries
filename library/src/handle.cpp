@@ -31,7 +31,7 @@
 #include <hipblaslt/hipblaslt.h>
 #endif
 
-#if BUILD_WITH_TENSILE
+#ifdef BUILD_WITH_TENSILE
 #else
 // see TensileHost.cpp for normal rocblas_initialize definition
 // it isn't compiled if not BUILD_WITH_TENSILE so defining here
