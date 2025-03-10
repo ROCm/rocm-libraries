@@ -8,6 +8,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 * VP9 IVF container file parsing support in bitstream reader.
 * CTest for VP9 decode on bitstream reader.
+* HEVC stream syntax error handling.
 
 ### Changed
 

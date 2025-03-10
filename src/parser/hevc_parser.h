@@ -163,9 +163,9 @@ protected:
     /*! \brief Function to parse Video Parameter Set 
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseVps(uint8_t *nalu, size_t size);
+    ParserResult ParseVps(uint8_t *nalu, size_t size);
 
     /*! \brief Function to parse Sequence Parameter Set 
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
@@ -210,9 +210,9 @@ protected:
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
      * \param [in] offset Reference to the offset in the input buffer
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset);
+    ParserResult ParseHrdParameters(HevcHrdParameters *hrd, bool common_inf_present_flag, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset);
     
     /*! \brief Function to set the default values to the scaling list
      * \param [out] sl_ptr A pointer to the scaling list <tt>HevcScalingListData</tt>
