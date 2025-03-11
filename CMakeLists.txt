@@ -39,8 +39,10 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 
-# NOTE: Match version with api/rocjpeg_version.h
-set(VERSION "0.10.1")
+# rocJPEG Version
+# NOTE: package version and rocjpeg_version.h is generated with this version
+set(VERSION "0.11.0")
+
 # Set Project Version and Language
 project(rocjpeg VERSION ${VERSION} LANGUAGES CXX)
 
@@ -190,12 +192,18 @@ if(HIP_FOUND AND Libva_FOUND)
       ROCJPEG_ROCP_REG_VERSION_PATCH=${VERSION_PATCH})
   endif()
 
+  #Generate BUILD_INFO
+  configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocjpeg_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_version.h @ONLY )
+  install(TARGETS ${PROJECT_NAME} EXPORT rocjpeg-targets DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
+
   # install rocJPEG libs -- {ROCM_PATH}/lib
   install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
   install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY)
   install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
   # install rocJPEG include files -- {ROCM_PATH}/include/rocJPEG
-  install(FILES api/rocjpeg.h api/rocjpeg_version.h
+  install(FILES api/rocjpeg.h
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME} COMPONENT dev)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_version.h
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME} COMPONENT dev)
   # install rocJPEG api trace include file -- {ROCM_PATH}/include/rocjpeg/amd_detail
   install(FILES api/amd_detail/rocjpeg_api_trace.h
@@ -218,6 +226,49 @@ if(HIP_FOUND AND Libva_FOUND)
 
   message("-- ${White}AMD ROCm rocJPEG -- CMAKE_CXX_FLAGS:${CMAKE_CXX_FLAGS}${ColourReset}")
   message("-- ${White}AMD ROCm rocJPEG -- Link Libraries: ${LINK_LIBRARY_LIST}${ColourReset}")
+
+  ## Cmake module config file configurations
+  set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
+
+  ## Export the package for use from the build-tree
+  ## (this registers the build-tree with a global CMake-registry)
+  export(PACKAGE ${PROJECT_NAME})
+  set(CONF_LIB_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+
+  ## Create the rocjpeg-config.cmake and rocjpeg-config-version files
+  include(CMakePackageConfigHelpers)
+  set(CONFIG_PACKAGE_INSTALL_DIR ${CONF_LIB_DIR}/cmake/${PROJECT_NAME})
+  set(LIB_INSTALL_DIR  "${CMAKE_INSTALL_LIBDIR}")
+  set(INCLUDE_INSTALL_DIR  "${CMAKE_INSTALL_INCLUDEDIR}")
+  set(BIN_INSTALL_DIR  "${CMAKE_INSTALL_BINDIR}")
+
+  ## Generate Config File for rocJPEG
+  configure_package_config_file(
+    ${CMAKE_MODULE_PATH}/${PROJECT_NAME}-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config.cmake
+    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+    PATH_VARS LIB_INSTALL_DIR INCLUDE_INSTALL_DIR BIN_INSTALL_DIR
+  )
+
+  ## Generate config Version File for rocJPEG
+  write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake
+    VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
+    COMPATIBILITY SameMajorVersion
+  )
+
+  ## Install the rocjpeg-config.cmake and rocjpeg-config-version.cmake
+  install(FILES
+    "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config.cmake"
+    "${PROJECT_BINARY_DIR}/${PROJECT_NAME}-config-version.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
+    COMPONENT dev
+  )
+
+  ## Install the export set for use with the install-tree
+  install(EXPORT rocjpeg-targets DESTINATION
+    "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}" COMPONENT dev
+  )
 
   # make test with CTest
   enable_testing()

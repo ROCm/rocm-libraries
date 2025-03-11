@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#ifndef ROCJPEG_VERSION_H
-#define ROCJPEG_VERSION_H
+#ifndef _ROCJPEG_VERSION_H_
+#define _ROCJPEG_VERSION_H_
 
 /*!
  * \file
@@ -32,11 +32,11 @@ THE SOFTWARE.
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-#define ROCJPEG_MAJOR_VERSION 0
-#define ROCJPEG_MINOR_VERSION 10
-#define ROCJPEG_MICRO_VERSION 1
+#endif  /* __cplusplus */
 
+#define ROCJPEG_MAJOR_VERSION   @PROJECT_VERSION_MAJOR@
+#define ROCJPEG_MINOR_VERSION   @PROJECT_VERSION_MINOR@
+#define ROCJPEG_MICRO_VERSION   @PROJECT_VERSION_PATCH@
 
 /**
  * ROCJPEG_CHECK_VERSION:
@@ -53,7 +53,7 @@ extern "C" {
         (ROCJPEG_MAJOR_VERSION == (major) && ROCJPEG_MINOR_VERSION == (minor) && ROCJPEG_MICRO_VERSION >= (micro)))
 
 #ifdef __cplusplus
-}
+}  // end extern "C" block
 #endif
 
-#endif
+#endif  //_ROCJPEG_VERSION_H_  header guard

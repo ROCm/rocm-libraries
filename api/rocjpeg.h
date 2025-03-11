@@ -26,7 +26,6 @@ THE SOFTWARE.
 
 #pragma once
 #include "hip/hip_runtime.h"
-#include "rocjpeg_version.h"
 
 /**
  * @file rocjpeg.h

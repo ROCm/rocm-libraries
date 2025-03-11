@@ -1,0 +1,18 @@
+# - Config file for the rocjpeg package
+# It defines the following variables
+#  ROCJPEG_INCLUDE_DIR - include directories for rocjpeg
+#  ROCJPEG_LIB_DIR     - libraries to link against
+#  ROCM_PATH     - Install Base Location for ROCM.
+
+@PACKAGE_INIT@
+
+# Compute paths
+set_and_check(rocjpeg_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCJPEG_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocjpeg_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCJPEG_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCM_PATH "${PACKAGE_PREFIX_DIR}")
+
+get_filename_component(ROCJPEG_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include("${ROCJPEG_CMAKE_DIR}/rocjpeg-targets.cmake")
+

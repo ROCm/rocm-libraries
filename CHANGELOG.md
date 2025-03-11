@@ -3,9 +3,10 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (Unreleased) rocJPEG 0.10.1
+## rocJPEG 0.11.0 for ROCm 6.5
 
 ## Added
+* cmake config files
 * CTEST - New tests were introduced for JPEG batch decoding using various output formats, such as yuv_planar, y, rgb, and rgb_planar, both with and without region-of-interest (ROI).
 
 ## Changed

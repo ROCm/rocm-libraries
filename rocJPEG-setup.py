@@ -29,7 +29,7 @@ else:
     import subprocess
 
 __copyright__ = "Copyright (c) 2024 - 2025, AMD ROCm rocJPEG"
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 __email__ = "mivisionx.support@amd.com"
 __status__ = "Shipping"
 
@@ -154,7 +154,6 @@ if userName == 'root':
 # source install - common package dependencies
 commonPackages = [
     'cmake',
-    'pkg-config',
     'rocm-hip-runtime'
 ]
 
