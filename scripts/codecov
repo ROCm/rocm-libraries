@@ -112,7 +112,7 @@ else
     rm -rf ${code_cov_path}/*.profraw
 
     # Add the node install to our PATH.
-    source ${script_path}/../utils/graupel/setup-node
+    source ${script_path}/../docker/setup-node
 
     # The `%m` creates a different prof file for each object file. So one for
     # rocroller.so and one for rocRollerTests.
@@ -269,7 +269,7 @@ else
 
         if [ -s ./code_cov_${gpu}.diff ]; then
             # Add the node install to our PATH.
-            source ../utils/graupel/setup-node
+            source ../docker/setup-node
             diff2html -s side -i file -F ./code_cov_diff_${gpu}.html -- ./code_cov_${gpu}.diff
             wc -l ./code_cov_diff_${gpu}.html
 

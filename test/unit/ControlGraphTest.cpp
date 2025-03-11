@@ -581,5 +581,7 @@ namespace rocRollerTest
 
         EXPECT_EQ(true, hasExistingSetCoordinate(kg, load1, coord1, unrollDim));
         EXPECT_EQ(false, hasExistingSetCoordinate(kg, load1, coord3, unrollDim));
+        EXPECT_EQ(true, hasExistingSetCoordinate(kg, load1, coord2, unrollDim));
+        EXPECT_EQ(false, hasExistingSetCoordinate(kg, load2, coord1, unrollDim));
     }
 }
