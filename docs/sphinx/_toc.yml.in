@@ -8,7 +8,7 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/prerequisites.rst
+  - file: install/rocDecode-prerequisites.rst
     title: rocDecode prerequisites
   - file: install/rocDecode-package-install.rst
     title: Installing rocDecode with the package installer
@@ -17,22 +17,28 @@ subtrees:
   - url: https://github.com/ROCm/rocDecode/tree/develop/docker
     title: rocDecode Docker containers
 
-- caption: Samples
-  entries:
-  - file: tutorials/rocDecode-samples.rst
-    title: rocDecode samples
-  - url: https://github.com/ROCm/rocDecode/tree/develop/samples
-    title: rocDecode samples on GitHub
-
-- caption: How to
-  entries:
-  - file: how-to/using-rocdecode.rst
-    title: Using rocDecode
-
 - caption: Conceptual
   entries:
   - file: conceptual/video-decoding-pipeline.rst
     title: Video decoding pipeline
+  - file: conceptual/rocDecode-memory-types.rst
+    title: rocDecode surface memory locations
+
+- caption: Samples
+  entries:
+  - file: tutorials/rocDecode-samples.rst
+    title: rocDecode samples
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocDecode-videodecode-sample.rst
+    title: Understand the rocDecode videodecode sample
+  - file: how-to/using-rocDecode-video-decoder.rst
+    title: Use the rocDecode RocVideoDecoder
+  - file: how-to/using-rocDecode-ffmpeg.rst
+    title: Use the rocDecode FFmpeg demultiplexer
+  - file: how-to/using-rocdecode.rst
+    title: Use the rocDecode core APIs
 
 - caption: Reference
   entries:

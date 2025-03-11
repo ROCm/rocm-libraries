@@ -18,9 +18,7 @@ using ROCm HIP, thereby avoiding unnecessary data copies via the PCIe bus. You c
 frames using scaling or color conversion and augmentation kernels (on a GPU or host) in a format for
 GPU/CPU-accelerated inferencing and training.
 
-In addition, you can use the rocDecode API to create multiple instances of video decoder based on the
-number of available VCNs in a GPU device. By configuring the decoder for a device, all available
-VCNs can be used seamlessly for decoding a batch of video streams in parallel.
+In addition, you can use the rocDecode API to create multiple instances of video decoders based on the number of available VCNs on a GPU device. By configuring the decoder for a device, all available VCNs can be used seamlessly to decode a batch of video streams in parallel.
 
 For more information, refer to the
 :doc:`Video decoding pipeline <./conceptual/video-decoding-pipeline>`.
