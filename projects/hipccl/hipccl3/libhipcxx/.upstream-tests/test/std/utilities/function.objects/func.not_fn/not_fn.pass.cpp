@@ -398,8 +398,8 @@ __host__ __device__ void constructor_tests()
     using RetT = decltype(cuda::std::not_fn(value));
     static_assert(cuda::std::is_move_constructible<RetT>::value, "");
     static_assert(cuda::std::is_copy_constructible<RetT>::value, "");
-    LIBCPP_STATIC_ASSERT(cuda::std::is_move_assignable<RetT>::value, "");
-    LIBCPP_STATIC_ASSERT(cuda::std::is_copy_assignable<RetT>::value, "");
+    static_assert(cuda::std::is_move_assignable<RetT>::value, "");
+    static_assert(cuda::std::is_copy_assignable<RetT>::value, "");
     auto ret = cuda::std::not_fn(value);
     assert(ret() == false);
     auto ret2 = cuda::std::not_fn(value2);
@@ -417,7 +417,7 @@ __host__ __device__ void constructor_tests()
     using RetT = decltype(cuda::std::not_fn(cuda::std::move(value)));
     static_assert(cuda::std::is_move_constructible<RetT>::value, "");
     static_assert(!cuda::std::is_copy_constructible<RetT>::value, "");
-    LIBCPP_STATIC_ASSERT(cuda::std::is_move_assignable<RetT>::value, "");
+    static_assert(cuda::std::is_move_assignable<RetT>::value, "");
     static_assert(!cuda::std::is_copy_assignable<RetT>::value, "");
     auto ret = cuda::std::not_fn(cuda::std::move(value));
     assert(ret() == false);
@@ -664,13 +664,13 @@ __host__ __device__ void call_operator_noexcept_test()
     using T = ConstCallable<bool>;
     T value(true);
     auto ret = cuda::std::not_fn(value);
-#ifndef TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#ifndef TEST_COMPILER_NVHPC
     static_assert(!noexcept(ret()), "call should not be noexcept");
-#endif // TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#endif // TEST_COMPILER_NVHPC
     auto const& cret = ret;
-#ifndef TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#ifndef TEST_COMPILER_NVHPC
     static_assert(!noexcept(cret()), "call should not be noexcept");
-#endif // TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#endif // TEST_COMPILER_NVHPC
     unused(cret);
   }
   {
@@ -678,7 +678,7 @@ __host__ __device__ void call_operator_noexcept_test()
     T value(true);
     auto ret = cuda::std::not_fn(value);
     (void) ret;
-    LIBCPP_STATIC_ASSERT(noexcept(!_CUDA_VSTD::__invoke(value)), "");
+    static_assert(noexcept(!_CUDA_VSTD::__invoke(value)), "");
     static_assert(noexcept(!cuda::std::invoke(value)), "");
 // TODO: nvcc gets this wrong, investigate
 #if !(defined(__CUDACC__) || defined(__HIPCC__))
@@ -709,13 +709,13 @@ __host__ __device__ void call_operator_noexcept_test()
     using T = NoExceptCallable<EvilBool>;
     T value(true);
     auto ret = cuda::std::not_fn(value);
-#ifndef TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#ifndef TEST_COMPILER_NVHPC
     static_assert(!noexcept(ret()), "call should not be noexcept");
-#endif // TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#endif // TEST_COMPILER_NVHPC
     auto const& cret = ret;
-#ifndef TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#ifndef TEST_COMPILER_NVHPC
     static_assert(!noexcept(cret()), "call should not be noexcept");
-#endif // TEST_COMPILER_BROKEN_SMF_NOEXCEPT
+#endif // TEST_COMPILER_NVHPC
     unused(cret);
   }
 }

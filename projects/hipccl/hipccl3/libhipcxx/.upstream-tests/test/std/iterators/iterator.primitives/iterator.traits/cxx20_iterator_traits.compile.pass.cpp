@@ -294,7 +294,7 @@ struct MinusNotDeclaredIter
   struct value_type
   {};
 
-#ifndef TEST_HAS_NO_SPACESHIP_OPERATOR
+#if _LIBCUDACXX_HAS_SPACESHIP_OPERATOR()
   auto operator<=>(const MinusNotDeclaredIter&) const = default; // nvbug3908399
 #else
   __host__ __device__ friend bool operator==(const MinusNotDeclaredIter&, const MinusNotDeclaredIter&) noexcept
@@ -356,7 +356,7 @@ struct WrongSubscriptReturnType
   struct value_type
   {};
 
-#ifndef TEST_HAS_NO_SPACESHIP_OPERATOR
+#if _LIBCUDACXX_HAS_SPACESHIP_OPERATOR()
   auto operator<=>(const WrongSubscriptReturnType&) const = default; // nvbug3908399
 #else
   __host__ __device__ friend bool operator==(const WrongSubscriptReturnType&, const WrongSubscriptReturnType&) noexcept
@@ -452,7 +452,7 @@ struct LegacyRandomAccessSpaceship
     __host__ __device__ operator not_value_type&() const;
   };
 
-#ifndef TEST_HAS_NO_SPACESHIP_OPERATOR
+#if _LIBCUDACXX_HAS_SPACESHIP_OPERATOR()
   auto operator<=>(const LegacyRandomAccessSpaceship&) const = default; // nvbug3908399
 #else
   __host__ __device__ friend bool
@@ -589,7 +589,7 @@ struct LegacyRandomAccessSpecialized
   struct not_value_type
   {};
 
-#ifndef TEST_HAS_NO_SPACESHIP_OPERATOR
+#if _LIBCUDACXX_HAS_SPACESHIP_OPERATOR()
   auto operator<=>(const LegacyRandomAccessSpecialized&) const = default; // nvbug3908399
 #else
   __host__ __device__ friend bool
