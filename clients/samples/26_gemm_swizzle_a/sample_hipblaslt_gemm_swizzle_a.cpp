@@ -167,42 +167,69 @@ int main()
     Runner<hipblaslt_f8_fnuz, hipblaslt_f8_fnuz, hipblasLtHalf, float, float> swizzleRunner_F8(
         m, n, k, 1, 1.f, 1.f, 32 * 128 * 128);
 
-    swizzleRunner.run([&swizzleRunner, &runner, m, n, k] {
-        // copy inputs from first runner for comparison and validation
-        hipMemcpy(swizzleRunner.d_a,
+    swizzleRunner_F8.run([&swizzleRunner_F8, &runner, m, n, k] {
+        // convert inputs from reference runner to fp8
+        std::vector<hipblasLtHalf>     cpuAF16(m * k, hipblasLtHalf(0.f));
+        std::vector<hipblasLtHalf>     cpuBF16(k * n, hipblasLtHalf(0.f));
+        std::vector<hipblaslt_f8_fnuz> cpuAF8(m * k, hipblaslt_f8_fnuz(0.f));
+        std::vector<hipblaslt_f8_fnuz> cpuBF8(k * n, hipblaslt_f8_fnuz(0.f));
+
+        hipMemcpy(cpuAF16.data(),
                   runner.d_a,
-                  m * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyDeviceToDevice);
-        hipMemcpy(swizzleRunner.d_b,
+                  cpuAF16.size() * sizeof(hipblasLtHalf),
+                  hipMemcpyDeviceToHost);
+        hipMemcpy(cpuBF16.data(),
                   runner.d_b,
+                  cpuBF16.size() * sizeof(hipblasLtHalf),
+                  hipMemcpyDeviceToHost);
+
+        for(size_t i = 0; i < cpuAF16.size(); ++i)
+        {
+            cpuAF8[i] = hipblaslt_f8_fnuz(float(cpuAF16[i]));
+        }
+
+        for(size_t i = 0; i < cpuBF16.size(); ++i)
+        {
+            cpuBF8[i] = hipblaslt_f8_fnuz(float(cpuBF16[i]));
+        }
+
+        // copy inputs from first runner for comparison and validation
+        hipMemcpy(swizzleRunner_F8.d_a,
+                  cpuAF8.data(),
+                  m * k * sizeof(hipblaslt_f8_fnuz),
+                  hipMemcpyHostToDevice);
+        hipMemcpy(swizzleRunner_F8.d_b,
+                  cpuBF8.data(),
                   n * k * sizeof(hipblaslt_f8_fnuz),
+                  hipMemcpyHostToDevice);
+        hipMemcpy(swizzleRunner_F8.d_c,
+                  runner.d_c,
+                  m * n * sizeof(hipblasLtHalf),
                   hipMemcpyDeviceToDevice);
-        hipMemcpy(
-            swizzleRunner.d_c, runner.d_c, m * n * sizeof(hipblasLtHalf), hipMemcpyDeviceToDevice);
         /** This is an example with swizzle-A
          *  a = (k, m). lda = k
          *  b = (k, n). ldb = k
          *  c = d = (m, n). ldc = ldd = m
          */
-        simpleGemm(swizzleRunner.handle,
+        simpleGemm(swizzleRunner_F8.handle,
                    /*For swizzle-A, it forces to use TN*/
                    HIPBLAS_OP_T,
                    HIPBLAS_OP_N,
-                   swizzleRunner.m,
-                   swizzleRunner.n,
-                   swizzleRunner.k,
-                   swizzleRunner.batch_count,
-                   swizzleRunner.alpha,
-                   swizzleRunner.beta,
-                   swizzleRunner.d_a,
-                   swizzleRunner.d_b,
-                   swizzleRunner.d_c,
-                   swizzleRunner.d_d,
-                   swizzleRunner.d_workspace,
-                   swizzleRunner.max_workspace_size,
+                   swizzleRunner_F8.m,
+                   swizzleRunner_F8.n,
+                   swizzleRunner_F8.k,
+                   swizzleRunner_F8.batch_count,
+                   swizzleRunner_F8.alpha,
+                   swizzleRunner_F8.beta,
+                   swizzleRunner_F8.d_a,
+                   swizzleRunner_F8.d_b,
+                   swizzleRunner_F8.d_c,
+                   swizzleRunner_F8.d_d,
+                   swizzleRunner_F8.d_workspace,
+                   swizzleRunner_F8.max_workspace_size,
                    HIP_R_8F_E4M3_FNUZ,
                    true,
-                   swizzleRunner.stream);
+                   swizzleRunner_F8.stream);
     });
 
     const hipblasLtHalf* regularCpuD     = static_cast<hipblasLtHalf*>(runner.d);
