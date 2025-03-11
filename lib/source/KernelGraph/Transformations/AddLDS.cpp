@@ -552,16 +552,8 @@ namespace rocRoller
 
                 // Connect coordinates with DataFlow edges
                 insertInstead<Graph::Direction::Downstream>(k.coordinates, internalTag, tileTag);
-                if(false && isLoad)
-                {
-                    k.coordinates.addElement(DataFlow(), {tileTag}, {ldsTag});
-                    k.coordinates.addElement(DataFlow(), {ldsTag}, {internalTag});
-                }
-                else
-                {
-                    k.coordinates.addElement(DataFlow(), {internalTag}, {ldsTag});
-                    k.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
-                }
+                k.coordinates.addElement(DataFlow(), {internalTag}, {ldsTag});
+                k.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
 
                 // Create new operations and update old operation
                 bool isTransposedTile = false;
@@ -598,6 +590,7 @@ namespace rocRoller
                 k.mapper.purge(opTag);
                 k.mapper.connect<User>(opTag, userTag);
                 k.mapper.connect<LDS>(storeLDSOp, ldsTag);
+                k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
 
                 if(isLoad)

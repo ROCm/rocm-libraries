@@ -71,9 +71,8 @@ namespace rocRoller
                        && (isMatrixA(macTile) || isMatrixB(macTile));
             };
 
-            auto candidates = graph.control.findElements(isLoadLDSTileOfTransposedTile);
-
-            return candidates.to<std::vector>();
+            return graph.control.findElements(isLoadLDSTileOfTransposedTile)
+                .to<std::unordered_set>();
         }
 
         KernelGraph AddF6LDSPadding::apply(KernelGraph const& graph)
@@ -91,13 +90,8 @@ namespace rocRoller
             auto kgraph{graph};
 
             std::unordered_set<int> visitedCoordinates;
-            std::unordered_set<int> visitedOps;
             for(auto tag : candidates)
             {
-                if(visitedOps.contains(tag))
-                    continue;
-                visitedOps.insert(tag);
-
                 auto connections = graph.mapper.getConnections(tag);
                 for(auto conn : connections)
                 {
@@ -107,20 +101,23 @@ namespace rocRoller
                         continue;
                     visitedCoordinates.insert(coordTag);
 
-                    std::visit(rocRoller::overloaded{[&kgraph, tag = conn.coordinate](User user) {
-                                                         auto newUser{user};
-                                                         newUser.needsPadding = true;
-                                                         kgraph.coordinates.setElement(tag,
-                                                                                       newUser);
-                                                     },
-                                                     [&](auto coord) {}},
-                               std::get<Dimension>(graph.coordinates.getElement(conn.coordinate)));
+                    auto maybeUser = graph.coordinates.get<User>(coordTag);
+                    if(maybeUser)
+                    {
+                        auto newUser = *maybeUser;
+
+                        Log::debug("Setting User.needsPadding for coordinate {}", coordTag);
+                        newUser.needsPadding = true;
+                        kgraph.coordinates.setElement(coordTag, newUser);
+                    }
 
                     auto maybeLDS = graph.coordinates.get<LDS>(coordTag);
                     if(maybeLDS)
                     {
-                        auto ldsTag                = coordTag;
-                        auto newLDS                = *maybeLDS;
+                        auto ldsTag = coordTag;
+                        auto newLDS = *maybeLDS;
+
+                        Log::debug("Setting LDS.holdsTransposeTile for coordinate {}", coordTag);
                         newLDS.holdsTransposedTile = true;
                         kgraph.coordinates.setElement(ldsTag, newLDS);
 
@@ -136,6 +133,7 @@ namespace rocRoller
                                 auto [macroTileTag, macroTile]
                                     = graph.getDimension<MacroTile>(storeLDSTileTag);
 
+                                Log::debug("Padding Tile {}", macroTileTag);
                                 kgraph.coordinates.setElement(macroTileTag,
                                                               paddedMacroTile(macroTile));
 
@@ -145,6 +143,8 @@ namespace rocRoller
                                         = graph.coordinates.get<MacroTile>(conn.coordinate);
                                     if(maybeMacroTile)
                                     {
+                                        Log::debug("Padding Tile {}", conn.coordinate);
+
                                         kgraph.coordinates.setElement(
                                             conn.coordinate, paddedMacroTile(*maybeMacroTile));
                                     }
