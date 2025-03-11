@@ -660,7 +660,7 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             RocdecSeiMessage *sei_message = sei_message_display_q_[pDispInfo->picture_index].sei_message;
             if (fp_sei_) {
                 for (uint32_t i = 0; i < sei_num_messages; i++) {
-                    if (codec_id_ == rocDecVideoCodec_AVC || rocDecVideoCodec_HEVC) {
+                    if (codec_id_ == rocDecVideoCodec_AVC || codec_id_ == rocDecVideoCodec_HEVC) {
                         switch (sei_message[i].sei_message_type) {
                             case SEI_TYPE_TIME_CODE: {
                                 //todo:: check if we need to write timecode
@@ -882,7 +882,6 @@ bool RocVideoDecoder::ReleaseFrame(int64_t pTimestamp, bool b_flushing) {
     if (!vp_frames_q_.empty()) {
         std::lock_guard<std::mutex> lock(mtx_vp_frame_);
         DecFrameBuffer *fb = &vp_frames_q_.front();
-        void *mapped_frame_ptr = fb->frame_ptr;
 
         if (pTimestamp != fb->pts) {
             std::cerr << "Decoded Frame is released out of order" << std::endl;
@@ -1078,5 +1077,9 @@ void RocVideoDecoder::WaitForDecodeCompletion() {
     memset(&dec_status, 0, sizeof(dec_status));
     do {
         rocDecStatus result = rocDecGetDecodeStatus(roc_decoder_, last_decode_surf_idx_, &dec_status);
+        if (result != ROCDEC_SUCCESS) {
+            std::cerr << "rocDecGetDecodeStatus failed for picture_index: " << last_decode_surf_idx_ << std::endl;
+            return;
+        }
     } while (dec_status.decode_status == rocDecodeStatus_InProgress);
 }

@@ -473,15 +473,15 @@ class RocVideoDecoder {
         RocdecVideoParser rocdec_parser_ = nullptr;
         rocDecDecoderHandle roc_decoder_ = nullptr;
         OutputSurfaceMemoryType out_mem_type_ = OUT_SURFACE_MEM_DEV_INTERNAL;
-        bool b_extract_sei_message_ = false;
+        rocDecVideoCodec codec_id_ = rocDecVideoCodec_NumCodecs;
         bool b_force_zero_latency_ = false;
+        bool b_extract_sei_message_ = false;
         uint32_t disp_delay_;
         ReconfigParams *p_reconfig_params_ = nullptr;
         bool b_force_recofig_flush_ = false;
         int32_t num_frames_flushed_during_reconfig_ = 0;
         hipDeviceProp_t hip_dev_prop_;
         hipStream_t hip_stream_;
-        rocDecVideoCodec codec_id_ = rocDecVideoCodec_NumCodecs;
         rocDecVideoChromaFormat video_chroma_format_ = rocDecVideoChromaFormat_420;
         rocDecVideoSurfaceFormat video_surface_format_ = rocDecVideoSurfaceFormat_NV12;
         RocdecSeiMessageInfo *curr_sei_message_ptr_ = nullptr;
