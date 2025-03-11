@@ -177,8 +177,8 @@ namespace rocwmma
             = !((bool)TestTraits::InputType::IsFloat16 || (bool)TestTraits::InputType::IsBFloat16)
               || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 16u)
                   && (BlockK % 16u == 0u))
-              || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 8u)
-                  && (BlockK % 8u == 0u)),
+              || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 16u)
+                  && (BlockK % 16u == 0u)),
 
             // Older gfx908 arch has half BlockK on bfloat16_t
             // BlockM/N = 16; Block K >= 8
@@ -196,8 +196,8 @@ namespace rocwmma
             F32BlockSizeTest = !((bool)TestTraits::InputType::IsFloat32)
                                || ((bool)TestTraits::BlockSizes::isBlockMN16 && (BlockK >= 4u)
                                    && (BlockK % 4u == 0u))
-                               || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 4u)
-                                   && (BlockK % 4u == 0u)),
+                               || ((bool)TestTraits::BlockSizes::isBlockMN32 && (BlockK >= 8u)
+                                   && (BlockK % 8u == 0u)),
 
             // General xfloat32_t block size
             // BlockM/N = 16; Block K >= 8
