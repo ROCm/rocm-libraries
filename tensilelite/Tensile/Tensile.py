@@ -270,7 +270,10 @@ def get_gpu_max_frequency(device_id):
         return result
 
     attrib = hip.hipDeviceAttribute_t.hipDeviceAttributeClockRate
-    freq = hip_check(hip.hipDeviceGetAttribute(attrib, device_id))
+    try:
+        freq = hip_check(hip.hipDeviceGetAttribute(attrib, device_id))
+    except:
+        freq = None
 
     return freq // 1000 if freq else None
 
@@ -395,6 +398,27 @@ def Tensile(userArgs):
 
     device_id = config["GlobalParameters"].get("Device", globalParameters["Device"])
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
+
+    def isRhel8():
+        try:
+            import distro
+        except:
+            printWarning(
+                """
+                Failed to import distro package. Cannot verify platform.
+                Run: pip install distro or pip install -r requirements.txt to resolve warning.
+                """
+            )
+            return False
+        
+        dist = distro.linux_distribution()
+        if distro.id() == "rhel" and distro.version()[0] == "8": 
+            printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
+            return True
+        else:
+            return False
+
+    UseEffLike = False if isRhel8() else UseEffLike
 
     if 'LibraryLogic' in config and UseEffLike:
         max_frequency = get_gpu_max_frequency(device_id)

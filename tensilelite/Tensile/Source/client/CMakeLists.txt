@@ -43,7 +43,7 @@ set(client_sources
     source/TypedId.cpp
     )
 
-find_package(Boost  COMPONENTS program_options filesystem REQUIRED)
+find_package(Boost COMPONENTS program_options filesystem REQUIRED)
 
 add_library(TensileClient STATIC ${client_sources})
 
@@ -61,7 +61,7 @@ endif()
 
 target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")# "${rocm_smi_root}/include")
 
-target_link_libraries(TensileClient PRIVATE TensileHost ${Boost_LIBRARIES} rocm_smi)
+target_link_libraries(TensileClient PRIVATE TensileHost Boost::program_options Boost::filesystem rocm_smi)
 
 if(Tensile_ENABLE_MARKER)
     target_link_libraries(TensileClient PRIVATE -lroctx64)
