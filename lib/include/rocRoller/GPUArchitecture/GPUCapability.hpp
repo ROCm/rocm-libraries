@@ -48,7 +48,13 @@ namespace rocRoller
         enum Value : uint8_t
         {
             SupportedISA = 0,
-            HasExplicitCO,
+            HasExplicitScalarCO,
+            HasExplicitScalarCOCI,
+            HasExplicitVectorCO,
+            HasExplicitVectorCOCI,
+            HasExplicitVectorRevCO,
+            HasExplicitVectorRevCOCI,
+            HasExplicitVectorRevNC,
             HasExplicitNC,
 
             HasDirectToLds,
@@ -103,6 +109,8 @@ namespace rocRoller
 
             v_mov_b64,
 
+            v_add3_u32,
+
             HasAtomicAdd,
 
             MaxVmcnt,
@@ -112,6 +120,7 @@ namespace rocRoller
 
             Waitcnt0Disabled,
             SeparateVscnt,
+            HasSplitWaitCounters,
             CMPXWritesSGPR,
             HasWave32,
             HasWave64,
@@ -138,6 +147,9 @@ namespace rocRoller
 
             HasPermLanes16,
             HasPermLanes32,
+
+            WorkgroupIdxViaTTMP,
+            HasBufferOutOfBoundsCheckOption,
 
             Count,
         };

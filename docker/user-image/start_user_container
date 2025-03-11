@@ -269,7 +269,11 @@ def main():
                 base_image_name,
                 args.context,
                 *make_build_args(build_args),
-                *args.base_build_extra_args
+                *[
+                    arg
+                    for extra_arg in args.base_build_extra_args
+                    for arg in extra_arg.split()
+                ]
             )
 
         if not args.skip_user_build:
@@ -278,7 +282,11 @@ def main():
                 user_image_name,
                 args.context,
                 *make_build_args(["base_image=" + base_image_name]),
-                *args.user_build_extra_args
+                *[
+                    arg
+                    for extra_arg in args.user_build_extra_args
+                    for arg in extra_arg.split()
+                ]
             )
 
         if not args.skip_container_run:

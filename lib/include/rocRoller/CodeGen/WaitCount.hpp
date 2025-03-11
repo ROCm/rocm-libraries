@@ -139,7 +139,8 @@ namespace rocRoller
 
         std::vector<std::string> m_comments;
 
-        GPUArchitectureTarget m_target;
+        bool m_isSplitCounter = false;
+        bool m_hasVSCnt       = false;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);

@@ -167,6 +167,19 @@ TEST_F(GPUArchitectureTest, WaveFrontSize)
     EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(
                   {GPUArchitectureGFX::GFX1030}, GPUCapability::DefaultWavefrontSize),
               32);
+
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability({GPUArchitectureGFX::GFX1200},
+                                                                   GPUCapability::HasWave32),
+              true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability({GPUArchitectureGFX::GFX1201},
+                                                                   GPUCapability::HasWave32),
+              true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(
+                  {GPUArchitectureGFX::GFX1200}, GPUCapability::DefaultWavefrontSize),
+              32);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(
+                  {GPUArchitectureGFX::GFX1201}, GPUCapability::DefaultWavefrontSize),
+              32);
 }
 
 TEST_F(GPUArchitectureTest, Validate90aInstructions)

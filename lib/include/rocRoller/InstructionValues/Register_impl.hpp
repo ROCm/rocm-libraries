@@ -113,6 +113,21 @@ namespace rocRoller
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP7:
+            case Type::TTMP9:
+                return true;
+
+            default:
+                return false;
+            }
+        }
+
+        constexpr inline bool IsTTMP(Type t)
+        {
+            switch(t)
+            {
+            case Type::TTMP7:
+            case Type::TTMP9:
                 return true;
 
             default:
@@ -132,6 +147,9 @@ namespace rocRoller
             if((lhs == Type::M0 && rhs == Type::Literal)
                || (lhs == Type::Literal && rhs == Type::M0))
                 return Type::M0;
+
+            if((IsTTMP(lhs) && rhs == Type::Literal) || (lhs == Type::Literal && IsTTMP(rhs)))
+                return Type::Scalar;
 
             if(!IsRegister(lhs) && !IsRegister(rhs))
             {
@@ -187,6 +205,10 @@ namespace rocRoller
                 return "EXEC_LO";
             case Type::EXEC_HI:
                 return "EXEC_HI";
+            case Type::TTMP7:
+                return "TTMP7";
+            case Type::TTMP9:
+                return "TTMP9";
             }
             Throw<FatalError>("Invalid register type!");
         }
@@ -448,6 +470,11 @@ namespace rocRoller
             return IsSpecial(m_regType);
         }
 
+        inline constexpr bool Value::isTTMP() const
+        {
+            return IsTTMP(m_regType);
+        }
+
         inline constexpr bool Value::isSCC() const
         {
             return m_regType == Type::SCC;
@@ -559,6 +586,12 @@ namespace rocRoller
             case Type::EXEC_HI:
                 os << "exec_hi";
                 return;
+            case Type::TTMP7:
+                os << "ttmp7";
+                return;
+            case Type::TTMP9:
+                os << "ttmp9";
+                return;
             default:
                 break;
             }
@@ -652,6 +685,8 @@ namespace rocRoller
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP7:
+            case Type::TTMP9:
                 specialString(os);
                 return;
             case Type::Literal:

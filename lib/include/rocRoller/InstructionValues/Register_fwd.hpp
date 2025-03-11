@@ -52,6 +52,8 @@ namespace rocRoller
             EXEC,
             EXEC_LO,
             EXEC_HI,
+            TTMP7,
+            TTMP9,
             Count // Always last enum entry
         };
 

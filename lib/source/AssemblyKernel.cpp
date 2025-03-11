@@ -43,10 +43,19 @@ namespace rocRoller
         m_argumentPointer->setName("Kernel argument pointer");
         co_yield m_argumentPointer->allocate();
 
-        m_workgroupIndex[0]
-            = Register::Value::Placeholder(ctx, Register::Type::Scalar, DataType::UInt32, 1);
-        m_workgroupIndex[0]->setName("Workgroup Index X");
-        co_yield m_workgroupIndex[0]->allocate();
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        {
+            m_workgroupIndex[0] = std::make_shared<Register::Value>(
+                ctx, Register::Type::TTMP9, DataType::UInt32, 1);
+            m_workgroupIndex[0]->setName("Workgroup Index X");
+        }
+        else
+        {
+            m_workgroupIndex[0]
+                = Register::Value::Placeholder(ctx, Register::Type::Scalar, DataType::UInt32, 1);
+            m_workgroupIndex[0]->setName("Workgroup Index X");
+            co_yield m_workgroupIndex[0]->allocate();
+        }
 
         if(m_kernelDimensions > 1)
         {
@@ -123,6 +132,29 @@ namespace rocRoller
 
         if(ctx->kernelOptions().preloadKernelArguments)
             co_yield ctx->argLoader()->loadAllArguments();
+
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        {
+            if(m_kernelDimensions > 1)
+            {
+                co_yield generateOp(
+                    m_workgroupIndex[1],
+                    std::make_shared<Register::Value>(
+                        ctx, Register::Type::TTMP7, DataType::UInt32, 1),
+                    Expression::BitFieldExtract{
+                        {nullptr, "Extract 16 bit Y coordinate"}, DataType::UInt32, 0, 16});
+            }
+
+            if(m_kernelDimensions > 2)
+            {
+                co_yield generateOp(
+                    m_workgroupIndex[2],
+                    std::make_shared<Register::Value>(
+                        ctx, Register::Type::TTMP7, DataType::UInt32, 1),
+                    Expression::BitFieldExtract{
+                        {nullptr, "Extract 16 bit Z coordinate"}, DataType::UInt32, 16, 16});
+            }
+        }
 
         if(m_packedWorkitemIndex)
         {

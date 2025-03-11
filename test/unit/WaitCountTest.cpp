@@ -54,7 +54,9 @@ TEST_F(WaitCountTest, Basic)
 TEST_F(WaitCountTest, Combine)
 {
     GPUArchitecture arch{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
-    auto            wc = WaitCount::KMCnt(arch, 2);
+    // Add capability so VSCnt can be generated
+    arch.AddCapability(GPUCapability::SeparateVscnt, 0);
+    auto wc = WaitCount::KMCnt(arch, 2);
 
     wc.combine(WaitCount::LoadCnt(arch, 4));
 

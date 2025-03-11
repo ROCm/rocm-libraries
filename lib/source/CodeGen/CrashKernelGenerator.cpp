@@ -64,14 +64,14 @@ namespace rocRoller
     {
         auto context     = m_context.lock();
         auto invalidAddr = std::make_shared<Register::Value>(
-            context, Register::Type::Scalar, DataType::Int64, 1);
+            context, Register::Type::Vector, DataType::Int64, 1);
         co_yield context->copier()->copy(invalidAddr, Register::Value::Literal(0L));
 
         auto dummyData = std::make_shared<Register::Value>(
-            context, Register::Type::Scalar, DataType::Int32, 1);
+            context, Register::Type::Vector, DataType::Int32, 1);
         co_yield context->copier()->copy(dummyData, Register::Value::Literal(42));
 
-        co_yield context->mem()->storeScalar(invalidAddr, dummyData, /*offset*/ 0, /*numBytes*/ 4);
+        co_yield context->mem()->storeGlobal(invalidAddr, dummyData, /*offset*/ 0, /*numBytes*/ 4);
     }
 
     Generator<Instruction> CrashKernelGenerator::sTrap()

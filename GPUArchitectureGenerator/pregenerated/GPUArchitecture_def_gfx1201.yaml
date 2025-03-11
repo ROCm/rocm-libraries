@@ -3,22 +3,34 @@ Architectures:
     Capabilities:
       DefaultWavefrontSize: 32
       HasAddLshl: 0
+      HasBufferOutOfBoundsCheckOption: 0
       HasCodeObjectV4: 0
       HasCodeObjectV5: 0
       HasExplicitNC: 0
+      HasExplicitScalarCO: 0
+      HasExplicitScalarCOCI: 0
+      HasExplicitVectorCO: 0
+      HasExplicitVectorCOCI: 0
+      HasExplicitVectorRevCO: 0
+      HasExplicitVectorRevCOCI: 0
+      HasExplicitVectorRevNC: 0
       HasGlobalOffset: 0
       HasLshlOr: 0
       HasSMulHi: 0
+      HasSplitWaitCounters: 0
       HasWMMA: 0
       HasWave32: 0
       HasWave64: 0
       MaxExpcnt: 7
       MaxLdsSize: 65536
-      MaxLgkmcnt: 15
+      MaxLgkmcnt: 31
       MaxVmcnt: 63
+      PackedWorkitemIDs: 0
       SupportedISA: 0
       SupportedSource: 0
       UnalignedVGPRs: 0
+      WorkgroupIdxViaTTMP: 0
+      v_add3_u32: 0
       v_dot2_f32_f16: 0
       v_fma_f16: 0
       v_fma_f32: 0

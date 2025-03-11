@@ -184,7 +184,7 @@ namespace rocRoller
                                     {to},
                                     {from, Register::Value::Literal((expr.width << 16) | offset)},
                                     {},
-                                    concatenate(ShowValue(offset), ", ", ShowValue(expr.width))));
+                                    concatenate("offset = ", offset, ", width = ", expr.width)));
                 }
                 else if(from->registerCount() == 2)
                 {
@@ -193,7 +193,7 @@ namespace rocRoller
                                     {to},
                                     {from, Register::Value::Literal((expr.width << 16) | offset)},
                                     {},
-                                    concatenate(ShowValue(offset), ", ", ShowValue(expr.width))));
+                                    concatenate("offset = ", offset, ", width = ", expr.width)));
                 }
                 else
                 {

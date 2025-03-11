@@ -2490,12 +2490,6 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_Conditional)
     {
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().toString();
-        }
-
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         m_context->kernel()->setKernelDimensions(1);
@@ -2532,12 +2526,6 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
     {
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for "
-                         << m_context->targetArchitecture().target().toString();
-        }
-
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         std::vector<int> testValues = {22, 66};

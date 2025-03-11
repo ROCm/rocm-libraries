@@ -171,16 +171,33 @@ namespace rocRoller
     {
         co_yield m_context->copier()->copy(
             m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
-                                           Register::Value::Literal(0x00020000),
-                                           ""); //default options
+        co_yield setDefaultOpts();
     }
 
     Generator<Instruction> BufferDescriptor::setDefaultOpts()
     {
-        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
-                                           Register::Value::Literal(0x00020000),
-                                           ""); //default options
+        if(m_context->targetArchitecture().HasCapability(
+               GPUCapability::HasBufferOutOfBoundsCheckOption))
+        {
+            // Bits 29:28 are for Out-of-Bounds check.
+            //   0 - index >= NumRecords || offset + payload > stride, used for structured buffers.
+            //   1 - index >= NumRecords, used for raw buffers (RR default)
+            //   2 - NumRecords == 0, empty buffers
+            //
+            // Bits 17:12 are for data format.
+            //   5 - 8_UINT. Currently, everything is buffer-loaded in terms of bytes.
+            // TODO: Add GFX12 buffer descriptor when other formats and/or features are needed.
+            uint32_t opts = (1u << 28) | (5u << 12);
+            co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
+                                               Register::Value::Literal(opts),
+                                               "default options");
+        }
+        else
+        {
+            co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
+                                               Register::Value::Literal(0x00020000),
+                                               "default options");
+        }
     }
 
     Generator<Instruction> BufferDescriptor::incrementBasePointer(Register::ValuePtr value)

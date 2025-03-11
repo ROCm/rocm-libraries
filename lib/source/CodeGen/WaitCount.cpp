@@ -33,7 +33,8 @@ namespace rocRoller
 {
     WaitCount::WaitCount(GPUArchitecture const& arch, std::string const& message)
     {
-        m_target = arch.target();
+        m_isSplitCounter = arch.HasCapability(GPUCapability::HasSplitWaitCounters);
+        m_hasVSCnt       = arch.HasCapability(GPUCapability::SeparateVscnt);
         if(message.length() > 0)
         {
             m_comments = {message};
@@ -53,7 +54,8 @@ namespace rocRoller
         , m_dscnt(dscnt)
         , m_kmcnt(kmcnt)
         , m_expcnt(expcnt)
-        , m_target(arch.target())
+        , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
+        , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
     {
     }
 
@@ -64,7 +66,8 @@ namespace rocRoller
         , m_dscnt(-1)
         , m_kmcnt(-1)
         , m_expcnt(-1)
-        , m_target(arch.target())
+        , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
+        , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
     {
         switch(queue)
         {
@@ -179,7 +182,8 @@ namespace rocRoller
         m_kmcnt    = CombineValues(m_kmcnt, other.m_kmcnt);
         m_expcnt   = CombineValues(m_expcnt, other.m_expcnt);
 
-        m_target = other.m_target;
+        m_isSplitCounter = other.m_isSplitCounter;
+        m_hasVSCnt       = other.m_hasVSCnt;
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
     }
@@ -330,29 +334,7 @@ namespace rocRoller
 
         if(m_loadcnt >= 0 || m_storecnt >= 0 || m_kmcnt >= 0 || m_dscnt >= 0 || m_expcnt >= 0)
         {
-            if(!m_target.isRDNA4GPU())
-            {
-                os << "s_waitcnt";
-
-                if(m_loadcnt >= 0 || m_storecnt >= 0)
-                {
-                    auto vmcnt = WaitCount::CombineValues(m_loadcnt, m_storecnt);
-                    os << " vmcnt(" << vmcnt << ")";
-                }
-
-                if(m_kmcnt >= 0 || m_dscnt >= 0)
-                {
-
-                    auto lgkmcnt = WaitCount::CombineValues(m_kmcnt, m_dscnt);
-                    os << " lgkmcnt(" << lgkmcnt << ")";
-                }
-
-                if(m_expcnt >= 0)
-                {
-                    os << " expcnt(" << m_expcnt << ")";
-                }
-            }
-            else
+            if(m_isSplitCounter)
             {
                 if(m_loadcnt >= 0)
                 {
@@ -379,6 +361,27 @@ namespace rocRoller
                     os << "s_wait_expcnt " << m_expcnt << std::endl;
                 }
             }
+            else
+            {
+                os << "s_waitcnt";
+
+                if(m_loadcnt >= 0 || m_storecnt >= 0)
+                {
+                    auto vmcnt = WaitCount::CombineValues(m_loadcnt, m_storecnt);
+                    os << " vmcnt(" << vmcnt << ")";
+                }
+
+                if(m_kmcnt >= 0 || m_dscnt >= 0)
+                {
+                    auto lgkmcnt = WaitCount::CombineValues(m_kmcnt, m_dscnt);
+                    os << " lgkmcnt(" << lgkmcnt << ")";
+                }
+
+                if(m_expcnt >= 0)
+                {
+                    os << " expcnt(" << m_expcnt << ")";
+                }
+            }
 
             if(commentIter != m_comments.end())
             {
@@ -391,7 +394,7 @@ namespace rocRoller
 
         if(m_vscnt >= 0)
         {
-            AssertFatal(!m_target.isRDNA4GPU(), "VSCnt is not a valid counter on RDNA4");
+            AssertFatal(m_hasVSCnt, "VSCnt is not a valid counter in target architecture");
 
             os << "s_waitcnt_vscnt " << m_vscnt;
 

@@ -65,7 +65,13 @@ namespace rocRoller
     inline const std::unordered_map<std::string, GPUCapability::Value> GPUCapability::m_stringMap
         = {
             {"SupportedISA", Value::SupportedISA},
-            {"HasExplicitCO", Value::HasExplicitCO},
+            {"HasExplicitScalarCO", Value::HasExplicitScalarCO},
+            {"HasExplicitScalarCOCI", Value::HasExplicitScalarCOCI},
+            {"HasExplicitVectorCO", Value::HasExplicitVectorCO},
+            {"HasExplicitVectorCOCI", Value::HasExplicitVectorCOCI},
+            {"HasExplicitVectorRevCO", Value::HasExplicitVectorRevCO},
+            {"HasExplicitVectorRevCOCI", Value::HasExplicitVectorRevCOCI},
+            {"HasExplicitVectorRevNC", Value::HasExplicitVectorRevNC},
             {"HasExplicitNC", Value::HasExplicitNC},
 
             {"HasDirectToLds", Value::HasDirectToLds},
@@ -119,6 +125,8 @@ namespace rocRoller
 
             {"v_mov_b64", Value::v_mov_b64},
 
+            {"v_add3_u32", Value::v_add3_u32},
+
             {"HasAtomicAdd", Value::HasAtomicAdd},
 
             {"MaxVmcnt", Value::MaxVmcnt},
@@ -128,6 +136,7 @@ namespace rocRoller
 
             {"Waitcnt0Disabled", Value::Waitcnt0Disabled},
             {"SeparateVscnt", Value::SeparateVscnt},
+            {"HasSplitWaitCounters", Value::HasSplitWaitCounters},
             {"CMPXWritesSGPR", Value::CMPXWritesSGPR},
             {"HasWave32", Value::HasWave32},
             {"HasAccCD", Value::HasAccCD},
@@ -154,5 +163,8 @@ namespace rocRoller
 
             {"HasPermLanes16", Value::HasPermLanes16},
             {"HasPermLanes32", Value::HasPermLanes32},
+
+            {"WorkgroupIdxViaTTMP", Value::WorkgroupIdxViaTTMP},
+            {"HasBufferOutOfBoundsCheckOption", Value::HasBufferOutOfBoundsCheckOption},
     };
 }

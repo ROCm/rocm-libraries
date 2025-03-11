@@ -303,7 +303,7 @@ namespace rocRollerTest
                              int                             t_m = 1, // thread tile size x
                              int                             t_n = 1) // thread tile size y
         {
-            REQUIRE_ARCH_CAP(GPUCapability::HasExplicitCO);
+            REQUIRE_ARCH_CAP(GPUCapability::HasExplicitVectorCO);
 
             AssertFatal(nx % numF6PerF6x16 == 0, "Invalid F6 Dimensions");
 

@@ -282,7 +282,9 @@ namespace rocRoller
     {
         for(auto& reg : m_src)
         {
-            if(reg && reg->isSpecial())
+            // TTMP registers are special but they are read-only in the kernel
+            // code thus do not create scheduling dependency.
+            if(reg && reg->isSpecial() && !reg->isTTMP())
             {
                 return true;
             }

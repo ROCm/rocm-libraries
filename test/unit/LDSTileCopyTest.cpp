@@ -169,9 +169,6 @@ namespace LDSCopyTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
 
-        if(!m_context->targetArchitecture().target().isCDNAGPU())
-            GTEST_SKIP() << "Skipping LDS tile add tests for " << GetParam();
-
         const int MN = 256;
         const int K  = 1;
 

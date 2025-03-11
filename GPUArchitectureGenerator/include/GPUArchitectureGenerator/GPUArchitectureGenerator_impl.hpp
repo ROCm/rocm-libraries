@@ -257,11 +257,13 @@ namespace GPUArchitectureGenerator
 
             for(auto const& query : AssemblerQueries)
             {
-                if(TryAssembler(
-                       hipcc, isaVersion, std::get<0>(query.second), std::get<1>(query.second)))
-                {
-                    AddCapability(isaVersion, query.first, 0);
-                }
+                std::ranges::for_each(
+                    std::get<0>(query.second), [hipcc, isaVersion, query](auto assembly) {
+                        if(TryAssembler(hipcc, isaVersion, assembly, std::get<1>(query.second)))
+                        {
+                            AddCapability(isaVersion, query.first, 0);
+                        }
+                    });
             }
             for(auto const& cap : ArchSpecificCaps)
             {
@@ -278,7 +280,7 @@ namespace GPUArchitectureGenerator
                 }
             }
 
-            if(TryAssembler(hipcc, isaVersion, "s_waitcnt_loadcnt 63", ""))
+            if(TryAssembler(hipcc, isaVersion, "s_wait_loadcnt 63", ""))
             {
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxVmcnt, 63);
             }
@@ -295,7 +297,7 @@ namespace GPUArchitectureGenerator
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxVmcnt, 0);
             }
 
-            if(TryAssembler(hipcc, isaVersion, "s_waitcnt_kmcnt 31", ""))
+            if(TryAssembler(hipcc, isaVersion, "s_wait_kmcnt 31", ""))
             {
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxLgkmcnt, 31);
             }

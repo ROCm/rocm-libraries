@@ -1212,10 +1212,20 @@ namespace rocRollerTest
 
         auto exprs = coords.reverse({A});
         auto sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr,
-                  "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: s2:U32}, "
-                  "16:U32)U32, 33:U32)U32}, 300:I)U32, Multiply({Tile: Add(Multiply({Workgroup "
-                  "Index Y: s3:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        {
+            EXPECT_EQ(sexpr,
+                      "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: ttmp9:U32}, "
+                      "16:U32)U32, 33:U32)U32}, 300:I)U32, Multiply({Tile: Add(Multiply({Workgroup "
+                      "Index Y: s2:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
+        }
+        else
+        {
+            EXPECT_EQ(sexpr,
+                      "{Split: Add(Multiply({Tile: Add(Multiply({Workgroup Index X: s2:U32}, "
+                      "16:U32)U32, 33:U32)U32}, 300:I)U32, Multiply({Tile: Add(Multiply({Workgroup "
+                      "Index Y: s3:U32}, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
+        }
     }
 
     INSTANTIATE_TEST_SUITE_P(ARCH_CoordinateGraphTests,

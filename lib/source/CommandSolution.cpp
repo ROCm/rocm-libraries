@@ -233,7 +233,11 @@ namespace rocRoller
         if(m_commandParameters->getManualWorkgroupSize())
             m_context->kernel()->setWorkgroupSize(*m_commandParameters->getManualWorkgroupSize());
         else
-            m_context->kernel()->setWorkgroupSize({64, 1, 1});
+        {
+            unsigned int wfs = m_context->targetArchitecture().GetCapability(
+                GPUCapability::DefaultWavefrontSize);
+            m_context->kernel()->setWorkgroupSize({wfs, 1, 1});
+        }
 
         auto zero = std::make_shared<Expression::Expression>(0u);
         m_context->kernel()->setDynamicSharedMemBytes(zero);

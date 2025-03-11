@@ -34,19 +34,14 @@ namespace rocRoller
                                Register::ValuePtr rhs,
                                std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU() || (gpu.isRDNAGPU() && gpu.gfx < GPUArchitectureGFX::GFX1200))
-        {
-            return Instruction("s_add_i32", {dest}, {lhs, rhs}, {}, comment);
-        }
-        else if(gpu.isRDNA4GPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitScalarCO))
         {
             return Instruction("s_add_co_i32", {dest}, {lhs, rhs}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("ScalarAddInt32 not implemented for {}\n", gpu.toString()));
+            return Instruction("s_add_i32", {dest}, {lhs, rhs}, {}, comment);
         }
     }
 
@@ -56,19 +51,14 @@ namespace rocRoller
                                 Register::ValuePtr rhs,
                                 std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU() || (gpu.isRDNAGPU() && gpu.gfx < GPUArchitectureGFX::GFX1200))
-        {
-            return Instruction("s_add_u32", {dest}, {lhs, rhs}, {}, comment);
-        }
-        else if(gpu.isRDNA4GPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitScalarCO))
         {
             return Instruction("s_add_co_u32", {dest}, {lhs, rhs}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("ScalarAddUInt32 not implemented for {}.\n", gpu.toString()));
+            return Instruction("s_add_u32", {dest}, {lhs, rhs}, {}, comment);
         }
     }
 
@@ -78,19 +68,14 @@ namespace rocRoller
                                           Register::ValuePtr rhs,
                                           std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU() || (gpu.isRDNAGPU() && gpu.gfx < GPUArchitectureGFX::GFX1200))
-        {
-            return Instruction("s_addc_u32", {dest}, {lhs, rhs}, {}, comment);
-        }
-        else if(gpu.isRDNA4GPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitScalarCOCI))
         {
             return Instruction("s_add_co_ci_u32", {dest}, {lhs, rhs}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("ScalarAddUInt32CarryIn not implemented for {}.\n", gpu.toString()));
+            return Instruction("s_addc_u32", {dest}, {lhs, rhs}, {}, comment);
         }
     }
 
@@ -100,19 +85,14 @@ namespace rocRoller
                                 Register::ValuePtr rhs,
                                 std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU())
-        {
-            return Instruction("v_add_u32", {dest}, {lhs, rhs}, {}, comment);
-        }
-        else if(gpu.isRDNAGPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitNC))
         {
             return Instruction("v_add_nc_u32", {dest}, {lhs, rhs}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("VectorAddUInt32 not implemented for {}.\n", gpu.toString()));
+            return Instruction("v_add_u32", {dest}, {lhs, rhs}, {}, comment);
         }
     }
 
@@ -123,15 +103,15 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU() || gpu.isRDNAGPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitVectorCO))
         {
             return Instruction("v_add_co_u32", {dest, carry}, {lhs, rhs}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("VectorAddUInt32Out not implemented for {}.\n", gpu.toString()));
+            Throw<FatalError>(std::format("VectorAddUInt32CarryOut not implemented for {}.\n",
+                                          arch.target().toString()));
         }
     }
 
@@ -152,20 +132,15 @@ namespace rocRoller
                                           Register::ValuePtr rhs,
                                           std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU())
-        {
-            return Instruction("v_addc_co_u32", {dest, carryOut}, {lhs, rhs, carryIn}, {}, comment);
-        }
-        else if(gpu.isRDNAGPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::HasExplicitVectorCOCI))
         {
             return Instruction(
                 "v_add_co_ci_u32", {dest, carryOut}, {lhs, rhs, carryIn}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("VectorAddUInt32CarryIn not implemented for {}.\n", gpu.toString()));
+            return Instruction("v_addc_co_u32", {dest, carryOut}, {lhs, rhs, carryIn}, {}, comment);
         }
     }
 
@@ -186,15 +161,15 @@ namespace rocRoller
                                  Register::ValuePtr rhs2,
                                  std::string        comment)
     {
-        auto gpu = ctx->targetArchitecture().target();
-        if(gpu.isCDNAGPU() || gpu.isRDNAGPU())
+        auto arch = ctx->targetArchitecture();
+        if(arch.HasCapability(GPUCapability::v_add3_u32))
         {
             return Instruction("v_add3_u32", {dest}, {lhs, rhs1, rhs2}, {}, comment);
         }
         else
         {
-            Throw<FatalError>(
-                std::format("VectorAddUInt32 not implemented for {}.\n", gpu.toString()));
+            Throw<FatalError>(std::format("VectorAdd3UInt32 not implemented for {}.\n",
+                                          arch.target().toString()));
         }
     }
 }

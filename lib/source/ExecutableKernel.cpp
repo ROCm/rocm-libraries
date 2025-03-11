@@ -152,16 +152,17 @@ namespace rocRoller
                                          int                       iteration,
                                          hipStream_t               stream)
     {
-        // TODO: Include this at a particular logging level.
-        if(args.log())
-        {
-            std::cout << "Launching kernel " << m_kernelName << ": Workgroup: {"
-                      << invocation.workgroupSize[0] << ", " << invocation.workgroupSize[1] << ", "
-                      << invocation.workgroupSize[2] << "}, Workitems: {"
-                      << invocation.workitemCount[0] << ", " << invocation.workitemCount[1] << ", "
-                      << invocation.workitemCount[2] << "}" << std::endl;
-            std::cout << args << std::endl;
-        }
+        // TODO: implement formatter for container and library types
+        Log::info(std::format("Launching kernel {}: Workgroup: [{}, {}, {}], Workitems: [{}, {}, "
+                              "{}]\nKernel arguments: {}\n",
+                              m_kernelName,
+                              invocation.workgroupSize[0],
+                              invocation.workgroupSize[1],
+                              invocation.workgroupSize[2],
+                              invocation.workitemCount[0],
+                              invocation.workitemCount[1],
+                              invocation.workitemCount[2],
+                              args.toString()));
 
         if(!kernelLoaded())
             throw std::runtime_error("Attempting to execute a kernel before it is loaded");

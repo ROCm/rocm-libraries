@@ -186,6 +186,12 @@ namespace rocRoller
         co_yield load(kind, val1, addr1, offset1, 2, comment, false, buffDesc, buffOpts);
         co_yield load(kind, val2, addr2, offset2, 2, comment, true, buffDesc, buffOpts);
 
+        // Zero-out upper 16-bits
+        co_yield generateOp<Expression::BitwiseAnd>(
+            val1, val1, Register::Value::Literal(0x0000FFFF));
+        // Zero-out lower 16-bits
+        co_yield generateOp<Expression::BitwiseAnd>(
+            val2, val2, Register::Value::Literal(0xFFFF0000));
         co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
     }
 

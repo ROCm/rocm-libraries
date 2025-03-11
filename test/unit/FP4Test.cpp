@@ -216,7 +216,7 @@ namespace rocRollerTest
                               int                             t_m = 1, // thread tile size x
                               int                             t_n = 1) // thread tile size y
         {
-            REQUIRE_ARCH_CAP(GPUCapability::HasExplicitCO);
+            REQUIRE_ARCH_CAP(GPUCapability::HasExplicitVectorCO);
 
             AssertFatal(nx % numFP4PerElement == 0, "Invalid FP4 Dimensions");
 

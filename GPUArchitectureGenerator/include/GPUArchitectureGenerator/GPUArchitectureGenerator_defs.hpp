@@ -54,108 +54,125 @@ namespace GPUArchitectureGenerator
 
     // GPUCapability -> {Assembler Query, Assembler Options}
     const std::unordered_map<rocRoller::GPUCapability,
-                             std::tuple<std::string, std::string>,
+                             std::tuple<std::vector<std::string>, std::string>,
                              rocRoller::GPUCapability::Hash>
         AssemblerQueries = {
-            {rocRoller::GPUCapability::SupportedISA, {"", ""}},
-            {rocRoller::GPUCapability::HasExplicitCO, {"v_add_co_u32 v0,vcc,v0,1", ""}},
-            {rocRoller::GPUCapability::HasExplicitNC, {"v_add_nc_u32 v0,v0,1", ""}},
+            {rocRoller::GPUCapability::SupportedISA, {{""}, ""}},
+            {rocRoller::GPUCapability::HasExplicitScalarCO, {{"s_add_co_u32 s0, s1, s1"}, ""}},
+            {rocRoller::GPUCapability::HasExplicitScalarCOCI, {{"s_add_co_ci_u32 s0, s1, s1"}, ""}},
+            {rocRoller::GPUCapability::HasExplicitVectorCO,
+             {{"v_add_co_u32 v0, vcc, v0, 1", "v_add_co_u32 v0, vcc_lo, v0, 1"}, ""}},
+            {rocRoller::GPUCapability::HasExplicitVectorCOCI,
+             {{"v_add_co_ci_u32 v0, vcc, v0, 1, vcc", "v_add_co_ci_u32 v0, vcc_lo, v0, 1, vcc_lo"},
+              ""}},
+            {rocRoller::GPUCapability::HasExplicitVectorRevCO,
+             {{"v_subrev_co_u32 v0, vcc, 1, v0", "v_subrev_co_u32 v0, vcc_lo, 1, v0"}, ""}},
+            {rocRoller::GPUCapability::HasExplicitVectorRevCOCI,
+             {{"v_subrev_co_ci_u32 v0, vcc, 1, v0, vcc",
+               "v_subrev_co_ci_u32 v0, vcc_lo, 1, v0, vcc_lo"},
+              ""}},
+            {rocRoller::GPUCapability::HasExplicitVectorRevNC, {{"v_subrev_nc_u32 v0, 1, v0"}, ""}},
+            {rocRoller::GPUCapability::HasExplicitNC, {{"v_add_nc_u32 v0,v0,1"}, ""}},
             {rocRoller::GPUCapability::HasDirectToLds,
-             {"buffer_load_dword v0, s[0:3], 0 offen offset:0 lds", ""}},
+             {{"buffer_load_dword v0, s[0:3], 0 offen offset:0 lds"}, ""}},
             {rocRoller::GPUCapability::HasWiderDirectToLds,
-             {"buffer_load_dwordx4 v0, s[8:11], 0 offen offset: 0 lds", ""}},
-            {rocRoller::GPUCapability::HasAddLshl, {"v_add_lshl_u32 v47, v36, v34, 0x2", ""}},
-            {rocRoller::GPUCapability::HasLshlOr, {"v_lshl_or_b32 v47, v36, 0x2, v34", ""}},
-            {rocRoller::GPUCapability::HasSMulHi, {"s_mul_hi_u32 s47, s36, s34", ""}},
-            {rocRoller::GPUCapability::HasCodeObjectV3, {"", "-mcode-object-version=3"}},
-            {rocRoller::GPUCapability::HasCodeObjectV4, {"", "-mcode-object-version=4"}},
-            {rocRoller::GPUCapability::HasCodeObjectV5, {"", "-mcode-object-version=5"}},
+             {{"buffer_load_dwordx4 v0, s[8:11], 0 offen offset: 0 lds"}, ""}},
+            {rocRoller::GPUCapability::HasAddLshl, {{"v_add_lshl_u32 v47, v36, v34, 0x2"}, ""}},
+            {rocRoller::GPUCapability::HasLshlOr, {{"v_lshl_or_b32 v47, v36, 0x2, v34"}, ""}},
+            {rocRoller::GPUCapability::HasSMulHi, {{"s_mul_hi_u32 s47, s36, s34"}, ""}},
+            {rocRoller::GPUCapability::HasCodeObjectV3, {{""}, "-mcode-object-version=3"}},
+            {rocRoller::GPUCapability::HasCodeObjectV4, {{""}, "-mcode-object-version=4"}},
+            {rocRoller::GPUCapability::HasCodeObjectV5, {{""}, "-mcode-object-version=5"}},
 
             {rocRoller::GPUCapability::HasMFMA,
-             {"v_mfma_f32_32x32x1f32 a[0:31], v32, v33, a[0:31]", ""}},
+             {{"v_mfma_f32_32x32x1f32 a[0:31], v32, v33, a[0:31]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_fp8,
-             {"v_mfma_f32_16x16x32_fp8_fp8 v[0:3], v[32:33], v[36:37], v[0:3]", ""}},
+             {{"v_mfma_f32_16x16x32_fp8_fp8 v[0:3], v[32:33], v[36:37], v[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_f8f6f4,
-             {"v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[32:39], v[40:47], a[0:3]", ""}},
+             {{"v_mfma_f32_16x16x128_f8f6f4 a[0:3], v[32:39], v[40:47], a[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_f64,
-             {"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]", ""}},
+             {{"v_mfma_f64_16x16x4f64 v[0:7], v[32:33], v[36:37], v[0:7]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_32x32x4_1k,
-             {"v_mfma_f32_32x32x4bf16_1k a[0:31], v[32:33], v[36:37], a[0:31]", ""}},
+             {{"v_mfma_f32_32x32x4bf16_1k a[0:31], v[32:33], v[36:37], a[0:31]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_32x32x4,
-             {"v_mfma_f32_32x32x4bf16 a[0:15], v11, v10, a[0:15]", ""}},
+             {{"v_mfma_f32_32x32x4bf16 a[0:15], v11, v10, a[0:15]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_32x32x8_1k,
-             {"v_mfma_f32_32x32x8bf16_1k a[0:3], v[32:33], v[34:35], a[0:3]", ""}},
+             {{"v_mfma_f32_32x32x8bf16_1k a[0:3], v[32:33], v[34:35], a[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_16x16x8,
-             {"v_mfma_f32_16x16x8bf6 a[0:3], v[32], v[33], a[0:3]", ""}},
+             {{"v_mfma_f32_16x16x8bf6 a[0:3], v[32], v[33], a[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_bf16_16x16x16_1k,
-             {"v_mfma_f32_16x16x16bf16_1k a[0:3], v[32:33], v[36:37], a[0:3]", ""}},
+             {{"v_mfma_f32_16x16x16bf16_1k a[0:3], v[32:33], v[36:37], a[0:3]"}, ""}},
 
             {rocRoller::GPUCapability::HasMFMA_16x16x32_f16,
-             {"v_mfma_f32_16x16x32_f16 a[0:3], v[32:35], v[36:39], a[0:3]", ""}},
+             {{"v_mfma_f32_16x16x32_f16 a[0:3], v[32:35], v[36:39], a[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_32x32x16_f16,
-             {"v_mfma_f32_32x32x16_f16 a[0:15], v[32:35], v[36:39], a[0:15]", ""}},
+             {{"v_mfma_f32_32x32x16_f16 a[0:15], v[32:35], v[36:39], a[0:15]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_16x16x32_bf16,
-             {"v_mfma_f32_16x16x32_bf16 a[0:3], v[32:35], v[36:39], a[0:3]", ""}},
+             {{"v_mfma_f32_16x16x32_bf16 a[0:3], v[32:35], v[36:39], a[0:3]"}, ""}},
             {rocRoller::GPUCapability::HasMFMA_32x32x16_bf16,
-             {"v_mfma_f32_32x32x16_bf16 a[0:15], v[32:35], v[36:39], a[0:15]", ""}},
+             {{"v_mfma_f32_32x32x16_bf16 a[0:15], v[32:35], v[36:39], a[0:15]"}, ""}},
 
             {rocRoller::GPUCapability::HasWMMA,
-             {"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]", ""}},
+             {{"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]"}, ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,
-             {".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
-              ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n  .amdhsa_accum_offset "
-              "4\n.end_amdhsa_kernel",
+             {{".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
+               ".amdhsa_next_free_sgpr .amdgcn.next_free_sgpr\n  .amdhsa_accum_offset "
+               "4\n.end_amdhsa_kernel"},
               ""}},
 
             {rocRoller::GPUCapability::HasGlobalOffset,
-             {"global_store_dword v[8:9], v5 off offset:-16", ""}},
+             {{"global_store_dword v[8:9], v5 off offset:-16"}, ""}},
 
-            {rocRoller::GPUCapability::v_mac_f16, {"v_mac_f16 v47, v36, v34", ""}},
+            {rocRoller::GPUCapability::v_mac_f16, {{"v_mac_f16 v47, v36, v34"}, ""}},
 
             {rocRoller::GPUCapability::v_fma_f16,
-             {"v_fma_f16 v47, v36, v34, v47, op_sel:[0,0,0,0]", ""}},
-            {rocRoller::GPUCapability::v_fmac_f16, {"v_fma_f16 v47, v36, v34", ""}},
+             {{"v_fma_f16 v47, v36, v34, v47, op_sel:[0,0,0,0]"}, ""}},
+            {rocRoller::GPUCapability::v_fmac_f16, {{"v_fma_f16 v47, v36, v34"}, ""}},
 
             {rocRoller::GPUCapability::v_pk_fma_f16,
-             {"v_pk_fma_f16 v47, v36, v34, v47, op_sel:[0,0,0]", ""}},
-            {rocRoller::GPUCapability::v_pk_fmac_f16, {"v_pk_fma_f16 v47, v36, v34", ""}},
+             {{"v_pk_fma_f16 v47, v36, v34, v47, op_sel:[0,0,0]"}, ""}},
+            {rocRoller::GPUCapability::v_pk_fmac_f16, {{"v_pk_fma_f16 v47, v36, v34"}, ""}},
 
             {rocRoller::GPUCapability::v_mad_mix_f32,
-             {"v_mad_mix_f32 v47, v36, v34, v47, op_sel:[0,0,0] op_sel_hi:[1,1,0]", ""}},
+             {{"v_mad_mix_f32 v47, v36, v34, v47, op_sel:[0,0,0] op_sel_hi:[1,1,0]"}, ""}},
             {rocRoller::GPUCapability::v_fma_mix_f32,
-             {"v_fma_mix_f32 v47, v36, v34, v47, op_sel:[0,0,0] op_sel_hi:[1,1,0]", ""}},
+             {{"v_fma_mix_f32 v47, v36, v34, v47, op_sel:[0,0,0] op_sel_hi:[1,1,0]"}, ""}},
 
-            {rocRoller::GPUCapability::v_dot2_f32_f16, {"v_dot2_f32_f16 v20, v36, v34, v20", ""}},
-            {rocRoller::GPUCapability::v_dot2c_f32_f16, {"v_dot2c_f32_f16 v47, v36, v34", ""}},
+            {rocRoller::GPUCapability::v_dot2_f32_f16, {{"v_dot2_f32_f16 v20, v36, v34, v20"}, ""}},
+            {rocRoller::GPUCapability::v_dot2c_f32_f16, {{"v_dot2c_f32_f16 v47, v36, v34"}, ""}},
 
-            {rocRoller::GPUCapability::v_dot4c_i32_i8, {"v_dot4c_i32_i8 v47, v36, v34", ""}},
-            {rocRoller::GPUCapability::v_dot4_i32_i8, {"v_dot4_i32_i8 v47, v36, v34", ""}},
+            {rocRoller::GPUCapability::v_dot4c_i32_i8, {{"v_dot4c_i32_i8 v47, v36, v34"}, ""}},
+            {rocRoller::GPUCapability::v_dot4_i32_i8, {{"v_dot4_i32_i8 v47, v36, v34"}, ""}},
 
-            {rocRoller::GPUCapability::v_mac_f32, {"v_mac_f32 v20, v21, v22", ""}},
-            {rocRoller::GPUCapability::v_fma_f32, {"v_fma_f32 v20, v21, v22, v23", ""}},
-            {rocRoller::GPUCapability::v_fmac_f32, {"v_fmac_f32 v20, v21, v22", ""}},
+            {rocRoller::GPUCapability::v_mac_f32, {{"v_mac_f32 v20, v21, v22"}, ""}},
+            {rocRoller::GPUCapability::v_fma_f32, {{"v_fma_f32 v20, v21, v22, v23"}, ""}},
+            {rocRoller::GPUCapability::v_fmac_f32, {{"v_fmac_f32 v20, v21, v22"}, ""}},
 
-            {rocRoller::GPUCapability::v_mov_b64, {"v_mov_b64 v[2:3], v[0:1]", ""}},
+            {rocRoller::GPUCapability::v_mov_b64, {{"v_mov_b64 v[2:3], v[0:1]"}, ""}},
+
+            {rocRoller::GPUCapability::v_add3_u32, {{"v_add3_u32 v0, v1, v2, v3"}, ""}},
 
             {rocRoller::GPUCapability::HasAtomicAdd,
-             {"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0", ""}},
+             {{"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0"}, ""}},
 
-            {rocRoller::GPUCapability::UnalignedVGPRs, {"v_add_f64 v[0:1], v[0:1], v[3:4]", ""}},
+            {rocRoller::GPUCapability::UnalignedVGPRs, {{"v_add_f64 v[0:1], v[0:1], v[3:4]"}, ""}},
 
             {rocRoller::GPUCapability::HasDSReadTransposeB16,
-             {"ds_read_b64_tr_b16 v[4:5], v1, offset:0", ""}},
+             {{"ds_read_b64_tr_b16 v[4:5], v1, offset:0"}, ""}},
             {rocRoller::GPUCapability::HasDSReadTransposeB8,
-             {"ds_read_b64_tr_b8  v[4:5], v1, offset:0", ""}},
+             {{"ds_read_b64_tr_b8  v[4:5], v1, offset:0"}, ""}},
             {rocRoller::GPUCapability::HasDSReadTransposeB6,
-             {"ds_read_b96_tr_b6  v[4:6], v1, offset:0", ""}},
+             {{"ds_read_b96_tr_b6  v[4:6], v1, offset:0"}, ""}},
             {rocRoller::GPUCapability::HasDSReadTransposeB4,
-             {"ds_read_b64_tr_b4  v[4:5], v1, offset:0", ""}},
+             {{"ds_read_b64_tr_b4  v[4:5], v1, offset:0"}, ""}},
 
-            {rocRoller::GPUCapability::HasPermLanes16, {"v_permlane16_swap_b32 v4, v5", ""}},
-            {rocRoller::GPUCapability::HasPermLanes32, {"v_permlane32_swap_b32 v4, v5", ""}},
-            {rocRoller::GPUCapability::UnalignedSGPRs, {"s_cmp_eq_u64 s[0:1], s[0:1], s[3:4]", ""}},
-            {rocRoller::GPUCapability::SeparateVscnt, {"s_waitcnt_vscnt 0", ""}},
+            {rocRoller::GPUCapability::HasPermLanes16, {{"v_permlane16_swap_b32 v4, v5"}, ""}},
+            {rocRoller::GPUCapability::HasPermLanes32, {{"v_permlane32_swap_b32 v4, v5"}, ""}},
+            {rocRoller::GPUCapability::UnalignedSGPRs,
+             {{"s_cmp_eq_u64 s[0:1], s[0:1], s[3:4]"}, ""}},
+            {rocRoller::GPUCapability::SeparateVscnt, {{"s_waitcnt_vscnt 0"}, ""}},
+            {rocRoller::GPUCapability::HasSplitWaitCounters, {{"s_wait_kmcnt 0"}, ""}},
 
     };
 
@@ -270,11 +287,13 @@ namespace GPUArchitectureGenerator
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
-        std::copy_if(
-            rocRoller::SupportedArchitectures.begin(),
-            rocRoller::SupportedArchitectures.end(),
-            std::back_inserter(retval),
-            [](rocRoller::GPUArchitectureTarget const& x) -> bool { return x.isCDNAGPU(); });
+        std::copy_if(rocRoller::SupportedArchitectures.begin(),
+                     rocRoller::SupportedArchitectures.end(),
+                     std::back_inserter(retval),
+                     [](rocRoller::GPUArchitectureTarget const& x) -> bool {
+                         return x.isCDNA1GPU() || x.isCDNA2GPU() || x.isCDNA3GPU()
+                                || x.isCDNA35GPU();
+                     });
         return retval;
     }
 
@@ -351,8 +370,12 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::PackedWorkitemIDs,
              [](rocRoller::GPUArchitectureTarget x) -> bool {
-                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA35GPU();
+                 return x.isCDNA2GPU() || x.isCDNA3GPU() || x.isCDNA35GPU() || x.isRDNA4GPU();
              }},
+            {rocRoller::GPUCapability::WorkgroupIdxViaTTMP,
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isGFX12GPU(); }},
+            {rocRoller::GPUCapability::HasBufferOutOfBoundsCheckOption,
+             [](rocRoller::GPUArchitectureTarget x) -> bool { return x.isGFX12GPU(); }},
 
     };
     // This is the way to add a set of instructions that have the same wait value and wait queues.

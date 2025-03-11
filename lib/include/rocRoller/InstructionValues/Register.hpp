@@ -189,6 +189,7 @@ namespace rocRoller
             bool           isZeroLiteral() const;
 
             constexpr bool isSpecial() const;
+            constexpr bool isTTMP() const;
             constexpr bool isSCC() const;
             bool           isVCC() const;
             constexpr bool isExec() const;
