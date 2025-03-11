@@ -18,7 +18,7 @@ def runCI =
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
     nodes.dockerArray.each {
-        _, docker ->
+        nodeKey, docker ->
         if (params?.ROCROLLER_AMDGPU_URL)
         {
             docker.buildArgs += " --build-arg ROCROLLER_AMDGPU_URL=${params.ROCROLLER_AMDGPU_URL}"
