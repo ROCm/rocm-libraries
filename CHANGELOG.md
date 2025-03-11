@@ -88,7 +88,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Additions
 
-* Architecture support for gfx940, gfx941, gfx942 and gfx950
+* Architecture support for gfx940, gfx941, and gfx942
 * Client tests configuration parameters now support YAML file input format
 
 ### Changes
