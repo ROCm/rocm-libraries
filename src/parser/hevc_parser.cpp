@@ -1539,8 +1539,9 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     }
 
     // Set active VPS, SPS and PPS for the current slice
-    m_active_pps_id_ = Parser::ExpGolomb::ReadUe(nalu, offset);
-    CHECK_ALLOWED_MAX("active_pps_id", m_active_pps_id_, (MAX_PPS_COUNT - 1));
+    int32_t active_pps_id = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_MAX("active_pps_id", active_pps_id, (MAX_PPS_COUNT - 1));
+    m_active_pps_id_ = active_pps_id;
     temp_sh.slice_pic_parameter_set_id = p_slice_header->slice_pic_parameter_set_id = m_active_pps_id_;
     pps_ptr = &pps_list_[m_active_pps_id_];
     if ( pps_ptr->is_received == 0) {
