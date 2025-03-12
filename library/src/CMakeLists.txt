@@ -63,10 +63,6 @@ if(NOT BUILD_CUDA)
       set(Tensile_Options ${Tensile_Options} KEEP_BUILD_TMP)
     endif()
 
-    if(Tensile_BUILD_ID)
-      set(Options ${Options} "--build-id=${Tensile_BUILD_ID}")
-    endif()
-
     # Add a build target for Tensile kernel library
     # Runtime language is HIP by default
     # warning our Tensile_ variables may shadow variable in TensileCreateLibraryFiles
@@ -81,6 +77,7 @@ if(NOT BUILD_CUDA)
         COMPILER            ${Tensile_COMPILER}
         LIBRARY_FORMAT      ${Tensile_LIBRARY_FORMAT}
         CPU_THREADS         ${Tensile_CPU_THREADS}
+        BUILD_ID            ${Tensile_BUILD_ID}
         ${Tensile_Options}
       )
     else()
@@ -91,6 +88,7 @@ if(NOT BUILD_CUDA)
         CODE_OBJECT_VERSION ${Tensile_CODE_OBJECT_VERSION}
         COMPILER            ${Tensile_COMPILER}
         LIBRARY_FORMAT      ${Tensile_LIBRARY_FORMAT}
+        BUILD_ID            ${Tensile_BUILD_ID}
         ${Tensile_Options}
       )
     endif()
