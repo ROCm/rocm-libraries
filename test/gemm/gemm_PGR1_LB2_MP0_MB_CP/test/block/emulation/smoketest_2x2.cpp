@@ -68,7 +68,7 @@ namespace rocwmma
         EmulationCommonTestParams,
         KernelGeneratorImpl,
         std::tuple<std::tuple<float32_t, float32_t, float32_t>>,
-        std::tuple<std::tuple<I<16>, I<16>, I<4>>, std::tuple<I<32>, I<32>, I<16>>>,
+        std::tuple<std::tuple<I<16>, I<16>, I<16>>, std::tuple<I<32>, I<32>, I<16>>>,
         TestLayoutsAll,
         TestLdsDataLayouts,
         TestGemmConfigsBlockLevel,
