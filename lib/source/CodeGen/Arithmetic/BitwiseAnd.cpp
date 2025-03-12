@@ -26,6 +26,7 @@
 
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/BitwiseAnd.hpp>
+#include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -81,16 +82,31 @@ namespace rocRoller
             }
             else if(elementBits == 64u)
             {
-                co_yield_(Instruction("v_and_b32",
-                                      {dest->subset({0})},
-                                      {lhs->subset({0}), rhs->subset({0})},
-                                      {},
-                                      ""));
-                co_yield_(Instruction("v_and_b32",
-                                      {dest->subset({1})},
-                                      {lhs->subset({1}), rhs->subset({1})},
-                                      {},
-                                      ""));
+                if(lhs->regType() == Register::Type::Literal)
+                {
+                    Register::ValuePtr lsb;
+                    Register::ValuePtr msb;
+                    Arithmetic::get2LiteralDwords(lsb, msb, lhs);
+
+                    // subset() is not applicable to NoAllocation Literal type.
+                    co_yield_(Instruction(
+                        "v_and_b32", {dest->subset({0})}, {lsb, rhs->subset({0})}, {}, ""));
+                    co_yield_(Instruction(
+                        "v_and_b32", {dest->subset({1})}, {msb, rhs->subset({1})}, {}, ""));
+                }
+                else
+                {
+                    co_yield_(Instruction("v_and_b32",
+                                          {dest->subset({0})},
+                                          {lhs->subset({0}), rhs->subset({0})},
+                                          {},
+                                          ""));
+                    co_yield_(Instruction("v_and_b32",
+                                          {dest->subset({1})},
+                                          {lhs->subset({1}), rhs->subset({1})},
+                                          {},
+                                          ""));
+                }
             }
             else
             {

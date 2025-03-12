@@ -270,6 +270,14 @@ namespace ArithmeticTest
                         .outputDataType = dataType, .offset = 8, .width = 8});
                 co_yield store(21);
 
+                co_yield generateOp<Expression::BitwiseAnd>(
+                    c, Register::Value::Literal(static_cast<T>(LITERAL_TEST)), b);
+                co_yield store(22);
+
+                co_yield generateOp<Expression::BitwiseAnd>(
+                    c, a, Register::Value::Literal(static_cast<T>(LITERAL_TEST)));
+                co_yield store(23);
+
                 //
                 // Logical / boolean
                 //
@@ -341,7 +349,7 @@ namespace ArithmeticTest
                 commandKernel.setContext(m_context);
                 commandKernel.generateKernel();
 
-                size_t const resultSize           = 22;
+                size_t const resultSize           = 24;
                 size_t const comparisonResultSize = 10;
 
                 auto d_result = make_shared_device<T>(resultSize);
@@ -433,6 +441,9 @@ namespace ArithmeticTest
                                       std::bit_cast<T>((std::bit_cast<similar_integral_type<T>>(a)
                                                         << (sizeof(T) * 8 - 16))
                                                        >> (sizeof(T) * 8 - 8)));
+
+                            EXPECT_EQ(result[22], LITERAL_TEST & b);
+                            EXPECT_EQ(result[23], a & LITERAL_TEST);
 
                             int wm = regType == Register::Type::Vector ? numBoolRegs : 1;
 
