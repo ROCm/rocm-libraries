@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <memory>
 
 namespace po = boost::program_options;
 
@@ -647,8 +648,7 @@ int main(int argc, const char* argv[])
         iter--;
     }
 
-    auto* ptr      = new DataInitialization(args, problemFactory);
-    auto  dataInit = std::shared_ptr<DataInitialization>(ptr);
+    auto dataInit = std::make_shared<DataInitialization>(args, problemFactory);
 
     auto solutionIterator = SolutionIterator::Default(library, hardware, args);
 

@@ -34,11 +34,109 @@
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
+#include <list>
+#include <map>
+#include <tuple>
 
 namespace TensileLite
 {
     namespace Client
     {
+        template <typename K, typename T, std::size_t MaxNumEntries = 128>
+        class LRUCache
+        {
+            using Entries    = std::list<K>;
+            using EntryTrack = std::pair<T, typename Entries::iterator>;
+            using EntryMap   = std::map<K, EntryTrack>;
+
+        public:
+            template <typename... Args>
+            std::pair<typename EntryMap::iterator, bool> emplace(const K& key, Args&&... args)
+            {
+                if(!entryMap.count(key))
+                {
+                    entries.push_back(key);
+                    auto&& ret = entryMap.emplace(
+                        key, std::make_pair(T(std::forward<Args>(args)...), --entries.end()));
+                    while(entries.size() > MaxNumEntries)
+                    {
+                        auto& front = entries.front();
+                        entryMap.erase(front);
+                        entries.pop_front();
+                    }
+                    return ret;
+                }
+                else
+                {
+                    auto& track = entryMap.at(key);
+                    track.first = T(std::forward<Args>(args)...);
+                    entries.splice(entries.end(), entries, track.second);
+                }
+                return {entryMap.find(key), true};
+            }
+
+            size_t count(const K& key) const
+            {
+                return entryMap.count(key);
+            }
+
+            const T& at(const K& key) const
+            {
+                auto& track = entryMap.at(key);
+                entries.splice(entries.end(), entries, track.second);
+                return track.first;
+            }
+
+            T& at(const K& key)
+            {
+                auto& track = entryMap.at(key);
+                entries.splice(entries.end(), entries, track.second);
+                return track.first;
+            }
+
+            const K &back() const {
+                return entries.back();
+            }
+
+        private:
+            EntryMap entryMap;
+            Entries  entries;
+        };
+
+        using BitWidth        = uint8_t;
+        using Size            = uint64_t;
+        using SwizzleCacheKey = std::tuple<BitWidth, Size, Size>;
+        using SwizzleCacheVal = ::Tensor::Manipulation::Tensor;
+        using SwizzleCache    = LRUCache<SwizzleCacheKey, SwizzleCacheVal>;
+        static thread_local SwizzleCache g_swizzleCache;
+
+        BitWidth toBitWidth(DataType datatype)
+        {
+            switch(datatype)
+            {
+            case DataType::Double:
+                return 64;
+            case DataType::XFloat32:
+            case DataType::Float:
+                return 32;
+            case DataType::Half:
+            case DataType::BFloat16:
+                return 16;
+            case DataType::Int8:
+            case DataType::Float8_fnuz:
+            case DataType::BFloat8_fnuz:
+            case DataType::Float8BFloat8_fnuz:
+            case DataType::BFloat8Float8_fnuz:
+            case DataType::Float8:
+            case DataType::BFloat8:
+            case DataType::Float8BFloat8:
+            case DataType::BFloat8Float8:
+                return 8;
+            default:
+                throw std::runtime_error("unsupported datatype");
+            }
+        }
+
         std::string ToString(InitMode mode)
         {
             switch(mode)
@@ -1472,10 +1570,11 @@ namespace TensileLite
                                                          tDim);
                                         break;
                                     case DataType::BFloat8_fnuz:
-                                        pruneSparseArray((BFloat8_fnuz*)p.second.cpuInput.valid.get()
-                                                             + gemmInitOffset,
-                                                         t,
-                                                         tDim);
+                                        pruneSparseArray(
+                                            (BFloat8_fnuz*)p.second.cpuInput.valid.get()
+                                                + gemmInitOffset,
+                                            t,
+                                            tDim);
                                         break;
                                     default:
                                         throw std::runtime_error("SparseMatrix doesn't support");
@@ -1850,6 +1949,12 @@ namespace TensileLite
         {
             for(size_t i = 0; i < m_vdata.size(); i++)
             {
+                bool needSwizzle
+                    = (problem.swizzleTensorA() && i == ContractionProblemGemm::TENSOR::A)
+                      || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
+                //Copy swizzle tensor would be in copySwizzledToGPUBuffer
+                if(needSwizzle)
+                    continue;
                 void* ptr  = nullptr;
                 auto& desc = problem.tensors()[i];
                 auto  it   = m_vdata[i].pristine.find(desc.dataType());
@@ -1885,38 +1990,60 @@ namespace TensileLite
                       || (problem.swizzleTensorB() && i == ContractionProblemGemm::TENSOR::B);
 
                 void* ptr{};
-                //FIXME: Not good, need to use format to specify the way for swizzling.
-                //TODO: Support more swizzling type, such as 32x32x8, currently we have 16x16x8 only.
+
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
                     // currently, if A then it means MiM = 16, if B then it means MiN = 16
                     size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
                     calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK);
-                    auto unrolledSize = desc.sizes()[0];
-                    auto tiledSize    = desc.sizes()[1];
-                    auto tmpTensor    = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
-
-                    memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                    auto                          unrolledSize = desc.sizes()[0];
+                    auto                          tiledSize    = desc.sizes()[1];
                     ::Tensor::Manipulation::Shape paddedShape{
                         ((tiledSize / MiM_N) + !!(tiledSize % MiM_N)) * MiM_N,
                         (unrolledSize / (MiK * PackK) + !!(unrolledSize % (MiK * PackK))) * MiK
                             * PackK};
-                    //Temporary hack
-                    uint64_t padVal{};
-                    auto     paddedTensor = ::Tensor::Manipulation::pad(
-                        tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
-                    paddedTensor.reshape({paddedShape[0] / MiM_N,
-                                          MiM_N,
-                                          paddedShape[1] / (MiK * PackK),
-                                          MiK / MiKv,
-                                          MiKv * PackK});
-                    Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                    ptr             = copyInputBuffers(desc,
-                                           p.gpuInput.valid.get(),
-                                           permuted.as<void>(),
-                                           permuted.getDesc().flattenSize(),
-                                           hipMemcpyHostToDevice);
+                    auto swizzleKey
+                        = std::make_tuple(toBitWidth(desc.dataType()), unrolledSize, tiledSize);
+
+                    if(g_swizzleCache.count(swizzleKey))
+                    {
+                        if (swizzleKey != g_swizzleCache.back()) {
+                            Tensor& permuted = g_swizzleCache.at(swizzleKey);
+                            ptr = copyInputBuffers(desc,
+                                    p.gpuInput.valid.get(),
+                                    permuted.as<void>(),
+                                    permuted.getDesc().flattenSize(),
+                                    hipMemcpyHostToDevice);
+                        }
+                        else
+                        {
+                            ptr = p.gpuInput.valid.get();
+                        }
+                    }
+                    else
+                    {
+                        auto tmpTensor = Tensor({tiledSize, unrolledSize}, desc.elementBytes());
+
+                        memcpy(
+                            tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                        //Temporary hack
+                        uint64_t padVal{};
+                        auto     paddedTensor = ::Tensor::Manipulation::pad(
+                            tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                        paddedTensor.reshape({paddedShape[0] / MiM_N,
+                                              MiM_N,
+                                              paddedShape[1] / (MiK * PackK),
+                                              MiK / MiKv,
+                                              MiKv * PackK});
+                        Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
+                        ptr             = copyInputBuffers(desc,
+                                               p.gpuInput.valid.get(),
+                                               permuted.as<void>(),
+                                               permuted.getDesc().flattenSize(),
+                                               hipMemcpyHostToDevice);
+                        g_swizzleCache.emplace(swizzleKey, std::move(permuted));
+                    }
                 }
                 else
                 {
