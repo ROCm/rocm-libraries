@@ -442,9 +442,14 @@ endfunction()
 
 function(_fetch_mxDataGenerator VERSION HASH)
     _determine_git_tag(v main)
+    if(MXDATAGENERATOR_SSH)
+        set(mxDataGenerator_url "git@${MXDATAGENERATOR_GIT_URL}:ROCm/mxDataGenerator.git")
+    else()
+        set(mxDataGenerator_url "https://${MXDATAGENERATOR_GIT_URL}/ROCm/mxDataGenerator.git")
+    endif()
     FetchContent_Declare(
         mxDataGenerator
-        GIT_REPOSITORY git@github.com:ROCm/mxDataGenerator.git
+        GIT_REPOSITORY ${mxDataGenerator_url}
         GIT_TAG ${GIT_TAG}
     )
     FetchContent_MakeAvailable(mxDataGenerator)

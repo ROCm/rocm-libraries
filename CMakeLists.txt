@@ -121,6 +121,9 @@ option(BUILD_TESTING "Build rocRoller test clients" ON)
 option(BUILD_DOCS "Build rocRoller documentation" ON)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 
+option(MXDATAGENERATOR_SSH "Fetch mxDataGenerator via SSH" OFF)
+set(MXDATAGENERATOR_GIT_URL "github.com" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
+
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
