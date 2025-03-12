@@ -47,6 +47,56 @@ class WMMASelection(MFMA):
 
         return kStr
 
+class MFMASelection950(MFMA):
+    versions = [(9,5,0)]
+
+    def WaitCount(self, writer):
+        kernel = writer.kernel
+        dataType = kernel["ProblemType"]["DataType"]
+        miM = kernel["MatrixInstM"]
+        miN = kernel["MatrixInstN"]
+        if dataType.isSingle() or dataType.isSingleComplex() or dataType.isHalf() or dataType.isBFloat16():
+            if miM == 4 and miN == 4:
+                return 2
+        elif dataType.isDouble() or dataType.isDoubleComplex():
+            if miM == 4 and miN == 4:
+                return 4
+        return 0
+
+    def __call__(self, writer, accOutStart, accOutEnd, in0, in1, accInStart, accInEnd, accStoreCIdx, firstIter):
+        kernel = writer.kernel
+        inType = kernel["ProblemType"]["DataType"].toNameAbbrev()
+        # for F8 hybrid cases, we need to change the inType of VMFMA inst as well
+        if kernel["SourceSwap"]:
+            dataType = kernel["ProblemType"]["DataType"]
+            if dataType.isFloat8BFloat8():
+                inType = DataType("B8F8").toNameAbbrev() # change the intype from F8B8 to B8F8
+            if dataType.isBFloat8Float8():
+                inType = DataType("F8B8").toNameAbbrev() # change the intype from B8F8 to F8B8
+
+        outType = kernel["ProblemType"]["DataType"].MIOutputTypeNameAbbrev()
+        if kernel["ProblemType"]["DataType"].isComplex():
+            inType = outType
+        accType = "a" if not kernel["MIArchVgpr"] else "v"
+        miM = kernel["MatrixInstM"]
+        miN = kernel["MatrixInstN"]
+        miK = kernel["MatrixInstK"]
+        miB = kernel["MatrixInstB"]
+        str0 = in1 if kernel["SourceSwap"] else in0
+        str1 = in0 if kernel["SourceSwap"] else in1
+
+        strB = ""
+        if miB > 1:
+            strB = "%ub_" % miB
+
+        # use const 0 for src2 in firstIter case
+        src2 = "0" if firstIter else "%s[%u:%u]"%(accType, accOutStart, accOutEnd)
+
+        kStr = "v_mfma_%s_%ux%ux%u_%s%s %s[%u+%u:%u+%u], %s, %s, %s%s" \
+            % (outType, miM, miN, miK, strB, inType, accType, accInStart, accStoreCIdx, accInEnd, accStoreCIdx, str0, str1, src2, writer.endLine)
+
+        return kStr
+
 class MFMASelection940(MFMA):
     versions = [(9,4,2)]
 

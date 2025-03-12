@@ -247,7 +247,7 @@ globalParameters["NumMergedFiles"] = 1            # The number of files that ker
 globalParameters["MaxFileName"] = 64              # If a file name would be longer than this, shorten it with a hash.
 globalParameters["SupportedISA"] = [(8,0,3),
                                     (9,0,0), (9,0,6), (9,0,8), (9,0,10),
-                                    (9,4,2),
+                                    (9,4,2), (9,5,0),
                                     (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1),
                                     (11,0,0), (11,0,1), (11,0,2),
                                     (11,5,1),
@@ -322,6 +322,7 @@ architectureMap = {
   'gfx908':'arcturus','gfx908:xnack+':'arcturus', 'gfx908:xnack-':'arcturus',
   'gfx90a':'aldebaran', 'gfx90a:xnack+':'aldebaran', 'gfx90a:xnack-':'aldebaran',
   'gfx942':'aquavanjaram942', 'gfx942:xnack+':'aquavanjaram942', 'gfx942:xnack-':'aquavanjaram942',
+  'gfx950':'gfx950', 'gfx950:xnack+':'gfx950', 'gfx950:xnack-':'gfx950',
   'gfx1010':'navi10', 'gfx1011':'navi12', 'gfx1012':'navi14',
   'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1034':'navi24', 'gfx1035':'rembrandt',
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33',
@@ -380,7 +381,7 @@ for i in validMacroTileSides:
     validMacroTiles.append([i, j])
 
 validMFMA = {}
-validMFMA["H"] = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [4,4,4,16]]
+validMFMA["H"] = [[32,32,4,2], [32,32,8,1], [16,16,4,4], [16,16,16,1], [16,16,32,1], [4,4,4,16]]
 validMFMA["S"] = [[32,32,1,2], [32,32,2,1], [16,16,1,4], [16,16,4,1], [4,4,1,16]]
 validMFMA["B"] = [[32,32,2,2], [32,32,4,1], [16,16,2,4], [16,16,8,1], [4,4,2,16]]
 validMFMA["D"] = [[16,16,4,1], [4,4,4,4]]
@@ -2139,17 +2140,18 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
 def GetArchCaps(isaVersion):
   rv = {}
   rv["HasEccHalf"]         = (isaVersion==(9,0,6) or isaVersion==(9,0,8) or isaVersion==(9,0,10) or \
-                              isaVersion==(9,4,2))
-  rv["Waitcnt0Disabled"]   = (isaVersion==(9,0,8) or isaVersion==(9,0,10) or isaVersion==(9,4,2))
+                              isaVersion==(9,4,2) or isaVersion==(9,5,0))
+  rv["Waitcnt0Disabled"]   = (isaVersion==(9,0,8) or isaVersion==(9,0,10) or isaVersion==(9,4,2) or isaVersion==(9,5,0))
   rv["SeparateVscnt"]      = isaVersion[0] in (10, 11)
   rv["CMPXWritesSGPR"]     = isaVersion[0] not in (10, 11, 12)
   rv["HasWave32"]          = isaVersion[0] in (10, 11, 12)
-  rv["HasAccCD"]           = (isaVersion==(9,0,10) or isaVersion==(9,4,2))
-  rv["ArchAccUnifiedRegs"] = (isaVersion==(9,0,10) or isaVersion==(9,4,2))
+  rv["HasAccCD"]           = (isaVersion==(9,0,10) or isaVersion==(9,4,2) or isaVersion==(9,5,0))
+  rv["ArchAccUnifiedRegs"] = (isaVersion==(9,0,10) or isaVersion==(9,4,2) or isaVersion==(9,5,0))
   rv["VgprBank"]           = isaVersion[0] in (10, 11, 12)
   rv["InstRename"]         = isaVersion[0]>=11
-  rv["CrosslaneWait"]      = isaVersion==(9,4,2)
+  rv["CrosslaneWait"]      = (isaVersion==(9,4,2) or isaVersion==(9,5,0))
   rv["ForceStoreSC1"]      = False
+  rv["HasDTLx4"]           = isaVersion==(9,5,0)
   
   return rv
 
@@ -2463,7 +2465,7 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     if os.name == "nt":
       globalParameters["CurrentISA"] = (9,0,6)
       printWarning("Failed to detect ISA so forcing (gfx906) on windows")
-  isasWithDisabledHWMonitor = ((9,4,2), (11,0,0), (11,0,1), (11,0,2), (12,0,0), (12,0,1))
+  isasWithDisabledHWMonitor = ((9,4,2), (9,5,0), (11,0,0), (11,0,1), (11,0,2), (12,0,0), (12,0,1))
   if globalParameters["CurrentISA"] in isasWithDisabledHWMonitor:
     isaString = ', '.join(map(gfxName, isasWithDisabledHWMonitor))
     printWarning(f"HardwareMonitor currently disabled for {isaString}")

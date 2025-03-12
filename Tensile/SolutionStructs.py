@@ -2597,6 +2597,7 @@ class Solution(collections.abc.Mapping):
   # determine can we use DirectToLds
   @staticmethod
   def isDirectToLdsDoable(state, tc):
+    isa = tuple(state["ISA"])
     numBytes = state["ProblemType"]["DataType"].numBytes()
     asem = state["AssertSummationElementMultiple"]
     gsu = state["GlobalSplitU"]
@@ -2614,9 +2615,11 @@ class Solution(collections.abc.Mapping):
 
     numBytes = state["ProblemType"]["DataType"].numBytes()
     numBytesPerLoad = int(state["GlobalLoadVectorWidth%c"%tc] * numBytes)
-    if numBytesPerLoad != 4:
-      reject(state, "DirectToLds can only be used with buffer loads requiring 1 register")
-      return False
+    # DTLx2 and DTLx4 for gfx950
+    if not globalParameters["ArchCaps"][isa]["HasDTLx4"]:
+      if numBytesPerLoad != 4:
+        reject(state, "DirectToLds can only be used with buffer loads requiring 1 register")
+        return False
 
     if numBytes < 4:
       # numBytes < 4 and TLU=false case
@@ -3709,6 +3712,8 @@ class Solution(collections.abc.Mapping):
           validDepthU = False
       else:
         GlobalLoadVectorWidthA = GlobalLoadVectorWidthAorig
+        # TODO: Enable DTLx2 and DTLx4 for gfx950
+        #if not globalParameters["ArchCaps"][isa]["HasDTLx4"]:
         if state["DirectToLdsA"] and (bpeAB * GlobalLoadVectorWidthA) > 4:
           # bpe * grvw must be <= 4 for DirectToLds (lds flag only for <= 32bit load)
           GlobalLoadVectorWidthA = 4 / bpeAB
@@ -3718,6 +3723,8 @@ class Solution(collections.abc.Mapping):
         if not Solution.setGlobalLoadVectorWidth(state, "A", totalElementsA, GlobalLoadVectorWidthA):
           validDepthU = False
         GlobalLoadVectorWidthB = GlobalLoadVectorWidthBorig
+        # TODO: Enable DTLx2 and DTLx4 for gfx950
+        #if not globalParameters["ArchCaps"][isa]["HasDTLx4"]:
         if (not state["DirectToVgprB"]) and state["DirectToLdsB"] and (bpeAB * GlobalLoadVectorWidthB) > 4:
           # bpe * grvw must be <= 4 for DirectToLds
           GlobalLoadVectorWidthB = 4 / bpeAB

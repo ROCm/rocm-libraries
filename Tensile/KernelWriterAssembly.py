@@ -2467,6 +2467,8 @@ class KernelWriterAssembly(KernelWriter):
     # Extra macro for DirectToLds loads with no destination register
     type_list = {
       'b32'       : 'dword',
+      'b64'       : 'dwordx2',
+      'b128'      : 'dwordx4',
       'u16'       : 'ushort'
     }
     for t in type_list:
@@ -6086,7 +6088,7 @@ class KernelWriterAssembly(KernelWriter):
   # we must use a longer 32 bit version.
   # Use when erroring out "invalid operand due to label > SIMM16"
   ##############################################################################
-  def longBranch(self, label, tmpSgpr):
+  def longBranch(self, label, tmpSgpr=None):
     kStr = ""
     if tmpSgpr is None:
       tmpSgpr = self.getTmpSgpr(3).idx()

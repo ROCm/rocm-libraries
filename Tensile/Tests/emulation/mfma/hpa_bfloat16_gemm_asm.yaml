@@ -1,5 +1,5 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx942, skip-gfx1010, skip-gfx1011, emulation1] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, emulation1] # not supported by arch
 
 GlobalParameters:
   NumElementsToValidate: 65536
