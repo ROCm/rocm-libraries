@@ -1,3 +1,0 @@
-{
-    "cmdlines":["-f csrgemm --precision d --device $dev --sizen 50 --alpha 1 --iters 4 --bench-x --rocalution ${ROCSPARSE_BENCH_DATA_DIR}/*.csr --bench-n 10" ]
-}
