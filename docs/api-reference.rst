@@ -150,15 +150,17 @@ For FP8 type Matmul, hipBLASLt supports the type combinations shown in the follo
 |       |       | BF8   | BF8   |             |          |          | FP32, FP16 | FP16      |
 +-------+-------+-------+-------+-------------+----------+----------+------------+-----------+
 
-To use FP16-specific data ordering `HIPBLASLT_ORDER_COL16_4R8` in `hipblasLtMatmul` for the gfx94x architecture, choose one of these valid combinations of transposes and orders of input and output matrices:
+To use special data ordering for ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16`` in ``hipblasLtMatmul`` for the gfx94x architecture, choose one of these valid combinations of transposes and orders of input and output matrices:
 
-+-------+-------+-------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
-| Atype | Btype | opA   |  opB  |  orderA                     |  orderB                     |  orderC             |   orderD            |
-+=======+=======+=======+=======+=============================+=============================+=====================+=====================+
-|  FP16 | FP16  |   T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
-+-------+-------+-------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
-|  FP16 | FP16  |   T   |   T   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
-+-------+-------+-------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+| Atype | Btype | CType | DType |  opA |  opB  |  orderA                     |  orderB                     |  orderC             |   orderD            |
++=======+=======+=======+=======+======+=======+=============================+=============================+=====================+=====================+
+|  FP8  | FP8   |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R16 |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP16 | FP16  |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  BF16 | BF16  |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 
 hipblasLtMatrixTransformDescCreate()
 ------------------------------------------

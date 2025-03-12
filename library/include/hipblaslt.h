@@ -189,6 +189,13 @@ typedef enum {
    * Leading dimension is the stride (in elements) to the beginning of next row in memory.
    */
   HIPBLASLT_ORDER_ROW = 1,
+  /**
+   * Data is ordered in column-major ordered tiles of composite tiles with total 16 columns and 64 rows.
+   * A tile is composed of 4 inner tiles in column-major with total 16 rows and 16 columns.
+   * Element offset within the tile is calculated as row%16+16*col+(row/16)*16*16.
+   * Note that for this order, the number of columns(rows) of the tensor has to be multiple of 16(64) or
+   * pre-padded to 16(64).
+   */
   HIPBLASLT_ORDER_COL16_4R16 = 100,
   /**
    * Data is ordered in column-major ordered tiles of composite tiles with total 16 columns and 32 rows.
