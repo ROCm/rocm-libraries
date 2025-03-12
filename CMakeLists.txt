@@ -108,10 +108,10 @@ endif()
 
 if (ADDRESS_SANITIZER_ENABLED)
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx90a:xnack+;gfx942:xnack+" )
+        TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950" )
 endif()
 
 # Check if offload compression is supported

@@ -21,11 +21,12 @@ List of supported CDNA architectures:
 * gfx940
 * gfx941
 * gfx942
+* gfx950
 
 .. note::
-    gfx9 = gfx908, gfx90a, gfx940, gfx941, gfx942
+    gfx9 = gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950
 
-    gfx940+ = gfx940, gfx941, gfx942
+    gfx940+ = gfx940, gfx941, gfx942, gfx950
 
 
 Supported data types

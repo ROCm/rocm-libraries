@@ -65,10 +65,10 @@ As a general rule, 8GB of system memory is required for a full hipTensor build. 
 
 GPU support
 ^^^^^^^^^^^
-AMD CDNA class GPU featuring matrix core support: `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942` labeled as `gfx9`.
+AMD CDNA class GPU featuring matrix core support: `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942`, `gfx950` labeled as `gfx9`.
 
 .. note::
-    Double precision FP64 datatype support requires `gfx90a`, `gfx940`, `gfx941` or `gfx942`.
+    Double precision FP64 datatype support requires `gfx90a`, `gfx940`, `gfx941`, `gfx942` or `gfx950`.
 
 Dependencies
 ^^^^^^^^^^^^
@@ -160,7 +160,7 @@ Below are the project options available to build hipTensor library with or witho
         -   **Default Value**
     *   -   GPU_TARGETS
         -   Build code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``
     *   -   HIPTENSOR_BUILD_TESTS
         -   Build Tests
         -   ON
