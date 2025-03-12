@@ -161,7 +161,15 @@ public:
     void OnTestProgramEnd(const UnitTest& unit_test) override
     {
         if(skipped_tests)
+        {
             rocblas_cout << "[ SKIPPED  ] " << skipped_tests << " tests." << std::endl;
+
+            // repeat in case of too many skipped
+            rocblas_cout << "[ PASSED   ] " << unit_test.successful_test_count() << " tests."
+                         << std::endl;
+            rocblas_cout << "[ FAILED   ] " << unit_test.failed_test_count() << " tests."
+                         << std::endl;
+        }
         eventListener->OnTestProgramEnd(unit_test);
     }
 };
