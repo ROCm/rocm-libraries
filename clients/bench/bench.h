@@ -149,46 +149,80 @@ std::vector<fft_params::fft_brick> get_output_bricks(const Tparams& params)
     return bricks;
 }
 
-// Allocate input buffers for a bench run.
+// Allocate input/output buffers for a bench run.
 template <typename Tparams>
 void alloc_bench_bricks(const Tparams&                            params,
-                        const std::vector<fft_params::fft_brick>& bricks,
-                        fft_array_type                            type,
-                        std::vector<gpubuf>&                      buffers,
+                        const std::vector<fft_params::fft_brick>& ibricks,
+                        const std::vector<fft_params::fft_brick>& obricks,
+                        std::vector<gpubuf>&                      ibuffers,
+                        std::vector<gpubuf>&                      obuffer_data,
+                        std::vector<gpubuf>*&                     obuffers,
                         std::vector<hostbuf>&                     host_buffers,
                         bool                                      is_host_gen)
 {
-    auto       elem_size = var_size<size_t>(params.precision, type);
-    const bool is_planar
-        = type == fft_array_type_complex_planar || type == fft_array_type_hermitian_planar;
-    // alloc 2x buffers, each half size for planar
-    if(is_planar)
-        elem_size /= 2;
-
-    for(const auto& b : bricks)
-    {
-        rocfft_scoped_device dev(b.device);
-
-        size_t brick_size_bytes = compute_ptrdiff(b.length(), b.stride, 0, 0) * elem_size;
-        buffers.emplace_back();
-        if(buffers.back().alloc(brick_size_bytes) != hipSuccess)
-            throw std::runtime_error("hipMalloc failed");
+    auto alloc_buffers = [&params, &host_buffers](const std::vector<fft_params::fft_brick>& bricks,
+                                                  fft_array_type                            type,
+                                                  std::vector<gpubuf>&                      output,
+                                                  bool is_host_gen) {
+        auto       elem_size = var_size<size_t>(params.precision, type);
+        const bool is_planar
+            = type == fft_array_type_complex_planar || type == fft_array_type_hermitian_planar;
+        // alloc 2x buffers, each half size for planar
         if(is_planar)
+            elem_size /= 2;
+
+        for(const auto& b : bricks)
         {
-            buffers.emplace_back();
-            if(buffers.back().alloc(brick_size_bytes) != hipSuccess)
+            rocfft_scoped_device dev(b.device);
+
+            size_t brick_size_bytes = compute_ptrdiff(b.length(), b.stride, 0, 0) * elem_size;
+            output.emplace_back();
+            if(output.back().alloc(brick_size_bytes) != hipSuccess)
                 throw std::runtime_error("hipMalloc failed");
-        }
-        if(is_host_gen)
-        {
-            host_buffers.emplace_back();
-            host_buffers.back().alloc(brick_size_bytes);
             if(is_planar)
+            {
+                output.emplace_back();
+                if(output.back().alloc(brick_size_bytes) != hipSuccess)
+                    throw std::runtime_error("hipMalloc failed");
+            }
+            if(is_host_gen)
             {
                 host_buffers.emplace_back();
                 host_buffers.back().alloc(brick_size_bytes);
+                if(is_planar)
+                {
+                    host_buffers.emplace_back();
+                    host_buffers.back().alloc(brick_size_bytes);
+                }
             }
         }
+    };
+
+    // If brick shape differs, inplace is only allowed for single
+    // bricks.  e.g. in-place real-complex
+    if(params.placement == fft_placement_inplace)
+    {
+        if(ibricks.size() != 1 && obricks.size() != 1 && ibricks != obricks)
+            throw std::runtime_error(
+                "in-place transform to different brick shapes only allowed for single bricks");
+
+        // allocate the larger of the two bricks
+        auto isize_bytes = compute_ptrdiff(ibricks.front().length(), ibricks.front().stride, 0, 0)
+                           * var_size<size_t>(params.precision, params.itype);
+        auto osize_bytes = compute_ptrdiff(obricks.front().length(), obricks.front().stride, 0, 0)
+                           * var_size<size_t>(params.precision, params.otype);
+
+        alloc_buffers(isize_bytes > osize_bytes ? ibricks : obricks,
+                      isize_bytes > osize_bytes ? params.itype : params.otype,
+                      ibuffers,
+                      is_host_gen);
+        obuffers = &ibuffers;
+    }
+    else
+    {
+        alloc_buffers(ibricks, params.itype, ibuffers, is_host_gen);
+        alloc_buffers(obricks, params.otype, obuffer_data, false);
+        obuffers = &obuffer_data;
     }
 }
 

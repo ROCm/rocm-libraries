@@ -538,6 +538,17 @@ public:
         // location of the brick
         int rank   = 0;
         int device = 0;
+
+        bool operator==(const fft_brick& other) const
+        {
+            return this->lower == other.lower && this->upper == other.upper
+                   && this->stride == other.stride && this->rank == other.rank
+                   && this->device == other.device;
+        }
+        bool operator!=(const fft_brick& other) const
+        {
+            return !(*this == other);
+        }
     };
 
     struct fft_field

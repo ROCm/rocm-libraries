@@ -585,7 +585,10 @@ int main(int argc, char* argv[])
     auto ibricks = get_input_bricks(params);
     auto obricks = get_output_bricks(params);
 
-    alloc_bench_bricks(params, ibricks, params.itype, ibuffer, ibuffer_cpu, is_host_gen);
+    std::vector<gpubuf>  obuffer_data;
+    std::vector<gpubuf>* obuffer = nullptr;
+    alloc_bench_bricks(
+        params, ibricks, obricks, ibuffer, obuffer_data, obuffer, ibuffer_cpu, is_host_gen);
     init_bench_input(params, ibricks, ibuffer, ibuffer_cpu, is_host_gen);
 
     for(unsigned int i = 0; i < ibuffer.size(); ++i)
@@ -607,17 +610,6 @@ int main(int argc, char* argv[])
         }
     }
 
-    // GPU output buffer:
-    std::vector<gpubuf>  obuffer_data;
-    std::vector<gpubuf>* obuffer = &obuffer_data;
-    if(params.placement == fft_placement_inplace)
-    {
-        obuffer = &ibuffer;
-    }
-    else
-    {
-        alloc_bench_bricks(params, obricks, params.otype, obuffer_data, ibuffer_cpu, false);
-    }
     std::vector<void*> pobuffer(obuffer->size());
     for(unsigned int i = 0; i < obuffer->size(); ++i)
     {
