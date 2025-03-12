@@ -1,3 +1,0 @@
-{
-    "cmdlines":["-f csrsort --bench-x --rocalution ${ROCSPARSE_BENCH_DATA_DIR}/*.csr --iters 400 --bench-n 10" ]
-}

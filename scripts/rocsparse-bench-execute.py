@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # ########################################################################
-# Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,12 +35,12 @@ def main():
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,description="Execute a set of rocsparse-bench commands from a .json file", epilog="The .json file must contain an array 'cmdlines' of strings, where each string contains the list of options to pass to rocsparse-bench to execute a test.\nExample:\n {\n   \"cmdlines\": [\"-f csrmv\",\n                \"-f csrmm\"]\n }\n")
     parser.add_argument('-w', '--workingdir',     required=False, default = './')
     parser.add_argument('-v', '--verbose',         required=False, default = False, action = "store_true")
-    parser.add_argument('-d', '--debug',         required=False, default = False, action = "store_true")
+    parser.add_argument('-d', '--device',         required=False, default = 0)
 
     user_args, unknown_args = parser.parse_known_args()
     verbose=user_args.verbose
     workingdir = user_args.workingdir
-    debug=user_args.debug
+    dev=user_args.device
     datadir=os.getenv('ROCSPARSE_BENCH_DATA_DIR')
     if datadir == None:
         print('//rocsparse-bench-execute:error You must define environment variable ROCSPARSE_BENCH_DATA_DIR as the directory of sparse matrices.')
@@ -64,6 +64,8 @@ def main():
     for i in range(num_cmdlines):
         # execute the cmdline
         full_cmd = prog + " " + cmdlines[i];
+        full_cmd=full_cmd.replace('$dev',str(dev))
+        full_cmd=full_cmd.replace('${dev}',str(dev))
         print('//rocsparse-bench-execute:verbose:execute command "' + full_cmd+ '"')
         full_cmd=full_cmd.split(' ')
         subprocess_arg=[]
