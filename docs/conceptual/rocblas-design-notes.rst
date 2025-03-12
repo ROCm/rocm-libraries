@@ -171,6 +171,9 @@ all ``rocblas_int`` arguments are replaced by the type name
 precision. Function-level documentation is not repeated for these APIs because they are identical in behavior to the LP64 versions.
 However, functions which support this alternate API include the line:
 ``This function supports the 64-bit integer interface (ILP64)``.
+When parameters exceeding the internal maximum supported size are provided
+the functions will return ``rocblas_status_invalid_size``.  This is most often for symmetric matrix dimensions larger than the ``int32_t`` max value,
+for which such large memory allocation is not practical.
 
 Column-major storage and 1-based indexing
 -----------------------------------------
