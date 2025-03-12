@@ -185,7 +185,8 @@ rocblas_Xgemmt + batched, strided_batched
    :outline:
 .. doxygenfunction:: rocblas_zgemmt
 
-The ``gemmt`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemmt`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sgemmt_batched
    :outline:
@@ -195,7 +196,8 @@ The ``gemmt`` functions support the ``_64`` interface. See the :ref:`ILP64 API` 
    :outline:
 .. doxygenfunction:: rocblas_zgemmt_batched
 
-The ``gemmt_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemmt_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+See the :ref:`ILP64 API` section.
 
 .. doxygenfunction:: rocblas_sgemmt_strided_batched
    :outline:
@@ -205,4 +207,5 @@ The ``gemmt_batched`` functions support the ``_64`` interface. See the :ref:`ILP
    :outline:
 .. doxygenfunction:: rocblas_zgemmt_strided_batched
 
-The ``gemmt_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
+The ``gemmt_strided_batched`` functions support the ``_64`` interface. Parameter ``n`` larger than ``int32_t`` max value is not currently supported.
+See the :ref:`ILP64 API` section.
