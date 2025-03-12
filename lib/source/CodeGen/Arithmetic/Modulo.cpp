@@ -208,7 +208,7 @@ namespace rocRoller
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
         AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,
-                    std::format("ModuloGenerator<{}, {}> only implemented for wave32 or wave64",
+                    fmt::format("ModuloGenerator<{}, {}> only implemented for wave32 or wave64",
                                 toString(Register::Type::Scalar),
                                 toString(DataType::Int64)));
 
@@ -531,7 +531,7 @@ namespace rocRoller
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
         AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,
-                    std::format("ModuloGenerator<{}, {}> only implemented for wave32 or wave64",
+                    fmt::format("ModuloGenerator<{}, {}> only implemented for wave32 or wave64",
                                 toString(Register::Type::Vector),
                                 toString(DataType::Int64)));
 

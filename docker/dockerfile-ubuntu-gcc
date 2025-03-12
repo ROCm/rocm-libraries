@@ -39,18 +39,17 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Propagate the environment variable HTTP_PROXY into the apt config if it's set.
 RUN [ -z ${HTTP_PROXY} ] || (echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/proxy)
 
-# Add PPA with libstdc++-13-dev for C++20 features (e.g. std::format)
-# We could remove this once libc++-13 or higher is made available through a ROCm/HIP package
+# Add PPA with g++-13
 RUN apt-get update && apt-get reinstall -y software-properties-common && add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
 RUN apt-get update && apt-get install -y \
    bc \
    gdb \
    libboost-container1.74-dev \
+   libfmt-dev \
    libopenblas-dev \
    libtinfo5 \
    libncurses-dev \
-   libstdc++-13-dev \
    m4 \
    make \
    nano \

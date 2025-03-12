@@ -29,7 +29,9 @@
 // Only need the forward declaration of LogLevel
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
-#include <format>
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <string>
 
 namespace rocRoller
@@ -43,26 +45,26 @@ namespace rocRoller
             void log(LogLevel level, const std::string& str);
 
             template <typename... Args>
-            void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args)
+            void log(LogLevel level, fmt::format_string<Args...> formatStr, Args&&... args)
             {
                 if(should_log(level))
                 {
                     std::string buf;
-                    std::vformat_to(
-                        std::back_inserter(buf), fmt.get(), std::make_format_args(args...));
+                    fmt::vformat_to(
+                        std::back_inserter(buf), formatStr, fmt::make_format_args(args...));
                     log(level, buf);
                 }
             }
 
-#define add_logging_method(method_name, level_name)                          \
-    inline void method_name(const std::string& str)                          \
-    {                                                                        \
-        log(LogLevel::level_name, str);                                      \
-    }                                                                        \
-    template <typename... Args>                                              \
-    inline void method_name(std::format_string<Args...> fmt, Args&&... args) \
-    {                                                                        \
-        log(LogLevel::level_name, fmt, std::forward<Args>(args)...);         \
+#define add_logging_method(method_name, level_name)                                \
+    inline void method_name(const std::string& str)                                \
+    {                                                                              \
+        log(LogLevel::level_name, str);                                            \
+    }                                                                              \
+    template <typename... Args>                                                    \
+    inline void method_name(fmt::format_string<Args...> formatStr, Args&&... args) \
+    {                                                                              \
+        log(LogLevel::level_name, formatStr, std::forward<Args>(args)...);         \
     }
 
             add_logging_method(trace, Trace);
@@ -85,23 +87,23 @@ namespace rocRoller
         }
 
         template <typename... Args>
-        inline void log(LogLevel level, std::format_string<Args...> fmt, Args&&... args)
+        inline void log(LogLevel level, fmt::format_string<Args...> formatStr, Args&&... args)
         {
             static auto defaultLog = getLogger();
-            defaultLog->log(level, fmt, std::forward<Args>(args)...);
+            defaultLog->log(level, formatStr, std::forward<Args>(args)...);
         }
 
-#define declare_logging_function(name)                                \
-    inline void name(const std::string& str)                          \
-    {                                                                 \
-        static auto defaultLog = getLogger();                         \
-        defaultLog->name(str);                                        \
-    }                                                                 \
-    template <typename... Args>                                       \
-    inline void name(std::format_string<Args...> fmt, Args&&... args) \
-    {                                                                 \
-        static auto defaultLog = getLogger();                         \
-        defaultLog->name(fmt, std::forward<Args>(args)...);           \
+#define declare_logging_function(name)                                      \
+    inline void name(const std::string& str)                                \
+    {                                                                       \
+        static auto defaultLog = getLogger();                               \
+        defaultLog->name(str);                                              \
+    }                                                                       \
+    template <typename... Args>                                             \
+    inline void name(fmt::format_string<Args...> formatStr, Args&&... args) \
+    {                                                                       \
+        static auto defaultLog = getLogger();                               \
+        defaultLog->name(formatStr, std::forward<Args>(args)...);           \
     }
 
         declare_logging_function(trace);

@@ -74,9 +74,6 @@ def runTestCommand (platform, project)
                 set -x
                 cd ${project.paths.project_build_prefix}/build/
 
-                # Add the node install to our PATH.
-                source ../utils/graupel/setup-node
-
                 echo Using `nproc` threads for testing.
                 OMP_NUM_THREADS=8 ctest -j `nproc` --output-on-failure ${testExclude}
             """

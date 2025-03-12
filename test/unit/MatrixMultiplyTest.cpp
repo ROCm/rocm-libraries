@@ -875,7 +875,7 @@ namespace MatrixMultiplyTest
             typeStr = "bf16";
             break;
         default:
-            Throw<FatalError>(std::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
                                           toString(typeAB)));
         }
 
@@ -884,7 +884,7 @@ namespace MatrixMultiplyTest
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
         std::string const mfmaMnemonic{
-            std::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
+            fmt::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
         std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
 
         uint const numMFMAs            = 4;
@@ -1038,7 +1038,7 @@ namespace MatrixMultiplyTest
         uint const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
-            std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+            fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         auto const [transA, transB] = transOp;
 
@@ -1075,7 +1075,7 @@ namespace MatrixMultiplyTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 
@@ -1108,7 +1108,7 @@ namespace MatrixMultiplyTest
         uint const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
-            std::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+            fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         auto const [transA, transB] = transOp;
 
@@ -1151,7 +1151,7 @@ namespace MatrixMultiplyTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 
@@ -1224,7 +1224,7 @@ namespace MatrixMultiplyTest
         uint const waveK = MFMAK;
 
         std::string const mfmaMnemonic{
-            std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+            fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         auto const transA = transOp.first == "T";
         auto const transB = transOp.second == "T";
@@ -1257,7 +1257,7 @@ namespace MatrixMultiplyTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 

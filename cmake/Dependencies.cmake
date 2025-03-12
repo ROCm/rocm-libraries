@@ -43,7 +43,6 @@ endif()
 set(_rocroller_all_local_deps
     spdlog
     msgpack
-    yaml-cpp
     Catch2
     CLI11
     libdivide
@@ -51,6 +50,7 @@ set(_rocroller_all_local_deps
 )
 # Dependencies where we never look for a local version
 set(_rocroller_all_remote_deps
+    yaml-cpp
     isa_spec_manager
     mrisa_xml
     googletest
@@ -200,7 +200,8 @@ function(_fetch_spdlog VERSION HASH)
     _determine_git_tag(v v1.x)
 
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-    set(SPDLOG_USE_STD_FORMAT ON)
+    set(SPDLOG_USE_STD_FORMAT OFF)
+    set(SPDLOG_FMT_EXTERNAL ON)
     set(SPDLOG_BUILD_PIC ON)
     set(SPDLOG_INSTALL ON)
     FetchContent_Declare(

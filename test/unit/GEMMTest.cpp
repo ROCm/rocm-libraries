@@ -1683,7 +1683,7 @@ namespace GEMMDriverTest
             typeStr = "bf16";
             break;
         default:
-            Throw<FatalError>(std::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
+            Throw<FatalError>(fmt::format("Unexpected data type: {}. (Allowed: Half and Bfloat16)",
                                           toString(typeAB)));
         }
 
@@ -1735,7 +1735,7 @@ namespace GEMMDriverTest
                 numTrLoads += /*number of B tiles*/ 4 * numMFMAsPerWave * trLoadsPerWave;
         }
 
-        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
+        auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
 
         checkGEMMF16(m_context,
                      mfma,
@@ -1965,7 +1965,7 @@ namespace GEMMDriverTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 
@@ -2013,7 +2013,7 @@ namespace GEMMDriverTest
 
         bool const isF6 = typeAB == DataType::FP6 || typeAB == DataType::BF6;
 
-        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+        auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         checkGEMMF8F6F4(m_context,
                         mfma,
@@ -2135,11 +2135,11 @@ namespace GEMMDriverTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 
-        auto const mfma{std::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+        auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
         check_mfma_f8f6f4(m_context, mfma, modifiers);
 
         uint const totalWorkitems = gemm.workgroupSizeX * gemm.workgroupSizeY;
@@ -2214,7 +2214,7 @@ namespace GEMMDriverTest
             break;
         default:
             Throw<FatalError>(
-                std::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
                             toString(typeAB)));
         }
 
@@ -2266,7 +2266,7 @@ namespace GEMMDriverTest
 
         bool const isF6 = typeAB == DataType::FP6 || typeAB == DataType::BF6;
 
-        auto const mfma{std::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+        auto const mfma{fmt::format("v_mfma_scale_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         checkGEMMF8F6F4(m_context,
                         mfma,
@@ -2755,7 +2755,7 @@ namespace GEMMDriverTest
 
         basicGEMMMixed(typeA, typeB, problem);
 
-        auto const mfma{std::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
+        auto const mfma{fmt::format("v_mfma_f32_{}x{}x{}_f8f6f4", waveM, waveN, waveK)};
 
         std::string modifierA = "defaultModiferA";
         std::string modifierB = "defaultModiferB";

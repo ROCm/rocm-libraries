@@ -95,7 +95,7 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>(std::format("AddGenerator<{}, {}> not implemented for {}.\n",
+            Throw<FatalError>(fmt::format("AddGenerator<{}, {}> not implemented for {}.\n",
                                           toString(Register::Type::Vector),
                                           toString(DataType::Int32),
                                           gpu.toString()));

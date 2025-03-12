@@ -40,9 +40,6 @@ include(CTest)
 # Header only/static, not visible to library users, so not necessary to use system packages
 rocroller_add_dependency(googletest VERSION 1.12.1)
 rocroller_add_dependency(Catch2 VERSION 3.7.0)
-rocroller_add_dependency(
-    mxDataGenerator HASH 2a26ecaf6df996e716534a43c11f29aa0d4723a0
-)
 
 # Component stand-alone test
 add_executable(ComponentTest standalone/ComponentTest.cpp)
@@ -52,21 +49,6 @@ target_link_libraries(ComponentTest rocroller_interface msgpackc-cxx)
 target_include_directories(
     ComponentTest PRIVATE ${PROJECT_SOURCE_DIR}/lib/include
 )
-
-add_library(
-    common_test_utilities OBJECT common/CommonGraphs.cpp common/Utilities.cpp common/mxDataGen.cpp
-)
-
-target_compile_options(
-    common_test_utilities PUBLIC ${COROUTINES_COMPILE_OPTION}
-                                 ${EXTRA_COMPILE_OPTIONS}
-)
-target_link_options(common_test_utilities PUBLIC ${EXTRA_LINK_OPTIONS})
-target_link_libraries(
-    common_test_utilities rocroller_interface openblas mxDataGenerator
-)
-
-target_include_directories(common_test_utilities PUBLIC common/)
 
 set(
     rocRollerTests_SOURCES
@@ -171,7 +153,6 @@ target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
     rocRollerTests
     common_test_utilities
-    msgpackc-cxx
     gtest_main
     gmock
     OpenMP::OpenMP_CXX
@@ -238,7 +219,6 @@ target_link_options(rocRollerTests_catch PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
     rocRollerTests_catch
     common_test_utilities
-    msgpackc-cxx
     Catch2::Catch2WithMain
     OpenMP::OpenMP_CXX
 )
@@ -271,7 +251,6 @@ target_link_libraries(
            rocroller_interface
            gtest_main
            gmock
-           msgpackc-cxx
            isa_spec_manager
 )
 

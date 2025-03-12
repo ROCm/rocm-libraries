@@ -110,7 +110,7 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>(std::format("VectorSubUInt32CarryOut not implemented for {}\n",
+            Throw<FatalError>(fmt::format("VectorSubUInt32CarryOut not implemented for {}\n",
                                           arch.target().toString()));
         }
     }
@@ -186,7 +186,7 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>(std::format("VectorSubRevUInt32CarryOut not implemented for {}\n",
+            Throw<FatalError>(fmt::format("VectorSubRevUInt32CarryOut not implemented for {}\n",
                                           arch.target().toString()));
         }
     }

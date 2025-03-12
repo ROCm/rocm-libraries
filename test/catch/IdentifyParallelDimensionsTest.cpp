@@ -110,7 +110,7 @@ struct HasKernelArgMatcher : Catch::Matchers::MatcherGenericBase
 
     std::string describe() const override
     {
-        return std::format("Has an argument starting with {}", name);
+        return fmt::format("Has an argument starting with {}", name);
     }
 
     std::string name;

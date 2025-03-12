@@ -960,7 +960,7 @@ namespace rocRoller
         else
         {
             Throw<FatalError>(
-                std::format("Barriers are not implemented for {}.\n", gpu.toString()));
+                fmt::format("Barriers are not implemented for {}.\n", gpu.toString()));
         }
     }
 

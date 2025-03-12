@@ -153,7 +153,7 @@ namespace rocRoller
                                          hipStream_t               stream)
     {
         // TODO: implement formatter for container and library types
-        Log::info(std::format("Launching kernel {}: Workgroup: [{}, {}, {}], Workitems: [{}, {}, "
+        Log::info(fmt::format("Launching kernel {}: Workgroup: [{}, {}, {}], Workitems: [{}, {}, "
                               "{}]\nKernel arguments: {}\n",
                               m_kernelName,
                               invocation.workgroupSize[0],

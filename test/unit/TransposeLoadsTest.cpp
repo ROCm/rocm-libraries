@@ -461,9 +461,8 @@ namespace TransposeLoadsTest
         const uint     dsReadWriteBits = bitsPerTransposeLoad(elementBits);
         std::string    mnemonic        = transposeLoadMnemonic(elementBits);
 
-        // FIXME: waiting for std::format :(
-        std::string globalLoadDWordX{"global_load_dwordx" + std::to_string(dwordX) + " "};
-        std::string dsWriteBX{"ds_write_b" + std::to_string(dsReadWriteBits) + " "};
+        std::string globalLoadDWordX{fmt::format("global_load_dwordx{} ", dwordX)};
+        std::string dsWriteBX{fmt::format("ds_write_b{} ", dsReadWriteBits)};
 
         std::string code = m_context->instructions()->toString();
 

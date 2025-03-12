@@ -238,7 +238,6 @@ configure_file(
 add_subdirectory(GPUArchitectureGenerator)
 add_subdirectory(lib)
 
-rocm_package_add_dependencies(COMPONENT runtime DEPENDS "libstdc++6 >= 13.1.0")
 rocm_package_add_deb_dependencies(
     COMPONENT devel DEPENDS liboost-container1.74-dev
 )
@@ -246,7 +245,16 @@ rocm_package_add_rpm_dependencies(
     COMPONENT devel DEPENDS liboost-container1.74-devel
 )
 
+rocm_package_add_deb_dependencies(
+    COMPONENT devel DEPENDS libfmt-dev
+)
+rocm_package_add_rpm_dependencies(
+    COMPONENT devel DEPENDS libfmt-devel
+)
+
 if(BUILD_CLIENTS OR BUILD_TESTING)
+    add_subdirectory(test/common)
+
     if(NOT CLIENTS_OS)
         rocm_set_os_id(CLIENTS_OS)
         string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)

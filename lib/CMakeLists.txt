@@ -261,8 +261,14 @@ set_target_properties(
         SOVERSION ${ROCROLLER_SOVERSION}
 )
 
-target_link_libraries(rocroller PRIVATE spdlog::spdlog_header_only)
+find_package(fmt CONFIG REQUIRED)
 
+target_link_libraries(rocroller
+    PRIVATE
+    spdlog::spdlog_header_only
+    PUBLIC
+    fmt::fmt
+)
 if(ROCROLLER_EMBED_ARCH_DEF)
     target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocRoller::GPUArchitecture_def>)
 else()

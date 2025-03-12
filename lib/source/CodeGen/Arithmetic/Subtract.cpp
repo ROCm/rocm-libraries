@@ -90,7 +90,7 @@ namespace rocRoller
         }
         else
         {
-            Throw<FatalError>(std::format("SubtractGenerator<{}, {}> not implemented for {}\n",
+            Throw<FatalError>(fmt::format("SubtractGenerator<{}, {}> not implemented for {}\n",
                                           toString(Register::Type::Vector),
                                           toString(DataType::Int32),
                                           gpu.toString()));
