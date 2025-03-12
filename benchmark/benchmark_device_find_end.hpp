@@ -44,7 +44,7 @@
 #include <vector>
 
 template<typename Key = int, typename Config = rocprim::default_config>
-struct device_find_end_benchmark : public config_autotune_interface
+struct device_find_end_benchmark : public benchmark_utils::autotune_interface
 {
     size_t key_size_  = 10;
     bool   repeating_ = false;
@@ -64,14 +64,12 @@ struct device_find_end_benchmark : public config_autotune_interface
             + ",value_type:" + std::string(Traits<Key>::name()) + ",cfg:default_config}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using key_type    = Key;
         using output_type = size_t;
 
@@ -137,61 +135,22 @@ struct device_find_end_benchmark : public config_autotune_interface
 
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(rocprim::find_end(d_temporary_storage,
-                                        temporary_storage_bytes,
-                                        d_input,
-                                        d_keys_input,
-                                        d_output,
-                                        size,
-                                        key_size,
-                                        compare_op,
-                                        stream,
-                                        false));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state,
+                  [&]
+                  {
+                      HIP_CHECK(rocprim::find_end(d_temporary_storage,
+                                                  temporary_storage_bytes,
+                                                  d_input,
+                                                  d_keys_input,
+                                                  d_output,
+                                                  size,
+                                                  key_size,
+                                                  compare_op,
+                                                  stream,
+                                                  false));
+                  });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                HIP_CHECK(rocprim::find_end(d_temporary_storage,
-                                            temporary_storage_bytes,
-                                            d_input,
-                                            d_keys_input,
-                                            d_output,
-                                            size,
-                                            key_size,
-                                            compare_op,
-                                            stream,
-                                            false));
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(*d_input));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));

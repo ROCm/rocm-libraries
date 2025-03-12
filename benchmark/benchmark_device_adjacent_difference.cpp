@@ -43,7 +43,7 @@
 #endif
 
 #define CREATE_BENCHMARK(T, Left, Aliasing) \
-    executor.queue_instance<device_adjacent_difference_benchmark<T, Left, Aliasing>>();
+    executor.queue_instance(device_adjacent_difference_benchmark<T, Left, Aliasing>());
 
 // clang-format off
 #define CREATE_BENCHMARKS(T) \

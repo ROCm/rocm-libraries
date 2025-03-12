@@ -1168,7 +1168,8 @@ public:
           const managed_seed& seed,
           size_t              batch_iterations,
           size_t              warmup_iterations,
-          bool                cold)
+          bool                cold,
+          bool                record_as_whole)
         : stream(stream)
         , size(size)
         , bytes(size)
@@ -1176,6 +1177,7 @@ public:
         , batch_iterations(batch_iterations)
         , warmup_iterations(warmup_iterations)
         , cold(cold)
+        , record_as_whole(record_as_whole)
         , events(batch_iterations * 2)
     {}
 
@@ -1196,31 +1198,48 @@ public:
         // Run
         for(auto _ : gbench_state)
         {
-            for(size_t i = 0; i < batch_iterations; ++i)
+            if(record_as_whole)
             {
-                if(cold)
+                HIP_CHECK(hipEventRecord(events[0], stream));
+                for(size_t i = 0; i < batch_iterations; ++i)
                 {
-                    clear_gpu_cache(stream);
+                    kernel();
+                }
+                HIP_CHECK(hipEventRecord(events[1], stream));
+                HIP_CHECK(hipEventSynchronize(events[1]));
+
+                float elapsed_mseconds;
+                HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, events[0], events[1]));
+                gbench_state.SetIterationTime(elapsed_mseconds / 1000);
+            }
+            else
+            {
+                for(size_t i = 0; i < batch_iterations; ++i)
+                {
+                    if(cold)
+                    {
+                        clear_gpu_cache(stream);
+                    }
+
+                    HIP_CHECK(hipEventRecord(events[i * 2], stream));
+                    kernel();
+                    HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
                 }
 
-                HIP_CHECK(hipEventRecord(events[i * 2], stream));
-                kernel();
-                HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
-            }
+                // Wait until the last record event has completed
+                HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
 
-            // Wait until the last record event has completed
-            HIP_CHECK(hipEventSynchronize(events[batch_iterations * 2 - 1]));
-
-            // Accumulate the total elapsed time
-            double elapsed_mseconds = 0.0;
-            for(size_t i = 0; i < batch_iterations; i++)
-            {
-                float iteration_mseconds;
-                HIP_CHECK(
-                    hipEventElapsedTime(&iteration_mseconds, events[i * 2], events[i * 2 + 1]));
-                elapsed_mseconds += iteration_mseconds;
+                // Accumulate the total elapsed time
+                double elapsed_mseconds = 0.0;
+                for(size_t i = 0; i < batch_iterations; i++)
+                {
+                    float iteration_mseconds;
+                    HIP_CHECK(
+                        hipEventElapsedTime(&iteration_mseconds, events[i * 2], events[i * 2 + 1]));
+                    elapsed_mseconds += iteration_mseconds;
+                }
+                gbench_state.SetIterationTime(elapsed_mseconds / 1000);
             }
-            gbench_state.SetIterationTime(elapsed_mseconds / 1000);
         }
 
         for(size_t i = 0; i < batch_iterations * 2; i++)
@@ -1241,6 +1260,7 @@ public:
     size_t       size;
     size_t       bytes;
     managed_seed seed;
+    size_t       batch_iterations;
 
 private:
     // Zeros a 256 MiB buffer, used to clear the cache before each kernel call.
@@ -1248,18 +1268,18 @@ private:
     // It is currently not possible to fetch the L3 cache size from the runtime.
     inline void clear_gpu_cache(hipStream_t stream)
     {
-        constexpr size_t l2_size = 256 * MiB;
-        static void*     l2_buf  = nullptr;
-        if(!l2_buf)
+        constexpr size_t buf_size = 256 * MiB;
+        static void*     buf      = nullptr;
+        if(!buf)
         {
-            HIP_CHECK(hipMalloc(&l2_buf, l2_size));
+            HIP_CHECK(hipMalloc(&buf, buf_size));
         }
-        HIP_CHECK(hipMemsetAsync(l2_buf, 0, l2_size, stream));
+        HIP_CHECK(hipMemsetAsync(buf, 0, buf_size, stream));
     }
 
-    size_t                  batch_iterations;
     size_t                  warmup_iterations;
     bool                    cold;
+    bool                    record_as_whole;
     std::vector<hipEvent_t> events;
 };
 
@@ -1314,13 +1334,8 @@ public:
     }
 
     template<typename Benchmark>
-    void queue_instance()
+    void queue_instance(Benchmark&& instance)
     {
-        static_assert(std::is_base_of<autotune_interface, Benchmark>::value,
-                      "Benchmark must be a specialization of autotune_interface");
-
-        Benchmark instance;
-
         apply_settings(benchmark::RegisterBenchmark(
             instance.name().c_str(),
             [instance](benchmark::State& gbench_state, benchmark_utils::state state)
@@ -1414,6 +1429,12 @@ private:
                                   "hot",
                                   !default_cold,
                                   "don't clear the gpu cache on every batch iteration");
+        parser.set_optional<bool>(
+            "record_as_whole",
+            "record_as_whole",
+            false,
+            "record the batch iterations as a whole, at the very start and end, which necessitates "
+            "that gpu cache clearing between iterations can't be done");
 
         parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
         parser.set_optional<int>("trials", "trials", default_trials, "number of iterations");
@@ -1444,8 +1465,15 @@ private:
         size_t warmup_iterations = parser.get<size_t>("warmup_iterations");
 
         bool cold = !parser.get<bool>("hot");
+        bool record_as_whole = parser.get<bool>("record_as_whole");
 
-        m_state = state(hipStreamDefault, size, seed, batch_iterations, warmup_iterations, cold);
+        m_state = state(hipStreamDefault,
+                        size,
+                        seed,
+                        batch_iterations,
+                        warmup_iterations,
+                        cold,
+                        record_as_whole);
 
         trials             = parser.get<int>("trials");
         parallel_instance  = parser.get<int>("parallel_instance");
