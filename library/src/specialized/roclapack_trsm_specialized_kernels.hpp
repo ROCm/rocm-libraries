@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -859,16 +859,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
     }
 #endif
 
-    // TODO: Some architectures require synchronization between rocSOLVER and rocBLAS kernels; more investigation needed
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t deviceProperties;
-    HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
-    std::string deviceFullString(deviceProperties.gcnArchName);
-    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-    bool do_sync = (deviceString.find("gfx940") != std::string::npos
-                    || deviceString.find("gfx941") != std::string::npos);
-
     // ****** MAIN LOOP ***********
     if(isleft)
     {
@@ -897,9 +887,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
                 offA = idx2D(j, j, inca, lda);
                 offB = idx2D(j, 0, incb, ldb);
                 FORWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update right hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none,
@@ -941,9 +928,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
                 offA = idx2D(m - nextpiv, m - nextpiv, inca, lda);
                 offB = idx2D(m - nextpiv, 0, incb, ldb);
                 BACKWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update right hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(
@@ -998,9 +982,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
                 offB = idx2D(0, n - nextpiv, incb, ldb);
                 BACKWARD_SUBSTITUTIONS;
 
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
-
                 // update left hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(
                     handle, rocblas_operation_none, rocblas_operation_none, m, n - nextpiv, blk,
@@ -1040,9 +1021,6 @@ rocblas_status rocsolver_trsm_lower(rocblas_handle handle,
                 offA = idx2D(j, j, inca, lda);
                 offB = idx2D(0, j, incb, ldb);
                 FORWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update left hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(handle, rocblas_operation_none, trans, m, n - nextpiv,
@@ -1144,16 +1122,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
     }
 #endif
 
-    // TODO: Some architectures require synchronization between rocSOLVER and rocBLAS kernels; more investigation needed
-    int device;
-    HIP_CHECK(hipGetDevice(&device));
-    hipDeviceProp_t deviceProperties;
-    HIP_CHECK(hipGetDeviceProperties(&deviceProperties, device));
-    std::string deviceFullString(deviceProperties.gcnArchName);
-    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-    bool do_sync = (deviceString.find("gfx940") != std::string::npos
-                    || deviceString.find("gfx941") != std::string::npos);
-
     // ****** MAIN LOOP ***********
     if(isleft)
     {
@@ -1182,9 +1150,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
                 offA = idx2D(j, j, inca, lda);
                 offB = idx2D(j, 0, incb, ldb);
                 FORWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update right hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(handle, trans, rocblas_operation_none, m - nextpiv, n,
@@ -1226,9 +1191,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
                 offA = idx2D(m - nextpiv, m - nextpiv, inca, lda);
                 offB = idx2D(m - nextpiv, 0, incb, ldb);
                 BACKWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update right hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(
@@ -1283,9 +1245,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
                 offB = idx2D(0, n - nextpiv, incb, ldb);
                 BACKWARD_SUBSTITUTIONS;
 
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
-
                 // update left hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(
                     handle, rocblas_operation_none, trans, m, n - nextpiv, blk, &minone, B,
@@ -1325,9 +1284,6 @@ rocblas_status rocsolver_trsm_upper(rocblas_handle handle,
                 offA = idx2D(j, j, inca, lda);
                 offB = idx2D(0, j, incb, ldb);
                 FORWARD_SUBSTITUTIONS;
-
-                if(do_sync)
-                    HIP_CHECK(hipStreamSynchronize(stream));
 
                 // update left hand sides
                 ROCBLAS_CHECK(rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_none,
