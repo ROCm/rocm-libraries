@@ -195,6 +195,11 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     set( BLIS_CPP ../common/blis_interface.cpp )
   endif()
 
+  if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/libgtest.a")
+    set( GTEST_ROOT "${BUILD_DIR}/deps/deps-install")
+  endif()
+  find_package( GTest REQUIRED )
+
   message(STATUS "Build Dir: ${BUILD_DIR}")
   message(STATUS "Linking Ref. Libs: ${BLAS_LIBRARY}")
 

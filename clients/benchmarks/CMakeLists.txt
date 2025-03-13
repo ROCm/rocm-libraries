@@ -82,8 +82,8 @@ target_include_directories( hipblas_v2-bench
     $<BUILD_INTERFACE:${FLAME_INCLUDE_DIR}>
 )
 
-target_link_libraries( hipblas-bench PRIVATE roc::hipblas )
-target_link_libraries( hipblas_v2-bench PRIVATE roc::hipblas )
+target_link_libraries( hipblas-bench PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
+target_link_libraries( hipblas_v2-bench PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
 
 if (NOT WIN32)
     target_link_libraries( hipblas-bench PRIVATE hipblas_fortran_client )

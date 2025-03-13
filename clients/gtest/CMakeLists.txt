@@ -31,11 +31,6 @@ if( NOT TARGET hipblas )
   find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
 endif( )
 
-if(EXISTS  "${BUILD_DIR}/deps/deps-install/lib/libgtest.a")
-  set( GTEST_ROOT "${BUILD_DIR}/deps/deps-install")
-endif()
-find_package( GTest REQUIRED )
-
 set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
@@ -161,8 +156,8 @@ target_include_directories( hipblas_v2-test
     ${ROCM_PATH}/include
 )
 
-target_link_libraries( hipblas-test PRIVATE roc::hipblas GTest::GTest )
-target_link_libraries( hipblas_v2-test PRIVATE roc::hipblas GTest::GTest )
+target_link_libraries( hipblas-test PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
+target_link_libraries( hipblas_v2-test PRIVATE roc::hipblas ${GTEST_BOTH_LIBRARIES} )
 
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE hipblas_fortran_client )
