@@ -238,6 +238,9 @@ namespace TensileLite
                     if(problem.groupedGemm())
                         ret = ret && (problem.groupedGemmCount() <= 16);
 
+                    ret = ret && (problem.c().strides()[1] == problem.freeSizeA(0));
+                    ret = ret && (problem.d().strides()[1] == problem.freeSizeA(0));
+
                     return ret;
                 }
 
