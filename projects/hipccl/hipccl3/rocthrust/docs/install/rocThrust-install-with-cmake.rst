@@ -34,7 +34,8 @@ The available build options are:
 
 * ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
 * ``BUILD_EXAMPLES``. Set this to ``ON`` to build rocThrust examples. Off by default.
-* ``BUILD_TEST`` and ``BUILD_HIPSTDPAR_TEST``. Set ``BUILD_TEST`` to ``ON`` to enable both rocThrust and HIPSTDPAR tests. Set ``BUILD_HIPSTDPAR_TEST`` to ``ON`` to enable only the HIPSTDPAR tests. Both options are Off by default.
+* ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
+* ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default. 
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
 * ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Set to 0 by default.
