@@ -340,6 +340,11 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
     }
     CHECK_VAAPI(vaDestroySurfaces(va_display_, va_surface_ids_.data(), va_surface_ids_.size()));
     CHECK_VAAPI(vaDestroyContext(va_display_, va_context_id_));
+    // Need to re-create VA config if bit deepth changes
+    bool create_va_config = decoder_create_info_.bit_depth_minus_8 != reconfig_params->bit_depth_minus_8 ? true : false;
+    if (create_va_config) {
+        CHECK_VAAPI(vaDestroyConfig(va_display_, va_config_id_));
+    }
 
     va_surface_ids_.clear();
     decoder_create_info_.width = reconfig_params->width;
@@ -347,8 +352,17 @@ rocDecStatus VaapiVideoDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo 
     decoder_create_info_.num_decode_surfaces = reconfig_params->num_decode_surfaces;
     decoder_create_info_.target_height = reconfig_params->target_height;
     decoder_create_info_.target_width = reconfig_params->target_width;
+    decoder_create_info_.bit_depth_minus_8 = reconfig_params->bit_depth_minus_8;
 
-    rocDecStatus rocdec_status = CreateSurfaces();
+    rocDecStatus rocdec_status;
+    if (create_va_config) {
+        rocdec_status = CreateDecoderConfig();
+        if (rocdec_status != ROCDEC_SUCCESS) {
+            ERR("Failed to create a VAAPI decoder configuration.");
+            return rocdec_status;
+        }
+    }
+    rocdec_status = CreateSurfaces();
     if (rocdec_status != ROCDEC_SUCCESS) {
         ERR("Failed to create VAAPI surfaces during the decoder reconfiguration.");
         return rocdec_status;

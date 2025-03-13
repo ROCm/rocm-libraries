@@ -222,7 +222,14 @@ static void GetSurfaceStrideInternal(rocDecVideoSurfaceFormat surface_format, ui
         *pitch = align(width, 128) * 2;
         *vstride = align(height, 16);
         break;
-
+    case rocDecVideoSurfaceFormat_YUV422:
+        *pitch = align(width, 256);
+        *vstride = align(height, 16);
+        break;
+    case rocDecVideoSurfaceFormat_YUV422_16Bit:
+        *pitch = align(width, 128) * 2;
+        *vstride = align(height, 16);
+        break;
     }
     return;
 }
@@ -298,7 +305,7 @@ int RocVideoDecoder::HandleVideoSequence(RocdecVideoFormat *p_video_format) {
     else if (video_chroma_format_ == rocDecVideoChromaFormat_444)
         video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
     else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
-        video_surface_format_ = rocDecVideoSurfaceFormat_NV12;
+        video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
 
     // Check if output format supported. If not, check falback options
     if (!(decode_caps.output_format_mask & (1 << video_surface_format_))){
@@ -469,17 +476,13 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
         ROCDEC_THROW("Reconfigure Not supported for chroma format change", ROCDEC_NOT_SUPPORTED);
         return 0;
     }
-    if (p_video_format->bit_depth_luma_minus8 != bitdepth_minus_8_){
-        ROCDEC_THROW("Reconfigure Not supported for bit depth change", ROCDEC_NOT_SUPPORTED);
-        return 0;
-    }
     bool is_decode_res_changed = !(p_video_format->coded_width == coded_width_ && p_video_format->coded_height == coded_height_);
     bool is_display_rect_changed = !(p_video_format->display_area.bottom == disp_rect_.bottom &&
                                      p_video_format->display_area.top == disp_rect_.top &&
                                      p_video_format->display_area.left == disp_rect_.left &&
                                      p_video_format->display_area.right == disp_rect_.right);
-
-    if (!is_decode_res_changed && !is_display_rect_changed && !b_force_recofig_flush_) {
+    bool is_bit_depth_changed = p_video_format->bit_depth_luma_minus8 != bitdepth_minus_8_;
+    if (!is_decode_res_changed && !is_display_rect_changed && !is_bit_depth_changed && !b_force_recofig_flush_) {
         return 1;
     }
 
@@ -527,6 +530,18 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
             target_height_ = (crop_rect_.bottom - crop_rect_.top + 1) & ~1;
         }
     }
+    if (is_bit_depth_changed) {
+        bitdepth_minus_8_ = p_video_format->bit_depth_luma_minus8;
+        byte_per_pixel_ = bitdepth_minus_8_ > 0 ? 2 : 1;
+    
+        // Set the output surface format same as chroma format
+        if (video_chroma_format_ == rocDecVideoChromaFormat_420 || video_chroma_format_ == rocDecVideoChromaFormat_Monochrome)
+            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_P016 : rocDecVideoSurfaceFormat_NV12;
+        else if (video_chroma_format_ == rocDecVideoChromaFormat_444)
+            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV444_16Bit : rocDecVideoSurfaceFormat_YUV444;
+        else if (video_chroma_format_ == rocDecVideoChromaFormat_422)
+            video_surface_format_ = bitdepth_minus_8_ ? rocDecVideoSurfaceFormat_YUV422_16Bit : rocDecVideoSurfaceFormat_YUV422;
+    }
 
     if (p_video_format->reconfig_options == ROCDEC_RECONFIG_NEW_SURFACES) {
         if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL || out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
@@ -568,7 +583,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
 
     // If the coded_width or coded_height hasn't changed but display resolution has changed, then need to update width and height for
     // correct output with cropping. There is no need to reconfigure the decoder.
-    if (!is_decode_res_changed && is_display_rect_changed) {
+    if (!is_decode_res_changed && is_display_rect_changed && !is_bit_depth_changed) {
         return 1;
     }
 
@@ -577,6 +592,7 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     reconfig_params.height = coded_height_;
     reconfig_params.target_width = target_width_;
     reconfig_params.target_height = target_height_;
+    reconfig_params.bit_depth_minus_8 = bitdepth_minus_8_;
     reconfig_params.num_decode_surfaces = p_video_format->min_num_decode_surfaces;
     if (!(crop_rect_.right && crop_rect_.bottom)) {
         reconfig_params.display_rect.top = disp_rect_.top;
@@ -600,10 +616,16 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
 
     input_video_info_str_.str("");
     input_video_info_str_.clear();
-    input_video_info_str_ << "Input Video Resolution Changed:" << std::endl
-        << "\tCoded size   : [" << p_video_format->coded_width << ", " << p_video_format->coded_height << "]" << std::endl
+    if (is_decode_res_changed) {
+        input_video_info_str_ << "Input Video Resolution Changed:" << std::endl;
+    }
+    if (is_bit_depth_changed) {
+        input_video_info_str_ << "Input Video Bit Depth Changed:" << std::endl;
+    }
+        input_video_info_str_ << "\tCoded size   : [" << p_video_format->coded_width << ", " << p_video_format->coded_height << "]" << std::endl
         << "\tDisplay area : [" << p_video_format->display_area.left << ", " << p_video_format->display_area.top << ", "
             << p_video_format->display_area.right << ", " << p_video_format->display_area.bottom << "]" << std::endl;
+        input_video_info_str_ << "\tBit depth   : " << reconfig_params.bit_depth_minus_8 + 8 << std::endl;
     input_video_info_str_ << std::endl;
     input_video_info_str_ << "Video Decoding Params:" << std::endl
         << "\tNum Surfaces : " << reconfig_params.num_decode_surfaces << std::endl
@@ -947,7 +969,7 @@ void RocVideoDecoder::SaveFrameToFile(std::string output_file_name, void *surf_m
         if (!current_output_filename.compare(output_file_name)) {
             std::string::size_type const pos(output_file_name.find_last_of('.'));
             extra_output_file_count_++;
-            std::string to_append = "_" + std::to_string(surf_info->output_width) + "_" + std::to_string(surf_info->output_height) + "_" + std::to_string(extra_output_file_count_);
+            std::string to_append = "_" + std::to_string(surf_info->output_width) + "_" + std::to_string(surf_info->output_height) + "_" + std::to_string(surf_info->bit_depth) + "bit" + "_" + std::to_string(extra_output_file_count_);
             if (pos != std::string::npos) {
                 output_file_name.insert(pos, to_append);
             } else {

@@ -2,13 +2,14 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 0.11.0
+## (Unreleased) rocDecode 0.11.1
 
 ### Added
 
 * VP9 IVF container file parsing support in bitstream reader.
 * CTest for VP9 decode on bitstream reader.
 * HEVC stream syntax error handling.
+* HEVC stream bit depth change handling through decoder reconfiguration.
 
 ### Changed
 

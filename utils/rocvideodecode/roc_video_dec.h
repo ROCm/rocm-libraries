@@ -83,10 +83,10 @@ inline int GetChromaPlaneCount(rocDecVideoSurfaceFormat surface_format) {
         break;
     case rocDecVideoSurfaceFormat_YUV444:
     case rocDecVideoSurfaceFormat_YUV444_16Bit:
-        num_planes = 2;
-        break;
     case rocDecVideoSurfaceFormat_YUV420:
     case rocDecVideoSurfaceFormat_YUV420_16Bit:
+    case rocDecVideoSurfaceFormat_YUV422:
+    case rocDecVideoSurfaceFormat_YUV422_16Bit:
         num_planes = 2;
         break;
     }
@@ -103,6 +103,8 @@ inline float GetChromaHeightFactor(rocDecVideoSurfaceFormat surface_format) {
     case rocDecVideoSurfaceFormat_YUV420_16Bit:
         factor = 0.5;
         break;
+    case rocDecVideoSurfaceFormat_YUV422:
+    case rocDecVideoSurfaceFormat_YUV422_16Bit:
     case rocDecVideoSurfaceFormat_YUV444:
     case rocDecVideoSurfaceFormat_YUV444_16Bit:
         factor = 1.0;

@@ -1566,7 +1566,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     }
 
     // Check video dimension change
-    if ( pic_width_ != sps_ptr->pic_width_in_luma_samples || pic_height_ != sps_ptr->pic_height_in_luma_samples) {
+    if (pic_width_ != sps_ptr->pic_width_in_luma_samples || pic_height_ != sps_ptr->pic_height_in_luma_samples) {
         pic_width_ = sps_ptr->pic_width_in_luma_samples;
         pic_height_ = sps_ptr->pic_height_in_luma_samples;
         // Take care of the case where a new SPS replaces the old SPS with the same id but with different dimensions
@@ -1578,6 +1578,12 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
         dpb_buffer_.dpb_size = max_dec_pic_buffering;
         dpb_buffer_.dpb_size = dpb_buffer_.dpb_size > HEVC_MAX_DPB_FRAMES ? HEVC_MAX_DPB_FRAMES : dpb_buffer_.dpb_size;
         CheckAndAdjustDecBufPoolSize(dpb_buffer_.dpb_size);
+    }
+    // Check bit depth change
+    if (bit_depth_luma_minus8_ != sps_ptr->bit_depth_luma_minus8 || bit_depth_chroma_minus8_ != sps_ptr->bit_depth_chroma_minus8) {
+        bit_depth_luma_minus8_ = sps_ptr->bit_depth_luma_minus8;
+        bit_depth_chroma_minus8_ = sps_ptr->bit_depth_chroma_minus8;
+        new_seq_activated_ = true;
     }
 
     // Set frame rate if available

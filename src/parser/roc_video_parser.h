@@ -138,6 +138,8 @@ protected:
     uint32_t pic_count_;  // decoded picture count for the current bitstream
     uint32_t pic_width_;
     uint32_t pic_height_;
+    uint32_t bit_depth_luma_minus8_;
+    uint32_t bit_depth_chroma_minus8_;
     bool new_seq_activated_;
 
     // Decoded buffer pool

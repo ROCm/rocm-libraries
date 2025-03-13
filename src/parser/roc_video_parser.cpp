@@ -26,6 +26,8 @@ RocVideoParser::RocVideoParser() {
     pic_count_ = 0;
     pic_width_ = 0;
     pic_height_ = 0;
+    bit_depth_luma_minus8_ = 0;
+    bit_depth_chroma_minus8_ = 0;
     new_seq_activated_ = false;
     frame_rate_.numerator = 0;
     frame_rate_.denominator = 0;

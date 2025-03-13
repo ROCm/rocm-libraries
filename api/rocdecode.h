@@ -108,7 +108,10 @@ typedef enum rocDecVideoSurfaceFormat_enum {
     rocDecVideoSurfaceFormat_YUV444_16Bit = 3, /**< 16 bit Planar YUV [Y plane followed by U and V planes].
                                                 Can be used for 10 bit(6LSB bits 0), 12 bit (4LSB bits 0) */
     rocDecVideoSurfaceFormat_YUV420 = 4,       /**< Planar YUV [Y plane followed by U and V planes in 4:2:0 format] */
-    rocDecVideoSurfaceFormat_YUV420_16Bit = 5, /**< 16 bit Planar YUV [Y plane followed by U and V planes in ].
+    rocDecVideoSurfaceFormat_YUV420_16Bit = 5, /**< 16 bit Planar YUV [Y plane followed by U and V planes in 4:2:0 format].
+                                                Can be used for 10 bit(LSB), 12 bit (LSB) */
+    rocDecVideoSurfaceFormat_YUV422 = 6,       /**< Planar YUV [Y plane followed by U and V planes in 4:2:2 format] */
+    rocDecVideoSurfaceFormat_YUV422_16Bit = 7, /**< 16 bit Planar YUV [Y plane followed by U and V planes in 4:2:2 format].
                                                 Can be used for 10 bit(LSB), 12 bit (LSB) */
 } rocDecVideoSurfaceFormat;
 
@@ -227,7 +230,8 @@ typedef struct _RocdecReconfigureDecoderInfo {
     uint32_t target_width;        /**< IN: Post processed output width */
     uint32_t target_height;       /**< IN: Post Processed output height */
     uint32_t num_decode_surfaces; /**< IN: Maximum number of internal decode surfaces */
-    uint32_t reserved_1[12];      /**< Reserved for future use. Set to Zero */
+    uint32_t bit_depth_minus_8;   /**< IN: The Value "BitDepth minus 8" */
+    uint32_t reserved_1[11];      /**< Reserved for future use. Set to Zero */
     struct {
         int16_t left;
         int16_t top;
