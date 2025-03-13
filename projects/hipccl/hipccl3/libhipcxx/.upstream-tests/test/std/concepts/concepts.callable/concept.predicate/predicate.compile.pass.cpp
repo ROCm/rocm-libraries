@@ -55,9 +55,9 @@ static_assert(!predicate<void (S::*)(), S&>, "");
 
 static_assert(!predicate<bool(S)>, "");
 static_assert(!predicate<bool(S)>, "");
-#if !defined(TEST_COMPILER_MSVC) || TEST_STD_VER > 2017 // unspecified MSVC bug
+#if !TEST_COMPILER(MSVC) || TEST_STD_VER > 2017 // unspecified MSVC bug
 static_assert(!predicate<bool(S&), S>, "");
-#endif // !defined(TEST_COMPILER_MSVC) || TEST_STD_VER > 2017
+#endif // !TEST_COMPILER(MSVC) || TEST_STD_VER > 2017
 static_assert(!predicate<bool(S&), S const&>, "");
 static_assert(predicate<bool(S&), S&>, "");
 
@@ -103,7 +103,7 @@ static_assert(!check_lambda([] {
   return explicit_bool();
 }),
               "");
-#endif // !TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 
 int main(int, char**)
 {

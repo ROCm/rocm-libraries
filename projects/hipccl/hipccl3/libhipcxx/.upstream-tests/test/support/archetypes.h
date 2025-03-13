@@ -134,7 +134,7 @@ struct TestBase
     ++value_assigned();
     return *this;
   }
-#if !defined(TEST_WORKAROUND_C1XX_BROKEN_ZA_CTOR_CHECK) && !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
+#if !defined(TEST_WORKAROUND_C1XX_BROKEN_ZA_CTOR_CHECK) && !TEST_COMPILER(NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 
 protected:
 #endif // !TEST_WORKAROUND_C1XX_BROKEN_ZA_CTOR_CHECK
@@ -216,7 +216,7 @@ struct ValueBase
   __host__ __device__ constexpr ValueBase(std::initializer_list<int>& il, int = 0)
       : value(static_cast<int>(il.size()))
   {}
-  __host__ __device__ TEST_CONSTEXPR_CXX14 ValueBase& operator=(int xvalue) noexcept
+  __host__ __device__ constexpr ValueBase& operator=(int xvalue) noexcept
   {
     value = xvalue;
     return *this;
@@ -250,14 +250,14 @@ protected:
   __host__ __device__ constexpr ValueBase(ValueBase&& o) noexcept
       : value(check_value(o.value))
   {}
-  __host__ __device__ TEST_CONSTEXPR_CXX14 ValueBase& operator=(ValueBase const& o) noexcept
+  __host__ __device__ constexpr ValueBase& operator=(ValueBase const& o) noexcept
   {
     assert(o.value != -1);
     assert(o.value != -999);
     value = o.value;
     return *this;
   }
-  __host__ __device__ TEST_CONSTEXPR_CXX14 ValueBase& operator=(ValueBase&& o) noexcept
+  __host__ __device__ constexpr ValueBase& operator=(ValueBase&& o) noexcept
   {
     assert(o.value != -1);
     assert(o.value != -999);

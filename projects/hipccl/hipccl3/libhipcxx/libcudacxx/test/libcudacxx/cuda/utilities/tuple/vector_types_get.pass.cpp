@@ -38,7 +38,7 @@ struct get_val;
 template <class VType, class BaseType>
 struct get_val<VType, BaseType, 1>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 VType create()
+  __host__ __device__ static constexpr VType create()
   {
     return VType{static_cast<BaseType>(42)};
   }
@@ -46,7 +46,7 @@ struct get_val<VType, BaseType, 1>
 template <class VType, class BaseType>
 struct get_val<VType, BaseType, 2>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 VType create()
+  __host__ __device__ static constexpr VType create()
   {
     return VType{static_cast<BaseType>(42), static_cast<BaseType>(1337)};
   }
@@ -54,7 +54,7 @@ struct get_val<VType, BaseType, 2>
 template <class VType, class BaseType>
 struct get_val<VType, BaseType, 3>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 VType create()
+  __host__ __device__ static constexpr VType create()
   {
     return VType{static_cast<BaseType>(42), static_cast<BaseType>(1337), static_cast<BaseType>(-1)};
   }
@@ -62,7 +62,7 @@ struct get_val<VType, BaseType, 3>
 template <class VType, class BaseType>
 struct get_val<VType, BaseType, 4>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 VType create()
+  __host__ __device__ static constexpr VType create()
   {
     return VType{
       static_cast<BaseType>(42), static_cast<BaseType>(1337), static_cast<BaseType>(-1), static_cast<BaseType>(0)};
@@ -75,7 +75,7 @@ struct get_expected;
 template <class BaseType>
 struct get_expected<BaseType, 0>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 BaseType create()
+  __host__ __device__ static constexpr BaseType create()
   {
     return BaseType{static_cast<BaseType>(42)};
   }
@@ -83,7 +83,7 @@ struct get_expected<BaseType, 0>
 template <class BaseType>
 struct get_expected<BaseType, 1>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 BaseType create()
+  __host__ __device__ static constexpr BaseType create()
   {
     return BaseType{static_cast<BaseType>(1337)};
   }
@@ -91,7 +91,7 @@ struct get_expected<BaseType, 1>
 template <class BaseType>
 struct get_expected<BaseType, 2>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 BaseType create()
+  __host__ __device__ static constexpr BaseType create()
   {
     return BaseType{static_cast<BaseType>(-1)};
   }
@@ -99,14 +99,14 @@ struct get_expected<BaseType, 2>
 template <class BaseType>
 struct get_expected<BaseType, 3>
 {
-  __host__ __device__ static TEST_CONSTEXPR_CXX14 BaseType create()
+  __host__ __device__ static constexpr BaseType create()
   {
     return BaseType{static_cast<BaseType>(0)};
   }
 };
 
 template <class VType, class BaseType, size_t VSize, size_t Index, cuda::std::enable_if_t<(Index < VSize), int> = 0>
-__host__ __device__ TEST_CONSTEXPR_CXX14 void test()
+__host__ __device__ constexpr void test()
 {
   { // & overload
     VType val  = get_val<VType, BaseType, VSize>::create();
@@ -146,11 +146,11 @@ __host__ __device__ TEST_CONSTEXPR_CXX14 void test()
 }
 
 template <class VType, class BaseType, size_t VSize, size_t Index, cuda::std::enable_if_t<(Index >= VSize), int> = 0>
-__host__ __device__ TEST_CONSTEXPR_CXX14 void test()
+__host__ __device__ constexpr void test()
 {}
 
 template <class VType, class BaseType, size_t VSize>
-__host__ __device__ TEST_CONSTEXPR_CXX14 void test()
+__host__ __device__ constexpr void test()
 {
   test<VType, BaseType, VSize, 0>();
   test<VType, BaseType, VSize, 1>();
@@ -164,7 +164,7 @@ __host__ __device__ TEST_CONSTEXPR_CXX14 void test()
   test<Type##3, BaseType, 3>();            \
   test<Type##4, BaseType, 4>();
 
-__host__ __device__ TEST_CONSTEXPR_CXX14 bool test()
+__host__ __device__ constexpr bool test()
 {
 #if defined(__HIP_PLATFORM_AMD__)
   EXPAND_VECTOR_TYPE(char, char);
@@ -187,9 +187,9 @@ __host__ __device__ TEST_CONSTEXPR_CXX14 bool test()
 }
 
 __host__ __device__
-#if !defined(TEST_COMPILER_MSVC)
-  TEST_CONSTEXPR_CXX14
-#endif // !TEST_COMPILER_MSVC
+#if !TEST_COMPILER(MSVC)
+  constexpr
+#endif // !TEST_COMPILER(MSVC)
   bool
   test_dim3()
 {
@@ -204,9 +204,9 @@ int main(int arg, char** argv)
   test();
   test_dim3();
   static_assert(test(), "");
-#if !defined(TEST_COMPILER_MSVC)
+#if !TEST_COMPILER(MSVC)
   static_assert(test_dim3(), "");
-#endif // !TEST_COMPILER_MSVC
+#endif // !TEST_COMPILER(MSVC)
 
   return 0;
 }

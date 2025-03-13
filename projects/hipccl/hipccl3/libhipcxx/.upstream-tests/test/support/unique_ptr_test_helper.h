@@ -32,16 +32,13 @@
 #include "deleter_types.h"
 #include "test_macros.h"
 
-#if defined(TEST_COMPILER_NVCC) || defined(TEST_COMPILER_NVRTC)
+#if TEST_CUDA_COMPILER(NVCC) || TEST_COMPILER(NVRTC)
 TEST_NV_DIAG_SUPPRESS(3060) // call to __builtin_is_constant_evaluated appearing in a non-constexpr function
-#endif // TEST_COMPILER_NVCC || TEST_COMPILER_NVRTC
-#if defined(TEST_COMPILER_GCC)
-#  pragma GCC diagnostic ignored "-Wtautological-compare"
-#elif defined(TEST_COMPILER_CLANG)
-#  pragma clang diagnostic ignored "-Wtautological-compare"
-#endif
+#endif // TEST_CUDA_COMPILER(NVCC) || TEST_COMPILER(NVRTC)
+TEST_DIAG_SUPPRESS_GCC("-Wtautological-compare")
+TEST_DIAG_SUPPRESS_CLANG("-Wtautological-compare")
 
-STATIC_TEST_GLOBAL_VAR int A_count = 0;
+TEST_GLOBAL_VARIABLE int A_count = 0;
 
 struct A
 {
@@ -59,7 +56,7 @@ struct A
   }
 };
 
-STATIC_TEST_GLOBAL_VAR int B_count = 0;
+TEST_GLOBAL_VARIABLE int B_count = 0;
 
 struct B : public A
 {
@@ -164,7 +161,7 @@ __host__ __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_a
 #define INCOMPLETE_TEST_EPILOGUE()                                            \
   int is_incomplete_test_anchor = is_incomplete_test();                       \
                                                                               \
-  STATIC_TEST_GLOBAL_VAR int IncompleteType_count = 0;                        \
+  TEST_GLOBAL_VARIABLE int IncompleteType_count = 0;                          \
   struct IncompleteType                                                       \
   {                                                                           \
     __host__ __device__ IncompleteType()                                      \
@@ -198,11 +195,6 @@ __host__ __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_a
   __host__ __device__ StoresIncomplete<IncompleteT, Del>::~StoresIncomplete() \
   {}
 
-#if defined(__GNUC__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wvariadic-macros"
-#endif
-
 // TODO(HIP/AMD): add constexpr to is_incomplete_test if required (and possible) 
 #define DEFINE_AND_RUN_IS_INCOMPLETE_TEST(...)                  \
   __host__ __device__ static int is_incomplete_test()           \
@@ -210,9 +202,5 @@ __host__ __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_a
     __VA_ARGS__ return 0;                                       \
   }                                                             \
   INCOMPLETE_TEST_EPILOGUE()
-
-#if defined(__GNUC__)
-#  pragma GCC diagnostic pop
-#endif
 
 #endif // TEST_SUPPORT_UNIQUE_PTR_TEST_HELPER_H

@@ -32,7 +32,7 @@
 
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 #  include <stdio.h>
-#endif // TEST_COMPILER_NVRTC
+#endif // TEST_COMPILER(NVRTC)
 
 int main(int, char**)
 {

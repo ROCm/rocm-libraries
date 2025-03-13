@@ -47,7 +47,7 @@ __host__ __device__ constexpr bool tests()
   //  Test deduced type.
   {
     auto arr = cuda::std::to_array({1, 2, 3});
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<int, 3>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<int, 3>>);
     assert(arr[0] == 1);
     assert(arr[1] == 2);
     assert(arr[2] == 3);
@@ -56,7 +56,7 @@ __host__ __device__ constexpr bool tests()
   {
     const long l1 = 42;
     auto arr      = cuda::std::to_array({1L, 4L, 9L, l1});
-    ASSERT_SAME_TYPE(decltype(arr)::value_type, long);
+    static_assert(cuda::std::is_same_v<decltype(arr)::value_type, long>);
     static_assert(arr.size() == 4, "");
     assert(arr[0] == 1);
     assert(arr[1] == 4);
@@ -66,7 +66,7 @@ __host__ __device__ constexpr bool tests()
 
   {
     auto arr = cuda::std::to_array("meow");
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<char, 5>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<char, 5>>);
     assert(arr[0] == 'm');
     assert(arr[1] == 'e');
     assert(arr[2] == 'o');
@@ -77,7 +77,7 @@ __host__ __device__ constexpr bool tests()
   {
     double source[3] = {4.0, 5.0, 6.0};
     auto arr         = cuda::std::to_array(source);
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<double, 3>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<double, 3>>);
     assert(arr[0] == 4.0);
     assert(arr[1] == 5.0);
     assert(arr[2] == 6.0);
@@ -86,7 +86,7 @@ __host__ __device__ constexpr bool tests()
   {
     double source[3] = {4.0, 5.0, 6.0};
     auto arr         = cuda::std::to_array(cuda::std::move(source));
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<double, 3>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<double, 3>>);
     assert(arr[0] == 4.0);
     assert(arr[1] == 5.0);
     assert(arr[2] == 6.0);
@@ -96,27 +96,27 @@ __host__ __device__ constexpr bool tests()
     MoveOnly source[] = {MoveOnly{0}, MoveOnly{1}, MoveOnly{2}};
 
     auto arr = cuda::std::to_array(cuda::std::move(source));
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<MoveOnly, 3>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<MoveOnly, 3>>);
     for (int i = 0; i < 3; ++i)
     {
       assert(arr[i].get() == i && source[i].get() == 0);
     }
   }
 
-#if (defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_HIPRTC)) && defined(TEST_COMPILER_MSVC)
+#if (TEST_COMPILER(NVRTC) || defined(TEST_COMPILER_HIPRTC)) && TEST_COMPILER(MSVC)
   // Test C99 compound literal.
   {
     auto arr = cuda::std::to_array((int[]) {3, 4});
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<int, 2>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<int, 2>>);
     assert(arr[0] == 3);
     assert(arr[1] == 4);
   }
-#endif // !TEST_COMPILER_NVRTC && !TEST_COMPILER_MSVC
+#endif // !TEST_COMPILER(NVRTC) && !TEST_COMPILER(MSVC)
 
   //  Test explicit type.
   {
     auto arr = cuda::std::to_array<long>({1, 2, 3});
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<long, 3>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<long, 3>>);
     assert(arr[0] == 1);
     assert(arr[1] == 2);
     assert(arr[2] == 3);
@@ -130,7 +130,7 @@ __host__ __device__ constexpr bool tests()
     };
 
     auto arr = cuda::std::to_array<A>({{3, .1}});
-    ASSERT_SAME_TYPE(decltype(arr), cuda::std::array<A, 1>);
+    static_assert(cuda::std::is_same_v<decltype(arr), cuda::std::array<A, 1>>);
     assert(arr[0].a == 3);
     assert(arr[0].b == .1);
   }

@@ -39,10 +39,11 @@
 #endif
 
 #include "concurrent_agents.h"
+#include "test_macros.h"
 
-#if defined(__clang__) && (defined(__CUDA__) || defined(__HIP__))
+#if TEST_CUDA_COMPILER(CLANG)
 #  include <new>
-#endif
+#endif // TEST_CUDA_COMPILER(CLANG)
 
 #if _CCCL_COMPILER(NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #  define LAMBDA [=]

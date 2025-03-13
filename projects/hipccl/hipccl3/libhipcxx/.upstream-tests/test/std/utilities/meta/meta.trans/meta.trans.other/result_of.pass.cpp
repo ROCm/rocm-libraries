@@ -79,14 +79,14 @@ struct test_invoke_result<Fn(Args...), Ret>
   {
     static_assert(cuda::std::is_invocable<Fn, Args...>::value, "");
     static_assert(cuda::std::is_invocable_r<Ret, Fn, Args...>::value, "");
-    ASSERT_SAME_TYPE(Ret, typename cuda::std::invoke_result<Fn, Args...>::type);
+    static_assert(cuda::std::is_same_v<Ret, typename cuda::std::invoke_result<Fn, Args...>::type>);
   }
 };
 
 template <class T, class U>
 __host__ __device__ void test_result_of()
 {
-  ASSERT_SAME_TYPE(U, typename cuda::std::result_of<T>::type);
+  static_assert(cuda::std::is_same_v<U, typename cuda::std::result_of<T>::type>);
   test_invoke_result<T, U>::call();
 }
 
@@ -110,14 +110,14 @@ __host__ __device__ void test_no_result()
   test_invoke_no_result<T>::call();
 }
 
-#if defined(__NVCC__) || defined(__HIPCC__)
+#if TEST_CUDA_COMPILER(NVCC) || defined(__HIPCC__)
 template <class Ret, class Fn>
 __host__ __device__ void test_lambda(Fn&&)
 {
-  ASSERT_SAME_TYPE(Ret, typename cuda::std::result_of<Fn()>::type);
-  ASSERT_SAME_TYPE(Ret, typename cuda::std::invoke_result<Fn>::type);
+  static_assert(cuda::std::is_same_v<Ret, typename cuda::std::result_of<Fn()>::type>);
+  static_assert(cuda::std::is_same_v<Ret, typename cuda::std::invoke_result<Fn>::type>);
 }
-#endif
+#endif // TEST_CUDA_COMPILER(NVCC)
 
 int main(int, char**)
 {
@@ -432,7 +432,7 @@ int main(int, char**)
     test_result_of<PMD(cuda::std::reference_wrapper<S const>), const char&>();
     test_no_result<PMD(ND&)>();
   }
-#if defined(TEST_COMPILER_NVCC) || defined(TEST_COMPILER_HIPCC) || defined(__HIPCC__)
+#if TEST_CUDA_COMPILER(NVCC) || defined(TEST_COMPILER_HIPCC) || defined(__HIPCC__)
   { // extended lambda
     NV_IF_TARGET(
       NV_IS_DEVICE,
@@ -449,7 +449,7 @@ int main(int, char**)
       return 42.0;
     }));
   }
-#endif
+#endif // TEST_CUDA_COMPILER(NVCC)
 
   return 0;
 }

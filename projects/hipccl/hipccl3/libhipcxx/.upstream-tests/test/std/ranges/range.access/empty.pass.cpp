@@ -59,7 +59,7 @@ static_assert(!cuda::std::ranges::empty(cuda::std::move(array_of_incomplete)));
 extern const Incomplete const_array_of_incomplete[42];
 static_assert(!cuda::std::ranges::empty(const_array_of_incomplete));
 static_assert(!cuda::std::ranges::empty(static_cast<const Incomplete (&&)[42]>(array_of_incomplete)));
-#endif // TEST_COMPILER_NVRTC
+#endif // TEST_COMPILER(NVRTC)
 
 struct InputRangeWithoutSize
 {
@@ -111,9 +111,9 @@ struct BoolConvertibleReturnType
   }
 };
 // old GCC seems to fall over the chaining of the noexcept clauses here
-#if (!defined(TEST_COMPILER_GCC) || __GNUC__ >= 9) && !defined(TEST_COMPILER_MSVC)
+#if !TEST_COMPILER(GCC, <, 9) && !TEST_COMPILER(MSVC)
 static_assert(!noexcept(cuda::std::ranges::empty(BoolConvertibleReturnType())));
-#endif // (!defined(TEST_COMPILER_GCC) || __GNUC__ >= 9)
+#endif // !TEST_COMPILER(GCC, <, 9) && !TEST_COMPILER(MSVC)
 
 struct InputIterators
 {

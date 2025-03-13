@@ -54,7 +54,7 @@ int main(int, char**)
 {
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   test<wchar_t>(WCHAR_MAX);
-#endif
+#endif // !TEST_COMPILER(NVRTC)
   test<bool>(true);
   test<char>(CHAR_MAX);
   test<signed char>(SCHAR_MAX);

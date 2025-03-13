@@ -41,7 +41,7 @@
 #include "test_macros.h"
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 #  include "pointer_comparison_test_helper.hpp"
-#endif
+#endif // !TEST_COMPILER(NVRTC)
 
 // ensure that we allow `__device__` functions too
 struct with_device_op

@@ -46,7 +46,7 @@
 
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 #  include <utility>
-#endif // !TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 
 struct CopyOnly
 {
@@ -111,7 +111,7 @@ __host__ __device__ void test_ambiguous_std()
     swap(i,j);
   ))
   // clang-format on
-#endif // !TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 }
 
 int main(int, char**)

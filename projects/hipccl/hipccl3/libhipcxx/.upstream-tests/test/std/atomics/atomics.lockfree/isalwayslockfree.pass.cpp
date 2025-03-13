@@ -47,7 +47,7 @@
 #  if !defined(__cccl_lib_atomic_is_always_lock_free)
 #    error Feature test macro missing.
 #  endif
-#endif
+#endif // !TEST_COMPILER(NVRTC)
 
 template <typename T>
 __host__ __device__ void checkAlwaysLockFree()
@@ -62,7 +62,7 @@ __host__ __device__ void checkAlwaysLockFree()
 // which causes LIBCUDACXX_ATOMIC_LLONG_LOCK_FREE to be defined as '1' in 32-bit builds
 // even though __atomic_always_lock_free returns true for the same type.
 constexpr bool NeedWorkaroundForPR31864 =
-#if defined(__clang__)
+#if TEST_COMPILER(CLANG)
   (sizeof(void*) == 4); // Needed on 32 bit builds
 #else
   false;

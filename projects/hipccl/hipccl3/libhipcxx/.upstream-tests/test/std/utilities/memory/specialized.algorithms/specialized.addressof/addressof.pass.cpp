@@ -40,9 +40,9 @@
 
 #include "test_macros.h"
 
-#if defined(TEST_COMPILER_CLANG_CUDA) || defined(TEST_COMPILER_HIPCC)
+#if TEST_CUDA_COMPILER(CLANG) || defined(TEST_COMPILER_HIPCC)
 #  include <new>
-#endif // TEST_COMPILER_CLANG_CUDA
+#endif // TEST_CUDA_COMPILER(CLANG)
 
 struct A
 {

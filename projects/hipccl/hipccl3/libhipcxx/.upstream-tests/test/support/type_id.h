@@ -36,7 +36,7 @@
 #  include <typeinfo>
 
 #  include "demangle.h"
-#endif // TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 
 // TypeID - Represent a unique identifier for a type. TypeID allows equality
 // comparisons between different types.

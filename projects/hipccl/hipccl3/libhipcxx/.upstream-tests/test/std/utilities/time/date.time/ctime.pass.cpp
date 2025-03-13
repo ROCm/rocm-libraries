@@ -44,10 +44,7 @@
 #  endif
 #endif
 
-#if defined(__GNUC__)
-#  pragma GCC diagnostic ignored "-Wformat-zero-length"
-#endif
-
+TEST_DIAG_SUPPRESS_GCC("-Wformat-zero-length")
 TEST_NV_DIAG_SUPPRESS(set_but_not_used)
 
 int main(int, char**)
@@ -71,9 +68,9 @@ int main(int, char**)
 //FIXME(HIP): clock() is declared as extern clock_t clock (void) __THROW; in <time.h>. clock_t is a typedef to long.
 //The below test doesn't work for HIP, as the clock() function is defined in /opt/rocm/include/hip/amd_detail/amd_device_functions.h
 //as "long long int  clock() { return __clock(); }". Therefore, the decltype expands to long long instead of the expected type long.
-#  if !defined(TEST_COMPILER_CLANG_CUDA) && !defined(__HIP__)
+#  if !TEST_CUDA_COMPILER(CLANG) && !defined(__HIP__)
   static_assert((cuda::std::is_same<decltype(cuda::std::clock()), cuda::std::clock_t>::value), "");
-#  endif // TEST_COMPILER_CLANG_CUDA
+#  endif // TEST_CUDA_COMPILER(CLANG)
   static_assert((cuda::std::is_same<decltype(cuda::std::difftime(t, t)), double>::value), "");
   static_assert((cuda::std::is_same<decltype(cuda::std::mktime(&tm)), cuda::std::time_t>::value), "");
   static_assert((cuda::std::is_same<decltype(cuda::std::time(&t)), cuda::std::time_t>::value), "");

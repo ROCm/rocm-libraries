@@ -55,7 +55,7 @@ int main(int, char**)
 {
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   test<wchar_t>(WCHAR_MIN);
-#endif
+#endif // !TEST_COMPILER(NVRTC)
   test<bool>(false);
   test<char>(CHAR_MIN);
   test<signed char>(SCHAR_MIN);

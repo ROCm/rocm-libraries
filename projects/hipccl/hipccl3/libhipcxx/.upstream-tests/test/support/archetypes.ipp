@@ -38,7 +38,7 @@
 #  define DEFINE_ASSIGN_CONSTEXPR DEFINE_CONSTEXPR
 #endif
 #ifndef DEFINE_DEFAULT_CONSTEXPR
-#  if defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_HIPRTC)
+#  if TEST_COMPILER(NVRTC) || defined(TEST_COMPILER_HIPRTC)
 #    define DEFINE_DEFAULT_CONSTEXPR
 #  else
 #    define DEFINE_DEFAULT_CONSTEXPR DEFINE_CONSTEXPR
@@ -70,7 +70,7 @@
 struct AllCtors : DEFINE_BASE(AllCtors)
 {
   using Base = DEFINE_BASE(AllCtors);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   AllCtors(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -102,7 +102,7 @@ struct NoCtors : DEFINE_BASE(NoCtors)
 struct NoDefault : DEFINE_BASE(NoDefault)
 {
   using Base = DEFINE_BASE(NoDefault);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   NoDefault(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -118,7 +118,7 @@ struct NoDefault : DEFINE_BASE(NoDefault)
 struct DefaultOnly : DEFINE_BASE(DefaultOnly)
 {
   using Base = DEFINE_BASE(DefaultOnly);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   DefaultOnly(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -136,7 +136,7 @@ struct DefaultOnly : DEFINE_BASE(DefaultOnly)
 struct Copyable : DEFINE_BASE(Copyable)
 {
   using Base = DEFINE_BASE(Copyable);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   Copyable(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -155,7 +155,7 @@ struct Copyable : DEFINE_BASE(Copyable)
 struct CopyOnly : DEFINE_BASE(CopyOnly)
 {
   using Base = DEFINE_BASE(CopyOnly);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   CopyOnly(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -176,7 +176,7 @@ struct CopyOnly : DEFINE_BASE(CopyOnly)
 struct NonCopyable : DEFINE_BASE(NonCopyable)
 {
   using Base = DEFINE_BASE(NonCopyable);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   NonCopyable(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -194,7 +194,7 @@ struct NonCopyable : DEFINE_BASE(NonCopyable)
 struct MoveOnly : DEFINE_BASE(MoveOnly)
 {
   using Base = DEFINE_BASE(MoveOnly);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   MoveOnly(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -213,7 +213,7 @@ struct MoveOnly : DEFINE_BASE(MoveOnly)
 struct CopyAssignable : DEFINE_BASE(CopyAssignable)
 {
   using Base = DEFINE_BASE(CopyAssignable);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   CopyAssignable(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -230,7 +230,7 @@ struct CopyAssignable : DEFINE_BASE(CopyAssignable)
 struct CopyAssignOnly : DEFINE_BASE(CopyAssignOnly)
 {
   using Base = DEFINE_BASE(CopyAssignOnly);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   CopyAssignOnly(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -248,7 +248,7 @@ struct CopyAssignOnly : DEFINE_BASE(CopyAssignOnly)
 struct MoveAssignOnly : DEFINE_BASE(MoveAssignOnly)
 {
   using Base = DEFINE_BASE(MoveAssignOnly);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621
   template <class... Args, typename = decltype(Base(cuda::std::declval<Args>()...))>
   __host__ __device__ DEFINE_EXPLICIT DEFINE_CONSTEXPR
   MoveAssignOnly(Args&&... args) noexcept(noexcept(Base(cuda::std::declval<Args>()...)))
@@ -266,8 +266,8 @@ struct MoveAssignOnly : DEFINE_BASE(MoveAssignOnly)
 struct ConvertingType : DEFINE_BASE(ConvertingType)
 {
   using Base = DEFINE_BASE(ConvertingType);
-#if defined(TEST_COMPILER_NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621, this one is special
-                                                              // because of the converting ctor
+#if TEST_COMPILER(NVRTC) && _CCCL_CUDACC_BELOW(12, 5) // nvbug3961621, this one is special
+                                                      // because of the converting ctor
 #else
   using Base::Base;
 #endif

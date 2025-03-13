@@ -68,11 +68,12 @@
 #if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 #  include <iterator>
 #  include <utility>
-#endif // !TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 
 // cuda::std::array is explicitly allowed to be initialized with A a = { init-list };.
 // Disable the missing braces warning for this reason.
-#include "disable_missing_braces_warning.h"
+TEST_DIAG_SUPPRESS_GCC("-Wmissing-braces")
+TEST_DIAG_SUPPRESS_CLANG("-Wmissing-braces")
 
 template <typename C>
 __host__ __device__ void test_const_container(const C& c, typename C::value_type val)
@@ -148,8 +149,8 @@ __host__ __device__ void test_const_array(const T (&array)[Sz])
   assert(cuda::std::cend(array) == array + Sz);
 }
 
-STATIC_TEST_GLOBAL_VAR constexpr int global_array[]{1, 2, 3};
-STATIC_TEST_GLOBAL_VAR constexpr int global_const_array[] = {0, 1, 2, 3, 4};
+TEST_GLOBAL_VARIABLE constexpr int global_array[]{1, 2, 3};
+TEST_GLOBAL_VARIABLE constexpr int global_const_array[] = {0, 1, 2, 3, 4};
 
 __host__ __device__ void test_ambiguous_std()
 {
@@ -193,7 +194,7 @@ __host__ __device__ void test_ambiguous_std()
   ))
 
   // clang-format on
-#endif // !TEST_COMPILER_NVRTC
+#endif // !TEST_COMPILER(NVRTC)
 }
 
 int main(int, char**)
