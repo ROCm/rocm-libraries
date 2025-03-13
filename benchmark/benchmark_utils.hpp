@@ -1178,19 +1178,32 @@ public:
         , warmup_iterations(warmup_iterations)
         , cold(cold)
         , record_as_whole(record_as_whole)
-        , events(batch_iterations * 2)
+        , events(record_as_whole ? 2 : batch_iterations * 2)
     {}
+
+    // Used to reset the input array of algorithms like device_merge_inplace
+    void run_before_every_iteration(std::function<void()> lambda)
+    {
+        run_before_every_iteration_lambda = lambda;
+    }
 
     void run(benchmark::State& gbench_state, std::function<void()> kernel)
     {
-        for(size_t i = 0; i < batch_iterations * 2; i++)
+        for(auto& event : events)
         {
-            HIP_CHECK(hipEventCreate(&events[i]));
+            HIP_CHECK(hipEventCreate(&event));
         }
 
         // Warm-up
         for(size_t i = 0; i < warmup_iterations; ++i)
         {
+            // Benchmarks may expect their kernel input to be prepared by this lambda,
+            // so to prevent any potential crashes, we call the lambda during warm-up
+            if(run_before_every_iteration_lambda)
+            {
+                run_before_every_iteration_lambda();
+            }
+
             kernel();
         }
         HIP_CHECK(hipDeviceSynchronize());
@@ -1200,6 +1213,16 @@ public:
         {
             if(record_as_whole)
             {
+                if(run_before_every_iteration_lambda)
+                {
+                    assert(
+                        batch_iterations == 1
+                        && "Must use a batch_iterations count of 1, when having called "
+                           "run_before_every_iteration() and having set record_as_whole to true");
+
+                    run_before_every_iteration_lambda();
+                }
+
                 HIP_CHECK(hipEventRecord(events[0], stream));
                 for(size_t i = 0; i < batch_iterations; ++i)
                 {
@@ -1216,13 +1239,22 @@ public:
             {
                 for(size_t i = 0; i < batch_iterations; ++i)
                 {
+                    if(run_before_every_iteration_lambda)
+                    {
+                        run_before_every_iteration_lambda();
+                    }
+
                     if(cold)
                     {
                         clear_gpu_cache(stream);
                     }
 
+                    // Even events record the start time
                     HIP_CHECK(hipEventRecord(events[i * 2], stream));
+
                     kernel();
+
+                    // Odd events record the stop time
                     HIP_CHECK(hipEventRecord(events[i * 2 + 1], stream));
                 }
 
@@ -1242,9 +1274,9 @@ public:
             }
         }
 
-        for(size_t i = 0; i < batch_iterations * 2; i++)
+        for(const auto& event : events)
         {
-            HIP_CHECK(hipEventDestroy(events[i]));
+            HIP_CHECK(hipEventDestroy(event));
         }
     }
 
@@ -1281,6 +1313,7 @@ private:
     bool                    cold;
     bool                    record_as_whole;
     std::vector<hipEvent_t> events;
+    std::function<void()>   run_before_every_iteration_lambda = nullptr;
 };
 
 struct autotune_interface
