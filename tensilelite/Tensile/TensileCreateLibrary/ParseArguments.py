@@ -26,7 +26,7 @@ import os
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import architectureMap
+from Tensile.Common import architectureMap, coVersionMap
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
 
@@ -74,7 +74,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     argParser.add_argument(
         "--code-object-version",
         dest="CodeObjectVersion",
-        choices=["4", "5"],
+        choices=["4", "5", "V4", "V5", "default"],
         default="4",
         action="store",
     )
@@ -194,7 +194,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage
-    arguments["CodeObjectVersion"] = args.CodeObjectVersion
+    arguments["CodeObjectVersion"] = coVersionMap[args.CodeObjectVersion]
     arguments["Architecture"] = args.Architecture
     arguments["LazyLibraryLoading"] = args.LazyLibraryLoading
     arguments["EnableMarker"] = args.EnableMarker

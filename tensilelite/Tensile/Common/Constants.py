@@ -1,3 +1,13 @@
+# Map for converting between Tensile-accepted co version strings
+# and code object versions accepted by the compiler.
+coVersionMap = {
+    "4": "4",
+    "V4": "4",
+    "5": "5",
+    "V5": "5",
+    "default": "4",
+}
+
 # Subdirectories for Tensile build artifacts
 CLIENT_BUILD_DIR: str = "0_Build"
 BENCHMARK_PROBLEMS_DIR: str = "1_BenchmarkProblems"
