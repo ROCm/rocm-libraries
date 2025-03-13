@@ -23,6 +23,8 @@
 
 #include <type_traits>
 
+#include <hip/hip_vector_types.h>
+
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
@@ -40,94 +42,13 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-// Define vector types that will be used by rocPRIM internally.
-// We don't use HIP vector types because they don't generate correct
-// load/store operations, see https://github.com/RadeonOpenCompute/ROCm/issues/341
-#ifndef _MSC_VER
-#define DEFINE_VECTOR_TYPE(name, base) \
-\
-struct alignas(sizeof(base) * 2) name##2 \
-{ \
-    typedef base vector_value_type __attribute__((ext_vector_type(2))); \
-    union { \
-        vector_value_type data; \
-        struct { base x, y; }; \
-    }; \
-}; \
-\
-struct alignas(sizeof(base) * 4) name##4 \
-{ \
-    typedef base vector_value_type __attribute__((ext_vector_type(4))); \
-    union { \
-        vector_value_type data; \
-        struct { base x, y, w, z; }; \
-    }; \
-};
-#else
-#define DEFINE_VECTOR_TYPE(name, base) \
-\
-struct alignas(sizeof(base) * 2) name##2 \
-{ \
-    typedef base vector_value_type; \
-    union { \
-        vector_value_type data; \
-        struct { base x, y; }; \
-    }; \
-}; \
-\
-struct alignas(sizeof(base) * 4) name##4 \
-{ \
-    typedef base vector_value_type; \
-    union { \
-        vector_value_type data; \
-        struct { base x, y, w, z; }; \
-    }; \
-};
-#endif
 
-#ifdef _MSC_VER
-#pragma warning( push )
-#pragma warning( disable : 4201 ) // nonstandard extension used: nameless struct/union
-#endif
-DEFINE_VECTOR_TYPE(char, char);
-DEFINE_VECTOR_TYPE(short, short);
-DEFINE_VECTOR_TYPE(int, int);
-DEFINE_VECTOR_TYPE(longlong, long long);
-#ifdef _MSC_VER
-#pragma warning( pop )
-#endif
 // Takes a scalar type T and matches to a vector type based on NumElements.
-template <class T, unsigned int NumElements>
+template<class T, unsigned int NumElements>
 struct make_vector_type
 {
-    using type = void;
+    using type = HIP_vector_type<T, NumElements>;
 };
-
-#define DEFINE_MAKE_VECTOR_N_TYPE(name, base, suffix) \
-template<> \
-struct make_vector_type<base, suffix> \
-{ \
-    using type = name##suffix; \
-};
-
-#define DEFINE_MAKE_VECTOR_TYPE(name, base) \
-\
-template <> \
-struct make_vector_type<base, 1> \
-{ \
-    using type = base; \
-}; \
-DEFINE_MAKE_VECTOR_N_TYPE(name, base, 2) \
-DEFINE_MAKE_VECTOR_N_TYPE(name, base, 4)
-
-DEFINE_MAKE_VECTOR_TYPE(char, char);
-DEFINE_MAKE_VECTOR_TYPE(short, short);
-DEFINE_MAKE_VECTOR_TYPE(int, int);
-DEFINE_MAKE_VECTOR_TYPE(longlong, long long);
-
-#undef DEFINE_VECTOR_TYPE
-#undef DEFINE_MAKE_VECTOR_TYPE
-#undef DEFINE_MAKE_VECTOR_N_TYPE
 
 } // end namespace detail
 
@@ -135,19 +56,16 @@ DEFINE_MAKE_VECTOR_TYPE(longlong, long long);
 /// template parameter should not be used.
 struct empty_type {};
 
-/// \brief Binary operator that takes two instances of empty_type, usually used
-/// as nop replacement for the HIP-CPU back-end
-struct empty_binary_op
-{
-    /// \brief Invocation operator.
-    constexpr empty_type operator()(const empty_type&, const empty_type&) const { return empty_type{}; }
-};
-
 /// \brief A decomposer that must be passed to the radix sort algorithms when
 /// sorting keys that are arithmetic types.
 /// To sort custom types, a custom decomposer should be provided.
 struct identity_decomposer
 {};
+
+/// \brief 128 bit unsigned integer
+using uint128_t = __uint128_t;
+/// \brief 128 bit signed integer
+using int128_t = __int128_t;
 
 /// \brief Half-precision floating point type
 using half = ::__half;
@@ -166,19 +84,10 @@ using lane_mask_type = unsigned long long int;
 #endif
 
 /// \brief Native half-precision floating point type
-#ifdef __HIP_CPU_RT__
-using native_half = half;
-#else
 using native_half = _Float16;
-#endif
 
 /// \brief native bfloat16 type
-#ifdef __HIP_CPU_RT__
-// TODO: Find a better type
 using native_bfloat16 = bfloat16;
-#else
-using native_bfloat16 = bfloat16;
-#endif
 
 END_ROCPRIM_NAMESPACE
 

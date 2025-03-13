@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,14 +35,14 @@ BEGIN_ROCPRIM_NAMESPACE
 /// One of three algorithms is used: single sort (launches only a single block),
 /// merge sort, or Onesweep.
 ///
-/// \tparam SortSingleConfig - Configuration for the single kernel subalgorithm.
+/// \tparam SortSingleConfig Configuration for the single kernel subalgorithm.
 ///         must be \p kernel_config or \p default_config.
-/// \tparam MergeSortConfig - Configuration for the merge sort subalgorithm.
+/// \tparam MergeSortConfig Configuration for the merge sort subalgorithm.
 ///         must be \p merge_sort_config or \p default_config. If \p merge_sort_config, the sorted
 ///         items per block must be a power of two.
-/// \tparam OnesweepConfig - Configuration for the Onesweep subalgorithm.
+/// \tparam OnesweepConfig Configuration for the Onesweep subalgorithm.
 ///         must be \p radix_sort_onesweep_config or \p default_config.
-/// \tparam MergeSortLimit - The largest number of items for which the merge sort algorithm will be
+/// \tparam MergeSortLimit The largest number of items for which the merge sort algorithm will be
 ///         used. Note that below this limit, a different algorithm may be used.
 template<class SingleSortConfig = default_config,
          class MergeSortConfig  = default_config,

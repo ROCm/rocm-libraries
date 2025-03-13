@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include <rocprim/device/device_transform.hpp>
 
 // required test headers
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 // Params for tests
@@ -44,12 +45,11 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
-    RocprimConstantIteratorParams<int>,
-    RocprimConstantIteratorParams<unsigned int>,
-    RocprimConstantIteratorParams<unsigned long>,
-    RocprimConstantIteratorParams<float>
-> RocprimConstantIteratorTestsParams;
+using RocprimConstantIteratorTestsParams
+    = ::testing::Types<RocprimConstantIteratorParams<int>,
+                       RocprimConstantIteratorParams<unsigned int>,
+                       RocprimConstantIteratorParams<unsigned long>,
+                       RocprimConstantIteratorParams<float>>;
 
 TYPED_TEST_SUITE(RocprimConstantIteratorTests, RocprimConstantIteratorTestsParams);
 
@@ -77,7 +77,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
 
     hipStream_t stream = 0; // default
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -87,37 +87,26 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
         Iterator input_begin(value);
 
         std::vector<T> output(size);
-        T * d_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(T)));
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<T> d_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(size, transform<T>()(value));
 
         // Run
-        HIP_CHECK(
-            rocprim::transform(
-                input_begin, d_output, size,
-                transform<T>(), stream, debug_synchronous
-            )
-        );
+        HIP_CHECK(rocprim::transform(input_begin,
+                                     d_output.get(),
+                                     size,
+                                     transform<T>(),
+                                     stream,
+                                     debug_synchronous));
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        output = d_output.load();
 
         // Validating results
         test_utils::assert_near(output, expected, test_utils::precision<T>);
-
-        hipFree(d_output);
     }
 
 }

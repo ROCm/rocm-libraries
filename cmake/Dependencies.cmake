@@ -57,49 +57,9 @@ list(JOIN CXX_FLAGS_LIST " " CMAKE_CXX_FLAGS)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to create shared libraries if on." FORCE)
 
 # HIP dependency is handled earlier in the project cmake file
-# when VerifyCompiler.cmake is included (when not using HIP-CPU).
+# when VerifyCompiler.cmake is included.
 
 include(FetchContent)
-
-if(USE_HIP_CPU)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(hip_cpu_rt QUIET)
-  endif()
-  if(NOT TARGET hip_cpu_rt::hip_cpu_rt)
-    message(STATUS "HIP-CPU runtime not found. Fetching...")
-    FetchContent_Declare(
-      hip-cpu
-      GIT_REPOSITORY https://github.com/ROCm-Developer-Tools/HIP-CPU.git
-      GIT_TAG        56f559c93be210bb300dad3673c06d2bb0119d13 # master@2022.07.01
-    )
-    FetchContent_MakeAvailable(hip-cpu)
-    if(NOT TARGET hip_cpu_rt::hip_cpu_rt)
-      add_library(hip_cpu_rt::hip_cpu_rt ALIAS hip_cpu_rt)
-    endif()
-  else()
-    find_package(hip_cpu_rt REQUIRED)
-    # If we found HIP-CPU as binary, search for transitive dependencies
-    find_package(Threads REQUIRED)
-    set(CMAKE_REQUIRED_FLAGS "-std=c++17")
-    include(CheckCXXSymbolExists)
-    check_cxx_symbol_exists(__GLIBCXX__ "cstddef" STL_IS_GLIBCXX)
-    set(STL_DEPENDS_ON_TBB ${STL_IS_GLIBCXX})
-    if(STL_DEPENDS_ON_TBB)
-      find_package(TBB QUIET)
-      if(NOT TARGET TBB::tbb AND NOT TARGET tbb)
-        message(STATUS "Thread Building Blocks not found. Fetching...")
-        FetchContent_Declare(
-          thread-building-blocks
-          GIT_REPOSITORY https://github.com/oneapi-src/oneTBB.git
-          GIT_TAG        3df08fe234f23e732a122809b40eb129ae22733f # v2021.5.0
-        )
-        FetchContent_MakeAvailable(thread-building-blocks)
-      else()
-        find_package(TBB REQUIRED)
-      endif()
-    endif(STL_DEPENDS_ON_TBB)
-  endif()
-endif(USE_HIP_CPU)
 
 # Test dependencies
 if(BUILD_TEST)

@@ -26,16 +26,19 @@
 #include "benchmark_utils.hpp"
 
 #include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_binary_search.hpp>
+#include <rocprim/functional.hpp>
 
 #include <benchmark/benchmark.h>
 
 #include <hip/hip_runtime_api.h>
 
-#include <string>
-#include <vector>
-
 #include <cstddef>
+#include <numeric>
+#include <string>
+#include <utility>
+#include <vector>
 
 struct binary_search_subalgorithm
 {
@@ -61,24 +64,24 @@ struct upper_bound_subalgorithm
     }
 };
 
-template<class Config = rocprim::default_config>
+template<typename Config = rocprim::default_config>
 struct dispatch_binary_search_helper
 {
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(binary_search_subalgorithm, Args&&... args)
     {
         using config = rocprim::binary_search_config<Config::block_size, Config::items_per_thread>;
         return rocprim::binary_search<config>(std::forward<Args>(args)...);
     }
 
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(upper_bound_subalgorithm, Args&&... args)
     {
         using config = rocprim::upper_bound_config<Config::block_size, Config::items_per_thread>;
         return rocprim::upper_bound<config>(std::forward<Args>(args)...);
     }
 
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(lower_bound_subalgorithm, Args&&... args)
     {
         using config = rocprim::lower_bound_config<Config::block_size, Config::items_per_thread>;
@@ -89,26 +92,26 @@ struct dispatch_binary_search_helper
 template<>
 struct dispatch_binary_search_helper<rocprim::default_config>
 {
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(binary_search_subalgorithm, Args&&... args)
     {
         return rocprim::binary_search<rocprim::default_config>(std::forward<Args>(args)...);
     }
 
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(upper_bound_subalgorithm, Args&&... args)
     {
         return rocprim::upper_bound<rocprim::default_config>(std::forward<Args>(args)...);
     }
 
-    template<class... Args>
+    template<typename... Args>
     hipError_t dispatch_binary_search(lower_bound_subalgorithm, Args&&... args)
     {
         return rocprim::lower_bound<rocprim::default_config>(std::forward<Args>(args)...);
     }
 };
 
-template<class SubAlgorithm, class T, class OutputType, class Config>
+template<typename SubAlgorithm, typename T, typename OutputType, typename Config>
 struct device_binary_search_benchmark : public config_autotune_interface
 {
     std::string name() const override

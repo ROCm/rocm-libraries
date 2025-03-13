@@ -34,18 +34,17 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
 #include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <type_traits>
 #include <vector>
 
-#include <cstdio>
-#include <cstdlib>
-
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
 enum class benchmark_kinds
@@ -54,104 +53,102 @@ enum class benchmark_kinds
     sort_pairs
 };
 
-namespace rp = rocprim;
+template<typename T>
+using select_decomposer_t = std::conditional_t<is_custom_type<T>::value,
+                                               custom_type_decomposer<T>,
+                                               rocprim::identity_decomposer>;
 
-template<class T>
-using select_decomposer_t = std::
-    conditional_t<is_custom_type<T>::value, custom_type_decomposer<T>, rp::identity_decomposer>;
-
-template<class T,
+template<typename T,
          unsigned int BlockSize,
          unsigned int RadixBitsPerPass,
          unsigned int ItemsPerThread,
          unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(const T* input, T* output)
+__global__ __launch_bounds__(BlockSize)
+void sort_keys_kernel(const T* input, T* output)
 {
-    const unsigned int lid = threadIdx.x;
+    const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
-    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
+    rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
     ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < Trials; ++trial)
     {
-        rp::block_radix_sort<T,
-                             BlockSize,
-                             ItemsPerThread,
-                             rocprim::empty_type,
-                             1,
-                             1,
-                             RadixBitsPerPass>
+        rocprim::block_radix_sort<T,
+                                  BlockSize,
+                                  ItemsPerThread,
+                                  rocprim::empty_type,
+                                  1,
+                                  1,
+                                  RadixBitsPerPass>
             sort;
         sort.sort(keys, 0, sizeof(T) * 8, select_decomposer_t<T>{});
     }
 
-    rp::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
+    rocprim::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
 }
 
-template<class T,
+template<typename T,
          unsigned int BlockSize,
          unsigned int RadixBitsPerPass,
          unsigned int ItemsPerThread,
          unsigned int Trials>
-__global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(const T* input, T* output)
+__global__ __launch_bounds__(BlockSize)
+void sort_pairs_kernel(const T* input, T* output)
 {
-    const unsigned int lid = threadIdx.x;
+    const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
     T values[ItemsPerThread];
-    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    rocprim::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         values[i] = keys[i] + T(1);
     }
 
     ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < Trials; ++trial)
     {
-        rp::block_radix_sort<T, BlockSize, ItemsPerThread, T, 1, 1, RadixBitsPerPass> sort;
+        rocprim::block_radix_sort<T, BlockSize, ItemsPerThread, T, 1, 1, RadixBitsPerPass> sort;
         sort.sort(keys, values, 0, sizeof(T) * 8, select_decomposer_t<T>{});
     }
 
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    for(unsigned int i = 0; i < ItemsPerThread; ++i)
     {
         keys[i] += values[i];
     }
-    rp::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
+    rocprim::block_store_direct_striped<BlockSize>(lid, output + block_offset, keys);
 }
 
-template<class T,
+template<typename T,
          unsigned int BlockSize,
          unsigned int RadixBitsPerPass,
          unsigned int ItemsPerThread,
          unsigned int Trials = 10>
 void run_benchmark(benchmark::State&   state,
                    benchmark_kinds     benchmark_kind,
-                   size_t              N,
+                   size_t              bytes,
                    const managed_seed& seed,
                    hipStream_t         stream)
 {
+    // Calculate the number of elements N
+    size_t N = bytes / sizeof(T);
+
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
-    const auto size = items_per_block * ((N + items_per_block - 1)/items_per_block);
+    const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
     std::vector<T> input = get_random_data<T>(size,
                                               generate_limits<T>::min(),
                                               generate_limits<T>::max(),
                                               seed.get_0());
 
-    T*  d_input;
-    T * d_output;
+    T* d_input;
+    T* d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // HIP events creation
@@ -217,7 +214,7 @@ void run_benchmark(benchmark::State&   state,
             .c_str(),                                                                          \
         run_benchmark<T, BS, RB, IPT>,                                                         \
         benchmark_kind,                                                                        \
-        size,                                                                                  \
+        bytes,                                                                                 \
         seed,                                                                                  \
         stream)
 
@@ -229,81 +226,99 @@ void run_benchmark(benchmark::State&   state,
 void add_benchmarks(benchmark_kinds                               benchmark_kind,
                     const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        size,
+                    size_t                                        bytes,
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
     using custom_int_type = custom_type<int, int>;
 
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_TYPE(int, 64, 3),
-        BENCHMARK_TYPE(int, 512, 3),
+    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 64, 3),
+                                                       BENCHMARK_TYPE(int, 512, 3),
 
-        BENCHMARK_TYPE(int, 64, 4),
-        BENCHMARK_TYPE(int, 128, 4),
-        BENCHMARK_TYPE(int, 192, 4),
-        BENCHMARK_TYPE(int, 256, 4),
-        BENCHMARK_TYPE(int, 320, 4),
-        BENCHMARK_TYPE(int, 512, 4),
+                                                       BENCHMARK_TYPE(int, 64, 4),
+                                                       BENCHMARK_TYPE(int, 128, 4),
+                                                       BENCHMARK_TYPE(int, 192, 4),
+                                                       BENCHMARK_TYPE(int, 256, 4),
+                                                       BENCHMARK_TYPE(int, 320, 4),
+                                                       BENCHMARK_TYPE(int, 512, 4),
 
-        BENCHMARK_TYPE(int8_t, 64, 3),
-        BENCHMARK_TYPE(int8_t, 512, 3),
+                                                       BENCHMARK_TYPE(int8_t, 64, 3),
+                                                       BENCHMARK_TYPE(int8_t, 512, 3),
 
-        BENCHMARK_TYPE(int8_t, 64, 4),
-        BENCHMARK_TYPE(int8_t, 128, 4),
-        BENCHMARK_TYPE(int8_t, 192, 4),
-        BENCHMARK_TYPE(int8_t, 256, 4),
-        BENCHMARK_TYPE(int8_t, 320, 4),
-        BENCHMARK_TYPE(int8_t, 512, 4),
+                                                       BENCHMARK_TYPE(int8_t, 64, 4),
+                                                       BENCHMARK_TYPE(int8_t, 128, 4),
+                                                       BENCHMARK_TYPE(int8_t, 192, 4),
+                                                       BENCHMARK_TYPE(int8_t, 256, 4),
+                                                       BENCHMARK_TYPE(int8_t, 320, 4),
+                                                       BENCHMARK_TYPE(int8_t, 512, 4),
 
-        BENCHMARK_TYPE(uint8_t, 64, 3),
-        BENCHMARK_TYPE(uint8_t, 512, 3),
+                                                       BENCHMARK_TYPE(uint8_t, 64, 3),
+                                                       BENCHMARK_TYPE(uint8_t, 512, 3),
 
-        BENCHMARK_TYPE(uint8_t, 64, 4),
-        BENCHMARK_TYPE(uint8_t, 128, 4),
-        BENCHMARK_TYPE(uint8_t, 192, 4),
-        BENCHMARK_TYPE(uint8_t, 256, 4),
-        BENCHMARK_TYPE(uint8_t, 320, 4),
-        BENCHMARK_TYPE(uint8_t, 512, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 64, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 128, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 192, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 256, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 320, 4),
+                                                       BENCHMARK_TYPE(uint8_t, 512, 4),
 
-        BENCHMARK_TYPE(rocprim::half, 64, 3),
-        BENCHMARK_TYPE(rocprim::half, 512, 3),
+                                                       BENCHMARK_TYPE(rocprim::half, 64, 3),
+                                                       BENCHMARK_TYPE(rocprim::half, 512, 3),
 
-        BENCHMARK_TYPE(rocprim::half, 64, 4),
-        BENCHMARK_TYPE(rocprim::half, 128, 4),
-        BENCHMARK_TYPE(rocprim::half, 192, 4),
-        BENCHMARK_TYPE(rocprim::half, 256, 4),
-        BENCHMARK_TYPE(rocprim::half, 320, 4),
-        BENCHMARK_TYPE(rocprim::half, 512, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 64, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 128, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 192, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 256, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 320, 4),
+                                                       BENCHMARK_TYPE(rocprim::half, 512, 4),
 
-        BENCHMARK_TYPE(long long, 64, 3),
-        BENCHMARK_TYPE(long long, 512, 3),
+                                                       BENCHMARK_TYPE(long long, 64, 3),
+                                                       BENCHMARK_TYPE(long long, 512, 3),
 
-        BENCHMARK_TYPE(long long, 64, 4),
-        BENCHMARK_TYPE(long long, 128, 4),
-        BENCHMARK_TYPE(long long, 192, 4),
-        BENCHMARK_TYPE(long long, 256, 4),
-        BENCHMARK_TYPE(long long, 320, 4),
-        BENCHMARK_TYPE(long long, 512, 4),
+                                                       BENCHMARK_TYPE(long long, 64, 4),
+                                                       BENCHMARK_TYPE(long long, 128, 4),
+                                                       BENCHMARK_TYPE(long long, 192, 4),
+                                                       BENCHMARK_TYPE(long long, 256, 4),
+                                                       BENCHMARK_TYPE(long long, 320, 4),
+                                                       BENCHMARK_TYPE(long long, 512, 4),
 
-        BENCHMARK_TYPE(custom_int_type, 64, 3),
-        BENCHMARK_TYPE(custom_int_type, 512, 3),
+                                                       BENCHMARK_TYPE(custom_int_type, 64, 3),
+                                                       BENCHMARK_TYPE(custom_int_type, 512, 3),
 
-        BENCHMARK_TYPE(custom_int_type, 64, 4),
-        BENCHMARK_TYPE(custom_int_type, 128, 4),
-        BENCHMARK_TYPE(custom_int_type, 192, 4),
-        BENCHMARK_TYPE(custom_int_type, 256, 4),
-        BENCHMARK_TYPE(custom_int_type, 320, 4),
-        BENCHMARK_TYPE(custom_int_type, 512, 4),
-    };
+                                                       BENCHMARK_TYPE(custom_int_type, 64, 4),
+                                                       BENCHMARK_TYPE(custom_int_type, 128, 4),
+                                                       BENCHMARK_TYPE(custom_int_type, 192, 4),
+                                                       BENCHMARK_TYPE(custom_int_type, 256, 4),
+                                                       BENCHMARK_TYPE(custom_int_type, 320, 4),
+                                                       BENCHMARK_TYPE(custom_int_type, 512, 4),
+
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 64, 3),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 512, 3),
+
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 64, 4),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 128, 4),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 192, 4),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 256, 4),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 320, 4),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 512, 4),
+
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 64, 3),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 512, 3),
+
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 64, 4),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 128, 4),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 192, 4),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 256, 4),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 320, 4),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 512, 4)};
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -314,8 +329,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
     const managed_seed seed(seed_type);
@@ -325,13 +340,13 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "keys", benchmarks, size, seed, stream);
-    add_benchmarks(benchmark_kinds::sort_pairs, "pairs", benchmarks, size, seed, stream);
+    add_benchmarks(benchmark_kinds::sort_keys, "keys", benchmarks, bytes, seed, stream);
+    add_benchmarks(benchmark_kinds::sort_pairs, "pairs", benchmarks, bytes, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

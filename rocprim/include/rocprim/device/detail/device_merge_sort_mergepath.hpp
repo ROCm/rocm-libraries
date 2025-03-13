@@ -102,6 +102,7 @@ namespace detail
                                                                       ValuesOutputIterator values_output,
                                                                       const OffsetT        input_size,
                                                                       const OffsetT  sorted_block_size,
+                                                                      const unsigned int   num_blocks,
                                                                       BinaryFunction compare_function,
                                                                       const OffsetT* merge_partitions)
         -> std::enable_if_t<(!std::is_trivially_copyable<ValueType>::value
@@ -131,8 +132,13 @@ namespace detail
         auto& values_shared = storage.values.get();
 
         const unsigned short flat_id = block_thread_id<0>();
-        const unsigned int flat_block_id = block_id<0>();
-        const bool IsIncompleteTile = flat_block_id == (input_size/items_per_tile);
+        const unsigned int flat_block_id = ::rocprim::flat_block_id();
+        if(flat_block_id >= num_blocks)
+        {
+            return;
+        }
+
+        const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
 
         const OffsetT partition_beg = merge_partitions[flat_block_id];
         const OffsetT partition_end = merge_partitions[flat_block_id + 1];
@@ -141,9 +147,11 @@ namespace detail
         const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
         const unsigned int mask  = target_merged_tiles_number - 1;
         const unsigned int tilegroup_start_id  = ~mask & flat_block_id;
-        const OffsetT tilegroup_start = items_per_tile * tilegroup_start_id; // Tile-group starts here
 
-        const OffsetT diag = items_per_tile * flat_block_id - tilegroup_start;
+        const OffsetT tilegroup_start
+            = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile; // Tile-group starts here
+        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
+
 
         const OffsetT keys1_beg = partition_beg;
         OffsetT keys1_end = partition_end;
@@ -166,7 +174,7 @@ namespace detail
                                     keys_input + keys2_beg,
                                     num_keys1,
                                     num_keys2,
-                                    IsIncompleteTile);
+                                    is_incomplete_tile);
         // Load keys into shared memory
         reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
 
@@ -177,7 +185,7 @@ namespace detail
                                         values_input + keys2_beg,
                                         num_keys1,
                                         num_keys2,
-                                        IsIncompleteTile);
+                                        is_incomplete_tile);
         }
         rocprim::syncthreads();
 
@@ -192,18 +200,16 @@ namespace detail
         const unsigned int keys1_end_local = num_keys1;
         const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
         const unsigned int keys2_end_local = num_keys2;
-        range_t range_local = {keys1_beg_local,
-                               keys1_end_local,
-                               keys2_beg_local + keys1_end_local,
-                               keys2_end_local + keys1_end_local};
+
+        range_t<> range_local{keys1_beg_local,
+                              keys1_end_local,
+                              keys2_beg_local + keys1_end_local,
+                              keys2_end_local + keys1_end_local};
 
         unsigned int indices[ItemsPerThread];
 
-        serial_merge(keys_shared,
-                     keys,
-                     indices,
-                     range_local,
-                     compare_function);
+        serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
+        rocprim::syncthreads();
 
         if ROCPRIM_IF_CONSTEXPR(with_values){
             reg_to_shared<BlockSize, ItemsPerThread>(values_shared, values);
@@ -219,10 +225,10 @@ namespace detail
             rocprim::syncthreads();
         }
 
-        const OffsetT offset = flat_block_id * items_per_tile;
+        const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
         block_store().store(offset,
                             input_size - offset,
-                            IsIncompleteTile,
+                            is_incomplete_tile,
                             keys_output,
                             values_output,
                             keys,
@@ -249,6 +255,7 @@ namespace detail
                                                                       ValuesOutputIterator values_output,
                                                                       const OffsetT        input_size,
                                                                       const OffsetT  sorted_block_size,
+                                                                      const unsigned int   num_blocks,
                                                                       BinaryFunction compare_function,
                                                                       const OffsetT* merge_partitions)
         -> std::enable_if_t<(std::is_trivially_copyable<ValueType>::value
@@ -278,8 +285,13 @@ namespace detail
         auto& values_shared = storage.values.get();
 
         const unsigned short flat_id            = block_thread_id<0>();
-        const unsigned int   flat_block_id      = block_id<0>();
-        const bool           is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
+        const unsigned int flat_block_id = ::rocprim::flat_block_id();
+        if(flat_block_id >= num_blocks)
+        {
+            return;
+        }
+
+        const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
 
         const OffsetT partition_beg = merge_partitions[flat_block_id];
         const OffsetT partition_end = merge_partitions[flat_block_id + 1];
@@ -288,9 +300,10 @@ namespace detail
         const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
         const unsigned int mask  = target_merged_tiles_number - 1;
         const unsigned int tilegroup_start_id  = ~mask & flat_block_id;
-        const OffsetT tilegroup_start = items_per_tile * tilegroup_start_id; // Tile-group starts here
+        const OffsetT tilegroup_start
+            = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile; // Tile-group starts here
+        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
 
-        const OffsetT diag = items_per_tile * flat_block_id - tilegroup_start;
 
         const OffsetT keys1_beg = partition_beg;
         OffsetT keys1_end = partition_end;
@@ -330,18 +343,16 @@ namespace detail
         const unsigned int keys1_end_local = num_keys1;
         const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
         const unsigned int keys2_end_local = num_keys2;
-        range_t range_local = {keys1_beg_local,
-                               keys1_end_local,
-                               keys2_beg_local + keys1_end_local,
-                               keys2_end_local + keys1_end_local};
+
+        range_t<> range_local{keys1_beg_local,
+                              keys1_end_local,
+                              keys2_beg_local + keys1_end_local,
+                              keys2_end_local + keys1_end_local};
 
         unsigned int indices[ItemsPerThread];
 
-        serial_merge(keys_shared,
-                     keys,
-                     indices,
-                     range_local,
-                     compare_function);
+        serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
+        rocprim::syncthreads();
 
         if ROCPRIM_IF_CONSTEXPR(with_values)
         {
@@ -381,7 +392,7 @@ namespace detail
             }
 
             rocprim::syncthreads();
-            const OffsetT thread_offset = items_per_tile * flat_block_id + ItemsPerThread * flat_id;
+            const OffsetT thread_offset = items_per_tile * static_cast<OffsetT>(flat_block_id) + ItemsPerThread * flat_id;
             if(is_incomplete_tile)
             {
                 ROCPRIM_UNROLL
@@ -405,7 +416,7 @@ namespace detail
             rocprim::syncthreads();
         }
 
-        const OffsetT offset = flat_block_id * items_per_tile;
+        const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
         value_type values[ItemsPerThread];
         block_store().store(offset,
                             input_size - offset,
@@ -432,6 +443,7 @@ namespace detail
                                      ValuesOutputIterator values_output,
                                      const OffsetT        input_size,
                                      const OffsetT        sorted_block_size,
+                                     const unsigned int   num_blocks,
                                      BinaryFunction       compare_function,
                                      const OffsetT*       merge_partitions)
     {
@@ -441,6 +453,7 @@ namespace detail
                                                             values_output,
                                                             input_size,
                                                             sorted_block_size,
+                                                            num_blocks,
                                                             compare_function,
                                                             merge_partitions);
     }

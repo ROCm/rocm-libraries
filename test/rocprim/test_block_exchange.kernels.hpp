@@ -198,7 +198,6 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, (output_type)0);
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -223,42 +222,26 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>        device_input(input);
+    test_utils::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(blocked_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
+        HIP_KERNEL_NAME(
+            blocked_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 template<class T,
@@ -287,7 +270,6 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
 
     // Calculate input and expected results on host
     std::vector<type> values(size);
@@ -312,42 +294,26 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>        device_input(input);
+    test_utils::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
+        HIP_KERNEL_NAME(
+            striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 template<class T,
@@ -376,7 +342,6 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
@@ -414,44 +379,26 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>        device_input(input);
+    test_utils::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(blocked_to_warp_striped_kernel<
-                type, output_type, items_per_block, items_per_thread
-        >),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
+        HIP_KERNEL_NAME(
+            blocked_to_warp_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 template<class T,
@@ -480,7 +427,6 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
 
     unsigned int current_device_warp_size;
     HIP_CHECK(::rocprim::host_warp_size(device_id, current_device_warp_size));
@@ -518,42 +464,26 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>        device_input(input);
+    test_utils::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(warp_striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output
-    );
+        HIP_KERNEL_NAME(
+            warp_striped_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
 }
 
 template<class T,
@@ -582,8 +512,7 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Generate data
     std::vector<type> input(size);
-    std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type>  expected(size);
     std::vector<unsigned int> ranks(size);
 
     // Calculate input and expected results on host
@@ -615,53 +544,28 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-    unsigned int* device_ranks;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_ranks, ranks.size() * sizeof(typename decltype(ranks)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_ranks, ranks.data(),
-            ranks.size() * sizeof(unsigned int),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>         device_input(input);
+    test_utils::device_ptr<output_type>  device_output(size);
+    test_utils::device_ptr<unsigned int> device_ranks(ranks);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scatter_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, device_ranks
-    );
+        HIP_KERNEL_NAME(
+            scatter_to_blocked_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get(),
+        device_ranks.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_ranks));
 }
 
 template<class T,
@@ -690,8 +594,7 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
 
     // Generate data
     std::vector<type> input(size);
-    std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type>  expected(size);
     std::vector<unsigned int> ranks(size);
 
     // Calculate input and expected results on host
@@ -725,53 +628,28 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    type* device_input;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_input, input.size() * sizeof(typename decltype(input)::value_type)));
-    output_type* device_output;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-    unsigned int* device_ranks;
-    HIP_CHECK(test_common_utils::hipMallocHelper(&device_ranks, ranks.size() * sizeof(typename decltype(ranks)::value_type)));
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_input, input.data(),
-            input.size() * sizeof(type),
-            hipMemcpyHostToDevice
-        )
-    );
-
-    HIP_CHECK(
-        hipMemcpy(
-            device_ranks, ranks.data(),
-            ranks.size() * sizeof(unsigned int),
-            hipMemcpyHostToDevice
-        )
-    );
+    test_utils::device_ptr<type>         device_input(input);
+    test_utils::device_ptr<output_type>  device_output(size);
+    test_utils::device_ptr<unsigned int> device_ranks(ranks);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(scatter_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
-        dim3(grid_size), dim3(block_size), 0, 0,
-        device_input, device_output, device_ranks
-    );
+        HIP_KERNEL_NAME(
+            scatter_to_striped_kernel<type, output_type, items_per_block, items_per_thread>),
+        dim3(grid_size),
+        dim3(block_size),
+        0,
+        0,
+        device_input.get(),
+        device_output.get(),
+        device_ranks.get());
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
-    HIP_CHECK(
-        hipMemcpy(
-            output.data(), device_output,
-            output.size() * sizeof(typename decltype(output)::value_type),
-            hipMemcpyDeviceToHost
-        )
-    );
-
+    const auto output = device_output.load();
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-    HIP_CHECK(hipFree(device_input));
-    HIP_CHECK(hipFree(device_output));
-    HIP_CHECK(hipFree(device_ranks));
 }
 
 // Static for-loop

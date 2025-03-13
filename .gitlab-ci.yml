@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,7 @@ include:
       - /deps-rocm.yaml
       - /deps-vcpkg.yaml
       - /deps-windows.yaml
+      - /deps-compiler-acceleration.yaml
       - /gpus-rocm.yaml
       - /rules.yaml
 
@@ -40,6 +41,17 @@ stages:
   - build
   - test
   - benchmark
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_LABELS =~ /CI Skip/
+      when: never
+    - if: $CI_MERGE_REQUEST_TITLE !~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 3
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/
+      variables:
+        ROCPRIM_TEST_RUNS: 1
 
 variables:
   PACKAGE_DIR: $BUILD_DIR/package
@@ -68,10 +80,12 @@ copyright-date:
     - .deps:rocm
     - .deps:cmake-minimum
     - .deps:vcpkg
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
     - !reference [".deps:vcpkg", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
     - $VCPKG_DIR/vcpkg install
         gtest
         benchmark
@@ -80,9 +94,11 @@ copyright-date:
   extends:
     - .deps:rocm
     - .deps:cmake-minimum
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
     - $SUDO_CMD apt-get install -y -qq
         libgtest-dev
         libbenchmark-dev
@@ -105,8 +121,10 @@ copyright-date:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D BUILD_BENCHMARK=ON
-      -D GPU_TARGETS=$GPU_TARGETS
-      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=14
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
     - cmake
@@ -131,17 +149,21 @@ build:cmake-minimum-apt:
   extends:
     - .deps:rocm
     - .deps:cmake-latest
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-latest", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .cmake-minimum:
   extends:
     - .deps:rocm
     - .deps:cmake-minimum
+    - .deps:compiler-acceleration
   before_script:
     - !reference [".deps:rocm", before_script]
     - !reference [".deps:cmake-minimum", before_script]
+    - !reference [".deps:compiler-acceleration", before_script]
 
 .build:common:
   stage: build
@@ -158,7 +180,7 @@ build:cmake-minimum-apt:
     - | # Add hardened libc++ assertions for tests only
         if [[ $BUILD_TARGET == "TEST" ]]; then
             echo "Configuring with hardened libc++!"
-            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON"
+            EXTRA_CMAKE_CXX_FLAGS+=" -D_GLIBCXX_ASSERTIONS=ON -D ROCPRIM_ENABLE_ASSERTS=ON"
         fi
     - cmake
       -G Ninja
@@ -166,9 +188,11 @@ build:cmake-minimum-apt:
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror $EXTRA_CMAKE_CXX_FLAGS"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
       -D BUILD_$BUILD_TARGET=ON
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
       -D BUILD_EXAMPLE=ON
-      -D GPU_TARGETS=$GPU_TARGETS
-      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD="$BUILD_VERSION"
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
     - cmake --build $BUILD_DIR
@@ -183,8 +207,9 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/test/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
       - $BUILD_DIR/test/rocprim/test_*
+      - $BUILD_DIR/test/rocprim/libtest_*
       - $BUILD_DIR/test/test_*
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:cmake-latest:
   stage: build
@@ -197,6 +222,7 @@ build:cmake-latest:
     matrix:
       - BUILD_TYPE: Release
         BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: [14, 17]
 
 build:cmake-minimum:
   needs: []
@@ -207,6 +233,7 @@ build:cmake-minimum:
     matrix:
       - BUILD_TYPE: [Debug, Release]
         BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 14
 
 build:package:
   stage: build
@@ -223,6 +250,7 @@ build:package:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=14
       -B $PACKAGE_DIR
       -S $CI_PROJECT_DIR
     - cd $PACKAGE_DIR
@@ -231,7 +259,7 @@ build:package:
     paths:
       - $PACKAGE_DIR/rocprim*.deb
       - $PACKAGE_DIR/rocprim*.zip
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 build:windows:
   stage: build
@@ -251,10 +279,11 @@ build:windows:
       -S $CI_PROJECT_DIR
       -B $CI_PROJECT_DIR/build
       -D BUILD_$BUILD_TARGET=ON
-      -D GPU_TARGETS=$GPU_TARGET
+      -D AMDGPU_TARGETS=$GPU_TARGET
       -D CMAKE_CXX_COMPILER:PATH="${env:HIP_PATH}\bin\clang++.exe"
       -D CMAKE_PREFIX_PATH:PATH="${env:HIP_PATH}"
       -D CMAKE_BUILD_TYPE="$BUILD_TYPE"
+      -D CMAKE_CXX_STANDARD=14
     - cmake --build "$CI_PROJECT_DIR/build"
   artifacts:
     paths:
@@ -266,7 +295,7 @@ build:windows:
       - $CI_PROJECT_DIR/build/CMakeCache.txt
       - $CI_PROJECT_DIR/build/.ninja_log
       - $CI_PROJECT_DIR/build/CTestTestfile.cmake
-    expire_in: 2 weeks
+    expire_in: 1 day
 
 autotune:build:
   stage: autotune
@@ -298,7 +327,10 @@ autotune:build:
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=ON
       -D BENCHMARK_CONFIG_TUNING=ON
-      -D GPU_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
+      -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
+      -D CMAKE_CXX_STANDARD=14
     - cmake --build . --target $BENCHMARK_TARGETS
     - 'rm -rf $BUILD_DIR/benchmark/benchmark*.parallel'
     # The autotune benchmarks get very large, above GitLabs upload limit. Fortunately they compress well.
@@ -312,18 +344,20 @@ autotune:build:
       - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 1 week
 
-test:
+.test:common:
   stage: test
+  tags:
+    - rocm
+    - $GPU
   extends:
     - .cmake-minimum
-    - .rules:test
-    - .gpus:rocm
   needs:
     - job: build:cmake-minimum
       parallel:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: TEST
+            BUILD_VERSION: 14
   script:
     - cd $BUILD_DIR
     - cmake
@@ -336,9 +370,31 @@ test:
     - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
-      --tests-regex "hip|$GPU_TARGET"
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
+
+test:any-gpu:
+  variables:
+    GPU: ""
+    PARALLEL_JOBS: 1
+  extends:
+    - .test:common
+  rules:
+    - if: $CI_MERGE_REQUEST_TITLE =~ /Draft:/ && $CI_MERGE_REQUEST_LABELS !~ /Arch::/
+
+test:label-arch:
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:arch-labels
+
+test:all-gpus:
+  variables:
+    SHOULD_BE_UNDRAFTED: "true"
+  extends:
+    - .gpus:rocm
+    - .test:common
+    - .rules:test
 
 .test-windows-base:
   stage: test
@@ -379,7 +435,8 @@ test-windows-release:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
-      -D GPU_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D CMAKE_CXX_STANDARD=14
       -S "$CI_PROJECT_DIR/test/extra"
       -B "$CI_PROJECT_DIR/package_test"
     - cmake --build "$CI_PROJECT_DIR/package_test"
@@ -401,9 +458,11 @@ test:install:
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D CMAKE_CXX_STANDARD=14
       -B build
       -S $CI_PROJECT_DIR
-    - $SUDO_CMD cmake --build build --target install
+    # Preserve $PATH when sudoing
+    - $SUDO_CMD env PATH="$PATH" cmake --build build --target install
     - !reference [.test-package, script]
 
 test:deb:
@@ -427,6 +486,10 @@ test:docs:
   extends:
     - .rules:test
     - .build:docs
+  artifacts:
+    paths:
+      - $DOCS_DIR/_build/html/
+    expire_in: 2 weeks
 
 .benchmark-base:
   stage: benchmark
@@ -443,6 +506,7 @@ benchmark:
         matrix:
           - BUILD_TYPE: Release
             BUILD_TARGET: BENCHMARK
+            BUILD_VERSION: 14
   extends:
     - .cmake-minimum
     - .gpus:rocm
@@ -450,6 +514,7 @@ benchmark:
   variables:
     BENCHMARK_FILENAME_REGEX: ^benchmark
     BENCHMARK_ALGORITHM_REGEX: ""
+    BENCHMARK_SEED: random
   script:
     - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
     - cd "${CI_PROJECT_DIR}"
@@ -461,6 +526,7 @@ benchmark:
       --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+      --seed "${BENCHMARK_SEED}"
   artifacts:
     paths:
       - ${BENCHMARK_RESULT_DIR}

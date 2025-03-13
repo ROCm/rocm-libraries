@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,13 @@
 #include <type_traits>
 
 #include "../../config.hpp"
+#include "../../detail/merge_path.hpp"
 #include "../../detail/various.hpp"
 
 #include "../../functional.hpp"
 #include "../../intrinsics.hpp"
+
+#include "../../detail/merge_path.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -154,14 +157,14 @@ private:
             const auto keys1_merge_begin = keys1_begin + partition;
             const auto keys2_merge_begin = keys2_begin + diag - partition;
 
-            const range_t range = {
+            const range_t<> range{
                 keys1_merge_begin,
                 keys1_end,
                 keys2_merge_begin,
                 keys2_end,
             };
 
-            serial_merge(shared_keys, thread_keys, range, compare_function);
+            serial_merge<false>(shared_keys, thread_keys, range, compare_function);
 
             wave_barrier();
         }
@@ -215,19 +218,19 @@ private:
             const auto keys1_merge_begin = keys1_begin + partition;
             const auto keys2_merge_begin = keys2_begin + diag - partition;
 
-            const range_t range = {
+            const range_t<> range{
                 keys1_merge_begin,
                 keys1_end,
                 keys2_merge_begin,
                 keys2_end,
             };
 
-            serial_merge(shared_keys,
-                         thread_keys,
-                         shared_values,
-                         thread_values,
-                         range,
-                         compare_function);
+            serial_merge<false>(shared_keys,
+                                thread_keys,
+                                shared_values,
+                                thread_values,
+                                range,
+                                compare_function);
 
             wave_barrier();
         }
@@ -361,7 +364,7 @@ private:
     /// Permuting the input by the output gives the merged ranges:
     /// | 1 3 6 7 | 0 2 4 5 |
     ///
-    /// \param m - The size of each subsequence to merge. The output consists of indices
+    /// \param m The size of each subsequence to merge. The output consists of indices
     /// for sorted ranges of 2 * m elements.
     template<bool is_incomplete, typename BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE int merge_rank(const unsigned int m,

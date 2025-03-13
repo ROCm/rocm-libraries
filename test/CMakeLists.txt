@@ -53,6 +53,10 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
 
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
 
+  if(USE_HIPCXX)
+    set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE HIP)
+  endif()
+
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   if (ROCPRIM_INSTALL)
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
@@ -68,24 +72,19 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
       GTest::GTest
       GTest::Main
   )
-  if(NOT USE_HIP_CPU)
+  target_link_libraries(${TEST_TARGET}
+    PRIVATE
+      rocprim
+  )
+  if(USE_HIPCXX)
     target_link_libraries(${TEST_TARGET}
       PRIVATE
-        rocprim_hip
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
     )
   else()
     target_link_libraries(${TEST_TARGET}
       PRIVATE
-        rocprim
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${TEST_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
+      hip::device)
   endif()
 
   target_compile_options(${TEST_TARGET}
@@ -124,6 +123,7 @@ endfunction()
 # HIP tests without using rocPRIM
 add_hip_test("hip.device_api" hip/test_hip_api.cpp)
 add_hip_test("hip.async_copy" hip/test_hip_async_copy.cpp)
+add_hip_test("hip.ordered_block_id" hip/test_ordered_block_id.cpp)
 
 # rocPRIM test
 add_subdirectory(rocprim)

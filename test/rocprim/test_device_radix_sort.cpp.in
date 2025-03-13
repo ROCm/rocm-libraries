@@ -47,12 +47,13 @@
 #if   ROCPRIM_TEST_SLICE == 0
     TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
     TEST(SUITE, SortKeysOver4GWithGraphs) { sort_keys_over_4g<true>(); }
+    TEST(SUITE, SortKeysLargeSizes) { sort_keys_large_sizes(); }
 #endif
 
 #if   ROCPRIM_TEST_TYPE_SLICE == 0
 #if ROCPRIM_HAS_INT128_SUPPORT
-    INSTANTIATE(params<__int128_t,          __int128_t>)
-    INSTANTIATE(params<__uint128_t,         __uint128_t>)
+    INSTANTIATE(params<rocprim::int128_t,          rocprim::int128_t>)
+    INSTANTIATE(params<rocprim::uint128_t,         rocprim::uint128_t>)
 #endif
     INSTANTIATE(params<bool,                int, true>)
     INSTANTIATE(params<bool,                int, false>)
@@ -71,6 +72,7 @@
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16>)
     INSTANTIATE(params<int,                 test_utils::custom_test_type<float>>)
     INSTANTIATE(params<test_utils::custom_float_type, int>)
+    INSTANTIATE(params<test_utils::custom_float_traits_type, int>)
     INSTANTIATE(params<unsigned int, test_utils::custom_test_array_type<int, 32>>)
 
     // start_bit and end_bit

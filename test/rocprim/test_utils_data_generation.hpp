@@ -58,7 +58,7 @@ struct is_valid_for_int_distribution :
 namespace detail
 {
 template<class T>
-struct numeric_limits_custom_test_type : public std::numeric_limits<typename T::value_type>
+struct numeric_limits_custom_test_type : public rocprim::numeric_limits<typename T::value_type>
 {};
 } // namespace detail
 
@@ -67,7 +67,7 @@ template<class T>
 struct numeric_limits
     : public std::conditional<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value,
                               detail::numeric_limits_custom_test_type<T>,
-                              std::numeric_limits<T>>::type
+                              rocprim::numeric_limits<T>>::type
 {};
 
 template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half> {
@@ -117,6 +117,48 @@ public:
     };
 };
 // End of extended numeric_limits
+
+template<class T, class enable = void>
+struct generate_limits
+{
+    static inline T min()
+    {
+        return rocprim::numeric_limits<T>::min();
+    }
+    static inline T max()
+    {
+        return rocprim::numeric_limits<T>::max();
+    }
+};
+
+template<class T>
+struct generate_limits<
+    T,
+    std::enable_if_t<is_custom_test_array_type<T>::value || is_custom_test_type<T>::value>>
+{
+    using Type = typename T::value_type;
+    static inline Type min()
+    {
+        return generate_limits<Type>::min();
+    }
+    static inline Type max()
+    {
+        return generate_limits<Type>::max();
+    }
+};
+
+template<class T>
+struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
+{
+    static inline T min()
+    {
+        return T(-1000);
+    }
+    static inline T max()
+    {
+        return T(1000);
+    }
+};
 
 // Converts possible device side types to their relevant host side native types
 inline rocprim::native_half convert_to_native(const rocprim::half& value)
@@ -229,13 +271,13 @@ template<typename Res, typename T>
 constexpr Res saturate_cast(T x) noexcept
 {
     // Handle overflow
-    if(test_utils::cmp_less(x, std::numeric_limits<Res>::min()))
+    if(test_utils::cmp_less(x, numeric_limits<Res>::min()))
     {
-        return std::numeric_limits<Res>::min();
+        return numeric_limits<Res>::min();
     }
-    if(test_utils::cmp_greater(x, std::numeric_limits<Res>::max()))
+    if(test_utils::cmp_greater(x, numeric_limits<Res>::max()))
     {
-        return std::numeric_limits<Res>::max();
+        return numeric_limits<Res>::max();
     }
     // No overflow
     return static_cast<Res>(x);
@@ -265,39 +307,11 @@ inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& g
             std::generate_n(it + segment_size * segment_index, segment_size, gen);
         }
     }
+    // Generate the remaining items
+    std::generate_n(it + segment_size * random_data_generation_segments,
+                    size - segment_size * random_data_generation_segments,
+                    gen);
     return it + size;
-}
-
-template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __int128_t>::value, OutputIter>
-{
-    using T = it_value_t<OutputIter>;
-
-    using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
-                                                         test_utils::saturate_cast<dis_type>(max));
-
-    return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
-}
-
-template<class OutputIter, class U, class V, class Generator>
-inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<std::is_same<it_value_t<OutputIter>, __uint128_t>::value, OutputIter>
-{
-    using T = it_value_t<OutputIter>;
-
-    using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
-                                                         test_utils::saturate_cast<dis_type>(max));
-
-    return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
 
 template<class OutputIter, class U, class V, class Generator>
@@ -309,10 +323,7 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
     using dis_type = typename std::conditional<
         is_valid_for_int_distribution<T>::value,
         T,
-        typename std::conditional<std::is_signed<T>::value,
-                                  int,
-                                  unsigned int>::type
-        >::type;
+        typename std::conditional<rocprim::is_signed<T>::value, int, unsigned int>::type>::type;
     std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
                                                          test_utils::saturate_cast<dis_type>(max));
 
@@ -491,21 +502,22 @@ std::vector<size_t> get_sizes(T seed_value)
     return sizes;
 }
 
-template<class T>
+template<unsigned int MaxPow2 = 37, class T>
 std::vector<size_t> get_large_sizes(T seed_value)
 {
-    // clang-format off
     std::vector<size_t> sizes = {
-        (size_t{1} << 30) - 1, size_t{1} << 30,
-        (size_t{1} << 32) - 1, size_t{1} << 32,
+        (size_t{1} << 30) - 1,
+        size_t{1} << 31,
+        (size_t{1} << 32) - 15,
+        (size_t{1} << 33) + (size_t{1} << 32) - 876543,
+        (size_t{1} << 34) - 12346,
         (size_t{1} << 35) + 1,
-        (size_t{1} << 37) - 1,
+        (size_t{1} << MaxPow2) - 1,
     };
-    // clang-format on
     const std::vector<size_t> random_sizes
         = test_utils::get_random_data<size_t>(2,
                                               (size_t{1} << 30) + 1,
-                                              (size_t{1} << 37) - 2,
+                                              (size_t{1} << MaxPow2) - 2,
                                               seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     std::sort(sizes.begin(), sizes.end());

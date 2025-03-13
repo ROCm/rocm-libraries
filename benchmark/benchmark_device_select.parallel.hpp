@@ -28,16 +28,24 @@
 
 #include <benchmark/benchmark.h>
 
-#include <rocprim/rocprim.hpp>
-
 #include <hip/hip_runtime.h>
 
-#include <algorithm>
-#include <limits>
-#include <memory>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_select.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/device/detail/device_config_helper.hpp>
+#endif
+
+#include <cstddef>
 #include <string>
 #include <type_traits>
 #include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <algorithm>
+    #include <memory>
+#endif
 
 enum class select_probability
 {
@@ -77,9 +85,9 @@ inline const char* get_probability_name(select_probability probability)
 constexpr int warmup_iter = 5;
 constexpr int batch_size  = 10;
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
-         class FlagType                 = char,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
+         typename FlagType              = char,
          select_probability Probability = select_probability::tuning>
 struct device_select_flag_benchmark : public config_autotune_interface
 {
@@ -94,10 +102,13 @@ struct device_select_flag_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(DataType);
+
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 generate_limits<DataType>::min(),
                                                                 generate_limits<DataType>::max(),
@@ -176,7 +187,7 @@ struct device_select_flag_benchmark : public config_autotune_interface
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; i++)
+        for(int i = 0; i < warmup_iter; ++i)
         {
             dispatch(d_temp_storage, temp_storage_size_bytes);
         }
@@ -207,23 +218,23 @@ struct device_select_flag_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
+        HIP_CHECK(hipFree(d_input));
         if(is_tuning)
         {
-            hipFree(d_flags_2);
-            hipFree(d_flags_1);
+            HIP_CHECK(hipFree(d_flags_2));
+            HIP_CHECK(hipFree(d_flags_1));
         }
-        hipFree(d_flags_0);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_flags_0));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
 };
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_predicate_benchmark : public config_autotune_interface
 {
@@ -237,10 +248,13 @@ struct device_select_predicate_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(DataType);
+
         // all data types can represent [0, 127], -1 so a predicate can select all
         std::vector<DataType> input = get_random_data<DataType>(size,
                                                                 static_cast<DataType>(0),
@@ -321,10 +335,160 @@ struct device_select_predicate_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
+    }
+
+    static constexpr bool is_tuning = Probability == select_probability::tuning;
+};
+
+template<typename DataType,
+         typename FlagType              = int,
+         typename Config                = rocprim::default_config,
+         select_probability Probability = select_probability::tuning>
+struct device_select_predicated_flag_benchmark : public config_autotune_interface
+{
+    std::string name() const override
+    {
+        using namespace std::string_literals;
+        return bench_naming::format_name(
+            "{lvl:device,algo:select,subalgo:predicated_flag,data_type:"
+            + std::string(Traits<DataType>::name())
+            + ",flag_type:" + std::string(Traits<FlagType>::name()) + ",probability:"
+            + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
+    }
+
+    void run(benchmark::State&   state,
+             size_t              bytes,
+             const managed_seed& seed,
+             hipStream_t         stream) const override
+    {
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(DataType);
+
+        std::vector<DataType> input = get_random_data<DataType>(size,
+                                                                generate_limits<DataType>::min(),
+                                                                generate_limits<DataType>::max(),
+                                                                seed.get_0());
+
+        std::vector<FlagType> flags_0;
+        std::vector<FlagType> flags_1;
+        std::vector<FlagType> flags_2;
+
+        if(is_tuning)
+        {
+            flags_0 = get_random_data01<FlagType>(size, 0.0f, seed.get_1());
+            flags_1 = get_random_data01<FlagType>(size, 0.5f, seed.get_1());
+            flags_2 = get_random_data01<FlagType>(size, 1.0f, seed.get_1());
+        }
+        else
+        {
+            flags_0 = get_random_data01<FlagType>(size, get_probability(Probability), seed.get_1());
+        }
+
+        DataType* d_input{};
+        HIP_CHECK(hipMalloc(&d_input, size * sizeof(*d_input)));
+        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(*d_input), hipMemcpyHostToDevice));
+
+        FlagType* d_flags_0{};
+        FlagType* d_flags_1{};
+        FlagType* d_flags_2{};
+        HIP_CHECK(hipMalloc(&d_flags_0, size * sizeof(*d_flags_0)));
+        HIP_CHECK(
+            hipMemcpy(d_flags_0, flags_0.data(), size * sizeof(*d_flags_0), hipMemcpyHostToDevice));
+        if(is_tuning)
+        {
+            HIP_CHECK(hipMalloc(&d_flags_1, size * sizeof(*d_flags_1)));
+            HIP_CHECK(hipMemcpy(d_flags_1,
+                                flags_1.data(),
+                                size * sizeof(*d_flags_1),
+                                hipMemcpyHostToDevice));
+            HIP_CHECK(hipMalloc(&d_flags_2, size * sizeof(*d_flags_2)));
+            HIP_CHECK(hipMemcpy(d_flags_2,
+                                flags_2.data(),
+                                size * sizeof(*d_flags_2),
+                                hipMemcpyHostToDevice));
+        }
+
+        DataType* d_output{};
+        HIP_CHECK(hipMalloc(&d_output, size * sizeof(*d_output)));
+
+        unsigned int* d_selected_count_output{};
+        HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(*d_selected_count_output)));
+
+        const auto dispatch = [&](void* d_temp_storage, size_t& temp_storage_size_bytes)
+        {
+            const auto dispatch_predicated_flags = [&](FlagType* d_flags)
+            {
+                auto predicate = [](const FlagType& value) -> bool { return value; };
+                HIP_CHECK(rocprim::select<Config>(d_temp_storage,
+                                                  temp_storage_size_bytes,
+                                                  d_input,
+                                                  d_flags,
+                                                  d_output,
+                                                  d_selected_count_output,
+                                                  size,
+                                                  predicate,
+                                                  stream));
+            };
+
+            dispatch_predicated_flags(d_flags_0);
+            if(is_tuning)
+            {
+                dispatch_predicated_flags(d_flags_1);
+                dispatch_predicated_flags(d_flags_2);
+            }
+        };
+
+        // Allocate temporary storage memory
+        size_t temp_storage_size_bytes{};
+        dispatch(nullptr, temp_storage_size_bytes);
+        void* d_temp_storage{};
+        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+
+        for(int i = 0; i < warmup_iter; ++i)
+        {
+            dispatch(d_temp_storage, temp_storage_size_bytes);
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
+        for(auto _ : state)
+        {
+            HIP_CHECK(hipEventRecord(start, stream));
+            for(int i = 0; i < batch_size; ++i)
+            {
+                dispatch(d_temp_storage, temp_storage_size_bytes);
+            }
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds{};
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
+        }
+
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
+        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
+        state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+        HIP_CHECK(hipFree(d_input));
+        if(is_tuning)
+        {
+            HIP_CHECK(hipFree(d_flags_2));
+            HIP_CHECK(hipFree(d_flags_1));
+        }
+        HIP_CHECK(hipFree(d_flags_0));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -341,7 +505,7 @@ inline std::vector<DataType> get_unique_input(size_t size, float probability, un
     auto                  input01 = get_random_data01<DataType>(size, probability, seed);
     auto                  acc     = input01[0];
     input[0]                      = acc;
-    for(size_t i = 1; i < input01.size(); i++)
+    for(size_t i = 1; i < input01.size(); ++i)
     {
         input[i] = op(acc, input01[i]);
     }
@@ -349,8 +513,8 @@ inline std::vector<DataType> get_unique_input(size_t size, float probability, un
     return input;
 }
 
-template<class DataType,
-         class Config                   = rocprim::default_config,
+template<typename DataType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_unique_benchmark : public config_autotune_interface
 {
@@ -364,10 +528,13 @@ struct device_select_unique_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(DataType);
+
         std::vector<DataType> input_0;
         std::vector<DataType> input_1;
         std::vector<DataType> input_2;
@@ -470,21 +637,21 @@ struct device_select_unique_benchmark : public config_autotune_interface
 
         if(is_tuning)
         {
-            hipFree(d_input_2);
-            hipFree(d_input_1);
+            HIP_CHECK(hipFree(d_input_2));
+            HIP_CHECK(hipFree(d_input_1));
         }
-        hipFree(d_input_0);
-        hipFree(d_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_input_0));
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
 };
 
-template<class KeyType,
-         class ValueType,
-         class Config                   = rocprim::default_config,
+template<typename KeyType,
+         typename ValueType,
+         typename Config                = rocprim::default_config,
          select_probability Probability = select_probability::tuning>
 struct device_select_unique_by_key_benchmark : public config_autotune_interface
 {
@@ -499,10 +666,13 @@ struct device_select_unique_by_key_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(KeyType);
+
         std::vector<KeyType> input_keys_0;
         std::vector<KeyType> input_keys_1;
         std::vector<KeyType> input_keys_2;
@@ -628,15 +798,15 @@ struct device_select_unique_by_key_benchmark : public config_autotune_interface
 
         if(is_tuning)
         {
-            hipFree(d_keys_input_2);
-            hipFree(d_keys_input_1);
+            HIP_CHECK(hipFree(d_keys_input_2));
+            HIP_CHECK(hipFree(d_keys_input_1));
         }
-        hipFree(d_keys_input_0);
-        hipFree(d_values_input);
-        hipFree(d_keys_output);
-        hipFree(d_values_output);
-        hipFree(d_selected_count_output);
-        hipFree(d_temp_storage);
+        HIP_CHECK(hipFree(d_keys_input_0));
+        HIP_CHECK(hipFree(d_values_input));
+        HIP_CHECK(hipFree(d_keys_output));
+        HIP_CHECK(hipFree(d_values_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -647,10 +817,24 @@ struct device_select_unique_by_key_benchmark : public config_autotune_interface
 template<typename Config, typename KeyType, typename ValueType>
 struct create_benchmark
 {
+    static constexpr unsigned int block_size           = Config().kernel_config.block_size;
+    static constexpr unsigned int items_per_thread     = Config().kernel_config.items_per_thread;
+    static constexpr unsigned int max_shared_memory    = TUNING_SHARED_MEMORY_MAX;
+    static constexpr unsigned int max_size_per_element = sizeof(KeyType) + sizeof(ValueType);
+    static constexpr unsigned int max_items_per_thread
+        = max_shared_memory / (block_size * max_size_per_element);
+
     void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
     {
         storage.emplace_back(
             std::make_unique<device_select_unique_by_key_benchmark<KeyType, ValueType, Config>>());
+
+        if(items_per_thread <= max_items_per_thread)
+        {
+            storage.emplace_back(
+                std::make_unique<
+                    device_select_predicated_flag_benchmark<KeyType, ValueType, Config>>());
+        }
     }
 };
 

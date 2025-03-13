@@ -29,34 +29,30 @@
 // HIP API
 #include <hip/hip_runtime.h>
 // rocPRIM
+#include <rocprim/config.hpp>
+#include <rocprim/types.hpp>
 #include <rocprim/warp/warp_scan.hpp>
 
-#include <iostream>
-#include <limits>
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <vector>
 
-#include <cstdio>
-#include <cstdlib>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-namespace rp = rocprim;
-
-template<class T, unsigned int WarpSize, unsigned int Trials>
-__global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+template<typename T, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_inclusive_scan_kernel(const T* input, T* output)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    auto value = input[i];
+    const unsigned int i     = blockIdx.x * blockDim.x + threadIdx.x;
+    auto               value = input[i];
 
-    using wscan_t = rp::warp_scan<T, WarpSize>;
+    using wscan_t = rocprim::warp_scan<T, WarpSize>;
     __shared__ typename wscan_t::storage_type storage;
     ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < Trials; ++trial)
     {
         wscan_t().inclusive_scan(value, value, storage);
     }
@@ -64,18 +60,17 @@ void warp_inclusive_scan_kernel(const T* input, T* output)
     output[i] = value;
 }
 
-template<class T, unsigned int WarpSize, unsigned int Trials>
-__global__
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
+template<typename T, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
 void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
 {
-    const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    auto value = input[i];
+    const unsigned int i     = blockIdx.x * blockDim.x + threadIdx.x;
+    auto               value = input[i];
 
-    using wscan_t = rp::warp_scan<T, WarpSize>;
+    using wscan_t = rocprim::warp_scan<T, WarpSize>;
     __shared__ typename wscan_t::storage_type storage;
     ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    for(unsigned int trial = 0; trial < Trials; ++trial)
     {
         wscan_t().exclusive_scan(value, value, init, storage);
     }
@@ -83,30 +78,25 @@ void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
     output[i] = value;
 }
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int WarpSize,
-    bool Inclusive = true,
-    unsigned int Trials = 100
->
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
+template<typename T,
+         unsigned int BlockSize,
+         unsigned int WarpSize,
+         bool         Inclusive = true,
+         unsigned int Trials    = 100>
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t bytes)
 {
+    // Calculate the number of elements
+    size_t size = bytes / sizeof(T);
+
     // Make sure size is a multiple of BlockSize
-    size = BlockSize * ((size + BlockSize - 1)/BlockSize);
+    size = BlockSize * ((size + BlockSize - 1) / BlockSize);
     // Allocate and fill memory
     std::vector<T> input(size, (T)1);
-    T * d_input;
-    T * d_output;
+    T*             d_input;
+    T*             d_output;
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
     HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
+    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
     // HIP events creation
@@ -114,26 +104,31 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     HIP_CHECK(hipEventCreate(&start));
     HIP_CHECK(hipEventCreate(&stop));
 
-    for (auto _ : state)
+    for(auto _ : state)
     {
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
         if(Inclusive)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, WarpSize, Trials>),
-                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-                d_input, d_output
-            );
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, WarpSize, Trials>),
+                               dim3(size / BlockSize),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input,
+                               d_output);
         }
         else
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, WarpSize, Trials>),
-                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-                d_input, d_output, input[0]
-            );
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, WarpSize, Trials>),
+                               dim3(size / BlockSize),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input,
+                               d_output,
+                               input[0]);
         }
         HIP_CHECK(hipGetLastError());
 
@@ -165,44 +160,40 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
             .c_str(),                                                                  \
         run_benchmark<T, BS, WS, INCLUSIVE>,                                           \
         stream,                                                                        \
-        size)
+        bytes)
 
-#define BENCHMARK_TYPE(type) \
-    CREATE_BENCHMARK(type, 64, 64, Inclusive), \
-    CREATE_BENCHMARK(type, 128, 64, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 64, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 32, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 16, Inclusive), \
-    CREATE_BENCHMARK(type, 63, 63, Inclusive), \
-    CREATE_BENCHMARK(type, 62, 31, Inclusive), \
-    CREATE_BENCHMARK(type, 60, 15, Inclusive)
+#define BENCHMARK_TYPE(type)                                                                    \
+    CREATE_BENCHMARK(type, 64, 64, Inclusive), CREATE_BENCHMARK(type, 128, 64, Inclusive),      \
+        CREATE_BENCHMARK(type, 256, 64, Inclusive), CREATE_BENCHMARK(type, 256, 32, Inclusive), \
+        CREATE_BENCHMARK(type, 256, 16, Inclusive), CREATE_BENCHMARK(type, 63, 63, Inclusive),  \
+        CREATE_BENCHMARK(type, 62, 31, Inclusive), CREATE_BENCHMARK(type, 60, 15, Inclusive)
 
 template<bool Inclusive>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t                                   stream,
-                    size_t                                        size)
+                    size_t                                        bytes)
 {
-    using custom_double2 = custom_type<double, double>;
+    using custom_double2    = custom_type<double, double>;
     using custom_int_double = custom_type<int, double>;
 
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
-    {
-        BENCHMARK_TYPE(int),
-        BENCHMARK_TYPE(float),
-        BENCHMARK_TYPE(double),
-        BENCHMARK_TYPE(int8_t),
-        BENCHMARK_TYPE(uint8_t),
-        BENCHMARK_TYPE(rocprim::half),
-        BENCHMARK_TYPE(custom_double2),
-        BENCHMARK_TYPE(custom_int_double)
-    };
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks
+        = {BENCHMARK_TYPE(int),
+           BENCHMARK_TYPE(float),
+           BENCHMARK_TYPE(double),
+           BENCHMARK_TYPE(int8_t),
+           BENCHMARK_TYPE(uint8_t),
+           BENCHMARK_TYPE(rocprim::half),
+           BENCHMARK_TYPE(custom_double2),
+           BENCHMARK_TYPE(custom_int_double),
+           BENCHMARK_TYPE(rocprim::int128_t),
+           BENCHMARK_TYPE(rocprim::uint128_t)};
     benchmarks.insert(benchmarks.end(), new_benchmarks.begin(), new_benchmarks.end());
 }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -212,8 +203,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
@@ -221,12 +212,12 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<true>(benchmarks, stream, size); //inclusive
-    add_benchmarks<false>(benchmarks, stream, size); //exclusive
+    add_benchmarks<true>(benchmarks, stream, bytes); //inclusive
+    add_benchmarks<false>(benchmarks, stream, bytes); //exclusive
 
     // Use manual timing
     for(auto& b : benchmarks)

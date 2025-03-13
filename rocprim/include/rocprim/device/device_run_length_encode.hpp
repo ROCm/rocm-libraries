@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,22 +21,24 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
 #define ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_
 
-#include <iostream>
-#include <iterator>
-#include <type_traits>
-
-#include "../config.hpp"
-#include "../detail/various.hpp"
-
-#include "../iterator/constant_iterator.hpp"
-#include "../iterator/counting_iterator.hpp"
-#include "../iterator/discard_iterator.hpp"
-#include "../iterator/zip_iterator.hpp"
-
-#include "detail/device_config_helper.hpp"
 #include "device_reduce_by_key.hpp"
 #include "device_run_length_encode_config.hpp"
-#include "device_select.hpp"
+
+#include "detail/device_config_helper.hpp"
+#include "detail/device_run_length_encode.hpp"
+
+#include "../common.hpp"
+#include "../config.hpp"
+#include "../detail/various.hpp"
+#include "../iterator/constant_iterator.hpp"
+#include "../type_traits.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <ios>
+#include <iostream>
+#include <iterator>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -46,21 +48,219 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        if(error != hipSuccess) return error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-        } \
+namespace run_length_encode
+{
+
+template<typename Config,
+         typename KeysInputIterator,
+         typename ValuesInputIterator,
+         typename UniqueOutputIterator,
+         typename AggregatesOutputIterator,
+         typename UniqueCountOutputIterator,
+         typename BinaryFunction,
+         typename KeyCompareFunction>
+hipError_t run_length_encode_impl(void*                     temporary_storage,
+                                  size_t&                   storage_size,
+                                  KeysInputIterator         keys_input,
+                                  ValuesInputIterator       values_input,
+                                  const size_t              size,
+                                  UniqueOutputIterator      unique_output,
+                                  AggregatesOutputIterator  aggregates_output,
+                                  UniqueCountOutputIterator unique_count_output,
+                                  BinaryFunction            reduce_op,
+                                  KeyCompareFunction        key_compare_op,
+                                  const hipStream_t         stream,
+                                  const bool                debug_synchronous)
+{
+    using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
+    using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
+
+    using config = wrapped_trivial_runs_config<Config, key_type, accumulator_type, BinaryFunction>;
+
+    return detail::reduce_by_key_impl_wrapped_config<
+        detail::lookback_scan_determinism::nondeterministic,
+        config>(temporary_storage,
+                storage_size,
+                keys_input,
+                values_input,
+                size,
+                unique_output,
+                aggregates_output,
+                unique_count_output,
+                reduce_op,
+                key_compare_op,
+                stream,
+                debug_synchronous);
+}
+
+template<typename Config,
+         typename OffsetCountPairType,
+         typename InputIterator,
+         typename OffsetsOutputIterator,
+         typename CountsOutputIterator,
+         typename RunsCountOutputIterator,
+         typename LookbackScanState>
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    non_trivial_kernel(const InputIterator           input,
+                       const OffsetsOutputIterator   offsets_output,
+                       const CountsOutputIterator    counts_output,
+                       const RunsCountOutputIterator runs_count_output,
+                       const LookbackScanState       scan_state,
+                       const std::size_t             grid_size,
+                       const std::size_t             size)
+{
+    run_length_encode::non_trivial_kernel_impl<Config, OffsetCountPairType>(input,
+                                                                            offsets_output,
+                                                                            counts_output,
+                                                                            runs_count_output,
+                                                                            scan_state,
+                                                                            grid_size,
+                                                                            size);
+}
+
+template<typename Config,
+         typename InputIterator,
+         typename OffsetsOutputIterator,
+         typename CountsOutputIterator,
+         typename RunsCountOutputIterator>
+hipError_t run_length_encode_non_trivial_runs_impl(void*                   temporary_storage,
+                                                   size_t&                 storage_size,
+                                                   InputIterator           input,
+                                                   const size_t            size,
+                                                   OffsetsOutputIterator   offsets_output,
+                                                   CountsOutputIterator    counts_output,
+                                                   RunsCountOutputIterator runs_count_output,
+                                                   const hipStream_t       stream,
+                                                   const bool              debug_synchronous)
+{
+    using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
+    using offset_type = unsigned int;
+    using count_type  = unsigned int;
+    using offset_count_pair_type
+        = run_length_encode::offset_count_pair_type_t<offset_type, count_type>; // accumulator_type
+
+    using config = rocprim::detail::wrapped_non_trivial_runs_config<Config, input_type>;
+
+    using scan_state_type
+        = ::rocprim::detail::lookback_scan_state<offset_count_pair_type, /*UseSleep=*/false>;
+    using scan_state_with_sleep_type
+        = ::rocprim::detail::lookback_scan_state<offset_count_pair_type, /*UseSleep=*/true>;
+
+    detail::target_arch target_arch;
+    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
+
+    const non_trivial_runs_config_params params     = dispatch_target_arch<config>(target_arch);
+    const unsigned int                   block_size = params.kernel_config.block_size;
+    const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
+    const std::size_t  grid_size       = detail::ceiling_div(size, items_per_block);
+
+    // Calculate required temporary storage
+    void* scan_state_storage;
+
+    detail::temp_storage::layout layout{};
+    ROCPRIM_RETURN_ON_ERROR(scan_state_type::get_temp_storage_layout(grid_size, stream, layout));
+
+    hipError_t result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            // This is valid even with scan_state_with_sleep_type
+            detail::temp_storage::make_partition(&scan_state_storage, layout)));
+
+    if(result != hipSuccess || temporary_storage == nullptr)
+    {
+        return result;
     }
 
-} // end detail namespace
+    bool use_sleep;
+    ROCPRIM_RETURN_ON_ERROR(detail::is_sleep_scan_state_used(stream, use_sleep));
+
+    scan_state_type            scan_state{};
+    scan_state_with_sleep_type scan_state_with_sleep{};
+    ROCPRIM_RETURN_ON_ERROR(scan_state_type::create(scan_state, scan_state_storage, grid_size, stream));
+    ROCPRIM_RETURN_ON_ERROR(scan_state_with_sleep_type::create(scan_state_with_sleep,
+                                                       scan_state_storage,
+                                                       grid_size,
+                                                       stream));
+
+    auto with_scan_state
+        = [use_sleep, scan_state, scan_state_with_sleep](auto&& func) mutable -> decltype(auto)
+    {
+        if(use_sleep)
+        {
+            return func(scan_state_with_sleep);
+        }
+        else
+        {
+            return func(scan_state);
+        }
+    };
+
+    if(size == 0)
+    {
+        // Fill out runs_count_output with zero
+        return rocprim::transform(rocprim::constant_iterator<std::size_t>(0),
+                                  runs_count_output,
+                                  1,
+                                  rocprim::identity<std::size_t>{},
+                                  stream,
+                                  debug_synchronous);
+    }
+
+    // Start point for time measurements
+    std::chrono::steady_clock::time_point start;
+    if(debug_synchronous)
+    {
+        std::cout << "size:               " << size << '\n';
+        std::cout << "block_size:         " << block_size << '\n';
+        std::cout << "grid_size:          " << grid_size << '\n';
+        std::cout << "items_per_block:    " << items_per_block << '\n';
+        start = std::chrono::steady_clock::now();
+    }
+
+    with_scan_state(
+        [&](const auto scan_state)
+        {
+            const unsigned int init_block_size = ROCPRIM_DEFAULT_MAX_BLOCK_SIZE;
+            const std::size_t  init_grid_size  = detail::ceiling_div(grid_size, init_block_size);
+            hipLaunchKernelGGL(init_lookback_scan_state_kernel,
+                               dim3(init_grid_size),
+                               dim3(init_block_size),
+                               0,
+                               stream,
+                               scan_state,
+                               grid_size);
+        });
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+                                                grid_size,
+                                                start);
+
+    with_scan_state(
+        [&](const auto scan_state)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(
+                    run_length_encode::non_trivial_kernel<config, offset_count_pair_type>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream,
+                input + 0,
+                offsets_output,
+                counts_output,
+                runs_count_output,
+                scan_state,
+                grid_size,
+                size);
+        });
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("run_length_encode::non_trivial_kernel",
+                                                size,
+                                                start);
+
+    return hipSuccess;
+}
+} // namespace run_length_encode
+} // namespace detail
 
 /// \brief Parallel run-length encoding for device level.
 ///
@@ -77,27 +277,27 @@ namespace detail
 /// * Ranges specified by \p unique_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of runs) elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam UniqueOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam UniqueOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam CountsOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam CountsOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam RunsCountOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam RunsCountOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range of values.
-/// \param [in] size - number of element in the input range.
-/// \param [out] unique_output - iterator to the first element in the output range of unique values.
-/// \param [out] counts_output - iterator to the first element in the output range of lenghts.
-/// \param [out] runs_count_output - iterator to total number of runs.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range of values.
+/// \param [in] size number of element in the input range.
+/// \param [out] unique_output iterator to the first element in the output range of unique values.
+/// \param [out] counts_output iterator to the first element in the output range of lenghts.
+/// \param [out] runs_count_output iterator to total number of runs.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
@@ -141,42 +341,37 @@ namespace detail
 /// // runs_count_output: [4]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator,
-    class UniqueOutputIterator,
-    class CountsOutputIterator,
-    class RunsCountOutputIterator
->
-inline
-hipError_t run_length_encode(void * temporary_storage,
-                             size_t& storage_size,
-                             InputIterator input,
-                             unsigned int size,
-                             UniqueOutputIterator unique_output,
-                             CountsOutputIterator counts_output,
-                             RunsCountOutputIterator runs_count_output,
-                             hipStream_t stream = 0,
-                             bool debug_synchronous = false)
+template<typename Config = default_config,
+         typename InputIterator,
+         typename UniqueOutputIterator,
+         typename CountsOutputIterator,
+         typename RunsCountOutputIterator>
+inline hipError_t run_length_encode(void*                   temporary_storage,
+                                    size_t&                 storage_size,
+                                    InputIterator           input,
+                                    unsigned int            size,
+                                    UniqueOutputIterator    unique_output,
+                                    CountsOutputIterator    counts_output,
+                                    RunsCountOutputIterator runs_count_output,
+                                    hipStream_t             stream            = 0,
+                                    bool                    debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using count_type = unsigned int;
 
-    // run_length_encode does not use a tuned reduce by key config, as using a constant iterator
-    //   instead of a device array has different performance characteristics
-    using config = detail::default_or_custom_config<
-        Config,
-        run_length_encode_config<
-            typename detail::default_reduce_by_key_config_base<input_type, count_type>::type,
-            default_config>>;
-
-    return ::rocprim::reduce_by_key<typename config::reduce_by_key>(
-        temporary_storage, storage_size,
-        input, make_constant_iterator<count_type>(1), size,
-        unique_output, counts_output, runs_count_output,
-        ::rocprim::plus<count_type>(), ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
-    );
+    return detail::run_length_encode::run_length_encode_impl<Config>(
+        temporary_storage,
+        storage_size,
+        input,
+        make_constant_iterator<count_type>(1),
+        size,
+        unique_output,
+        counts_output,
+        runs_count_output,
+        ::rocprim::plus<count_type>(),
+        ::rocprim::equal_to<input_type>(),
+        stream,
+        debug_synchronous);
 }
 
 /// \brief Parallel run-length encoding of non-trivial runs for device level.
@@ -195,27 +390,27 @@ hipError_t run_length_encode(void * temporary_storage,
 /// * Ranges specified by \p offsets_output and \p counts_output must have at least
 /// <tt>*runs_count_output</tt> (i.e. the number of non-trivial runs) elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `run_length_encode_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetsOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OffsetsOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam CountsOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam CountsOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam RunsCountOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam RunsCountOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range of values.
-/// \param [in] size - number of element in the input range.
-/// \param [out] offsets_output - iterator to the first element in the output range of offsets.
-/// \param [out] counts_output - iterator to the first element in the output range of lenghts.
-/// \param [out] runs_count_output - iterator to total number of runs.
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range of values.
+/// \param [in] size number of element in the input range.
+/// \param [out] offsets_output iterator to the first element in the output range of offsets.
+/// \param [out] counts_output iterator to the first element in the output range of lenghts.
+/// \param [out] runs_count_output iterator to total number of runs.
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful operation; otherwise a HIP runtime error of
@@ -259,152 +454,32 @@ hipError_t run_length_encode(void * temporary_storage,
 /// // runs_count_output: [2]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator,
-    class OffsetsOutputIterator,
-    class CountsOutputIterator,
-    class RunsCountOutputIterator
->
-inline
-hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
-                                              size_t& storage_size,
-                                              InputIterator input,
-                                              unsigned int size,
-                                              OffsetsOutputIterator offsets_output,
-                                              CountsOutputIterator counts_output,
-                                              RunsCountOutputIterator runs_count_output,
-                                              hipStream_t stream = 0,
-                                              bool debug_synchronous = false)
+template<typename Config = default_config,
+         typename InputIterator,
+         typename OffsetsOutputIterator,
+         typename CountsOutputIterator,
+         typename RunsCountOutputIterator>
+inline hipError_t run_length_encode_non_trivial_runs(void*                   temporary_storage,
+                                                     size_t&                 storage_size,
+                                                     InputIterator           input,
+                                                     unsigned int            size,
+                                                     OffsetsOutputIterator   offsets_output,
+                                                     CountsOutputIterator    counts_output,
+                                                     RunsCountOutputIterator runs_count_output,
+                                                     hipStream_t             stream = 0,
+                                                     bool debug_synchronous         = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using offset_type = unsigned int;
-    using count_type = unsigned int;
-    using offset_count_pair = typename ::rocprim::tuple<offset_type, count_type>;
-
-    using config = detail::default_or_custom_config<
-        Config,
-        detail::default_run_length_encode_config<tuple<offset_type, count_type>>>;
-
-    hipError_t error;
-
-    auto reduce_op = [] __device__ (const offset_count_pair& a, const offset_count_pair& b)
-    {
-        return offset_count_pair(
-            ::rocprim::get<0>(a), // Always use offset of the first item of the run
-            ::rocprim::get<1>(a) + ::rocprim::get<1>(b) // Number of items in the run
-        );
-    };
-    auto non_trivial_runs_select_op = [] __device__ (const offset_count_pair& a)
-    {
-        return ::rocprim::get<1>(a) > 1;
-    };
-
-    offset_type * offsets_tmp = nullptr;
-    count_type * counts_tmp = nullptr;
-    count_type * all_runs_count_tmp = nullptr;
-
-    // Calculate size of temporary storage for reduce_by_key operation
-    size_t reduce_by_key_bytes;
-    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
-        nullptr, reduce_by_key_bytes,
+    return detail::run_length_encode::run_length_encode_non_trivial_runs_impl<Config>(
+        temporary_storage,
+        storage_size,
         input,
-        ::rocprim::make_zip_iterator(
-            ::rocprim::make_tuple(
-                ::rocprim::make_counting_iterator<offset_type>(0),
-                ::rocprim::make_constant_iterator<count_type>(1)
-            )
-        ),
         size,
-        ::rocprim::make_discard_iterator(),
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
-        all_runs_count_tmp,
-        reduce_op, ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
-    );
-    if(error != hipSuccess) return error;
-    reduce_by_key_bytes = ::rocprim::detail::align_size(reduce_by_key_bytes);
-
-    // Calculate size of temporary storage for select operation
-    size_t select_bytes;
-    error = ::rocprim::select<typename config::select>(
-        nullptr, select_bytes,
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
+        offsets_output,
+        counts_output,
         runs_count_output,
-        size,
-        non_trivial_runs_select_op,
-        stream, debug_synchronous
-    );
-    if(error != hipSuccess) return error;
-    select_bytes = ::rocprim::detail::align_size(select_bytes);
-
-    const size_t offsets_tmp_bytes = ::rocprim::detail::align_size(size * sizeof(offset_type));
-    const size_t counts_tmp_bytes = ::rocprim::detail::align_size(size * sizeof(count_type));
-    const size_t all_runs_count_tmp_bytes = sizeof(count_type);
-    if(temporary_storage == nullptr)
-    {
-        storage_size = ::rocprim::max(reduce_by_key_bytes, select_bytes) +
-            offsets_tmp_bytes + counts_tmp_bytes + all_runs_count_tmp_bytes;
-        return hipSuccess;
-    }
-
-    char * ptr = reinterpret_cast<char *>(temporary_storage);
-    ptr += ::rocprim::max(reduce_by_key_bytes, select_bytes);
-    offsets_tmp = reinterpret_cast<offset_type *>(ptr);
-    ptr += offsets_tmp_bytes;
-    counts_tmp = reinterpret_cast<count_type *>(ptr);
-    ptr += counts_tmp_bytes;
-    all_runs_count_tmp = reinterpret_cast<count_type *>(ptr);
-
-    std::chrono::high_resolution_clock::time_point start;
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::reduce_by_key<typename config::reduce_by_key>(
-        temporary_storage, reduce_by_key_bytes,
-        input,
-        ::rocprim::make_zip_iterator(
-            ::rocprim::make_tuple(
-                ::rocprim::make_counting_iterator<offset_type>(0),
-                ::rocprim::make_constant_iterator<count_type>(1)
-            )
-        ),
-        size,
-        ::rocprim::make_discard_iterator(), // Ignore unique output
-        ::rocprim::make_zip_iterator(rocprim::make_tuple(offsets_tmp, counts_tmp)),
-        all_runs_count_tmp,
-        reduce_op, ::rocprim::equal_to<input_type>(),
-        stream, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::reduce_by_key", size, start)
-
-    // Read count of all runs (including trivial runs)
-    count_type all_runs_count;
-    error = detail::memcpy_and_sync(&all_runs_count,
-                                    all_runs_count_tmp,
-                                    sizeof(count_type),
-                                    hipMemcpyDeviceToHost,
-                                    stream);
-    if(error != hipSuccess)
-        return error;
-
-    // Select non-trivial runs
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    error = ::rocprim::select<typename config::select>(
-        temporary_storage, select_bytes,
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_tmp, counts_tmp)),
-        ::rocprim::make_zip_iterator(::rocprim::make_tuple(offsets_output, counts_output)),
-        runs_count_output,
-        all_runs_count,
-        non_trivial_runs_select_op,
-        stream, debug_synchronous
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("rocprim::select", all_runs_count, start)
-
-    return hipSuccess;
+        stream,
+        debug_synchronous);
 }
-
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
 // end of group devicemodule

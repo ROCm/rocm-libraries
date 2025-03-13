@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-""" Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+""" Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 Manage build and installation"""
 
 import re
@@ -20,6 +20,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="""
     Checks build arguments
     """)
+
+    default_gpus = 'gfx906:xnack-,gfx1030,gfx1100,gfx1101,gfx1102,gfx1151,gfx1200,gfx1201'
+
     parser.add_argument('-g', '--debug', required=False, default=False,  action='store_true',
                         help='Generate Debug build (default: False)')
     parser.add_argument(      '--build_dir', type=str, required=False, default="build",
@@ -37,7 +40,7 @@ def parse_args():
                         help='Install after build (default: False)')
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
-    parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default="gfx906;gfx1030;gfx1100;gfx1101;gfx1102", #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
+    parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default=default_gpus, #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
                         help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
@@ -72,7 +75,6 @@ def delete_dir(dir_path) :
         run_cmd( "RMDIR" , f"/S /Q {dir_path}")
     else:
         linux_path = pathlib.Path(dir_path).absolute()
-        #print( linux_path )
         run_cmd( "rm" , f"-rf {linux_path}")
 
 def cmake_path(os_path):
@@ -119,7 +121,7 @@ def config_cmd():
         else:
           cmake_executable = "cmake"
         toolchain = "toolchain-linux.cmake"
-        cmake_platform_opts = f"-DROCM_DIR:PATH={rocm_path} -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
+        cmake_platform_opts = [f"-DROCM_DIR:PATH={rocm_path}", f"-DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"]
 
     tools = f"-DCMAKE_TOOLCHAIN_FILE={toolchain}"
     cmake_options.append( tools )
@@ -143,7 +145,12 @@ def config_cmd():
         deps_dir = os.path.abspath(os.path.join(build_dir, 'deps')).replace('\\','/')
     else:
         deps_dir = args.deps_dir
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
+
+    if (OS_info["ID"] == 'windows'):
+        cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
+    else:
+        cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]},{rocm_cmake_path[1:-1]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
+    
     cmake_options.append( cmake_base_options )
 
     print( cmake_options )
@@ -208,7 +215,7 @@ def make_cmd():
           make_options.append( "--target package --target install" )
     else:
         nproc = OS_info["NUM_PROC"]
-        make_executable = f"make -j{nproc}"
+        make_executable = f"make -j {nproc}"
         if args.verbose:
           make_options.append( "VERBOSE=1" )
         if args.install:

@@ -23,9 +23,7 @@
 #ifndef ROCPRIM_BENCHMARK_DEVICE_TRANSFORM_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_DEVICE_TRANSFORM_PARALLEL_HPP_
 
-#include <cstddef>
-#include <string>
-#include <vector>
+#include "benchmark_utils.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -34,10 +32,15 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
-#include <rocprim/detail/various.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_transform.hpp>
+#include <rocprim/functional.hpp>
 
-#include "benchmark_utils.hpp"
+#include <cstddef>
+#include <memory>
+#include <string>
+#include <vector>
 
 template<typename Config>
 std::string transform_config_name()
@@ -70,11 +73,14 @@ struct device_transform_benchmark : public config_autotune_interface
     static constexpr unsigned int warmup_size = 5;
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
         using output_type = T;
+
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(T);
 
         static constexpr bool debug_synchronous = false;
 
@@ -105,7 +111,7 @@ struct device_transform_benchmark : public config_autotune_interface
         };
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
             HIP_CHECK(launch());
         }
@@ -122,7 +128,7 @@ struct device_transform_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
                 HIP_CHECK(launch());
             }
@@ -143,8 +149,8 @@ struct device_transform_benchmark : public config_autotune_interface
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
-        hipFree(d_input);
-        hipFree(d_output);
+        HIP_CHECK(hipFree(d_input));
+        HIP_CHECK(hipFree(d_output));
     }
 };
 

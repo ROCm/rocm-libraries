@@ -32,29 +32,32 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include <cstddef>
-#include <string>
+#include <rocprim/types.hpp>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#include <cstddef>
+#include <stdint.h>
+#include <string>
+#include <vector>
+
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-#define CREATE_BENCHMARK_PARTIAL_SORT(TYPE, SMALL_N)                  \
-    {                                                                 \
-        const device_partial_sort_benchmark<TYPE> instance(SMALL_N);  \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance); \
+#define CREATE_BENCHMARK_PARTIAL_SORT(TYPE, SMALL_N)                   \
+    {                                                                  \
+        const device_partial_sort_benchmark<TYPE> instance(SMALL_N);   \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
-#define CREATE_BENCHMARK(TYPE)                     \
-    {                                              \
-        CREATE_BENCHMARK_PARTIAL_SORT(TYPE, true)  \
-        CREATE_BENCHMARK_PARTIAL_SORT(TYPE, false) \
+#define CREATE_BENCHMARK(TYPE)                                                               \
+    {                                                                                        \
+        CREATE_BENCHMARK_PARTIAL_SORT(TYPE, true) CREATE_BENCHMARK_PARTIAL_SORT(TYPE, false) \
     }
 
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -65,7 +68,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -76,7 +79,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
@@ -88,6 +91,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::half)
     CREATE_BENCHMARK(short)
     CREATE_BENCHMARK(float)
+    CREATE_BENCHMARK(rocprim::int128_t)
+    CREATE_BENCHMARK(rocprim::uint128_t)
 
     using custom_float2          = custom_type<float, float>;
     using custom_double2         = custom_type<double, double>;

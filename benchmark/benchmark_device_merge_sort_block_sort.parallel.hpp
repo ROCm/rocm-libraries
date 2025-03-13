@@ -32,22 +32,27 @@
 #include <hip/hip_runtime.h>
 
 // rocPRIM
+#include <rocprim/block/block_sort.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_merge_sort.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
 
-#include <string>
-#include <vector>
-
+#include <algorithm>
 #include <cstddef>
-
-namespace rp = rocprim;
+#include <memory>
+#include <numeric>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 constexpr const char* get_block_sort_method_name(rocprim::block_sort_algorithm alg)
 {
     switch(alg)
     {
         case rocprim::block_sort_algorithm::merge_sort: return "merge_sort";
-        case rocprim::block_sort_algorithm::bitonic_sort:
-            return "bitonic_sort";
+        case rocprim::block_sort_algorithm::bitonic_sort: return "bitonic_sort";
         case rocprim::block_sort_algorithm::stable_merge_sort:
             return "stable_merge_sort";
             // Not using `default: ...` because it kills effectiveness of -Wswitch
@@ -89,13 +94,15 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
     // keys benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         using key_type = Key;
 
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(key_type);
         // Generate data
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
@@ -116,17 +123,17 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         rocprim::empty_type*      values_ptr = nullptr;
         unsigned int              items_per_block;
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
-            HIP_CHECK(rp::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                d_keys_output,
-                                                                values_ptr,
-                                                                values_ptr,
-                                                                size,
-                                                                items_per_block,
-                                                                lesser_op,
-                                                                stream,
-                                                                false));
+            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
+                                                                     d_keys_output,
+                                                                     values_ptr,
+                                                                     values_ptr,
+                                                                     size,
+                                                                     items_per_block,
+                                                                     lesser_op,
+                                                                     stream,
+                                                                     false));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -140,17 +147,17 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rp::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                    d_keys_output,
-                                                                    values_ptr,
-                                                                    values_ptr,
-                                                                    size,
-                                                                    items_per_block,
-                                                                    lesser_op,
-                                                                    stream,
-                                                                    false));
+                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
+                                                                         d_keys_output,
+                                                                         values_ptr,
+                                                                         values_ptr,
+                                                                         size,
+                                                                         items_per_block,
+                                                                         lesser_op,
+                                                                         stream,
+                                                                         false));
             }
 
             // Record stop event and wait until it completes
@@ -176,7 +183,7 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
     // pairs benchmark
     template<typename val = Value>
     auto do_run(benchmark::State&   state,
-                size_t              size,
+                size_t              bytes,
                 const managed_seed& seed,
                 hipStream_t         stream) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
@@ -184,6 +191,8 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         using key_type   = Key;
         using value_type = Value;
 
+        // Calculate the number of elements
+        size_t size = bytes / sizeof(key_type);
         // Generate data
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
@@ -218,18 +227,18 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
         HIP_CHECK(hipDeviceSynchronize());
 
         // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
+        for(size_t i = 0; i < warmup_size; ++i)
         {
 
-            HIP_CHECK(rp::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                d_keys_output,
-                                                                d_values_input,
-                                                                d_values_output,
-                                                                size,
-                                                                items_per_block,
-                                                                lesser_op,
-                                                                stream,
-                                                                false));
+            HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
+                                                                     d_keys_output,
+                                                                     d_values_input,
+                                                                     d_values_output,
+                                                                     size,
+                                                                     items_per_block,
+                                                                     lesser_op,
+                                                                     stream,
+                                                                     false));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -243,17 +252,17 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
             // Record start event
             HIP_CHECK(hipEventRecord(start, stream));
 
-            for(size_t i = 0; i < batch_size; i++)
+            for(size_t i = 0; i < batch_size; ++i)
             {
-                HIP_CHECK(rp::detail::merge_sort_block_sort<Config>(d_keys_input,
-                                                                    d_keys_output,
-                                                                    d_values_input,
-                                                                    d_values_output,
-                                                                    size,
-                                                                    items_per_block,
-                                                                    lesser_op,
-                                                                    stream,
-                                                                    false));
+                HIP_CHECK(rocprim::detail::merge_sort_block_sort<Config>(d_keys_input,
+                                                                         d_keys_output,
+                                                                         d_values_input,
+                                                                         d_values_output,
+                                                                         size,
+                                                                         items_per_block,
+                                                                         lesser_op,
+                                                                         stream,
+                                                                         false));
             }
 
             // Record stop event and wait until it completes
@@ -280,11 +289,11 @@ struct device_merge_sort_block_sort_benchmark : public config_autotune_interface
     }
 
     void run(benchmark::State&   state,
-             size_t              size,
+             size_t              bytes,
              const managed_seed& seed,
              hipStream_t         stream) const override
     {
-        do_run(state, size, seed, stream);
+        do_run(state, bytes, seed, stream);
     }
 };
 

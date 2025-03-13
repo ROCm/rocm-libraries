@@ -33,6 +33,7 @@ The rocPRIM documentation is structured as follows:
     * :ref:`thread-index`
     * :ref:`iterators` 
     * :ref:`intrinsics` 
+    * :ref:`type_traits`
 
 To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 

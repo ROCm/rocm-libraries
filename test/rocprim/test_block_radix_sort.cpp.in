@@ -28,6 +28,7 @@
 #include <rocprim/block/block_store.hpp>
 
 // required test headers
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_sort_comparator.hpp"
 #include "test_utils_types.hpp"
 
@@ -55,14 +56,14 @@ struct Floating;
 
 #elif ROCPRIM_TEST_SLICE == 2
 
-typedef ::testing::Types<
+using BlockParamsCustom = ::testing::Types<
     block_param_type(test_utils::custom_test_type<int>, int)
     , block_param_type(test_utils::custom_test_type<float>, int8_t)
     , block_param_type(test_utils::custom_test_type<uint8_t>, uint16_t)
 #if ROCPRIM_HAS_INT128_SUPPORT
     , block_param_type(test_utils::custom_test_type<double>, double)
 #endif
-> BlockParamsCustom;
+>;
 
 struct Custom;
 #define suite_name RocprimBlockRadixSort

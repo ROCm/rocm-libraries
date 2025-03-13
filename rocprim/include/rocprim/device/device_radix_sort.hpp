@@ -27,6 +27,7 @@
 #include <utility>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
@@ -48,25 +49,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-#ifndef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
-
-#endif
 
 template<class Tuple, size_t Index>
 constexpr auto tuple_bit_size_impl()
@@ -101,14 +83,14 @@ using offset_type_t = std::conditional_t<
 
 template<class Config, bool Descending, class KeysInputIterator, class Offset, class Decomposer>
 ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().histogram.block_size) void onesweep_histograms_kernel(
-        KeysInputIterator  keys_input,
-        Offset*            global_digit_counts,
-        const Offset       size,
-        const Offset       full_blocks,
-        Decomposer         decomposer,
-        const unsigned int begin_bit,
-        const unsigned int end_bit)
+    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram.block_size) void
+    onesweep_histograms_kernel(KeysInputIterator  keys_input,
+                               Offset*            global_digit_counts,
+                               const Offset       size,
+                               const Offset       full_blocks,
+                               Decomposer         decomposer,
+                               const unsigned int begin_bit,
+                               const unsigned int end_bit)
 {
     static constexpr radix_sort_onesweep_config_params params = device_params<Config>();
     onesweep_histograms<params.histogram.block_size,
@@ -124,9 +106,8 @@ ROCPRIM_KERNEL
 }
 
 template<class Config, class Offset>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .histogram.block_size) void onesweep_scan_histograms_kernel(Offset* global_digit_offsets)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram.block_size) void
+    onesweep_scan_histograms_kernel(Offset* global_digit_offsets)
 {
     static constexpr radix_sort_onesweep_config_params params = device_params<Config>();
     onesweep_scan_histograms<params.histogram.block_size, params.radix_bits_per_place>(
@@ -177,13 +158,13 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     if(error != hipSuccess)
         return error;
 
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     if(debug_synchronous)
     {
         std::cout << "blocks " << blocks << '\n';
         std::cout << "full_blocks " << full_blocks << '\n';
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
     }
 
     // Compute a histogram for each digit.
@@ -204,7 +185,7 @@ hipError_t radix_sort_onesweep_global_offsets(KeysInputIterator keys_input,
     // Scan each histogram separately to get the final offsets.
     if(debug_synchronous)
     {
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
     }
 
     hipLaunchKernelGGL(HIP_KERNEL_NAME(onesweep_scan_histograms_kernel<config>),
@@ -226,20 +207,19 @@ template<class Config,
          class ValuesOutputIterator,
          class Offset,
          class Decomposer>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().sort.block_size) void onesweep_iteration_kernel(
-        KeysInputIterator        keys_input,
-        KeysOutputIterator       keys_output,
-        ValuesInputIterator      values_input,
-        ValuesOutputIterator     values_output,
-        const unsigned int       size,
-        Offset*                  global_digit_offsets_in,
-        Offset*                  global_digit_offsets_out,
-        onesweep_lookback_state* lookback_states,
-        Decomposer               decomposer,
-        const unsigned int       bit,
-        const unsigned int       current_radix_bits,
-        const unsigned int       full_blocks)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().sort.block_size) void
+    onesweep_iteration_kernel(KeysInputIterator        keys_input,
+                              KeysOutputIterator       keys_output,
+                              ValuesInputIterator      values_input,
+                              ValuesOutputIterator     values_output,
+                              const unsigned int       size,
+                              Offset*                  global_digit_offsets_in,
+                              Offset*                  global_digit_offsets_out,
+                              onesweep_lookback_state* lookback_states,
+                              Decomposer               decomposer,
+                              const unsigned int       bit,
+                              const unsigned int       current_radix_bits,
+                              const unsigned int       full_blocks)
 {
     static constexpr radix_sort_onesweep_config_params params = device_params<Config>();
     onesweep_iteration<params.sort.block_size,
@@ -332,7 +312,7 @@ hipError_t radix_sort_onesweep_iteration(
         if(error != hipSuccess)
             return error;
 
-        std::chrono::high_resolution_clock::time_point start;
+        std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "radix_bits " << params.radix_bits_per_place << '\n';
@@ -347,7 +327,7 @@ hipError_t radix_sort_onesweep_iteration(
             std::cout << "offset " << offset << '\n';
             std::cout << "blocks " << blocks << '\n';
             std::cout << "full_blocks " << full_blocks << '\n';
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         if(from_input && to_output)
@@ -461,6 +441,7 @@ hipError_t radix_sort_onesweep_impl(
     const unsigned int                                              begin_bit,
     const unsigned int                                              end_bit,
     const hipStream_t                                               stream,
+    const bool                                                      no_allocate_tmp_buffer,
     const bool                                                      debug_synchronous)
 {
     using key_type    = typename std::iterator_traits<KeysInputIterator>::value_type;
@@ -490,8 +471,7 @@ hipError_t radix_sort_onesweep_impl(
     const unsigned int num_lookback_states
         = radix_size_per_place * ceiling_div(items_per_batch, sort_items_per_block);
 
-    constexpr bool with_values        = !std::is_same<value_type, ::rocprim::empty_type>::value;
-    const bool     with_double_buffer = keys_tmp != nullptr;
+    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     offset_type*             global_digit_offsets;
     offset_type*             global_digit_offsets_tmp;
@@ -508,10 +488,10 @@ hipError_t radix_sort_onesweep_impl(
                                                     radix_size_per_place),
             detail::temp_storage::ptr_aligned_array(&lookback_states, num_lookback_states),
             detail::temp_storage::ptr_aligned_array(&keys_tmp_storage,
-                                                    !with_double_buffer ? size : 0),
+                                                    !no_allocate_tmp_buffer ? size : 0),
             detail::temp_storage::ptr_aligned_array(&values_tmp_storage,
-                                                    !with_double_buffer && with_values ? size
-                                                                                       : 0)));
+                                                    !no_allocate_tmp_buffer && with_values ? size
+                                                                                           : 0)));
 
     if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
@@ -549,16 +529,16 @@ hipError_t radix_sort_onesweep_impl(
             return error;
     }
 
-    if(!with_double_buffer)
+    if(!no_allocate_tmp_buffer)
     {
         keys_tmp   = keys_tmp_storage;
         values_tmp = values_tmp_storage;
     }
 
     // Copy input keys and values if necessary (in-place sorting: input and output iterators are equal).
-    bool to_output  = with_double_buffer || (places - 1) % 2 == 0;
+    bool to_output  = no_allocate_tmp_buffer || (places - 1) % 2 == 0;
     bool from_input = true;
-    if(!with_double_buffer && to_output)
+    if(!no_allocate_tmp_buffer && to_output)
     {
         const bool keys_alias
             = ::rocprim::detail::can_iterators_alias(keys_input, keys_output, size);
@@ -648,6 +628,7 @@ hipError_t
                     unsigned int begin_bit,
                     unsigned int end_bit,
                     hipStream_t  stream,
+                    bool         no_allocate_tmp_buffer,
                     bool         debug_synchronous)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
@@ -741,6 +722,7 @@ hipError_t
                                                                     begin_bit,
                                                                     end_bit,
                                                                     stream,
+                                                                    no_allocate_tmp_buffer,
                                                                     debug_synchronous);
     }
     else
@@ -761,11 +743,12 @@ hipError_t
                                                                      begin_bit,
                                                                      end_bit,
                                                                      stream,
+                                                                     no_allocate_tmp_buffer,
                                                                      debug_synchronous);
     }
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end namespace detail
 
@@ -784,6 +767,13 @@ hipError_t
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -876,6 +866,7 @@ hipError_t radix_sort_keys(void*              temporary_storage,
                                                   begin_bit,
                                                   end_bit,
                                                   stream,
+                                                  false,
                                                   debug_synchronous);
 }
 
@@ -899,6 +890,13 @@ hipError_t radix_sort_keys(void*              temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -985,6 +983,7 @@ hipError_t radix_sort_keys(void*               temporary_storage,
                                                               begin_bit,
                                                               end_bit,
                                                               stream,
+                                                              true,
                                                               debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -1014,6 +1013,13 @@ hipError_t radix_sort_keys(void*               temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator Random-access iterator type of the input range. Must meet the
@@ -1127,6 +1133,7 @@ auto radix_sort_keys(void*              temporary_storage,
                                                   begin_bit,
                                                   end_bit,
                                                   stream,
+                                                  false,
                                                   debug_synchronous);
 }
 
@@ -1146,6 +1153,13 @@ auto radix_sort_keys(void*              temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator Random-access iterator type of the input range. Must meet the
@@ -1252,6 +1266,7 @@ auto radix_sort_keys(void*              temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        false,
         debug_synchronous);
 }
 
@@ -1281,6 +1296,13 @@ auto radix_sort_keys(void*              temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -1386,6 +1408,7 @@ auto radix_sort_keys(void*               temporary_storage,
                                                               begin_bit,
                                                               end_bit,
                                                               stream,
+                                                              true,
                                                               debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -1415,6 +1438,13 @@ auto radix_sort_keys(void*               temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_keys is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -1513,6 +1543,7 @@ auto radix_sort_keys(void*               temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        true,
         debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -1536,6 +1567,13 @@ auto radix_sort_keys(void*               temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -1629,6 +1667,7 @@ hipError_t radix_sort_keys_desc(void*              temporary_storage,
                                                  begin_bit,
                                                  end_bit,
                                                  stream,
+                                                 false,
                                                  debug_synchronous);
 }
 
@@ -1652,6 +1691,13 @@ hipError_t radix_sort_keys_desc(void*              temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -1738,6 +1784,7 @@ hipError_t radix_sort_keys_desc(void*               temporary_storage,
                                                              begin_bit,
                                                              end_bit,
                                                              stream,
+                                                             true,
                                                              debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -1767,6 +1814,13 @@ hipError_t radix_sort_keys_desc(void*               temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -1880,6 +1934,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
                                                  begin_bit,
                                                  end_bit,
                                                  stream,
+                                                 false,
                                                  debug_synchronous);
 }
 
@@ -1899,6 +1954,13 @@ auto radix_sort_keys_desc(void*              temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -2005,6 +2067,7 @@ auto radix_sort_keys_desc(void*              temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        false,
         debug_synchronous);
 }
 
@@ -2034,6 +2097,13 @@ auto radix_sort_keys_desc(void*              temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -2139,6 +2209,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                                                              begin_bit,
                                                              end_bit,
                                                              stream,
+                                                             true,
                                                              debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -2168,6 +2239,13 @@ auto radix_sort_keys_desc(void*               temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_keys_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -2266,6 +2344,7 @@ auto radix_sort_keys_desc(void*               temporary_storage,
                                                 0,
                                                 detail::decomposer_max_bits<Decomposer, Key>::value,
                                                 stream,
+                                                true,
                                                 debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -2290,6 +2369,13 @@ auto radix_sort_keys_desc(void*               temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -2400,6 +2486,7 @@ hipError_t radix_sort_pairs(void*                temporary_storage,
                                                   begin_bit,
                                                   end_bit,
                                                   stream,
+                                                  false,
                                                   debug_synchronous);
 }
 
@@ -2423,6 +2510,13 @@ hipError_t radix_sort_pairs(void*                temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -2522,6 +2616,7 @@ hipError_t radix_sort_pairs(void*                 temporary_storage,
                                                               begin_bit,
                                                               end_bit,
                                                               stream,
+                                                              true,
                                                               debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -2552,6 +2647,13 @@ hipError_t radix_sort_pairs(void*                 temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -2683,6 +2785,7 @@ auto radix_sort_pairs(void*                temporary_storage,
                                                   begin_bit,
                                                   end_bit,
                                                   stream,
+                                                  false,
                                                   debug_synchronous);
 }
 
@@ -2702,6 +2805,13 @@ auto radix_sort_pairs(void*                temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -2822,6 +2932,7 @@ auto radix_sort_pairs(void*                temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        false,
         debug_synchronous);
 }
 
@@ -2851,6 +2962,13 @@ auto radix_sort_pairs(void*                temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -2967,6 +3085,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
                                                               begin_bit,
                                                               end_bit,
                                                               stream,
+                                                              true,
                                                               debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -2997,6 +3116,13 @@ auto radix_sort_pairs(void*                 temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -3102,6 +3228,7 @@ auto radix_sort_pairs(void*                 temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        true,
         debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -3127,6 +3254,13 @@ auto radix_sort_pairs(void*                 temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -3233,6 +3367,7 @@ hipError_t radix_sort_pairs_desc(void*                temporary_storage,
                                                  begin_bit,
                                                  end_bit,
                                                  stream,
+                                                 false,
                                                  debug_synchronous);
 }
 
@@ -3256,6 +3391,13 @@ hipError_t radix_sort_pairs_desc(void*                temporary_storage,
 /// * If \p Key is an integer type and the range of keys is known in advance, the performance
 /// can be improved by setting \p begin_bit and \p end_bit, for example if all keys are in range
 /// [100, 10000], <tt>begin_bit = 0</tt> and <tt>end_bit = 14</tt> will cover the whole range.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -3349,6 +3491,7 @@ hipError_t radix_sort_pairs_desc(void*                 temporary_storage,
                                                              begin_bit,
                                                              end_bit,
                                                              stream,
+                                                             true,
                                                              debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -3379,6 +3522,13 @@ hipError_t radix_sort_pairs_desc(void*                 temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -3510,6 +3660,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
                                                  begin_bit,
                                                  end_bit,
                                                  stream,
+                                                 false,
                                                  debug_synchronous);
 }
 
@@ -3529,6 +3680,13 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
@@ -3649,6 +3807,7 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
         0,
         detail::decomposer_max_bits<Decomposer, Key>::value,
         stream,
+        false,
         debug_synchronous);
 }
 
@@ -3678,6 +3837,13 @@ auto radix_sort_pairs_desc(void*                temporary_storage,
 /// `begin_bit==6` and `end_bit==12`, then the 2 MSBs of the `uint8_t` value and the 4 LSBs of the
 /// `int16_t` value are considered for sorting. The range specified by \p begin_bit and \p end_bit
 /// must be valid with regards to the sizes of the return tuple's elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -3794,6 +3960,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                                                              begin_bit,
                                                              end_bit,
                                                              stream,
+                                                             true,
                                                              debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {
@@ -3824,6 +3991,13 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
 /// These references must point to member variables of `Key`, however not every member variable has to be
 /// exposed this way.
 /// * Ranges specified by \p keys_input and \p keys_output must have at least \p size elements.
+///
+/// \par Stability
+/// \p radix_sort_pairs_desc is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
 ///
 /// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `radix_sort_config`.
 /// \tparam Key key type. Must be an integral type or a floating-point type.
@@ -3929,6 +4103,7 @@ auto radix_sort_pairs_desc(void*                 temporary_storage,
                                                 0,
                                                 detail::decomposer_max_bits<Decomposer, Key>::value,
                                                 stream,
+                                                true,
                                                 debug_synchronous);
     if(temporary_storage != nullptr && error == hipSuccess && is_result_in_output)
     {

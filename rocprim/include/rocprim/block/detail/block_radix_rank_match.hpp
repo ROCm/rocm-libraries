@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,16 +29,18 @@
 #include "../../thread/radix_key_codec.hpp"
 
 #include "../block_scan.hpp"
+#include "../config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
 
-template<unsigned int BlockSizeX,
-         unsigned int RadixBits,
-         unsigned int BlockSizeY = 1,
-         unsigned int BlockSizeZ = 1>
+template<unsigned int       BlockSizeX,
+         unsigned int       RadixBits,
+         unsigned int       BlockSizeY  = 1,
+         unsigned int       BlockSizeZ  = 1,
+         block_padding_hint PaddingHint = block_padding_hint::avoid_conflicts>
 class block_radix_rank_match
 {
     using digit_counter_type = unsigned int;
@@ -52,18 +54,44 @@ class block_radix_rank_match
     static constexpr unsigned int block_size   = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr unsigned int radix_digits = 1 << RadixBits;
 
-    // Force the number of warps to an uneven amount to reduce the number of lds bank conflicts.
-    static constexpr unsigned int warps
-        = ::rocprim::detail::ceiling_div(block_size, device_warp_size()) | 1u;
+    struct unpadded_config
+    {
+        static constexpr unsigned int warps
+            = ::rocprim::detail::ceiling_div(block_size, device_warp_size());
+    };
+
+    struct padded_config
+    {
+        static constexpr unsigned int warps = unpadded_config::warps | 1u;
+    };
+
+    template<typename Config>
+    struct build_config : Config
+    {
+        static constexpr unsigned int active_counters = Config::warps * radix_digits;
+        static constexpr unsigned int counters_per_thread
+            = ::rocprim::detail::ceiling_div(active_counters, block_size);
+        static constexpr unsigned int counters = counters_per_thread * block_size;
+
+        // Compute local data share and theorethical occupancy
+        static constexpr size_t       lds_size  = max(sizeof(digit_counter_type) * counters,
+                                               sizeof(typename block_scan_type::storage_type));
+        static constexpr unsigned int occupancy = detail::get_min_lds_size() / lds_size;
+    };
+
+    using config = detail::select_block_padding_config<PaddingHint,
+                                                       build_config<padded_config>,
+                                                       build_config<unpadded_config>>;
+
+    static constexpr unsigned int warps = config::warps;
     // The number of counters that are actively being used.
-    static constexpr unsigned int active_counters = warps * radix_digits;
+    static constexpr unsigned int active_counters = config::active_counters;
     // We want to use a regular block scan to scan the per-warp counters. This requires the
     // total number of counters to be divisible by the block size. To facilitate this, just add
     // a bunch of counters that are not otherwise used.
-    static constexpr unsigned int counters_per_thread
-        = ::rocprim::detail::ceiling_div(active_counters, block_size);
+    static constexpr unsigned int counters_per_thread = config::counters_per_thread;
     // The total number of counters, factoring in the unused ones for the block scan.
-    static constexpr unsigned int counters = counters_per_thread * block_size;
+    static constexpr unsigned int counters = config::counters;
 
 public:
     constexpr static unsigned int digits_per_thread
@@ -76,10 +104,10 @@ private:
         digit_counter_type                     counters[counters];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE digit_counter_type&
-        get_digit_counter(const unsigned int digit, const unsigned int warp, storage_type_& storage)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    unsigned int get_digit_counter(const unsigned int digit, const unsigned int warp)
     {
-        return storage.counters[digit * warps + warp];
+        return digit * warps + warp;
     }
 
     template<typename Key, unsigned int ItemsPerThread, typename DigitExtractor>
@@ -108,8 +136,13 @@ private:
             const unsigned int digit = digit_extractor(keys[i]);
 
             // Get the digit counter for this key on the current warp.
-            digit_counters[i] = &get_digit_counter(digit, warp_id, storage);
-            const digit_counter_type warp_digit_prefix = *digit_counters[i];
+            digit_counters[i] = &storage.counters[get_digit_counter(digit, warp_id)];
+
+            // Read the prefix sum of that digit. We already know it's 0 on the first iteration. So
+            // we can skip a read-after-write dependency. The conditional gets optimized out due to
+            // loop unrolling.
+            const digit_counter_type warp_digit_prefix
+                = i == 0 ? digit_counter_type(0) : *digit_counters[i];
 
             // Construct a mask of threads in this wave which have the same digit.
             ::rocprim::lane_mask_type peer_mask = ::rocprim::match_any<RadixBits>(digit);
@@ -200,12 +233,12 @@ private:
             if(radix_digits % block_size == 0 || digit < radix_digits)
             {
                 // The counter for warp 0 holds the prefix of all the digits at this point.
-                prefix[i] = get_digit_counter(digit, 0, storage);
+                prefix[i] = storage.counters[get_digit_counter(digit, 0)];
                 // To find the count, subtract the prefix of the next digit with that of the
                 // current digit.
-                const unsigned int next_prefix = digit + 1 == radix_digits
-                                                     ? block_size * ItemsPerThread
-                                                     : get_digit_counter(digit + 1, 0, storage);
+                const unsigned int next_prefix
+                    = digit + 1 == radix_digits ? block_size * ItemsPerThread
+                                                : storage.counters[get_digit_counter(digit + 1, 0)];
                 counts[i]                      = next_prefix - prefix[i];
             }
         }

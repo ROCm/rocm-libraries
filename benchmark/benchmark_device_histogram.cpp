@@ -34,18 +34,16 @@
 
 // rocPRIM
 #include <rocprim/device/device_histogram.hpp>
+#include <rocprim/types.hpp>
 
-#include <iostream>
-#include <limits>
-#include <locale>
+#include <cstddef>
 #include <string>
+#include <type_traits>
 #include <vector>
 
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
-
-namespace rp = rocprim;
 
 const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
@@ -65,15 +63,18 @@ int get_entropy_percents(int entropy_reduction)
 
 const int entropy_reductions[] = {0, 2, 4, 6};
 
-template<class T>
+template<typename T>
 void run_even_benchmark(benchmark::State& state,
-                        size_t            size,
+                        size_t            bytes,
                         const managed_seed&,
                         hipStream_t stream,
                         size_t      bins,
                         size_t      scale,
                         int         entropy_reduction)
 {
+    // Calculate the number of elements
+    size_t size = bytes / sizeof(T);
+
     using counter_type = unsigned int;
     using level_type =
         typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
@@ -92,33 +93,33 @@ void run_even_benchmark(benchmark::State& state,
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(rp::histogram_even(d_temporary_storage,
-                                 temporary_storage_bytes,
-                                 d_input,
-                                 size,
-                                 d_histogram,
-                                 bins + 1,
-                                 lower_level,
-                                 upper_level,
-                                 stream,
-                                 false));
+    HIP_CHECK(rocprim::histogram_even(d_temporary_storage,
+                                      temporary_storage_bytes,
+                                      d_input,
+                                      size,
+                                      d_histogram,
+                                      bins + 1,
+                                      lower_level,
+                                      upper_level,
+                                      stream,
+                                      false));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
-        HIP_CHECK(rp::histogram_even(d_temporary_storage,
-                                     temporary_storage_bytes,
-                                     d_input,
-                                     size,
-                                     d_histogram,
-                                     bins + 1,
-                                     lower_level,
-                                     upper_level,
-                                     stream,
-                                     false));
+        HIP_CHECK(rocprim::histogram_even(d_temporary_storage,
+                                          temporary_storage_bytes,
+                                          d_input,
+                                          size,
+                                          d_histogram,
+                                          bins + 1,
+                                          lower_level,
+                                          upper_level,
+                                          stream,
+                                          false));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -132,18 +133,18 @@ void run_even_benchmark(benchmark::State& state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
-            HIP_CHECK(rp::histogram_even(d_temporary_storage,
-                                         temporary_storage_bytes,
-                                         d_input,
-                                         size,
-                                         d_histogram,
-                                         bins + 1,
-                                         lower_level,
-                                         upper_level,
-                                         stream,
-                                         false));
+            HIP_CHECK(rocprim::histogram_even(d_temporary_storage,
+                                              temporary_storage_bytes,
+                                              d_input,
+                                              size,
+                                              d_histogram,
+                                              bins + 1,
+                                              lower_level,
+                                              upper_level,
+                                              stream,
+                                              false));
         }
 
         // Record stop event and wait until it completes
@@ -167,15 +168,18 @@ void run_even_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_histogram));
 }
 
-template<class T, unsigned int Channels, unsigned int ActiveChannels>
+template<typename T, unsigned int Channels, unsigned int ActiveChannels>
 void run_multi_even_benchmark(benchmark::State& state,
-                              size_t            size,
+                              size_t            bytes,
                               const managed_seed&,
                               hipStream_t stream,
                               size_t      bins,
                               size_t      scale,
                               int         entropy_reduction)
 {
+    // Calculate the number of elements
+    size_t size = bytes / sizeof(T);
+
     using counter_type = unsigned int;
     using level_type =
         typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
@@ -183,7 +187,7 @@ void run_multi_even_benchmark(benchmark::State& state,
     unsigned int num_levels[ActiveChannels];
     level_type   lower_level[ActiveChannels];
     level_type   upper_level[ActiveChannels];
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         lower_level[channel] = 0;
         upper_level[channel] = bins * scale;
@@ -197,7 +201,7 @@ void run_multi_even_benchmark(benchmark::State& state,
     T*            d_input;
     counter_type* d_histogram[ActiveChannels];
     HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMalloc(&d_histogram[channel], bins * sizeof(counter_type)));
     }
@@ -205,33 +209,33 @@ void run_multi_even_benchmark(benchmark::State& state,
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((rp::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
-                                                                  temporary_storage_bytes,
-                                                                  d_input,
-                                                                  size,
-                                                                  d_histogram,
-                                                                  num_levels,
-                                                                  lower_level,
-                                                                  upper_level,
-                                                                  stream,
-                                                                  false)));
+    HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
+                                                                       temporary_storage_bytes,
+                                                                       d_input,
+                                                                       size,
+                                                                       d_histogram,
+                                                                       num_levels,
+                                                                       lower_level,
+                                                                       upper_level,
+                                                                       stream,
+                                                                       false)));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
-        HIP_CHECK((rp::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
-                                                                      temporary_storage_bytes,
-                                                                      d_input,
-                                                                      size,
-                                                                      d_histogram,
-                                                                      num_levels,
-                                                                      lower_level,
-                                                                      upper_level,
-                                                                      stream,
-                                                                      false)));
+        HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
+                                                                           temporary_storage_bytes,
+                                                                           d_input,
+                                                                           size,
+                                                                           d_histogram,
+                                                                           num_levels,
+                                                                           lower_level,
+                                                                           upper_level,
+                                                                           stream,
+                                                                           false)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -245,18 +249,19 @@ void run_multi_even_benchmark(benchmark::State& state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
-            HIP_CHECK((rp::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
-                                                                          temporary_storage_bytes,
-                                                                          d_input,
-                                                                          size,
-                                                                          d_histogram,
-                                                                          num_levels,
-                                                                          lower_level,
-                                                                          upper_level,
-                                                                          stream,
-                                                                          false)));
+            HIP_CHECK(
+                (rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
+                                                                         temporary_storage_bytes,
+                                                                         d_input,
+                                                                         size,
+                                                                         d_histogram,
+                                                                         num_levels,
+                                                                         lower_level,
+                                                                         upper_level,
+                                                                         stream,
+                                                                         false)));
         }
 
         // Record stop event and wait until it completes
@@ -277,16 +282,22 @@ void run_multi_even_benchmark(benchmark::State& state,
 
     HIP_CHECK(hipFree(d_temporary_storage));
     HIP_CHECK(hipFree(d_input));
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipFree(d_histogram[channel]));
     }
 }
 
-template<class T>
-void run_range_benchmark(
-    benchmark::State& state, size_t size, const managed_seed& seed, hipStream_t stream, size_t bins)
+template<typename T>
+void run_range_benchmark(benchmark::State&   state,
+                         size_t              bytes,
+                         const managed_seed& seed,
+                         hipStream_t         stream,
+                         size_t              bins)
 {
+    // Calculate the number of elements
+    size_t size = bytes / sizeof(T);
+
     using counter_type = unsigned int;
     using level_type =
         typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
@@ -297,7 +308,7 @@ void run_range_benchmark(
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
     std::vector<level_type> levels(bins + 1);
-    for(size_t i = 0; i < levels.size(); i++)
+    for(size_t i = 0; i < levels.size(); ++i)
     {
         levels[i] = static_cast<level_type>(i);
     }
@@ -314,31 +325,31 @@ void run_range_benchmark(
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(rp::histogram_range(d_temporary_storage,
-                                  temporary_storage_bytes,
-                                  d_input,
-                                  size,
-                                  d_histogram,
-                                  bins + 1,
-                                  d_levels,
-                                  stream,
-                                  false));
+    HIP_CHECK(rocprim::histogram_range(d_temporary_storage,
+                                       temporary_storage_bytes,
+                                       d_input,
+                                       size,
+                                       d_histogram,
+                                       bins + 1,
+                                       d_levels,
+                                       stream,
+                                       false));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
-        HIP_CHECK(rp::histogram_range(d_temporary_storage,
-                                      temporary_storage_bytes,
-                                      d_input,
-                                      size,
-                                      d_histogram,
-                                      bins + 1,
-                                      d_levels,
-                                      stream,
-                                      false));
+        HIP_CHECK(rocprim::histogram_range(d_temporary_storage,
+                                           temporary_storage_bytes,
+                                           d_input,
+                                           size,
+                                           d_histogram,
+                                           bins + 1,
+                                           d_levels,
+                                           stream,
+                                           false));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -352,17 +363,17 @@ void run_range_benchmark(
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
-            HIP_CHECK(rp::histogram_range(d_temporary_storage,
-                                          temporary_storage_bytes,
-                                          d_input,
-                                          size,
-                                          d_histogram,
-                                          bins + 1,
-                                          d_levels,
-                                          stream,
-                                          false));
+            HIP_CHECK(rocprim::histogram_range(d_temporary_storage,
+                                               temporary_storage_bytes,
+                                               d_input,
+                                               size,
+                                               d_histogram,
+                                               bins + 1,
+                                               d_levels,
+                                               stream,
+                                               false));
         }
 
         // Record stop event and wait until it completes
@@ -387,10 +398,16 @@ void run_range_benchmark(
     HIP_CHECK(hipFree(d_histogram));
 }
 
-template<class T, unsigned int Channels, unsigned int ActiveChannels>
-void run_multi_range_benchmark(
-    benchmark::State& state, size_t size, const managed_seed& seed, hipStream_t stream, size_t bins)
+template<typename T, unsigned int Channels, unsigned int ActiveChannels>
+void run_multi_range_benchmark(benchmark::State&   state,
+                               size_t              bytes,
+                               const managed_seed& seed,
+                               hipStream_t         stream,
+                               size_t              bins)
 {
+    // Calculate the number of elements
+    size_t size = bytes / sizeof(T);
+
     using counter_type = unsigned int;
     using level_type =
         typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
@@ -398,10 +415,10 @@ void run_multi_range_benchmark(
     const int               num_levels_channel = bins + 1;
     unsigned int            num_levels[ActiveChannels];
     std::vector<level_type> levels[ActiveChannels];
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         levels[channel].resize(num_levels_channel);
-        for(size_t i = 0; i < levels[channel].size(); i++)
+        for(size_t i = 0; i < levels[channel].size(); ++i)
         {
             levels[channel][i] = static_cast<level_type>(i);
         }
@@ -419,14 +436,14 @@ void run_multi_range_benchmark(
     level_type*   d_levels[ActiveChannels];
     counter_type* d_histogram[ActiveChannels];
     HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(level_type)));
         HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
     }
 
     HIP_CHECK(hipMemcpy(d_input, input.data(), size * Channels * sizeof(T), hipMemcpyHostToDevice));
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMemcpy(d_levels[channel],
                             levels[channel].data(),
@@ -436,31 +453,31 @@ void run_multi_range_benchmark(
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((rp::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
-                                                                   temporary_storage_bytes,
-                                                                   d_input,
-                                                                   size,
-                                                                   d_histogram,
-                                                                   num_levels,
-                                                                   d_levels,
-                                                                   stream,
-                                                                   false)));
+    HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
+                                                                        temporary_storage_bytes,
+                                                                        d_input,
+                                                                        size,
+                                                                        d_histogram,
+                                                                        num_levels,
+                                                                        d_levels,
+                                                                        stream,
+                                                                        false)));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
     HIP_CHECK(hipDeviceSynchronize());
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
-        HIP_CHECK((rp::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
-                                                                       temporary_storage_bytes,
-                                                                       d_input,
-                                                                       size,
-                                                                       d_histogram,
-                                                                       num_levels,
-                                                                       d_levels,
-                                                                       stream,
-                                                                       false)));
+        HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
+                                                                            temporary_storage_bytes,
+                                                                            d_input,
+                                                                            size,
+                                                                            d_histogram,
+                                                                            num_levels,
+                                                                            d_levels,
+                                                                            stream,
+                                                                            false)));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -474,17 +491,18 @@ void run_multi_range_benchmark(
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        for(size_t i = 0; i < batch_size; i++)
+        for(size_t i = 0; i < batch_size; ++i)
         {
-            HIP_CHECK((rp::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
-                                                                           temporary_storage_bytes,
-                                                                           d_input,
-                                                                           size,
-                                                                           d_histogram,
-                                                                           num_levels,
-                                                                           d_levels,
-                                                                           stream,
-                                                                           false)));
+            HIP_CHECK(
+                (rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
+                                                                          temporary_storage_bytes,
+                                                                          d_input,
+                                                                          size,
+                                                                          d_histogram,
+                                                                          num_levels,
+                                                                          d_levels,
+                                                                          stream,
+                                                                          false)));
         }
 
         // Record stop event and wait until it completes
@@ -505,7 +523,7 @@ void run_multi_range_benchmark(
 
     HIP_CHECK(hipFree(d_temporary_storage));
     HIP_CHECK(hipFree(d_input));
-    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipFree(d_levels[channel]));
         HIP_CHECK(hipFree(d_histogram[channel]));
@@ -519,7 +537,7 @@ void run_multi_range_benchmark(
                                   + ",bins:" + std::to_string(BINS) + ",cfg:default_config}")  \
             .c_str(),                                                                          \
         [=](benchmark::State& state)                                                           \
-        { run_even_benchmark<T>(state, size, seed, stream, BINS, SCALE, entropy_reduction); }));
+        { run_even_benchmark<T>(state, bytes, seed, stream, BINS, SCALE, entropy_reduction); }));
 
 #define BENCHMARK_EVEN_TYPE(VECTOR, T, S)      \
     CREATE_EVEN_BENCHMARK(VECTOR, T, 10, S);   \
@@ -528,7 +546,7 @@ void run_multi_range_benchmark(
     CREATE_EVEN_BENCHMARK(VECTOR, T, 10000, S);
 
 void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                         size_t                                        size,
+                         size_t                                        bytes,
                          const managed_seed&                           seed,
                          hipStream_t                                   stream)
 {
@@ -542,6 +560,10 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
         BENCHMARK_EVEN_TYPE(benchmarks, double, 1234);
         BENCHMARK_EVEN_TYPE(benchmarks, float, 1234);
         BENCHMARK_EVEN_TYPE(benchmarks, rocprim::half, 5);
+        CREATE_EVEN_BENCHMARK(benchmarks, rocprim::int128_t, 16, 16);
+        CREATE_EVEN_BENCHMARK(benchmarks, rocprim::int128_t, 256, 1);
+        CREATE_EVEN_BENCHMARK(benchmarks, rocprim::uint128_t, 16, 16);
+        CREATE_EVEN_BENCHMARK(benchmarks, rocprim::uint128_t, 256, 1);
     };
 }
 
@@ -556,7 +578,7 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
         [=](benchmark::State& state)                                                          \
         {                                                                                     \
             run_multi_even_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state,                     \
-                                                                   size,                      \
+                                                                   bytes,                     \
                                                                    seed,                      \
                                                                    stream,                    \
                                                                    BINS,                      \
@@ -573,19 +595,22 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
 // clang-format on
 
 void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                               size_t                                        size,
+                               size_t                                        bytes,
                                const managed_seed&                           seed,
                                hipStream_t                                   stream)
 {
     for(int entropy_reduction : entropy_reductions)
     {
-        std::vector<benchmark::internal::Benchmark*> bs = {
-            BENCHMARK_MULTI_EVEN_TYPE(4, 4, int, 1234),
-            BENCHMARK_MULTI_EVEN_TYPE(4, 3, short, 5),
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 16, 16),
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 256, 1),
-            BENCHMARK_MULTI_EVEN_TYPE(3, 3, float, 1234),
-        };
+        std::vector<benchmark::internal::Benchmark*> bs
+            = {BENCHMARK_MULTI_EVEN_TYPE(4, 4, int, 1234),
+               BENCHMARK_MULTI_EVEN_TYPE(4, 3, short, 5),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 16, 16),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 256, 1),
+               BENCHMARK_MULTI_EVEN_TYPE(3, 3, float, 1234),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, rocprim::int128_t, 16, 16),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, rocprim::int128_t, 256, 1),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, rocprim::uint128_t, 16, 16),
+               CREATE_MULTI_EVEN_BENCHMARK(4, 3, rocprim::uint128_t, 256, 1)};
         benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
     };
 }
@@ -595,7 +620,8 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
         bench_naming::format_name("{lvl:device,algo:histogram_range,value_type:" #T ",bins:" \
                                   + std::to_string(BINS) + ",cfg:default_config}")           \
             .c_str(),                                                                        \
-        [=](benchmark::State& state) { run_range_benchmark<T>(state, size, seed, stream, BINS); })
+        [=](benchmark::State& state)                                                         \
+        { run_range_benchmark<T>(state, bytes, seed, stream, BINS); })
 
 // clang-format off
 #define BENCHMARK_RANGE_TYPE(T)      \
@@ -606,20 +632,23 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 // clang-format on
 
 void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                          size_t                                        size,
+                          size_t                                        bytes,
                           const managed_seed&                           seed,
                           hipStream_t                                   stream)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_RANGE_TYPE(long long),
-        BENCHMARK_RANGE_TYPE(int),
-        BENCHMARK_RANGE_TYPE(short),
-        CREATE_RANGE_BENCHMARK(unsigned char, 16),
-        CREATE_RANGE_BENCHMARK(unsigned char, 256),
-        BENCHMARK_RANGE_TYPE(double),
-        BENCHMARK_RANGE_TYPE(float),
-        BENCHMARK_RANGE_TYPE(rocprim::half),
-    };
+    std::vector<benchmark::internal::Benchmark*> bs
+        = {BENCHMARK_RANGE_TYPE(long long),
+           BENCHMARK_RANGE_TYPE(int),
+           BENCHMARK_RANGE_TYPE(short),
+           CREATE_RANGE_BENCHMARK(unsigned char, 16),
+           CREATE_RANGE_BENCHMARK(unsigned char, 256),
+           BENCHMARK_RANGE_TYPE(double),
+           BENCHMARK_RANGE_TYPE(float),
+           BENCHMARK_RANGE_TYPE(rocprim::half),
+           CREATE_RANGE_BENCHMARK(rocprim::int128_t, 16),
+           CREATE_RANGE_BENCHMARK(rocprim::int128_t, 256),
+           CREATE_RANGE_BENCHMARK(rocprim::uint128_t, 16),
+           CREATE_RANGE_BENCHMARK(rocprim::uint128_t, 256)};
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
@@ -632,7 +661,7 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
             .c_str(),                                                                         \
         [=](benchmark::State& state) {                                                        \
             run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state,                    \
-                                                                    size,                     \
+                                                                    bytes,                    \
                                                                     seed,                     \
                                                                     stream,                   \
                                                                     BINS);                    \
@@ -647,25 +676,28 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
 // clang-format on
 
 void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                                size_t                                        size,
+                                size_t                                        bytes,
                                 const managed_seed&                           seed,
                                 hipStream_t                                   stream)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_MULTI_RANGE_TYPE(4, 4, int),
-        BENCHMARK_MULTI_RANGE_TYPE(4, 3, short),
-        CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 16),
-        CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 256),
-        BENCHMARK_MULTI_RANGE_TYPE(3, 3, float),
-        BENCHMARK_MULTI_RANGE_TYPE(2, 2, double),
-    };
+    std::vector<benchmark::internal::Benchmark*> bs
+        = {BENCHMARK_MULTI_RANGE_TYPE(4, 4, int),
+           BENCHMARK_MULTI_RANGE_TYPE(4, 3, short),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 16),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 256),
+           BENCHMARK_MULTI_RANGE_TYPE(3, 3, float),
+           BENCHMARK_MULTI_RANGE_TYPE(2, 2, double),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, rocprim::int128_t, 16),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, rocprim::int128_t, 256),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, rocprim::uint128_t, 16),
+           CREATE_MULTI_RANGE_BENCHMARK(4, 3, rocprim::uint128_t, 256)};
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -687,7 +719,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -698,7 +730,7 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
@@ -709,14 +741,14 @@ int main(int argc, char* argv[])
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        bytes,
                                                         seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
-    add_even_benchmarks(benchmarks, size, seed, stream);
-    add_multi_even_benchmarks(benchmarks, size, seed, stream);
-    add_range_benchmarks(benchmarks, size, seed, stream);
-    add_multi_range_benchmarks(benchmarks, size, seed, stream);
+    add_even_benchmarks(benchmarks, bytes, seed, stream);
+    add_multi_even_benchmarks(benchmarks, bytes, seed, stream);
+    add_range_benchmarks(benchmarks, bytes, seed, stream);
+    add_multi_range_benchmarks(benchmarks, bytes, seed, stream);
 #endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing

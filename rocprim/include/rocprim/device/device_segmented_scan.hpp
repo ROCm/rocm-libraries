@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/various.hpp"
 
 #include "../iterator/zip_iterator.hpp"
@@ -46,45 +47,52 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    bool Exclusive,
-    class Config,
-    class ResultType,
-    class InputIterator,
-    class OutputIterator,
-    class OffsetIterator,
-    class InitValueType,
-    class BinaryFunction
->
-ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void segmented_scan_kernel(InputIterator input,
-                           OutputIterator output,
-                           OffsetIterator begin_offsets,
-                           OffsetIterator end_offsets,
-                           InitValueType initial_value,
-                           BinaryFunction scan_op)
+template<class InputIterator, class HeadFlagIterator, class ResultType, class FlagType>
+struct transform_op_t
+{
+    InputIterator    input;
+    HeadFlagIterator head_flags;
+    ResultType       initial_value_converted;
+    size_t           size;
+
+    ROCPRIM_DEVICE
+    auto             operator()(const size_t i) const
+    {
+        FlagType flag(false);
+        if(i + 1 < size)
+        {
+            flag = head_flags[i + 1];
+        }
+        ResultType value = initial_value_converted;
+        if(!flag)
+        {
+            value = input[i];
+        }
+        return rocprim::make_tuple(value, flag);
+    }
+};
+
+template<bool Exclusive,
+         class Config,
+         class ResultType,
+         class InputIterator,
+         class OutputIterator,
+         class OffsetIterator,
+         class InitValueType,
+         class BinaryFunction>
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
+    segmented_scan_kernel(InputIterator  input,
+                          OutputIterator output,
+                          OffsetIterator begin_offsets,
+                          OffsetIterator end_offsets,
+                          InitValueType  initial_value,
+                          BinaryFunction scan_op)
 {
     segmented_scan<Exclusive, Config, ResultType>(
         input, output, begin_offsets, end_offsets,
         static_cast<ResultType>(initial_value), scan_op
     );
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 template<
     bool Exclusive,
@@ -134,8 +142,8 @@ hipError_t segmented_scan_impl(void * temporary_storage,
     if( segments == 0u )
         return hipSuccess;
 
-    std::chrono::high_resolution_clock::time_point start;
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    std::chrono::steady_clock::time_point start;
+    if(debug_synchronous) start = std::chrono::steady_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(segmented_scan_kernel<Exclusive, config, result_type>),
         dim3(segments), dim3(block_size), 0, stream,
@@ -147,7 +155,7 @@ hipError_t segmented_scan_impl(void * temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end of detail namespace
 
@@ -165,32 +173,32 @@ hipError_t segmented_scan_impl(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// \tparam BinaryFunction type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -279,34 +287,34 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] initial_value - initial value to start the scan.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] initial_value initial value to start the scan.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -396,32 +404,32 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
+/// \tparam HeadFlagIterator random-access iterator type of flags. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// \tparam BinaryFunction type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] head_flags - iterator to the first element in the range of head flags marking
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] head_flags iterator to the first element in the range of head flags marking
 /// beginnings of each segment in the input range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -508,34 +516,34 @@ hipError_t segmented_inclusive_scan(void * temporary_storage,
 /// * Ranges specified by \p input, \p output, and \p flags must have at least \p size elements.
 /// * \p value_type of \p HeadFlagIterator iterator should be convertible to \p bool type.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam HeadFlagIterator - random-access iterator type of flags. Must meet the
+/// \tparam HeadFlagIterator random-access iterator type of flags. Must meet the
 /// requirements of a C++ RandomAccessIterator concept. It can be a simple pointer type.
-/// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for scan operation. Default type
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for scan operation. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to scan.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] head_flags - iterator to the first element in the range of head flags marking
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] head_flags iterator to the first element in the range of head flags marking
 /// beginnings of each segment in the input range.
-/// \param [in] initial_value - initial value to start the scan.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scan.
+/// \param [in] initial_value initial value to start the scan.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scan.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -601,39 +609,26 @@ hipError_t segmented_exclusive_scan(void * temporary_storage,
         detail::headflag_scan_op_wrapper<
             result_type, flag_type, BinaryFunction
         >;
+    using transform_op
+        = detail::transform_op_t<InputIterator, HeadFlagIterator, result_type, flag_type>;
 
     const result_type initial_value_converted = static_cast<result_type>(initial_value);
 
     // Flag the last item of each segment as the next segment's head, use initial_value as its value,
     // then run exclusive scan
     return exclusive_scan<Config>(
-        temporary_storage, storage_size,
+        temporary_storage,
+        storage_size,
         rocprim::make_transform_iterator(
             rocprim::make_counting_iterator<size_t>(0),
-            [input, head_flags, initial_value_converted, size]
-            ROCPRIM_DEVICE
-            (const size_t i)
-            {
-                flag_type flag(false);
-                if(i + 1 < size)
-                {
-                    flag = head_flags[i + 1];
-                }
-                result_type value = initial_value_converted;
-                if(!flag)
-                {
-                    value = input[i];
-                }
-                return rocprim::make_tuple(value, flag);
-            }
-        ),
+            transform_op{input, head_flags, initial_value_converted, size}),
         rocprim::make_zip_iterator(rocprim::make_tuple(output, rocprim::make_discard_iterator())),
-        rocprim::make_tuple(initial_value_converted, flag_type(true)), // init value is a head of the first segment
+        rocprim::make_tuple(initial_value_converted,
+                            flag_type(true)), // init value is a head of the first segment
         size,
         headflag_scan_op_wrapper_type(scan_op),
         stream,
-        debug_synchronous
-    );
+        debug_synchronous);
 }
 
 /// @}

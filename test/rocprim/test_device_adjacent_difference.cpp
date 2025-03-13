@@ -23,6 +23,7 @@
 #include "../common_test_header.hpp"
 
 #include "indirect_iterator.hpp"
+#include "test_utils_device_ptr.hpp"
 #include "test_utils_types.hpp"
 
 #include <rocprim/device/device_adjacent_difference.hpp>
@@ -318,7 +319,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
     SCOPED_TRACE(testing::Message()
                  << "left = " << left << ", api_variant = " << to_string(aliasing));
 
-    for(std::size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(std::size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         const unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -332,31 +333,26 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
             }
-            
+
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
 
-            T* d_input;
-            HIP_CHECK(
-                test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(input[0])));
-            HIP_CHECK(hipMemcpy(
-                d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
+            test_utils::device_ptr<T> d_input(input);
 
             static constexpr auto left_tag  = rocprim::detail::bool_constant<left>{};
             static constexpr auto alias_tag = std::integral_constant<api_variant, aliasing>{};
 
             auto input_it
                 = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
-                    d_input);
+                    d_input.get());
 
             // Allocate temporary storage
             std::size_t temp_storage_size;
-            void*       d_temp_storage = nullptr;
             HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
                                                            alias_tag,
-                                                           d_temp_storage,
+                                                           nullptr,
                                                            temp_storage_size,
                                                            input_it,
                                                            (output_type*){nullptr},
@@ -367,10 +363,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 
             ASSERT_GT(temp_storage_size, 0);
 
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size));
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size);
 
-            hipGraph_t     graph;
-            hipGraphExec_t graph_instance;
+            test_utils::GraphHelper gHelper;
 
             // We might call the API multiple times, with almost the same parameter
             // (in-place and out-of-place)
@@ -380,13 +375,13 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
             {
                 if(TestFixture::use_graphs)
                 {
-                    graph = test_utils::createGraphHelper(stream);
+                    gHelper.startStreamCapture(stream);
                 }
 
                 // Run
                 HIP_CHECK(dispatch_adjacent_difference<Config>(left_tag,
                                                                alias_tag,
-                                                               d_temp_storage,
+                                                               d_temp_storage.get(),
                                                                temp_storage_size,
                                                                input_it,
                                                                output_it,
@@ -398,7 +393,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 
                 if(TestFixture::use_graphs)
                 {
-                    graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                    gHelper.createAndLaunchGraph(stream);
                 }
 
                 // input_type for in-place, output_type for out of place
@@ -425,37 +420,31 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 
                 if(TestFixture::use_graphs)
                 {
-                    test_utils::cleanupGraphHelper(graph, graph_instance);
+                    gHelper.cleanupGraphHelper();
                 }
             };
 
             // if api_variant is not in_place we should check the non aliased function call
             if(aliasing != api_variant::in_place)
             {
-                output_type* d_output = nullptr;
-                HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(*d_output)));
+                test_utils::device_ptr<output_type> d_output(size);
 
                 const auto output_it
-                    = test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output);
+                    = test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get());
 
-                ASSERT_NO_FATAL_FAILURE(run_and_verify(output_it, d_output));
-
-                hipFree(d_output);
+                ASSERT_NO_FATAL_FAILURE(run_and_verify(output_it, d_output.get()));
             }
 
             // if api_variant is not no_alias we should check the inplace function call
             if(aliasing != api_variant::no_alias)
             {
-                ASSERT_NO_FATAL_FAILURE(run_and_verify(input_it, d_input));
+                ASSERT_NO_FATAL_FAILURE(run_and_verify(input_it, d_input.get()));
             }
 
             if(TestFixture::use_graphs)
             {
                 HIP_CHECK(hipStreamDestroy(stream));
             }
-
-            hipFree(d_temp_storage);
-            hipFree(d_input);
         }
     }
 }
@@ -598,9 +587,6 @@ TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
 
 TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
-    if (TestFixture::use_graphs)
-        GTEST_SKIP() << "Temporarily skipping test within hipGraphs. Will re-enable when issues with atomics inside graphs are resolved.";
-
     const int device_id = test_common_utils::obtain_device_from_ctest();
 
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
@@ -624,7 +610,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    for(std::size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(std::size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -634,18 +620,20 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            flag_type* d_incorrect_flag;
-            size_t*    d_counter;
+            test_utils::device_ptr<flag_type> d_incorrect_flag(1);
+            HIP_CHECK(hipMemset(d_incorrect_flag.get(),
+                                0,
+                                sizeof(typename decltype(d_incorrect_flag)::value_type)));
+
+            test_utils::device_ptr<size_t> d_counter(1);
             HIP_CHECK(
-                test_common_utils::hipMallocHelper(&d_incorrect_flag, sizeof(*d_incorrect_flag)));
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_counter, sizeof(*d_counter)));
-            HIP_CHECK(hipMemset(d_incorrect_flag, 0, sizeof(*d_incorrect_flag)));
-            HIP_CHECK(hipMemset(d_counter, 0, sizeof(*d_counter)));
+                hipMemset(d_counter.get(), 0, sizeof(typename decltype(d_counter)::value_type)));
+
             // Note: hipMemset runs asynchronously unless the pointer it's passed refers to pinned memory.
             // Wait for it to complete here before we use the device variables we just set.
             HIP_CHECK(hipDeviceSynchronize());
 
-            OutputIterator output(d_incorrect_flag, d_counter);
+            OutputIterator output(d_incorrect_flag.get(), d_counter.get());
 
             const auto input = rocprim::make_counting_iterator(T{0});
 
@@ -660,10 +648,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 
             // Allocate temporary storage
             std::size_t temp_storage_size;
-            void*       d_temp_storage = nullptr;
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
                                                    aliasing_tag,
-                                                   d_temp_storage,
+                                                   nullptr,
                                                    temp_storage_size,
                                                    input,
                                                    output,
@@ -674,22 +661,28 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 
             ASSERT_GT(temp_storage_size, 0);
 
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size));
+            test_utils::device_ptr<void> d_temp_storage(temp_storage_size);
 
-            hipGraph_t graph;
+            test_utils::GraphHelper gHelper;;
             if(TestFixture::use_graphs)
             {
-                graph = test_utils::createGraphHelper(stream);
+                gHelper.startStreamCapture(stream);
             }
 
             // Capture the memset in the graph so that relaunching will have expected result
-            HIP_CHECK(hipMemsetAsync(d_incorrect_flag, 0, sizeof(*d_incorrect_flag), stream));
-            HIP_CHECK(hipMemsetAsync(d_counter, 0, sizeof(*d_counter), stream));
+            HIP_CHECK(hipMemsetAsync(d_incorrect_flag.get(),
+                                     0,
+                                     sizeof(typename decltype(d_incorrect_flag)::value_type),
+                                     stream));
+            HIP_CHECK(hipMemsetAsync(d_counter.get(),
+                                     0,
+                                     sizeof(typename decltype(d_counter)::value_type),
+                                     stream));
 
             // Run
             HIP_CHECK(dispatch_adjacent_difference(left_tag,
                                                    aliasing_tag,
-                                                   d_temp_storage,
+                                                   d_temp_storage.get(),
                                                    temp_storage_size,
                                                    input,
                                                    output,
@@ -698,31 +691,21 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
                                                    stream,
                                                    debug_synchronous));
 
-            hipGraphExec_t graph_instance;
             if(TestFixture::use_graphs)
             {
-                graph_instance = test_utils::endCaptureGraphHelper(graph, stream, true, true);
+                gHelper.createAndLaunchGraph(stream);
             }
 
             // Copy output to host
-            flag_type incorrect_flag;
-            size_t    counter;
-            HIP_CHECK(hipMemcpy(&incorrect_flag,
-                                d_incorrect_flag,
-                                sizeof(incorrect_flag),
-                                hipMemcpyDeviceToHost));
-            HIP_CHECK(hipMemcpy(&counter, d_counter, sizeof(counter), hipMemcpyDeviceToHost));
+            const auto incorrect_flag = d_incorrect_flag.load()[0];
+            const auto counter        = d_counter.load()[0];
 
             ASSERT_EQ(incorrect_flag, 0);
             ASSERT_EQ(counter, rocprim::detail::ceiling_div(size, sampling_rate));
 
-            hipFree(d_temp_storage);
-            hipFree(d_incorrect_flag);
-            hipFree(d_counter);
-
             if(TestFixture::use_graphs)
             {
-                test_utils::cleanupGraphHelper(graph, graph_instance);
+                gHelper.cleanupGraphHelper();
             }
         }
     }

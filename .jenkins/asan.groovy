@@ -14,7 +14,8 @@ def runCI =
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
-    def settings = [addressSanitizer: true]
+    def settings = [addressSanitizer: true,
+                    debug:false]
 
     def commonGroovy
 

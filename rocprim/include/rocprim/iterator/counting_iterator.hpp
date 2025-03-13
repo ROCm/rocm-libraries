@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,8 +42,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// * Using it for simulating a range filled with a sequence of consecutive values saves
 /// memory capacity and bandwidth.
 ///
-/// \tparam Incrementable - type of value that can be obtained by dereferencing the iterator.
-/// \tparam Difference - a type used for identify distance between iterators
+/// \tparam Incrementable type of value that can be obtained by dereferencing the iterator.
+/// \tparam Difference a type used for identify distance between iterators
 template<
     class Incrementable,
     class Difference = std::ptrdiff_t
@@ -248,10 +248,10 @@ operator+(typename counting_iterator<Incrementable, Difference>::difference_type
 /// make_counting_iterator creates a counting_iterator with its initial value
 /// set to \p value.
 ///
-/// \tparam Incrementable - type of value that can be obtained by dereferencing created iterator.
-/// \tparam Difference - a type used for identify distance between counting_iterator iterators.
+/// \tparam Incrementable type of value that can be obtained by dereferencing created iterator.
+/// \tparam Difference a type used for identify distance between counting_iterator iterators.
 ///
-/// \param value - initial value for counting_iterator.
+/// \param value initial value for counting_iterator.
 template<
     class Incrementable,
     class Difference = std::ptrdiff_t

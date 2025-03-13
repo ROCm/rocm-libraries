@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -172,6 +172,46 @@ void scan_kernel(T* device_output, T* device_output_b, T init)
     if(threadIdx.x == 0)
     {
         device_output_b[blockIdx.x] = prefix_value;
+    }
+}
+
+template<int                           Method,
+         unsigned int                  BlockSize,
+         rocprim::block_scan_algorithm Algorithm,
+         class T,
+         typename std::enable_if<Method == 6>::type* = nullptr>
+__global__
+__launch_bounds__(BlockSize)
+void scan_kernel(T* device_output, T* device_output_b, T init)
+{
+    (void)device_output_b;
+    const unsigned int                           index    = (blockIdx.x * BlockSize) + threadIdx.x;
+    T                                            input[1] = {device_output[index]};
+    T                                            output[1];
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+    bscan.inclusive_scan(input, init, output);
+    device_output[index] = output[0];
+}
+
+template<int                           Method,
+         unsigned int                  BlockSize,
+         rocprim::block_scan_algorithm Algorithm,
+         class T,
+         typename std::enable_if<Method == 7>::type* = nullptr>
+__global__
+__launch_bounds__(BlockSize)
+void scan_kernel(T* device_output, T* device_output_b, T init)
+{
+    const unsigned int                           index    = (blockIdx.x * BlockSize) + threadIdx.x;
+    T                                            input[1] = {device_output[index]};
+    T                                            output[1];
+    T                                            reduction;
+    rocprim::block_scan<T, BlockSize, Algorithm> bscan;
+    bscan.inclusive_scan(input, init, output, reduction);
+    device_output[index] = output[0];
+    if(threadIdx.x == 0)
+    {
+        device_output_b[blockIdx.x] = reduction;
     }
 }
 
@@ -488,7 +528,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -509,39 +549,28 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size,
+                                                                       items_per_thread,
+                                                                       algorithm,
+                                                                       T,
+                                                                       binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get());
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -576,7 +605,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -602,65 +631,32 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        T* device_output_reductions;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_output_reductions,
-                output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output_reductions, output_reductions.data(),
-                output_reductions.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
+        test_utils::device_ptr<T> device_output_reductions(output_reductions);
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, device_output_reductions
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T,
+                                                                              binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           device_output_reductions.get());
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                output_reductions.data(), device_output_reductions,
-                output_reductions.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output            = device_output.load();
+        output_reductions = device_output_reductions.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_reductions));
     }
 
 }
@@ -695,7 +691,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -721,67 +717,35 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        T* device_output_bp;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_output_bp,
-                output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output_bp, output_block_prefixes.data(),
-                output_block_prefixes.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
+        test_utils::device_ptr<T> device_output_bp(output_block_prefixes);
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                inclusive_scan_array_prefix_callback_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>
-            ),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, device_output_bp, block_prefix
-        );
+            HIP_KERNEL_NAME(inclusive_scan_array_prefix_callback_kernel<block_size,
+                                                                        items_per_thread,
+                                                                        algorithm,
+                                                                        T,
+                                                                        binary_op_type>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output.get(),
+            device_output_bp.get(),
+            block_prefix);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                output_block_prefixes.data(), device_output_bp,
-                output_block_prefixes.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output                = device_output.load();
+        output_block_prefixes = device_output_bp.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_bp));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
     }
 
 }
@@ -816,7 +780,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -839,40 +803,29 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, init
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size,
+                                                                       items_per_thread,
+                                                                       algorithm,
+                                                                       T,
+                                                                       binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           init);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output = device_output.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-        HIP_CHECK(hipFree(device_output));
     }
 
 }
@@ -907,7 +860,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -939,52 +892,29 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        T* device_output_reductions;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_output_reductions,
-                output_reductions.size() * sizeof(typename decltype(output_reductions)::value_type)
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
+        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                exclusive_scan_reduce_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>
-            ),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, device_output_reductions, init
-        );
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_kernel<block_size,
+                                                                              items_per_thread,
+                                                                              algorithm,
+                                                                              T,
+                                                                              binary_op_type>),
+                           dim3(grid_size),
+                           dim3(block_size),
+                           0,
+                           0,
+                           device_output.get(),
+                           device_output_reductions.get(),
+                           init);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                output_reductions.data(), device_output_reductions,
-                output_reductions.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output            = device_output.load();
+        output_reductions = device_output_reductions.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
@@ -1023,7 +953,7 @@ auto test_block_scan_input_arrays()
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -1054,59 +984,35 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        T* device_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(typename decltype(output)::value_type)));
-        T* device_output_bp;
-        HIP_CHECK(
-            test_common_utils::hipMallocHelper(
-                &device_output_bp,
-                output_block_prefixes.size() * sizeof(typename decltype(output_block_prefixes)::value_type)
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_output, output.data(),
-                output.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<T> device_output(output);
+        test_utils::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(
-                exclusive_scan_prefix_callback_array_kernel<block_size, items_per_thread, algorithm, T, binary_op_type>
-            ),
-            dim3(grid_size), dim3(block_size), 0, 0,
-            device_output, device_output_bp, block_prefix
-        );
+            HIP_KERNEL_NAME(exclusive_scan_prefix_callback_array_kernel<block_size,
+                                                                        items_per_thread,
+                                                                        algorithm,
+                                                                        T,
+                                                                        binary_op_type>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            0,
+            device_output.get(),
+            device_output_bp.get(),
+            block_prefix);
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), device_output,
-                output.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
-
-        HIP_CHECK(
-            hipMemcpy(
-                output_block_prefixes.data(), device_output_bp,
-                output_block_prefixes.size() * sizeof(T),
-                hipMemcpyDeviceToHost
-            )
-        );
+        output                = device_output.load();
+        output_block_prefixes = device_output_bp.load();
 
         // Validating results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
-
-        HIP_CHECK(hipFree(device_output));
-        HIP_CHECK(hipFree(device_output_bp));
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output_block_prefixes, expected_block_prefixes));
     }
 
 }

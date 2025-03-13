@@ -418,7 +418,7 @@ TYPED_TEST(TypedRadixKeyCodecTest, EncodeDecodeExtract)
 
     CustomDecomposer custom_decomposer{};
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -427,8 +427,8 @@ TYPED_TEST(TypedRadixKeyCodecTest, EncodeDecodeExtract)
         const size_t     size = (1 << 20) + 123;
         std::vector<Key> input_keys
             = test_utils::get_random_data<Key>(size,
-                                               test_utils::numeric_limits<Key>::min(),
-                                               test_utils::numeric_limits<Key>::max(),
+                                               test_utils::generate_limits<Key>::min(),
+                                               test_utils::generate_limits<Key>::max(),
                                                seed_value);
 
         for(size_t i = 0; i < size; ++i)

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -80,11 +80,51 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(T input, T& output, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        const unsigned int lid      = detail::logical_lane_id<WarpSize>();
+        storage_type_&     storage_ = storage.get();
+
+        T me                  = input;
+        storage_.threads[lid] = me;
+        ::rocprim::wave_barrier();
+        for(unsigned int i = 1; i < WarpSize; i *= 2)
+        {
+            const bool do_op = lid >= i;
+            if(do_op)
+            {
+                T other = storage_.threads[lid - i];
+                me      = scan_op(other, me);
+            }
+            ::rocprim::wave_barrier();
+            if(do_op)
+            {
+                storage_.threads[lid] = me;
+            }
+            ::rocprim::wave_barrier();
+        }
+        output                = scan_op(init, me);
+        storage_.threads[lid] = output;
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
         storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
+        reduction = storage_.threads[WarpSize - 1];
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void inclusive_scan(
+        T input, T& output, T& reduction, storage_type& storage, BinaryFunction scan_op, T init)
+    {
+        storage_type_& storage_ = storage.get();
+        inclusive_scan(input, output, storage, scan_op, init);
+        ::rocprim::wave_barrier();
         reduction = storage_.threads[WarpSize - 1];
     }
 

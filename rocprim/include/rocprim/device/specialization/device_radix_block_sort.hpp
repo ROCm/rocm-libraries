@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_SPECIALIZATION_DEVICE_RADIX_SINGLE_SORT_HPP_
 #define ROCPRIM_DEVICE_SPECIALIZATION_DEVICE_RADIX_SINGLE_SORT_HPP_
 
+#include "../../common.hpp"
 #include "../detail/device_radix_sort.hpp"
 #include "../device_radix_sort_config.hpp"
 
@@ -29,23 +30,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
-    {                                                                                            \
-        auto _error = hipGetLastError();                                                         \
-        if(_error != hipSuccess)                                                                 \
-            return _error;                                                                       \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            std::cout << name << "(" << size << ")";                                             \
-            auto __error = hipStreamSynchronize(stream);                                         \
-            if(__error != hipSuccess)                                                            \
-                return __error;                                                                  \
-            auto _end = std::chrono::high_resolution_clock::now();                               \
-            auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-        }                                                                                        \
-    }
-
 template<class Config,
          bool Descending,
          class KeysInputIterator,
@@ -53,16 +37,15 @@ template<class Config,
          class ValuesInputIterator,
          class ValuesOutputIterator,
          class Decomposer>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().block_size) void radix_sort_block_sort_kernel(
-        KeysInputIterator    keys_input,
-        KeysOutputIterator   keys_output,
-        ValuesInputIterator  values_input,
-        ValuesOutputIterator values_output,
-        unsigned int         size,
-        Decomposer           decomposer,
-        unsigned int         bit,
-        unsigned int         current_radix_bits)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().block_size) void
+    radix_sort_block_sort_kernel(KeysInputIterator    keys_input,
+                                 KeysOutputIterator   keys_output,
+                                 ValuesInputIterator  values_input,
+                                 ValuesOutputIterator values_output,
+                                 unsigned int         size,
+                                 Decomposer           decomposer,
+                                 unsigned int         bit,
+                                 unsigned int         current_radix_bits)
 {
     static constexpr kernel_config_params params = device_params<Config>();
     sort_single<params.block_size, params.items_per_thread, Descending>(keys_input,
@@ -123,10 +106,10 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
     {
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
     }
 
     radix_sort_block_sort_kernel<config, Descending>
@@ -138,7 +121,7 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
                                                                               decomposer,
                                                                               bit,
                                                                               current_radix_bits);
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start)
+    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start);
     return hipSuccess;
 }
 

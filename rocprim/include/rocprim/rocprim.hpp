@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,8 +28,6 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
-#include "rocprim_version.hpp"
-
 #include "intrinsics.hpp"
 #include "functional.hpp"
 #include "types.hpp"
@@ -57,13 +55,18 @@
 #include "block/block_scan.hpp"
 #include "block/block_sort.hpp"
 #include "block/block_store.hpp"
+#include "block/config.hpp"
 
 #include "device/device_adjacent_difference.hpp"
+#include "device/device_adjacent_find.hpp"
 #include "device/device_binary_search.hpp"
 #include "device/device_copy.hpp"
+#include "device/device_find_end.hpp"
+#include "device/device_find_first_of.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_memcpy.hpp"
 #include "device/device_merge.hpp"
+#include "device/device_merge_inplace.hpp"
 #include "device/device_merge_sort.hpp"
 #include "device/device_nth_element.hpp"
 #include "device/device_partial_sort.hpp"
@@ -74,6 +77,8 @@
 #include "device/device_run_length_encode.hpp"
 #include "device/device_scan.hpp"
 #include "device/device_scan_by_key.hpp"
+#include "device/device_search.hpp"
+#include "device/device_search_n.hpp"
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_scan.hpp"

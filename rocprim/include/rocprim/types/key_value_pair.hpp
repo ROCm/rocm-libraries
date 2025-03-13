@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,41 +29,47 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Convenience struct that allows you to store key-value pairs as a composite entity.
-template<
-    class Key_,
-    class Value_
->
+template<class Key_, class Value_>
 struct key_value_pair
 {
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    using Key = Key_;
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    using Key   = Key_;
     using Value = Value_;
-    #endif
+#endif
 
-    using key_type = Key_; ///< the key's type
-    using value_type = Value_; ///< the value's type
+    /// The key's type.
+    using key_type = Key_;
+    /// The value's type.
+    using value_type = Value_;
 
-    key_type key; ///< the stored key
-    value_type value; ///< the stored value
+    /// The stored key.
+    key_type key;
+    /// The stored value.
+    value_type value;
 
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair() = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE key_value_pair() = default;
 
-    ROCPRIM_HOST_DEVICE inline
-    ~key_value_pair() = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE ~key_value_pair() = default;
 
     /// \brief Constructs a key-value pair using the supplied values.
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair(const key_type key, const value_type value) : key(key), value(value)
-    {
-    }
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE key_value_pair(const key_type key, const value_type value)
+        : key(key), value(value)
+    {}
 
     /// \brief Returns true if the given key-value pair is not equal to this one.
     /// Otherwise returns false.
-    ROCPRIM_HOST_DEVICE inline
-    bool operator !=(const key_value_pair& kvb)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    bool operator!=(const key_value_pair& kvb) const
     {
         return (key != kvb.key) || (value != kvb.value);
+    }
+
+    /// \brief Returns true if the given key-value pair is equal to this one.
+    /// Otherwise returns false.
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    bool operator==(const key_value_pair& kvb) const
+    {
+        return (key == kvb.key) && (value == kvb.value);
     }
 };
 

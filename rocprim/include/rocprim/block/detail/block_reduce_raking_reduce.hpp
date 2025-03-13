@@ -72,15 +72,9 @@ public:
         for(int i = 0; i < words_no; i++)
         {
             const size_t s = std::min(sizeof(int32_t), sizeof(T) - i * sizeof(int32_t));
-#ifdef __HIP_CPU_RT__
-            std::memcpy(reinterpret_cast<char*>(&result) + i * sizeof(int32_t),
-                        data + index + i * n,
-                        s);
-#else
             __builtin_memcpy(reinterpret_cast<char*>(&result) + i * sizeof(int32_t),
                              data + index + i * n,
                              s);
-#endif
         }
         return result;
     }
@@ -91,15 +85,9 @@ public:
         for(int i = 0; i < words_no; i++)
         {
             const size_t s = std::min(sizeof(int32_t), sizeof(T) - i * sizeof(int32_t));
-#ifdef __HIP_CPU_RT__
-            std::memcpy(data + index + i * n,
-                        reinterpret_cast<const char*>(&value) + i * sizeof(int32_t),
-                        s);
-#else
             __builtin_memcpy(data + index + i * n,
                              reinterpret_cast<const char*>(&value) + i * sizeof(int32_t),
                              s);
-#endif
         }
     }
 

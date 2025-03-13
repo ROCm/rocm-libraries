@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ public:
 
     template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    void reduce(T input, T& output, BinaryFunction reduce_op)
+    void reduce_impl(T input, T& output, BinaryFunction reduce_op, std::false_type)
     {
         output = input;
 
@@ -65,13 +65,17 @@ public:
         }
         if(WarpSize > 4)
         {
-            // row_shr:4
-            output = reduce_op(warp_move_dpp<T, 0x114>(output), output);
+            // row_ror:4
+            // Use rotation instead of shift to avoid leaving invalid values in the destination
+            // registers (asume warp size of at least hardware warp-size)
+            output = reduce_op(warp_move_dpp<T, 0x124>(output), output);
         }
         if(WarpSize > 8)
         {
-            // row_shr:8
-            output = reduce_op(warp_move_dpp<T, 0x118>(output), output);
+            // row_ror:8
+            // Use rotation instead of shift to avoid leaving invalid values in the destination
+            // registers (asume warp size of at least hardware warp-size)
+            output = reduce_op(warp_move_dpp<T, 0x128>(output), output);
         }
 #ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
         if(WarpSize > 16)
@@ -95,6 +99,23 @@ public:
 #endif
         // Read the result from the last lane of the logical warp
         output = warp_shuffle(output, WarpSize - 1, WarpSize);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce_impl(T input, T& output, BinaryFunction reduce_op, std::true_type)
+    {
+        warp_reduce_shuffle<T, WarpSize, UseAllReduce>().reduce(input, output, reduce_op);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void reduce(T input, T& output, BinaryFunction reduce_op)
+    {
+        reduce_impl(input,
+                    output,
+                    reduce_op,
+                    std::integral_constant<bool, (WarpSize < ::rocprim::device_warp_size())>{});
     }
 
     template<class BinaryFunction>

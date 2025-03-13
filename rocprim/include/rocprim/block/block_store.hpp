@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -93,11 +93,11 @@ enum class block_store_method
 /// \brief The \p block_store class is a block level parallel primitive which provides methods
 /// for storing an arrangement of items into a blocked/striped arrangement on continous memory.
 ///
-/// \tparam T - the output/output type.
-/// \tparam BlockSize - the number of threads in a block.
-/// \tparam ItemsPerThread - the number of items to be processed by
+/// \tparam T the output/output type.
+/// \tparam BlockSize the number of threads in a block.
+/// \tparam ItemsPerThread the number of items to be processed by
 /// each thread.
-/// \tparam Method - the method to store data.
+/// \tparam Method the method to store data.
 ///
 /// \par Overview
 /// * The \p block_store class has a number of different methods to store data:
@@ -154,11 +154,11 @@ public:
     /// \brief Stores an arrangement of items from across the thread block into an
     /// arrangement on continuous memory.
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator from the thread block to store to.
-    /// \param [in] items - array that data is read from.
+    /// \param [out] block_output the output iterator from the thread block to store to.
+    /// \param [in] items array that data is read from.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -175,12 +175,12 @@ public:
     /// \brief Stores an arrangement of items from across the thread block into an
     /// arrangement on continuous memory, which is guarded by range \p valid.
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator from the thread block to store to.
-    /// \param [in] items - array that data is read from.
-    /// \param [in] valid - maximum range of valid numbers to read.
+    /// \param [out] block_output the output iterator from the thread block to store to.
+    /// \param [in] items array that data is read from.
+    /// \param [in] valid maximum range of valid numbers to read.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -198,12 +198,12 @@ public:
     /// \brief Stores an arrangement of items from across the thread block into an
     /// arrangement on continuous memory, using temporary storage.
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator from the thread block to store to.
-    /// \param [in] items - array that data is read from.
-    /// \param [in] storage - temporary storage for outputs.
+    /// \param [out] block_output the output iterator from the thread block to store to.
+    /// \param [in] items array that data is read from.
+    /// \param [in] storage temporary storage for outputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -239,13 +239,13 @@ public:
     /// arrangement on continuous memory, which is guarded by range \p valid,
     /// using temporary storage
     ///
-    /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
+    /// \tparam OutputIterator [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator from the thread block to store to.
-    /// \param [in] items - array that data is read from.
-    /// \param [in] valid - maximum range of valid numbers to read.
-    /// \param [in] storage - temporary storage for outputs.
+    /// \param [out] block_output the output iterator from the thread block to store to.
+    /// \param [in] items array that data is read from.
+    /// \param [in] valid maximum range of valid numbers to read.
+    /// \param [in] storage temporary storage for outputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator

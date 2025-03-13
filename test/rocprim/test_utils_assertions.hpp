@@ -294,14 +294,15 @@ auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& e
 #if ROCPRIM_HAS_INT128_SUPPORT
 template<class T>
 auto operator<<(std::ostream& os, const T& value)
-    -> std::enable_if_t<std::is_same<T, __int128_t>::value || std::is_same<T, __uint128_t>::value,
+    -> std::enable_if_t<std::is_same<T, rocprim::int128_t>::value
+                            || std::is_same<T, rocprim::uint128_t>::value,
                         std::ostream&>
 {
     static const char* charmap = "0123456789";
 
     std::string result;
     result.reserve(41); // max. 40 digits possible ( uint64_t has 20) plus sign
-    __uint128_t helper = (value < 0) ? -value : value;
+    rocprim::uint128_t helper = (value < 0) ? -value : value;
 
     do
     {

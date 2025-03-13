@@ -24,19 +24,29 @@
 #include <benchmark/benchmark.h>
 
 // rocPRIM
+#include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_scan.hpp>
+#include <rocprim/config.hpp>
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp> // partition_config_params
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
+#include <rocprim/types/tuple.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
-#include <numeric>
 #include <random>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
+#include <stdint.h>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -99,71 +109,169 @@ private:
     bool                        is_random;
 };
 
-ROCPRIM_HOST inline
-rocprim::native_half half_to_native(const rocprim::half& x)
+ROCPRIM_HOST
+inline rocprim::native_half half_to_native(const rocprim::half& x)
 {
-    return *reinterpret_cast<const rocprim::native_half *>(&x);
+    return *reinterpret_cast<const rocprim::native_half*>(&x);
 }
 
-ROCPRIM_HOST inline
-rocprim::half native_to_half(const rocprim::native_half& x)
+ROCPRIM_HOST
+inline rocprim::half native_to_half(const rocprim::native_half& x)
 {
-    return *reinterpret_cast<const rocprim::half *>(&x);
+    return *reinterpret_cast<const rocprim::half*>(&x);
 }
 
 struct half_less
 {
-    ROCPRIM_HOST_DEVICE inline
-    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator()(const rocprim::half& a, const rocprim::half& b) const
     {
-        #if __HIP_DEVICE_COMPILE__
+#if __HIP_DEVICE_COMPILE__
         return a < b;
-        #else
+#else
         return half_to_native(a) < half_to_native(b);
-        #endif
+#endif
     }
 };
 
 struct half_plus
 {
-    ROCPRIM_HOST_DEVICE inline
-    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
+    ROCPRIM_HOST_DEVICE
+    inline rocprim::half
+        operator()(const rocprim::half& a, const rocprim::half& b) const
     {
-        #if __HIP_DEVICE_COMPILE__
+#if __HIP_DEVICE_COMPILE__
         return a + b;
-        #else
+#else
         return native_to_half(half_to_native(a) + half_to_native(b));
-        #endif
+#endif
     }
 };
 
 struct half_equal_to
 {
-    ROCPRIM_HOST_DEVICE inline
-    bool operator()(const rocprim::half& a, const rocprim::half& b) const
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator()(const rocprim::half& a, const rocprim::half& b) const
     {
-        #if __HIP_DEVICE_COMPILE__
+#if __HIP_DEVICE_COMPILE__
         return a == b;
-        #else
+#else
         return half_to_native(a) == half_to_native(b);
-        #endif
+#endif
     }
 };
 
 // std::uniform_int_distribution is undefined for anything other than:
-// short, int, long, long long, unsigned short, unsigned int, unsigned long, or unsigned long long
-template <typename T>
-struct is_valid_for_int_distribution :
-    std::integral_constant<bool,
-        std::is_same<short, T>::value ||
-        std::is_same<unsigned short, T>::value ||
-        std::is_same<int, T>::value ||
-        std::is_same<unsigned int, T>::value ||
-        std::is_same<long, T>::value ||
-        std::is_same<unsigned long, T>::value ||
-        std::is_same<long long, T>::value ||
-        std::is_same<unsigned long long, T>::value
-    > {};
+// short, int, long, long long, rocprim::int128_t, unsigned short, unsigned int, unsigned long, unsigned long long, or rocprim::uint128_t
+template<typename T>
+struct is_valid_for_int_distribution
+    : std::integral_constant<
+          bool,
+          std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
+              || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
+              || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
+              || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value
+              || std::is_same<rocprim::int128_t, T>::value
+              || std::is_same<rocprim::uint128_t, T>::value>
+{};
+
+// uniform_int_distribution is defined for supporting rocprim::int128_t and rocprim::uint128_t
+template<typename IntType, typename Enable = void>
+class uniform_int_distribution
+{
+public:
+    typedef IntType result_type;
+
+    uniform_int_distribution() : uniform_int_distribution(0) {}
+
+    explicit uniform_int_distribution(IntType _a,
+                                      IntType _b = rocprim::numeric_limits<IntType>::max())
+        : lower_bound{_a}, upper_bound{_b}
+    {}
+
+    void reset() {}
+
+    result_type a() const
+    {
+        return lower_bound;
+    }
+
+    result_type b() const
+    {
+        return upper_bound;
+    }
+
+    result_type min() const
+    {
+        return a();
+    }
+
+    result_type max() const
+    {
+        return b();
+    }
+
+    template<typename Generator>
+    result_type operator()(Generator& urng)
+    {
+        rocprim::uint128_t range  = upper_bound - lower_bound + 1;
+        auto               offset = helper(urng, range);
+        return offset + lower_bound;
+    }
+
+    friend bool operator==(const uniform_int_distribution& d1, const uniform_int_distribution& d2)
+    {
+        return d1.lower_bound == d2.lower_bound && d1.upper_bound == d2.upper_bound;
+    }
+
+    friend bool operator!=(const uniform_int_distribution& d1, const uniform_int_distribution& d2)
+    {
+        return !(d1 == d2);
+    }
+
+    // third constructor, param(), operator<< and operator>> are not defined
+
+private:
+    // Java approach in the reference below.
+    // Returns an unbiased random number from urng downscaled to [0, range)
+    template<typename Generator>
+    static rocprim::uint128_t helper(Generator& urng, const rocprim::uint128_t& range)
+    {
+        // reference: Fast Random Integer Geeneration in an Interval
+        // ACM Transactions on Modeling and Computer Simulation 29 (1), 2019
+        // https://arxiv.org/abs/1805.10941
+        static std::uniform_int_distribution<uint64_t> dists[2];
+        auto random_number = rocprim::uint128_t{dists[0](urng)} << 64 | dists[1](urng);
+        if(!range)
+        {
+            return random_number;
+        }
+        auto result    = random_number % range;
+        auto threshold = rocprim::numeric_limits<rocprim::uint128_t>::max() - range + 1;
+        while(random_number - result > threshold)
+        {
+            random_number = rocprim::uint128_t{dists[0](urng)} << 64 | dists[1](urng);
+            result        = random_number % range;
+        }
+        return result;
+    }
+
+    IntType lower_bound;
+    IntType upper_bound;
+};
+
+template<typename IntType>
+class uniform_int_distribution<
+    IntType,
+    std::enable_if_t<(!(std::is_same<rocprim::int128_t, IntType>::value
+                        || std::is_same<rocprim::uint128_t, IntType>::value))>>
+    : public std::uniform_int_distribution<IntType>
+{
+public:
+    using std::uniform_int_distribution<IntType>::uniform_int_distribution;
+};
 
 template<typename Iterator>
 using it_value_t = typename std::iterator_traits<Iterator>::value_type;
@@ -172,7 +280,7 @@ using engine_type = std::minstd_rand;
 
 // generate_random_data_n() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
-template<class OutputIter, class U, class V, class Generator>
+template<typename OutputIter, typename U, typename V, typename Generator>
 inline auto generate_random_data_n(
     OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
     -> typename std::enable_if_t<rocprim::is_integral<it_value_t<OutputIter>>::value, OutputIter>
@@ -182,11 +290,8 @@ inline auto generate_random_data_n(
     using dis_type = typename std::conditional<
         is_valid_for_int_distribution<T>::value,
         T,
-        typename std::conditional<std::is_signed<T>::value,
-            int,
-            unsigned int>::type
-        >::type;
-    std::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
+        typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
+    ::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
     std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
@@ -195,7 +300,7 @@ inline auto generate_random_data_n(
     return it + size;
 }
 
-template<class OutputIterator, class U, class V, class Generator>
+template<typename OutputIterator, typename U, typename V, typename Generator>
 inline auto generate_random_data_n(OutputIterator it,
                                    size_t         size,
                                    U              min,
@@ -208,7 +313,10 @@ inline auto generate_random_data_n(OutputIterator it,
     using T = typename std::iterator_traits<OutputIterator>::value_type;
 
     // Generate floats when T is half
-    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value, float, T>;
+    using dis_type = std::conditional_t<std::is_same<rocprim::half, T>::value
+                                            || std::is_same<rocprim::bfloat16, T>::value,
+                                        float,
+                                        T>;
     std::uniform_real_distribution<dis_type> distribution((dis_type)min, (dis_type)max);
     std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
@@ -218,7 +326,7 @@ inline auto generate_random_data_n(OutputIterator it,
     return it + size;
 }
 
-template<class T>
+template<typename T>
 inline std::vector<T>
     get_random_data01(size_t size, float p, unsigned int seed, size_t max_random_size = 1024 * 1024)
 {
@@ -235,44 +343,45 @@ inline std::vector<T>
     return data;
 }
 
-template<class T, class U = T>
+template<typename T, typename U = T>
 struct custom_type
 {
-    using first_type = T;
+    using first_type  = T;
     using second_type = U;
 
     T x;
     U y;
 
-    ROCPRIM_HOST_DEVICE inline
-    custom_type(T xx = 0, U yy = 0) : x(xx), y(yy)
-    {
-    }
+    ROCPRIM_HOST_DEVICE inline custom_type(T xx = 0, U yy = 0) : x(xx), y(yy) {}
 
-    ROCPRIM_HOST_DEVICE inline
-    ~custom_type() = default;
+    ROCPRIM_HOST_DEVICE inline ~custom_type() = default;
 
-    ROCPRIM_HOST_DEVICE inline
-    custom_type operator+(const custom_type& rhs) const
+    ROCPRIM_HOST_DEVICE
+    inline custom_type
+        operator+(const custom_type& rhs) const
     {
         return custom_type(x + rhs.x, y + rhs.y);
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    bool operator<(const custom_type& rhs) const
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator<(const custom_type& rhs) const
     {
         // intentionally suboptimal choice for short-circuting,
         // required to generate more performant device code
         return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    bool operator==(const custom_type& rhs) const
+    ROCPRIM_HOST_DEVICE
+    inline bool
+        operator==(const custom_type& rhs) const
     {
         return x == rhs.x && y == rhs.y;
     }
 
-    ROCPRIM_HOST_DEVICE custom_type& operator+=(const custom_type& rhs)
+    ROCPRIM_HOST_DEVICE
+    custom_type&
+        operator+=(const custom_type& rhs)
     {
         this->x += rhs.x;
         this->y += rhs.y;
@@ -284,7 +393,7 @@ template<typename>
 struct is_custom_type : std::false_type
 {};
 
-template<class T, class U>
+template<typename T, typename U>
 struct is_custom_type<custom_type<T, U>> : std::true_type
 {};
 
@@ -314,7 +423,7 @@ struct is_comparable<custom_type<U, V>, T>
                          std::true_type>
 {};
 
-template<class CustomType>
+template<typename CustomType>
 struct custom_type_decomposer
 {
     static_assert(is_custom_type<CustomType>::value,
@@ -323,29 +432,31 @@ struct custom_type_decomposer
     using T = typename CustomType::first_type;
     using U = typename CustomType::second_type;
 
-    __host__ __device__ ::rocprim::tuple<T&, U&> operator()(CustomType& key) const
+    __host__ __device__
+    ::rocprim::tuple<T&, U&>
+        operator()(CustomType& key) const
     {
         return ::rocprim::tuple<T&, U&>{key.x, key.y};
     }
 };
 
-template<class T, class enable = void>
+template<typename T, typename enable = void>
 struct generate_limits;
 
-template<class T>
+template<typename T>
 struct generate_limits<T, std::enable_if_t<rocprim::is_integral<T>::value>>
 {
     static inline T min()
     {
-        return std::numeric_limits<T>::min();
+        return rocprim::numeric_limits<T>::min();
     }
     static inline T max()
     {
-        return std::numeric_limits<T>::max();
+        return rocprim::numeric_limits<T>::max();
     }
 };
 
-template<class T>
+template<typename T>
 struct generate_limits<T, std::enable_if_t<is_custom_type<T>::value>>
 {
     using F = typename T::first_type;
@@ -360,7 +471,7 @@ struct generate_limits<T, std::enable_if_t<is_custom_type<T>::value>>
     }
 };
 
-template<class T>
+template<typename T>
 struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
 {
     static inline T min()
@@ -373,7 +484,7 @@ struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>
     }
 };
 
-template<class OutputIterator, class Generator>
+template<typename OutputIterator, typename Generator>
 inline auto generate_random_data_n(OutputIterator             it,
                                    size_t                     size,
                                    it_value_t<OutputIterator> min,
@@ -384,7 +495,7 @@ inline auto generate_random_data_n(OutputIterator             it,
 {
     using T = it_value_t<OutputIterator>;
 
-    using first_type = typename T::first_type;
+    using first_type  = typename T::first_type;
     using second_type = typename T::second_type;
 
     std::vector<first_type>  fdata(size);
@@ -392,14 +503,14 @@ inline auto generate_random_data_n(OutputIterator             it,
     generate_random_data_n(fdata.begin(), size, min.x, max.x, gen, max_random_size);
     generate_random_data_n(sdata.begin(), size, min.y, max.y, gen, max_random_size);
 
-    for(size_t i = 0; i < size; i++)
+    for(size_t i = 0; i < size; ++i)
     {
         it[i] = T(fdata[i], sdata[i]);
     }
     return it + size;
 }
 
-template<class OutputIterator, class Generator>
+template<typename OutputIterator, typename Generator>
 inline auto generate_random_data_n(OutputIterator             it,
                                    size_t                     size,
                                    it_value_t<OutputIterator> min,
@@ -415,14 +526,14 @@ inline auto generate_random_data_n(OutputIterator             it,
     using field_type = decltype(max.x);
     std::vector<field_type> field_data(size);
     generate_random_data_n(field_data.begin(), size, min.x, max.x, gen, max_random_size);
-    for(size_t i = 0; i < size; i++)
+    for(size_t i = 0; i < size; ++i)
     {
         it[i] = T(field_data[i]);
     }
     return it + size;
 }
 
-template<class T, class U, class V>
+template<typename T, typename U, typename V>
 inline std::vector<T> get_random_data(
     size_t size, U min, V max, unsigned int seed, size_t max_random_size = 1024 * 1024)
 {
@@ -444,19 +555,19 @@ auto limit_cast(U value) -> T
     {
         if(value < 0)
         {
-            return std::numeric_limits<T>::min();
+            return rocprim::numeric_limits<T>::min();
         }
         if(static_cast<common_type>(value)
-           > static_cast<common_type>(std::numeric_limits<T>::max()))
+           > static_cast<common_type>(rocprim::numeric_limits<T>::max()))
         {
-            return std::numeric_limits<T>::max();
+            return rocprim::numeric_limits<T>::max();
         }
     }
     else if(rocprim::is_signed<T>::value && rocprim::is_unsigned<U>::value)
     {
-        if(value > std::numeric_limits<T>::max())
+        if(value > rocprim::numeric_limits<T>::max())
         {
-            return std::numeric_limits<T>::max();
+            return rocprim::numeric_limits<T>::max();
         }
     }
     else if(rocprim::is_floating_point<T>::value)
@@ -465,20 +576,20 @@ auto limit_cast(U value) -> T
     }
     else // Both T and U are signed
     {
-        if(value < static_cast<common_type>(std::numeric_limits<T>::min()))
+        if(value < static_cast<common_type>(rocprim::numeric_limits<T>::min()))
         {
-            return std::numeric_limits<T>::min();
+            return rocprim::numeric_limits<T>::min();
         }
-        else if(value > static_cast<common_type>(std::numeric_limits<T>::max()))
+        else if(value > static_cast<common_type>(rocprim::numeric_limits<T>::max()))
         {
-            return std::numeric_limits<T>::max();
+            return rocprim::numeric_limits<T>::max();
         }
     }
     return static_cast<T>(value);
 }
 
 // This overload below is selected for non-standard float types, e.g. half, which cannot be compared with the limit types.
-template<class T, class U, class V>
+template<typename T, typename U, typename V>
 inline auto limit_random_range(U range_start, V range_end)
     -> std::enable_if_t<!is_custom_type<T>::value
                             && (!is_comparable<T, U>::value || !is_comparable<T, V>::value),
@@ -507,7 +618,7 @@ auto limit_random_range(U range_start, V range_end)
     };
 }
 
-template<class T, class U, class V>
+template<typename T, typename U, typename V>
 inline auto limit_random_range(U range_start, V range_end)
     -> std::enable_if_t<!is_custom_type<T>::value && is_comparable<T, U>::value
                             && is_comparable<T, V>::value,
@@ -547,16 +658,16 @@ std::vector<T>
     static_assert(rocprim::is_arithmetic<T>::value, "Key type must be arithmetic");
 
     engine_type                           prng(seed);
-    std::uniform_int_distribution<size_t> segment_length_distribution(
+    ::uniform_int_distribution<size_t>    segment_length_distribution(
         std::numeric_limits<size_t>::min(),
         max_segment_length);
     // std::uniform_real_distribution cannot handle rocprim::half, use float instead
     using dis_type =
         typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
     using key_distribution_type = std::conditional_t<rocprim::is_integral<T>::value,
-                                                     std::uniform_int_distribution<dis_type>,
+                                                     ::uniform_int_distribution<dis_type>,
                                                      std::uniform_real_distribution<dis_type>>;
-    key_distribution_type key_distribution(std::numeric_limits<T>::max());
+    key_distribution_type key_distribution(rocprim::numeric_limits<T>::max());
     std::vector<T>        keys(size);
 
     size_t keys_start_index = 0;
@@ -577,7 +688,7 @@ std::vector<T>
     get_random_segments_iota(const size_t size, const size_t max_segment_length, unsigned int seed)
 {
     engine_type                           prng(seed);
-    std::uniform_int_distribution<size_t> segment_length_distribution(1, max_segment_length);
+    ::uniform_int_distribution<size_t>    segment_length_distribution(1, max_segment_length);
 
     std::vector<T> keys(size);
 
@@ -594,17 +705,39 @@ std::vector<T>
     return keys;
 }
 
-template <typename T, T, typename>
+template<typename T, typename U, typename V>
+inline auto get_random_value(U min, V max, size_t seed_value)
+    -> std::enable_if_t<rocprim::is_arithmetic<T>::value, T>
+{
+    T           result;
+    engine_type gen(seed_value);
+    generate_random_data_n(&result, 1, min, max, gen);
+    return result;
+}
+
+template<typename T>
+inline auto get_random_value(T min, T max, size_t seed_value)
+    -> std::enable_if_t<is_custom_type<T>::value, T>
+{
+    typename T::first_type  result_first;
+    typename T::second_type result_second;
+    engine_type             gen(seed_value);
+    generate_random_data_n(&result_first, 1, min.x, max.x, gen);
+    generate_random_data_n(&result_second, 1, min.y, max.y, gen);
+    return T{result_first, result_second};
+}
+
+template<typename T, T, typename>
 struct make_index_range_impl;
 
-template <typename T, T Start, T... I>
+template<typename T, T Start, T... I>
 struct make_index_range_impl<T, Start, std::integer_sequence<T, I...>>
 {
     using type = std::integer_sequence<T, (Start + I)...>;
 };
 
 // make a std::integer_sequence with values from Start to End inclusive
-template <typename T, T Start, T End>
+template<typename T, T Start, T End>
 using make_index_range =
     typename make_index_range_impl<T, Start, std::make_integer_sequence<T, End - Start + 1>>::type;
 
@@ -637,7 +770,7 @@ void static_for_each(Args&&... args)
 
 struct config_autotune_interface
 {
-    virtual std::string name() const                               = 0;
+    virtual std::string name() const = 0;
     virtual std::string sort_key() const
     {
         return name();
@@ -648,13 +781,15 @@ struct config_autotune_interface
 
 struct config_autotune_register
 {
-    static std::vector<std::unique_ptr<config_autotune_interface>>& vector() {
+    static std::vector<std::unique_ptr<config_autotune_interface>>& vector()
+    {
         static std::vector<std::unique_ptr<config_autotune_interface>> storage;
         return storage;
     }
 
-    template <typename T>
-    static config_autotune_register create() {
+    template<typename T>
+    static config_autotune_register create()
+    {
         vector().push_back(std::make_unique<T>());
         return config_autotune_register();
     }
@@ -683,7 +818,7 @@ struct config_autotune_register
             = (configs.size() + parallel_instance_count - 1) / parallel_instance_count;
         size_t start = std::min(parallel_instance_index * configs_per_instance, configs.size());
         size_t end = std::min((parallel_instance_index + 1) * configs_per_instance, configs.size());
-        for(size_t i = start; i < end; i++)
+        for(size_t i = start; i < end; ++i)
         {
             std::unique_ptr<config_autotune_interface>& uniq_ptr         = configs.at(i);
             config_autotune_interface*                  tuning_benchmark = uniq_ptr.get();
@@ -774,7 +909,7 @@ private:
                 {
                     int n = std::min(brackets_count, static_cast<int>(m[3].length()));
                     brackets_count -= n;
-                    for(int c = 0; c < n; c++)
+                    for(int c = 0; c < n; ++c)
                     {
                         result << "}";
                     }
@@ -782,14 +917,14 @@ private:
             }
             else
             {
-                brackets_count++;
+                ++brackets_count;
                 result << "{";
                 insert_comma = false;
             }
         }
         while(brackets_count > 0)
         {
-            brackets_count--;
+            --brackets_count;
             result << "}";
         }
         return result.str();
@@ -818,7 +953,7 @@ private:
                 {
                     int n = std::min(brackets_count, static_cast<int>(m[3].length()));
                     brackets_count -= n;
-                    for(int c = 0; c < n; c++)
+                    for(int c = 0; c < n; ++c)
                     {
                         result << ">";
                     }
@@ -826,14 +961,14 @@ private:
             }
             else
             {
-                brackets_count++;
+                ++brackets_count;
                 result << "<";
                 insert_comma = false;
             }
         }
         while(brackets_count > 0)
         {
-            brackets_count--;
+            --brackets_count;
             result << ">";
         }
         return result.str();
@@ -843,7 +978,8 @@ public:
     static std::string format_name(std::string string)
     {
         format     format = get_format();
-std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
+        std::regex r(
+            "([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
         // First we perform some checks
         bool checks[4] = {false};
         for(std::sregex_iterator i = std::sregex_iterator(string.begin(), string.end(), r);
@@ -891,11 +1027,12 @@ std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-
     }
 };
 
-template <typename T>
+template<typename T>
 struct Traits
 {
     //static inline method instead of static inline attribute because that's only supported from C++17 onwards
-    static inline const char* name(){
+    static inline const char* name()
+    {
         static_assert(sizeof(T) == 0, "Traits<T>::name() unknown");
         return "unknown";
     }
@@ -907,14 +1044,26 @@ inline const char* Traits<char>::name()
 {
     return "char";
 }
-template <>
-inline const char* Traits<int>::name() { return "int"; }
-template <>
-inline const char* Traits<short>::name() { return "short"; }
-template <>
-inline const char* Traits<int8_t>::name() { return "int8_t"; }
-template <>
-inline const char* Traits<uint8_t>::name() { return "uint8_t"; }
+template<>
+inline const char* Traits<int>::name()
+{
+    return "int";
+}
+template<>
+inline const char* Traits<short>::name()
+{
+    return "short";
+}
+template<>
+inline const char* Traits<int8_t>::name()
+{
+    return "int8_t";
+}
+template<>
+inline const char* Traits<uint8_t>::name()
+{
+    return "uint8_t";
+}
 template<>
 inline const char* Traits<uint16_t>::name()
 {
@@ -931,19 +1080,47 @@ inline const char* Traits<rocprim::half>::name()
     return "rocprim::half";
 }
 template<>
+inline const char* Traits<rocprim::bfloat16>::name()
+{
+    return "rocprim::bfloat16";
+}
+template<>
 inline const char* Traits<long long>::name()
 {
     return "int64_t";
 }
 // On MSVC `int64_t` and `long long` are the same, leading to multiple definition errors
 #ifndef _WIN32
-template <>
-inline const char* Traits<int64_t>::name() { return "int64_t"; }
+template<>
+inline const char* Traits<int64_t>::name()
+{
+    return "int64_t";
+}
 #endif
-template <>
-inline const char* Traits<float>::name() { return "float"; }
-template <>
-inline const char* Traits<double>::name() { return "double"; }
+// On MSVC `uint64_t` and `unsigned long long` are the same, leading to multiple definition errors
+#ifndef _WIN32
+template<>
+inline const char* Traits<uint64_t>::name()
+{
+    return "uint64_t";
+}
+#else
+template<>
+inline const char* Traits<unsigned long long>::name()
+{
+    return "unsigned long long";
+}
+#endif
+template<>
+inline const char* Traits<float>::name()
+{
+    return "float";
+}
+template<>
+inline const char* Traits<double>::name()
+{
+    return "double";
+}
 template<>
 inline const char* Traits<custom_type<int, int>>::name()
 {
@@ -1004,28 +1181,38 @@ inline const char* Traits<HIP_vector_type<double, 2>>::name()
 {
     return "double2";
 }
+template<>
+inline const char* Traits<rocprim::int128_t>::name()
+{
+    return "rocprim::int128_t";
+}
+template<>
+inline const char* Traits<rocprim::uint128_t>::name()
+{
+    return "rocprim::uint128_t";
+}
 
 inline void add_common_benchmark_info()
 {
-    hipDeviceProp_t   devProp;
-    int               device_id = 0;
+    hipDeviceProp_t devProp;
+    int             device_id = 0;
     HIP_CHECK(hipGetDevice(&device_id));
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
 
-    auto str = [](const std::string& name, const std::string& val) {
-        benchmark::AddCustomContext(name, val);
-    };
+    auto str = [](const std::string& name, const std::string& val)
+    { benchmark::AddCustomContext(name, val); };
 
-    auto num = [](const std::string& name, const auto& value) {
-        benchmark::AddCustomContext(name, std::to_string(value));
-    };
+    auto num = [](const std::string& name, const auto& value)
+    { benchmark::AddCustomContext(name, std::to_string(value)); };
 
-    auto dim2 = [num](const std::string& name, const auto* values) {
+    auto dim2 = [num](const std::string& name, const auto* values)
+    {
         num(name + "_x", values[0]);
         num(name + "_y", values[1]);
     };
 
-    auto dim3 = [num, dim2](const std::string& name, const auto* values) {
+    auto dim3 = [num, dim2](const std::string& name, const auto* values)
+    {
         dim2(name, values);
         num(name + "_z", values[2]);
     };
@@ -1071,16 +1258,20 @@ inline void add_common_benchmark_info()
     num("hdp_ecc_enabled", devProp.ECCEnabled);
     num("hdp_tcc_driver", devProp.tccDriver);
     num("hdp_cooperative_multi_device_unmatched_func", devProp.cooperativeMultiDeviceUnmatchedFunc);
-    num("hdp_cooperative_multi_device_unmatched_grid_dim", devProp.cooperativeMultiDeviceUnmatchedGridDim);
-    num("hdp_cooperative_multi_device_unmatched_block_dim", devProp.cooperativeMultiDeviceUnmatchedBlockDim);
-    num("hdp_cooperative_multi_device_unmatched_shared_mem", devProp.cooperativeMultiDeviceUnmatchedSharedMem);
+    num("hdp_cooperative_multi_device_unmatched_grid_dim",
+        devProp.cooperativeMultiDeviceUnmatchedGridDim);
+    num("hdp_cooperative_multi_device_unmatched_block_dim",
+        devProp.cooperativeMultiDeviceUnmatchedBlockDim);
+    num("hdp_cooperative_multi_device_unmatched_shared_mem",
+        devProp.cooperativeMultiDeviceUnmatchedSharedMem);
     num("hdp_is_large_bar", devProp.isLargeBar);
     num("hdp_asic_revision", devProp.asicRevision);
     num("hdp_managed_memory", devProp.managedMemory);
     num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
     num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
     num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
-    num("hdp_pageable_memory_access_uses_host_page_tables", devProp.pageableMemoryAccessUsesHostPageTables);
+    num("hdp_pageable_memory_access_uses_host_page_tables",
+        devProp.pageableMemoryAccessUsesHostPageTables);
 
     const auto arch = devProp.arch;
     num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
@@ -1102,7 +1293,7 @@ inline void add_common_benchmark_info()
     num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
 }
 
-inline const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
+inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)
 {
     switch(alg)
     {
@@ -1112,7 +1303,25 @@ inline const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
             return "block_scan_algorithm::reduce_then_scan";
             // Not using `default: ...` because it kills effectiveness of -Wswitch
     }
-    return "unknown_algorithm";
+    return "default_algorithm";
+}
+
+inline const char* get_block_load_method_name(rocprim::block_load_method method)
+{
+    switch(method)
+    {
+        case rocprim::block_load_method::block_load_direct:
+            return "block_load_method::block_load_direct";
+        case rocprim::block_load_method::block_load_striped:
+            return "block_load_method::block_load_striped";
+        case rocprim::block_load_method::block_load_vectorize:
+            return "block_load_method::block_load_vectorize";
+        case rocprim::block_load_method::block_load_transpose:
+            return "block_load_method::block_load_transpose";
+        case rocprim::block_load_method::block_load_warp_transpose:
+            return "block_load_method::block_load_warp_transpose";
+    }
+    return "default_method";
 }
 
 template<std::size_t Size, std::size_t Alignment>

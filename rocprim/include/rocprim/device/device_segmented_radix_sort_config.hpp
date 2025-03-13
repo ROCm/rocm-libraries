@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,8 +39,8 @@ BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Selects the appropriate \p WarpSortConfig based on the size of the key type.
 ///
-/// \tparam Key - the type of the sorted keys.
-/// \tparam MediumWarpSize - the logical warp size of the medium segment processing kernel.
+/// \tparam Key the type of the sorted keys.
+/// \tparam MediumWarpSize the logical warp size of the medium segment processing kernel.
 template<class Key, unsigned int MediumWarpSize = ROCPRIM_WARP_SIZE_32>
 using select_warp_sort_config_t
     = std::conditional_t<sizeof(Key) < 2,

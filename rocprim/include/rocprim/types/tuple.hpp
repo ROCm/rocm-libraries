@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -797,8 +797,8 @@ struct tuple_less_than<0>
 
 /// \brief Equal to operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares every element of the tuple lhs with the corresponding element
 /// of the tuple rhs, and returns \p true if all are equal.
@@ -823,8 +823,8 @@ bool operator==(const tuple<TTypes...>& lhs, const tuple<UTypes...>& rhs)
 
 /// \brief Not equal to operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares every element of the tuple lhs with the corresponding element
 /// of the tuple rhs, and returns \p true if at least one of such pairs is
@@ -842,8 +842,8 @@ bool operator!=(const tuple<TTypes...>& lhs, const tuple<UTypes...>& rhs)
 
 /// \brief Less than operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares lhs and rhs lexicographically.
 ///
@@ -868,8 +868,8 @@ bool operator<(const tuple<TTypes...>& lhs, const tuple<UTypes...>& rhs)
 
 /// \brief Greater than operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares lhs and rhs lexicographically.
 ///
@@ -885,8 +885,8 @@ bool operator>(const tuple<TTypes...>& lhs, const tuple<UTypes...>& rhs)
 
 /// \brief Less than or equal to operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares lhs and rhs lexicographically.
 ///
@@ -902,8 +902,8 @@ bool operator<=(const tuple<TTypes...>& lhs, const tuple<UTypes...>& rhs)
 
 /// \brief Greater than or equal to operator for tuples.
 ///
-/// \tparam TTypes... - the element types of \p lhs tuple.
-/// \tparam UTypes... - the element types of \p rhs tuple.
+/// \tparam TTypes... the element types of \p lhs tuple.
+/// \tparam UTypes... the element types of \p rhs tuple.
 ///
 /// Compares lhs and rhs lexicographically.
 ///
@@ -1010,7 +1010,7 @@ tuple<detail::make_tuple_return_t<Types>...> make_tuple(Types&&... args) noexcep
 /// unless \p std::decay<Ti>::type results in \p std::reference_wrapper<U> for some type U,
 /// in which case the deduced type is U&.
 ///
-/// \param args - zero or more arguments to create tuple from
+/// \param args zero or more arguments to create tuple from
 ///
 /// \see std::tuple
 template<class... Types>
@@ -1061,7 +1061,7 @@ const ignore_type ignore;
 /// \brief Creates a tuple of lvalue references to its arguments \p args or instances
 /// of \ref rocprim::ignore.
 ///
-/// \param args - zero or more input lvalue references used to create tuple
+/// \param args zero or more input lvalue references used to create tuple
 ///
 /// \see std::tie
 template<class... Types>

@@ -10,7 +10,7 @@ select_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> {
 
 {% macro general_case() -%}
 template<unsigned int arch, class key_type, class value_type, class enable = void>
-struct default_select_unique_by_key_config : default_partition_config_base<key_type>::type
+struct default_select_unique_by_key_config : default_partition_config_base<key_type, false>::type
 {};
 {%- endmacro %}
 

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include <rocprim/type_traits.hpp>
 
 #include "test_utils_bfloat16.hpp"
+#include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_half.hpp"
@@ -42,29 +43,44 @@ template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
          std::enable_if_t<(rocprim::is_integral<Key>::value && !std::is_same<Key, bool>::value)
-                              || std::is_same<Key, __uint128_t>::value
-                              || std::is_same<Key, __int128_t>::value,
+                              || std::is_same<Key, rocprim::uint128_t>::value
+                              || std::is_same<Key, rocprim::int128_t>::value,
                           int>
          = 0>
-Key to_bits(const Key key)
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
-    static constexpr Key radix_mask_upper
-        = EndBit == 8 * sizeof(Key) ? ~Key(0) : static_cast<Key>((Key(1) << EndBit) - 1);
-    static constexpr Key radix_mask_bottom = static_cast<Key>((Key(1) << StartBit) - 1);
-    static constexpr Key radix_mask        = radix_mask_upper ^ radix_mask_bottom;
+    using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
 
-    return key & radix_mask;
+    static constexpr unsigned_bits_type radix_mask_upper
+        = EndBit == 8 * sizeof(Key)
+              ? ~unsigned_bits_type(0)
+              : static_cast<unsigned_bits_type>((unsigned_bits_type(1) << EndBit) - 1);
+    static constexpr unsigned_bits_type radix_mask_bottom
+        = static_cast<unsigned_bits_type>((unsigned_bits_type(1) << StartBit) - 1);
+    static constexpr unsigned_bits_type radix_mask = radix_mask_upper ^ radix_mask_bottom;
+
+    auto bit_key = static_cast<unsigned_bits_type>(key);
+    // Flip sign bit to properly order signed types
+    if(::rocprim::is_signed<Key>::value)
+    {
+        constexpr auto sign_bit = static_cast<unsigned_bits_type>(1) << (sizeof(Key) * 8 - 1);
+        bit_key ^= sign_bit;
+    }
+
+    return bit_key & radix_mask;
 }
 
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
          std::enable_if_t<std::is_same<Key, bool>::value, int> = 0>
-Key to_bits(const Key key)
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
     unsigned_bits_type bit_key;
-    std::memcpy(&bit_key, &key, sizeof(bit_key));
+    memcpy(&bit_key, &key, sizeof(bit_key));
     return to_bits<StartBit, EndBit>(bit_key);
 }
 
@@ -76,10 +92,12 @@ template<unsigned int StartBit,
                               // radix sorting custom types. A part of this workaround
                               // is to specialize rocprim::is_floating_point<custom_float_type>
                               // that we must counter here.
-                              && !std::is_same<Key, custom_float_type>::value,
+                              && !std::is_same<Key, custom_float_type>::value
+                              && !std::is_same<Key, custom_float_traits_type>::value,
                           int>
          = 0>
-auto to_bits(const Key key)
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
 
@@ -114,31 +132,25 @@ template<unsigned int StartBit,
                               // radix sorting custom types. A part of this workaround
                               // is to specialize rocprim::is_custom_test_type<custom_float_type>
                               // that we must counter here.
-                              && !std::is_same<Key, custom_float_type>::value,
+                              && !std::is_same<Key, custom_float_type>::value
+                              && !std::is_same<Key, custom_float_traits_type>::value,
                           int>
          = 0>
-auto to_bits(const Key& key)
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key& key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     using inner_t            = typename inner_type<Key>::type;
     using unsigned_bits_type = typename ::rocprim::get_unsigned_bits_type<inner_t>::unsigned_type;
     // For two doubles, we need uint128, but that is not part of rocprim::get_unsigned_bits_type
     using result_bits_type = std::conditional_t<
         sizeof(inner_t) == 8,
-        __uint128_t,
+        rocprim::uint128_t,
         typename rocprim::get_unsigned_bits_type<void,
                                                  rocprim::min(static_cast<size_t>(8),
                                                               sizeof(inner_t) * 2)>::unsigned_type>;
 
     auto bit_key_upper = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.x) * 8>(key.x));
     auto bit_key_lower = static_cast<unsigned_bits_type>(to_bits<0, sizeof(key.y) * 8>(key.y));
-
-    // Flip sign bit to properly order signed types
-    if(::rocprim::is_signed<inner_t>::value)
-    {
-        constexpr auto sign_bit = static_cast<unsigned_bits_type>(1) << (sizeof(inner_t) * 8 - 1);
-        bit_key_upper ^= sign_bit;
-        bit_key_lower ^= sign_bit;
-    }
 
     // Create the result containing both parts
     const auto bit_key
@@ -153,7 +165,18 @@ template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
          std::enable_if_t<std::is_same<Key, custom_float_type>::value, int> = 0>
-auto to_bits(const Key key)
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
+{
+    return to_bits<StartBit, EndBit>(key.x);
+}
+
+template<unsigned int StartBit,
+         unsigned int EndBit,
+         class Key,
+         std::enable_if_t<std::is_same<Key, custom_float_traits_type>::value, int> = 0>
+ROCPRIM_HOST_DEVICE
+auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::unsigned_type
 {
     return to_bits<StartBit, EndBit>(key.x);
 }
@@ -169,6 +192,7 @@ constexpr bool is_floating_nan_host(const T& a)
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator
 {
+    ROCPRIM_HOST_DEVICE
     bool operator()(const Key lhs, const Key rhs) const
     {
         const auto l = detail::to_bits<StartBit, EndBit>(lhs);
@@ -193,7 +217,8 @@ struct custom_test_type_decomposer
                   "custom_test_type_decomposer can only be used with custom_test_type<T>");
     using inner_t = typename inner_type<CustomTestType>::type;
 
-    __host__ __device__ auto operator()(CustomTestType& key) const
+    __host__ __device__
+    auto operator()(CustomTestType& key) const
     {
         return ::rocprim::tuple<inner_t&, inner_t&>{key.x, key.y};
     }

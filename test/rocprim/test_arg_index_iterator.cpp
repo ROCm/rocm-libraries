@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 // required test headers
 #include "test_seed.hpp"
 #include "test_utils.hpp"
-
+#include "test_utils_device_ptr.hpp"
 
 // Params for tests
 template<class InputType>
@@ -46,12 +46,11 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
-    RocprimArgIndexIteratorParams<int>,
-    RocprimArgIndexIteratorParams<unsigned int>,
-    RocprimArgIndexIteratorParams<unsigned long>,
-    RocprimArgIndexIteratorParams<float>
-> RocprimArgIndexIteratorTestsParams;
+using RocprimArgIndexIteratorTestsParams
+    = ::testing::Types<RocprimArgIndexIteratorParams<int>,
+                       RocprimArgIndexIteratorParams<unsigned int>,
+                       RocprimArgIndexIteratorParams<unsigned long>,
+                       RocprimArgIndexIteratorParams<float>>;
 
 TYPED_TEST_SUITE(RocprimArgIndexIteratorTests, RocprimArgIndexIteratorTestsParams);
 
@@ -64,7 +63,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
     using T = typename TestFixture::input_type;
     using Iterator = typename rocprim::arg_index_iterator<T*>;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -85,7 +84,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
         {
             y++;
         }
-        ASSERT_EQ(x, y);
+        ASSERT_TRUE(x == y);
     }
 }
 
@@ -120,7 +119,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
 
     hipStream_t stream = 0; // default
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -129,23 +128,14 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 200, seed_value);
         std::vector<key_value> output(1);
 
-        T * d_input;
-        key_value * d_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(key_value)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(T),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<T>         d_input(input);
+        test_utils::device_ptr<key_value> d_output(output.size());
 
-        Iterator d_iter(d_input);
+        Iterator d_iter(d_input.get());
 
         arg_min reduce_op;
-        const key_value max(std::numeric_limits<difference_type>::max(), std::numeric_limits<T>::max());
+        const key_value max(test_utils::numeric_limits<difference_type>::max(),
+                            test_utils::numeric_limits<T>::max());
 
         // Calculate expected results on host
         Iterator x(input.data());
@@ -153,50 +143,40 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
 
         // temp storage
         size_t temp_storage_size_bytes;
-        void * d_temp_storage = nullptr;
+
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_iter, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
-            )
-        );
+        HIP_CHECK(rocprim::reduce(nullptr,
+                                  temp_storage_size_bytes,
+                                  d_iter,
+                                  d_output.get(),
+                                  max,
+                                  input.size(),
+                                  reduce_op,
+                                  stream,
+                                  debug_synchronous));
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
         // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_iter, d_output, max, input.size(),
-                reduce_op, stream, debug_synchronous
-            )
-        );
+        HIP_CHECK(rocprim::reduce(d_temp_storage.get(),
+                                  temp_storage_size_bytes,
+                                  d_iter,
+                                  d_output.get(),
+                                  max,
+                                  input.size(),
+                                  reduce_op,
+                                  stream,
+                                  debug_synchronous));
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(key_value),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        output = d_output.load();
 
         // Check if output values are as expected
         test_utils::assert_eq(output[0].key, expected.key);
         test_utils::assert_eq(output[0].value, expected.value);
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
 }

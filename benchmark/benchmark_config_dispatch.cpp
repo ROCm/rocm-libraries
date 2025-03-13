@@ -7,12 +7,13 @@
 
 #include <hip/hip_runtime.h>
 
-#include <iostream>
+#include <cstddef>
+#include <string>
+#include <vector>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
-
 
 enum class stream_kind
 {
@@ -51,7 +52,9 @@ static void BM_host_target_arch(benchmark::State& state, const stream_kind strea
     }
 }
 
-__global__ void empty_kernel() {}
+__global__
+void empty_kernel()
+{}
 
 // An empty kernel launch for baseline
 static void BM_kernel_launch(benchmark::State& state)
@@ -63,35 +66,30 @@ static void BM_kernel_launch(benchmark::State& state)
         hipLaunchKernelGGL(empty_kernel, dim3(1), dim3(1), 0, stream);
         HIP_CHECK(hipGetLastError());
     }
-    hipStreamSynchronize(stream);
+    HIP_CHECK(hipStreamSynchronize(stream));
 }
 
-#define CREATE_BENCHMARK(ST, SK)                \
-    benchmark::RegisterBenchmark(               \
-        bench_naming::format_name(              \
-            "{lvl:na"                           \
-            ",algo:" #ST                        \
-            ",cfg:default_config}"              \
-        ).c_str(),                              \
-        &BM_host_target_arch,                   \
-        SK                                      \
-    )                                           \
-
+#define CREATE_BENCHMARK(ST, SK)                                                                \
+    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:na"                            \
+                                                           ",algo:" #ST ",cfg:default_config}") \
+                                     .c_str(),                                                  \
+                                 &BM_host_target_arch,                                          \
+                                 SK)
 
 int main(int argc, char** argv)
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", 100, "number of iterations");
     parser.set_optional<std::string>("name_format",
-                                    "name_format",
-                                    "human",
-                                    "either: json,human,txt");
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const int    trials = parser.get<int>("trials");
+    const int trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
@@ -124,5 +122,4 @@ int main(int argc, char** argv)
     // Run benchmarks
     benchmark::RunSpecifiedBenchmarks();
     return 0;
-
 }

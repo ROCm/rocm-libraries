@@ -30,15 +30,19 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
-#include <rocprim/device/device_adjacent_difference.hpp>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/types.hpp>
+#endif
 
 // CmdParser
 #include "cmdparser.hpp"
 
-#include <iostream>
-#include <string>
-
 #include <cstddef>
+#include <string>
+#include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
 
 #ifndef DEFAULT_BYTES
 constexpr std::size_t DEFAULT_BYTES = 1024LL * 1024LL * 1024LL * 2LL;
@@ -122,6 +126,9 @@ int main(int argc, char* argv[])
 
     CREATE_BENCHMARKS(custom_float2)
     CREATE_BENCHMARKS(custom_double2)
+
+    CREATE_BENCHMARKS(rocprim::int128_t)
+    CREATE_BENCHMARKS(rocprim::uint128_t)
 #endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing

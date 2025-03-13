@@ -132,25 +132,18 @@ void test_block_radix_rank()
     SCOPED_TRACE(testing::Message() << "with grid_size = " << size);
     SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; ++seed_index)
+    for(size_t seed_index = 0; seed_index < number_of_runs; ++seed_index)
     {
         seed_type seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> keys_input;
-        if(rocprim::is_floating_point<T>::value)
-        {
-            keys_input = test_utils::get_random_data<T>(size, T(-1000), T(+1000), seed_value);
-        }
-        else
-        {
-            keys_input = test_utils::get_random_data<T>(size,
-                                                        std::numeric_limits<T>::min(),
-                                                        std::numeric_limits<T>::max(),
-                                                        seed_value);
-        }
+        std::vector<T> keys_input
+            = test_utils::get_random_data<T>(size,
+                                             test_utils::generate_limits<T>::min(),
+                                             test_utils::generate_limits<T>::max(),
+                                             seed_value);
 
         // Calculated expected results on host
         std::vector<unsigned int> expected(size);
@@ -175,13 +168,8 @@ void test_block_radix_rank()
             }
         }
 
-        T* d_keys_input;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(T)));
-        unsigned int* d_ranks_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_ranks_output, size * sizeof(unsigned int)));
-
-        HIP_CHECK(
-            hipMemcpy(d_keys_input, keys_input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+        test_utils::device_ptr<T>            d_keys_input(keys_input);
+        test_utils::device_ptr<unsigned int> d_ranks_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -191,25 +179,17 @@ void test_block_radix_rank()
             dim3(block_size),
             0,
             0,
-            d_keys_input,
-            d_ranks_output,
+            d_keys_input.get(),
+            d_ranks_output.get(),
             descending,
             start_bit,
             radix_bits);
         HIP_CHECK(hipGetLastError());
 
         // Getting results to host
-        std::vector<unsigned int> ranks_output(size);
-        HIP_CHECK(hipMemcpy(ranks_output.data(),
-                            d_ranks_output,
-                            size * sizeof(unsigned int),
-                            hipMemcpyDeviceToHost));
-        HIP_CHECK(hipDeviceSynchronize());
+        auto ranks_output = d_ranks_output.load();
 
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(ranks_output, expected));
-
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_ranks_output));
     }
 }
 

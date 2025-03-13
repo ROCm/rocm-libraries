@@ -24,6 +24,9 @@ option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various c
 include(../cmake/ConfigAutotune.cmake)
 include(ConfigAutotuneSettings.cmake)
 
+option(BENCHMARK_TUNE_PARAM_NAMES "Tuning parameter names" "")
+option(BENCHMARK_TUNE_PARAMS "Tuning parameters" "")
+
 if(BENCHMARK_CONFIG_TUNING)
   add_custom_target("benchmark_config_tuning")
 endif()
@@ -31,10 +34,20 @@ endif()
 function(add_rocprim_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
 
+  if(USE_HIPCXX)
+    set_source_files_properties(${BENCHMARK_SOURCE} PROPERTIES LANGUAGE HIP)
+  endif()
+
   if(BENCHMARK_CONFIG_TUNING)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BENCHMARK_TARGET}.parallel.cpp.in")
       message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
       read_config_autotune_settings(${BENCHMARK_TARGET} list_across_names list_across output_pattern_suffix)
+
+      if(BENCHMARK_TUNE_PARAM_NAMES AND BENCHMARK_TUNE_PARAMS)
+        set(list_across_names "${BENCHMARK_TUNE_PARAM_NAMES}")
+        set(list_across "${BENCHMARK_TUNE_PARAMS}")
+      endif()
+
       #make sure that variables are not empty, i.e. there actually is an entry for that benchmark in benchmark/ConfigAutotuneSettings.cmake
       if(list_across_names)
         add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
@@ -68,23 +81,16 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       rocprim
       benchmark::benchmark
   )
-  if(NOT USE_HIP_CPU)
+
+  if(USE_HIPCXX)
     target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
-        rocprim_hip
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
     )
   else()
     target_link_libraries(${BENCHMARK_TARGET}
       PRIVATE
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${BENCHMARK_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
+      hip::device)
   endif()
 
   target_compile_options(${BENCHMARK_TARGET}
@@ -134,10 +140,14 @@ add_rocprim_benchmark(benchmark_block_scan.cpp)
 add_rocprim_benchmark(benchmark_block_sort.cpp)
 add_rocprim_benchmark(benchmark_config_dispatch.cpp)
 add_rocprim_benchmark(benchmark_device_adjacent_difference.cpp)
+add_rocprim_benchmark(benchmark_device_adjacent_find.cpp)
 add_rocprim_benchmark(benchmark_device_batch_memcpy.cpp)
 add_rocprim_benchmark(benchmark_device_binary_search.cpp)
+add_rocprim_benchmark(benchmark_device_find_first_of.cpp)
+add_rocprim_benchmark(benchmark_device_find_end.cpp)
 add_rocprim_benchmark(benchmark_device_histogram.cpp)
 add_rocprim_benchmark(benchmark_device_merge.cpp)
+add_rocprim_benchmark(benchmark_device_merge_inplace.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort_block_sort.cpp)
 add_rocprim_benchmark(benchmark_device_merge_sort_block_merge.cpp)
@@ -152,10 +162,13 @@ add_rocprim_benchmark(benchmark_device_reduce_by_key.cpp)
 add_rocprim_benchmark(benchmark_device_reduce_by_key_deterministic.cpp)
 add_rocprim_benchmark(benchmark_device_reduce.cpp)
 add_rocprim_benchmark(benchmark_device_run_length_encode.cpp)
+add_rocprim_benchmark(benchmark_device_run_length_encode_non_trivial_runs.cpp)
 add_rocprim_benchmark(benchmark_device_scan.cpp)
 add_rocprim_benchmark(benchmark_device_scan_deterministic.cpp)
 add_rocprim_benchmark(benchmark_device_scan_by_key.cpp)
+add_rocprim_benchmark(benchmark_device_search.cpp)
 add_rocprim_benchmark(benchmark_device_scan_by_key_deterministic.cpp)
+add_rocprim_benchmark(benchmark_device_search_n.cpp)
 add_rocprim_benchmark(benchmark_device_select.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_keys.cpp)
 add_rocprim_benchmark(benchmark_device_segmented_radix_sort_pairs.cpp)

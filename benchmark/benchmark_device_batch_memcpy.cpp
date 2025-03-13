@@ -31,11 +31,19 @@
 #include <rocprim/device/device_copy.hpp>
 #include <rocprim/device/device_memcpy.hpp>
 #include <rocprim/device/device_memcpy_config.hpp>
+#include <rocprim/types.hpp>
+#ifdef BUILD_NAIVE_BENCHMARK
+    #include <rocprim/block/block_load_func.hpp>
+    #include <rocprim/intrinsics/thread.hpp>
+#endif
 
-#include <iostream>
+#include <algorithm>
+#include <cstddef>
 #include <numeric>
 #include <random>
 #include <stdint.h>
+#include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -65,7 +73,7 @@ constexpr int32_t  blev_min_size = rocprim::batch_memcpy_config<>::blev_size_thr
 // ┌───┬───┬───┬───┬───┬───┬───┬───┐
 // │c0'│a0'│a1'│a2'│d0'│d1'│b0'│b1'│ buffer y contains buffers a', b', c', d'
 // └───┴───┴───┴───┴───┴───┴───┴───┘
-template<class T, class S, class RandomGenerator>
+template<typename T, typename S, typename RandomGenerator>
 std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenerator& rng)
 {
     const auto n = input.size();
@@ -89,8 +97,8 @@ std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenera
 using offset_type = size_t;
 
 template<bool IsMemCpy,
-         class ContainerMemCpy,
-         class ContainerCopy,
+         typename ContainerMemCpy,
+         typename ContainerCopy,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 void init_input(ContainerMemCpy& h_input_for_memcpy,
                 ContainerCopy& /*h_input_for_copy*/,
@@ -111,9 +119,9 @@ void init_input(ContainerMemCpy& h_input_for_memcpy,
 }
 
 template<bool IsMemCpy,
-         class ContainerMemCpy,
-         class ContainerCopy,
-         class byte_offset_type,
+         typename ContainerMemCpy,
+         typename ContainerCopy,
+         typename byte_offset_type,
          typename std::enable_if<!IsMemCpy, int>::type = 0>
 void init_input(ContainerMemCpy& /*h_input_for_memcpy*/,
                 ContainerCopy&   h_input_for_copy,
@@ -137,9 +145,9 @@ void init_input(ContainerMemCpy& /*h_input_for_memcpy*/,
 }
 
 template<bool IsMemCpy,
-         class InputBufferItType,
-         class OutputBufferItType,
-         class BufferSizeItType,
+         typename InputBufferItType,
+         typename OutputBufferItType,
+         typename BufferSizeItType,
          typename std::enable_if<IsMemCpy, int>::type = 0>
 void batch_copy(void*              temporary_storage,
                 size_t&            storage_size,
@@ -159,9 +167,9 @@ void batch_copy(void*              temporary_storage,
 }
 
 template<bool IsMemCpy,
-         class InputBufferItType,
-         class OutputBufferItType,
-         class BufferSizeItType,
+         typename InputBufferItType,
+         typename OutputBufferItType,
+         typename BufferSizeItType,
          typename std::enable_if<!IsMemCpy, int>::type = 0>
 void batch_copy(void*              temporary_storage,
                 size_t&            storage_size,
@@ -230,7 +238,7 @@ struct BatchMemcpyData
     }
 };
 
-template<class ValueType, class BufferSizeType, bool IsMemCpy>
+template<typename ValueType, typename BufferSizeType, bool IsMemCpy>
 BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed,
                                                         const int32_t       num_tlev_buffers = 1024,
                                                         const int32_t       num_wlev_buffers = 1024,
@@ -355,7 +363,7 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed
     return result;
 }
 
-template<class ValueType, class BufferSizeType, bool IsMemCpy>
+template<typename ValueType, typename BufferSizeType, bool IsMemCpy>
 void run_benchmark(benchmark::State&   state,
                    const managed_seed& seed,
                    hipStream_t         stream,
@@ -384,7 +392,7 @@ void run_benchmark(benchmark::State&   state,
                                                              num_blev_buffers);
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
         batch_copy<IsMemCpy>(d_temp_storage,
                              temp_storage_bytes,
@@ -436,7 +444,7 @@ void run_benchmark(benchmark::State&   state,
 
 template<typename OffsetType, int32_t BlockSize>
 __launch_bounds__(BlockSize) __global__
-    void naive_kernel(void** in_ptr, void** out_ptr, const OffsetType* sizes)
+void naive_kernel(void** in_ptr, void** out_ptr, const OffsetType* sizes)
 {
     using underlying_type              = unsigned char;
     constexpr int32_t items_per_thread = 4;
@@ -470,7 +478,7 @@ __launch_bounds__(BlockSize) __global__
     }
 }
 
-template<class ValueType, class BufferSizeType, bool IsMemCpy>
+template<typename ValueType, typename BufferSizeType, bool IsMemCpy>
 void run_naive_benchmark(benchmark::State&   state,
                          const managed_seed& seed,
                          hipStream_t         stream,
@@ -486,7 +494,7 @@ void run_naive_benchmark(benchmark::State&   state,
                                                                         num_blev_buffers);
 
     // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
+    for(size_t i = 0; i < warmup_size; ++i)
     {
         naive_kernel<BufferSizeType, 256>
             <<<num_buffers, 256, 0, stream>>>((void**)data.d_buffer_srcs,
@@ -572,21 +580,38 @@ void run_naive_benchmark(benchmark::State&   state,
         })
 
 #ifndef BUILD_NAIVE_BENCHMARK
-    #define BENCHMARK_TYPE(item_size, item_alignment)                            \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),     \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0), \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),   \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)
+    #define BENCHMARK_TYPE(item_size, item_alignment)                                      \
+        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),               \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0),           \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),             \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000),       \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0), \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0), \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000),   \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000)
 #else
-    #define BENCHMARK_TYPE(item_size, item_alignment)                                  \
-        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),           \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0),       \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),         \
-            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000),   \
-            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0), \
-            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0), \
-            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),   \
-            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000)
+    #define BENCHMARK_TYPE(item_size, item_alignment)                                            \
+        CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),                     \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0),                 \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),                   \
+            CREATE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000),             \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 100000, 0, 0),           \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 100000, 0),           \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 0, 0, 1000),             \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, uint32_t, 1000, 1000, 1000),       \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0),       \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0),       \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000),         \
+            CREATE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 1000, 1000, 1000),   \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 100000, 0, 0), \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 100000, 0), \
+            CREATE_NAIVE_BENCHMARK(item_size, item_alignment, rocprim::uint128_t, 0, 0, 1000),   \
+            CREATE_NAIVE_BENCHMARK(item_size,                                                    \
+                                   item_alignment,                                               \
+                                   rocprim::uint128_t,                                           \
+                                   1000,                                                         \
+                                   1000,                                                         \
+                                   1000)
 #endif //BUILD_NAIVE_BENCHMARK
 
 int32_t main(int32_t argc, char* argv[])
@@ -618,15 +643,13 @@ int32_t main(int32_t argc, char* argv[])
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-
-    benchmarks = {BENCHMARK_TYPE(1, 1),
-                  BENCHMARK_TYPE(1, 2),
-                  BENCHMARK_TYPE(1, 4),
-                  BENCHMARK_TYPE(1, 8),
-                  BENCHMARK_TYPE(2, 2),
-                  BENCHMARK_TYPE(4, 4),
-                  BENCHMARK_TYPE(8, 8)};
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {BENCHMARK_TYPE(1, 1),
+                                                               BENCHMARK_TYPE(1, 2),
+                                                               BENCHMARK_TYPE(1, 4),
+                                                               BENCHMARK_TYPE(1, 8),
+                                                               BENCHMARK_TYPE(2, 2),
+                                                               BENCHMARK_TYPE(4, 4),
+                                                               BENCHMARK_TYPE(8, 8)};
 
     // Use manual timing
     for(auto& b : benchmarks)

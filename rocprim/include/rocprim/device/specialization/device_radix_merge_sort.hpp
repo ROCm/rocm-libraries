@@ -47,7 +47,8 @@ auto invoke_merge_sort_block_merge(
     const hipStream_t                                          stream,
     bool                                                       debug_synchronous,
     typename std::iterator_traits<KeysIterator>::value_type*   keys_buffer,
-    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer)
+    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer,
+    const bool                                                 no_allocate_tmp_buffer)
     -> std::enable_if_t<is_integral<typename std::iterator_traits<KeysIterator>::value_type>::value,
                         hipError_t>
 {
@@ -65,7 +66,8 @@ auto invoke_merge_sort_block_merge(
                                               stream,
                                               debug_synchronous,
                                               keys_buffer,
-                                              values_buffer);
+                                              values_buffer,
+                                              no_allocate_tmp_buffer);
     }
     else
     {
@@ -80,7 +82,8 @@ auto invoke_merge_sort_block_merge(
             stream,
             debug_synchronous,
             keys_buffer,
-            values_buffer);
+            values_buffer,
+            no_allocate_tmp_buffer);
     }
 }
 
@@ -98,7 +101,8 @@ auto invoke_merge_sort_block_merge(
     const hipStream_t                                          stream,
     bool                                                       debug_synchronous,
     typename std::iterator_traits<KeysIterator>::value_type*   keys_buffer,
-    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer)
+    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer,
+    const bool                                                 no_allocate_tmp_buffer)
     -> std::enable_if_t<
         !is_integral<typename std::iterator_traits<KeysIterator>::value_type>::value,
         hipError_t>
@@ -117,7 +121,8 @@ auto invoke_merge_sort_block_merge(
                                           stream,
                                           debug_synchronous,
                                           keys_buffer,
-                                          values_buffer);
+                                          values_buffer,
+                                          no_allocate_tmp_buffer);
 }
 
 template<class Config,
@@ -139,7 +144,8 @@ auto invoke_merge_sort_block_merge(
     const hipStream_t                                          stream,
     bool                                                       debug_synchronous,
     typename std::iterator_traits<KeysIterator>::value_type*   keys_buffer,
-    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer)
+    typename std::iterator_traits<ValuesIterator>::value_type* values_buffer,
+    const bool                                                 no_allocate_tmp_buffer)
     -> std::enable_if_t<!std::is_same<Decomposer, identity_decomposer>::value, hipError_t>
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
@@ -156,7 +162,8 @@ auto invoke_merge_sort_block_merge(
         stream,
         debug_synchronous,
         keys_buffer,
-        values_buffer);
+        values_buffer,
+        no_allocate_tmp_buffer);
 }
 
 /// In device_radix_sort, we use this device_radix_sort_merge_sort specialization only
@@ -182,6 +189,7 @@ hipError_t radix_sort_merge_impl(
     unsigned int                                                    bit,
     unsigned int                                                    end_bit,
     hipStream_t                                                     stream,
+    const bool                                                      no_allocate_tmp_buffer,
     bool                                                            debug_synchronous)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
@@ -244,7 +252,8 @@ hipError_t radix_sort_merge_impl(
             stream,
             debug_synchronous,
             keys_buffer,
-            values_buffer);
+            values_buffer,
+            no_allocate_tmp_buffer);
     }
 
     if(size == size_t(0))
@@ -285,7 +294,8 @@ hipError_t radix_sort_merge_impl(
             stream,
             debug_synchronous,
             keys_buffer,
-            values_buffer);
+            values_buffer,
+            no_allocate_tmp_buffer);
     }
     return hipSuccess;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,9 +26,11 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
+#include "detail/common.hpp"
 #include "detail/device_merge.hpp"
 #include "detail/device_merge_sort.hpp"
 #include "detail/device_merge_sort_mergepath.hpp"
@@ -50,14 +52,14 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-ROCPRIM_KERNEL
-    __launch_bounds__(device_params<Config>().block_sort_config.block_size) void block_sort_kernel(
-        KeysInputIterator    keys_input,
-        KeysOutputIterator   keys_output,
-        ValuesInputIterator  values_input,
-        ValuesOutputIterator values_output,
-        const OffsetT        sorted_block_size,
-        BinaryFunction       compare_function)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().block_sort_config.block_size) void
+    block_sort_kernel(KeysInputIterator    keys_input,
+                      KeysOutputIterator   keys_output,
+                      ValuesInputIterator  values_input,
+                      ValuesOutputIterator values_output,
+                      const OffsetT        size,
+                      const unsigned int   num_blocks,
+                      BinaryFunction       compare_function)
 {
     static constexpr merge_sort_block_sort_config_params params = device_params<Config>();
     block_sort_kernel_impl<params.block_sort_config.block_size,
@@ -65,7 +67,8 @@ ROCPRIM_KERNEL
                                                                       keys_output,
                                                                       values_input,
                                                                       values_output,
-                                                                      sorted_block_size,
+                                                                      size,
+                                                                      num_blocks,
                                                                       compare_function);
 }
 
@@ -76,16 +79,14 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .merge_oddeven_config
-        .block_size) void device_block_merge_oddeven_kernel(KeysInputIterator    keys_input,
-                                                            KeysOutputIterator   keys_output,
-                                                            ValuesInputIterator  values_input,
-                                                            ValuesOutputIterator values_output,
-                                                            const OffsetT        input_size,
-                                                            const OffsetT        sorted_block_size,
-                                                            BinaryFunction       compare_function)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().merge_oddeven_config.block_size) void
+    device_block_merge_oddeven_kernel(KeysInputIterator    keys_input,
+                                      KeysOutputIterator   keys_output,
+                                      ValuesInputIterator  values_input,
+                                      ValuesOutputIterator values_output,
+                                      const OffsetT        input_size,
+                                      const OffsetT        sorted_block_size,
+                                      BinaryFunction       compare_function)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
     block_merge_oddeven_kernel<params.merge_oddeven_config.block_size,
@@ -105,17 +106,16 @@ template<class Config,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .merge_mergepath_config
-        .block_size) void device_block_merge_mergepath_kernel(KeysInputIterator    keys_input,
-                                                              KeysOutputIterator   keys_output,
-                                                              ValuesInputIterator  values_input,
-                                                              ValuesOutputIterator values_output,
-                                                              const OffsetT        input_size,
-                                                              const OffsetT  sorted_block_size,
-                                                              BinaryFunction compare_function,
-                                                              const OffsetT* merge_partitions)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().merge_mergepath_config.block_size) void
+    device_block_merge_mergepath_kernel(KeysInputIterator    keys_input,
+                                        KeysOutputIterator   keys_output,
+                                        ValuesInputIterator  values_input,
+                                        ValuesOutputIterator values_output,
+                                        const OffsetT        input_size,
+                                        const OffsetT        sorted_block_size,
+                                        const unsigned int   num_blocks,
+                                        BinaryFunction       compare_function,
+                                        const OffsetT*       merge_partitions)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
     block_merge_mergepath_kernel<params.merge_mergepath_config.block_size,
@@ -125,74 +125,52 @@ ROCPRIM_KERNEL __launch_bounds__(
                                                                                  values_output,
                                                                                  input_size,
                                                                                  sorted_block_size,
+                                                                                 num_blocks,
                                                                                  compare_function,
                                                                                  merge_partitions);
 }
 
-#define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
-    if(debug_synchronous) \
-    { \
-        std::cout << name << "(" << size << ")"; \
-        auto error = hipStreamSynchronize(stream); \
-        if(error != hipSuccess) return error; \
-        auto end = std::chrono::high_resolution_clock::now(); \
-        auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-        std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-    }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
-
 template<typename Config, typename KeysInputIterator, typename OffsetT, typename CompareOpT>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .merge_mergepath_partition_config
-        .block_size) void device_block_merge_mergepath_partition_kernel(KeysInputIterator keys,
-                                                                        const OffsetT input_size,
-                                                                        const unsigned int
-                                                                                 num_partitions,
-                                                                        OffsetT* merge_partitions,
-                                                                        const CompareOpT compare_op,
-                                                                        const OffsetT
-                                                                            sorted_block_size)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
+                                         .merge_mergepath_partition_config.block_size) void
+    device_block_merge_mergepath_partition_kernel(KeysInputIterator  keys,
+                                                  const OffsetT      input_size,
+                                                  const unsigned int num_partitions,
+                                                  OffsetT*           merge_partitions,
+                                                  const CompareOpT   compare_op,
+                                                  const OffsetT      sorted_block_size)
 {
     static constexpr merge_sort_block_merge_config_params params = device_params<Config>();
-    static constexpr unsigned int                         ItemsPerTile
+    static constexpr unsigned int                         items_per_tile
         = params.merge_mergepath_config.block_size * params.merge_mergepath_config.items_per_thread;
-    const OffsetT partition_id
+
+    const unsigned int partition_id
         = blockIdx.x * params.merge_mergepath_partition_config.block_size + threadIdx.x;
 
-    if (partition_id >= num_partitions)
+    if(partition_id >= num_partitions)
     {
         return;
     }
 
-    const unsigned int merged_tiles = sorted_block_size / ItemsPerTile;
+    const unsigned int merged_tiles        = sorted_block_size / items_per_tile;
     const unsigned int target_merged_tiles = merged_tiles * 2;
-    const unsigned int mask = target_merged_tiles - 1;
-    const unsigned int tilegroup_start_id = ~mask & partition_id; // id of the first tile in the current tile-group
-    const OffsetT tilegroup_start = ItemsPerTile * tilegroup_start_id; // index of the first item in the current tile-group
+    const unsigned int mask                = target_merged_tiles - 1;
 
-    const unsigned int local_tile_id = mask & partition_id; // id of the current tile in the current tile-group
+    // id of the first tile in the current tile-group
+    const unsigned int tilegroup_start_id = ~mask & partition_id;
+    // id of the current tile in the current tile-group
+    const unsigned int local_tile_id = mask & partition_id;
+
+    // index of the first item in the current tile-group
+    const OffsetT tilegroup_start = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile;
 
     const OffsetT keys1_beg = rocprim::min(input_size, tilegroup_start);
     const OffsetT keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
     const OffsetT keys2_beg = keys1_end;
     const OffsetT keys2_end = rocprim::min(input_size, keys2_beg + sorted_block_size);
 
-    const OffsetT partition_at = rocprim::min<OffsetT>(keys2_end - keys1_beg, ItemsPerTile * local_tile_id);
+    const OffsetT partition_at
+        = rocprim::min(keys2_end - keys1_beg, static_cast<OffsetT>(local_tile_id) * items_per_tile);
 
     const OffsetT partition_diag = ::rocprim::detail::merge_path(keys + keys1_beg,
                                                                  keys + keys2_beg,
@@ -219,8 +197,9 @@ inline hipError_t merge_sort_block_merge(
     BinaryFunction                                             compare_function,
     const hipStream_t                                          stream,
     bool                                                       debug_synchronous,
-    typename std::iterator_traits<KeysIterator>::value_type*   keys_double_buffer   = nullptr,
-    typename std::iterator_traits<ValuesIterator>::value_type* values_double_buffer = nullptr)
+    typename std::iterator_traits<KeysIterator>::value_type*   keys_double_buffer     = nullptr,
+    typename std::iterator_traits<ValuesIterator>::value_type* values_double_buffer   = nullptr,
+    const bool                                                 no_allocate_tmp_buffer = false)
 {
     using key_type             = typename std::iterator_traits<KeysIterator>::value_type;
     using value_type           = typename std::iterator_traits<ValuesIterator>::value_type;
@@ -266,7 +245,7 @@ inline hipError_t merge_sort_block_merge(
     value_type* values_buffer      = nullptr;
 
     hipError_t partition_result;
-    if(keys_double_buffer == nullptr)
+    if(!no_allocate_tmp_buffer)
     {
         partition_result = detail::temp_storage::partition(
             temporary_storage,
@@ -322,7 +301,7 @@ inline hipError_t merge_sort_block_merge(
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
     bool temporary_store = true;
     for(OffsetT block = sorted_block_size; block < size; block *= 2)
@@ -337,7 +316,7 @@ inline hipError_t merge_sort_block_merge(
             if(use_mergepath && block >= merge_mergepath_items_per_block)
             {
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(device_block_merge_mergepath_partition_kernel<config>),
                     dim3(merge_partition_number_of_blocks),
@@ -352,13 +331,14 @@ inline hipError_t merge_sort_block_merge(
                     block);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
                     "device_block_merge_mergepath_partition_kernel",
-                    size,
+                    merge_num_partitions,
                     start);
 
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_mergepath_kernel<config>),
-                                   dim3(merge_mergepath_number_of_blocks),
+                                   calculate_grid_dim(merge_mergepath_number_of_blocks,
+                                                      merge_mergepath_block_size),
                                    dim3(merge_mergepath_block_size),
                                    0,
                                    stream,
@@ -368,6 +348,7 @@ inline hipError_t merge_sort_block_merge(
                                    values_output_,
                                    size,
                                    block,
+                                   merge_mergepath_number_of_blocks,
                                    compare_function,
                                    d_merge_partitions);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_mergepath_kernel",
@@ -377,7 +358,9 @@ inline hipError_t merge_sort_block_merge(
             else
             {
                 if(debug_synchronous)
-                    start = std::chrono::high_resolution_clock::now();
+                    start = std::chrono::steady_clock::now();
+                // As this kernel is only called with small sizes, it is safe to use 32-bit integers
+                // for size and block.
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(device_block_merge_oddeven_kernel<config>),
                                    dim3(merge_oddeven_number_of_blocks),
                                    dim3(merge_oddeven_block_size),
@@ -387,12 +370,12 @@ inline hipError_t merge_sort_block_merge(
                                    keys_output_,
                                    values_input_,
                                    values_output_,
-                                   size,
-                                   block,
+                                   static_cast<unsigned int>(size),
+                                   static_cast<unsigned int>(block),
                                    compare_function);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_oddeven_kernel",
                                                             size,
-                                                            start)
+                                                            start);
             }
             return hipSuccess;
         };
@@ -444,7 +427,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
                                         KeysOutputIterator   keys_output,
                                         ValuesInputIterator  values_input,
                                         ValuesOutputIterator values_output,
-                                        const unsigned int   size,
+                                        const size_t         size,
                                         unsigned int&        sort_items_per_block,
                                         BinaryFunction       compare_function,
                                         const hipStream_t    stream,
@@ -478,21 +461,23 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     }
 
     // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
     if(debug_synchronous)
-        start = std::chrono::high_resolution_clock::now();
+        start = std::chrono::steady_clock::now();
 
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(block_sort_kernel<config>),
-                       dim3(sort_number_of_blocks),
-                       dim3(params.block_sort_config.block_size),
-                       0,
-                       stream,
-                       keys_input,
-                       keys_output,
-                       values_input,
-                       values_output,
-                       size,
-                       compare_function);
+    hipLaunchKernelGGL(
+        HIP_KERNEL_NAME(block_sort_kernel<config>),
+        calculate_grid_dim(sort_number_of_blocks, params.block_sort_config.block_size),
+        dim3(params.block_sort_config.block_size),
+        0,
+        stream,
+        keys_input,
+        keys_output,
+        values_input,
+        values_output,
+        size,
+        sort_number_of_blocks,
+        compare_function);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     return hipSuccess;
@@ -550,12 +535,13 @@ inline hipError_t merge_sort_impl(
     KeysOutputIterator                                              keys_output,
     ValuesInputIterator                                             values_input,
     ValuesOutputIterator                                            values_output,
-    const unsigned int                                              size,
+    const size_t                                                    size,
     BinaryFunction                                                  compare_function,
     const hipStream_t                                               stream,
     bool                                                            debug_synchronous,
     typename std::iterator_traits<KeysInputIterator>::value_type*   keys_buffer   = nullptr,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_buffer = nullptr)
+    typename std::iterator_traits<ValuesInputIterator>::value_type* values_buffer = nullptr,
+    bool                                                            no_allocate_tmp_buffer = false)
 {
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -589,7 +575,8 @@ inline hipError_t merge_sort_impl(
                                                           stream,
                                                           debug_synchronous,
                                                           keys_buffer,
-                                                          values_buffer);
+                                                          values_buffer,
+                                                          no_allocate_tmp_buffer);
     }
 
     if(size == size_t(0))
@@ -624,13 +611,13 @@ inline hipError_t merge_sort_impl(
                                                           stream,
                                                           debug_synchronous,
                                                           keys_buffer,
-                                                          values_buffer);
+                                                          values_buffer,
+                                                          no_allocate_tmp_buffer);
     }
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
-#undef ROCPRIM_DETAIL_HIP_SYNC
+
 
 } // end of detail namespace
 
@@ -645,26 +632,33 @@ inline hipError_t merge_sort_impl(
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \par Stability
+/// \p merge_sort is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] compare_function - binary operation function object that will be used for comparison.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] compare_function binary operation function object that will be used for comparison.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
@@ -737,32 +731,39 @@ hipError_t merge_sort(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Accepts custom compare_functions for sorting across the device.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. Must meet the
+/// \par Stability
+/// \p merge_sort is \b stable: it preserves the relative ordering of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is \b guaranteed that \p a will precede \p b as well in the output (ordered) keys.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `merge_sort_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam KeysOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam ValuesInputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the sort operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - pointer to the first element in the range to sort.
-/// \param [out] keys_output - pointer to the first element in the output range.
-/// \param [in] values_input - pointer to the first element in the range to sort.
-/// \param [out] values_output - pointer to the first element in the output range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] compare_function - binary operation function object that will be used for comparison.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input pointer to the first element in the range to sort.
+/// \param [out] keys_output pointer to the first element in the output range.
+/// \param [in] values_input pointer to the first element in the range to sort.
+/// \param [out] values_output pointer to the first element in the output range.
+/// \param [in] size number of element in the input range.
+/// \param [in] compare_function binary operation function object that will be used for comparison.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of

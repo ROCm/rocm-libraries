@@ -134,18 +134,12 @@ struct match_vector_type
 
     using vector_4 = typename make_vector_type<vector_base_type, 4>::type;
     using vector_2 = typename make_vector_type<vector_base_type, 2>::type;
-    using vector_1 = typename make_vector_type<vector_base_type, 1>::type;
 
-    using type =
-        typename std::conditional<
-            size % sizeof(vector_4) == 0,
-            vector_4,
-            typename std::conditional<
-                size % sizeof(vector_2) == 0,
-                vector_2,
-                vector_1
-            >::type
-        >::type;
+    using type = typename std::conditional<
+        size % sizeof(vector_4) == 0,
+        vector_4,
+        typename std::conditional<size % sizeof(vector_2) == 0, vector_2, vector_base_type>::type>::
+        type;
 };
 
 // Checks if Items is odd and ensures that size of T is smaller than vector_type.
@@ -158,6 +152,18 @@ constexpr unsigned int get_lds_banks_no()
 {
     // Currently all devices supported by ROCm have 32 banks (4 bytes each)
     return 32;
+}
+
+/// \brief Returns the minimum LDS size in bytes available on this device architecture.
+ROCPRIM_HOST_DEVICE
+constexpr unsigned int get_min_lds_size()
+{
+#if defined(__GFX11__) || defined(__GFX10__)
+    return (1 << 17) /* 128 KiB*/;
+#else
+    // On host the lowest should be returned!
+    return (1 << 16) /* 64 KiB */;
+#endif
 }
 
 // Finds biggest fundamental type for type T that sizeof(T) is
@@ -187,7 +193,7 @@ struct [[deprecated("To store non default-constructible types in local memory, u
                     "rocprim::uninitialized_array instead")]] raw_storage
 {
     // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
-    typedef typename detail::match_fundamental_type<T>::type device_word;
+    using device_word = typename detail::match_fundamental_type<T>::type;
 
     // Backing storage
     alignas(device_word) unsigned char storage[sizeof(T)];
@@ -413,6 +419,25 @@ ROCPRIM_HOST_DEVICE auto bit_cast(const Source& source)
     return dest;
 #endif
 }
+
+template<typename... Ts>
+struct select_max_by_value;
+
+template<typename T>
+struct select_max_by_value<T>
+{
+    using type = T;
+};
+
+template<typename T, typename U, typename... Vs>
+struct select_max_by_value<T, U, Vs...>
+{
+    using tail = typename select_max_by_value<U, Vs...>::type;
+    using type = std::conditional_t<(T::value >= tail::value), T, tail>;
+};
+
+template<typename... Ts>
+using select_max_by_value_t = typename select_max_by_value<Ts...>::type;
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

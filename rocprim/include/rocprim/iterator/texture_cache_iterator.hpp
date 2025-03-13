@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -124,8 +124,8 @@ struct match_texture_type
 /// * This iterator is not functional on gfx94x architectures, as native texture fetch functions 
 /// are not supported in gfx94x.
 ///
-/// \tparam T - type of value that can be obtained by dereferencing the iterator.
-/// \tparam Difference - a type used for identify distance between iterators.
+/// \tparam T type of value that can be obtained by dereferencing the iterator.
+/// \tparam Difference a type used for identify distance between iterators.
 template<
     class T,
     class Difference = std::ptrdiff_t
@@ -148,22 +148,19 @@ public:
     using self_type = texture_cache_iterator;
 #endif
 
-    ROCPRIM_HOST_DEVICE inline
-    ~texture_cache_iterator() = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE ~texture_cache_iterator() = default;
 
-    ROCPRIM_HOST_DEVICE inline
-    texture_cache_iterator()
-        : ptr(NULL), texture_offset(0), texture_object(0)
-    {
-    }
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE texture_cache_iterator()
+        : ptr(nullptr), texture_offset(0), texture_object(0)
+    {}
 
     /// \brief Creates a \p hipTextureObject_t and binds this iterator to it.
     ///
     /// \tparam Texture data pointer type
     ///
-    /// \param ptr - pointer to the texture data on the device
-    /// \param bytes - size of the texture data (in bytes)
-    /// \param texture_offset - an offset from ptr to load texture data from
+    /// \param ptr pointer to the texture data on the device
+    /// \param bytes size of the texture data (in bytes)
+    /// \param texture_offset an offset from ptr to load texture data from
     /// (Defaults to 0)
     template<class Qualified>
     inline
@@ -185,7 +182,7 @@ public:
         resourse_desc.res.linear.sizeInBytes = bytes;
         texture_desc.readMode = hipReadModeElementType;
 
-        return hipCreateTextureObject(&texture_object, &resourse_desc, &texture_desc, NULL);
+        return hipCreateTextureObject(&texture_object, &resourse_desc, &texture_desc, nullptr);
     }
 
     /// \brief Destroys the texture object that this iterator points at.
@@ -221,9 +218,9 @@ public:
         #else
         texture_type words[multiple];
 
-        #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx1200__) || defined(__gfx1201__)
-        #pragma message "Texture cache iterator is not supported on gfx94x or gfx120x as the texture fetch functions in HIP are not available."
-        ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x or gfx120x devices is not supported and will not produce valid results.")
+        #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__)
+        #pragma message "Texture cache iterator is not supported on gfx94x, gfx120x or gfx95x as the texture fetch functions in HIP are not available."
+        ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x, gfx120x or gfx95x devices is not supported and will not produce valid results.")
         #else
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < multiple; i++)

@@ -31,6 +31,8 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+#include <rocprim/types.hpp>
+
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -50,22 +52,26 @@ constexpr size_t DEFAULT_BYTES = size_t{2} << 30; // 2 GiB
     CREATE_BENCHMARK(KEY, VALUE, 1000)
 
 // some of the tuned types
-#define CREATE_BENCHMARK_TYPES(KEY)            \
-    CREATE_BENCHMARK_TYPE(KEY, int8_t);        \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::half); \
-    CREATE_BENCHMARK_TYPE(KEY, int32_t);       \
-    CREATE_BENCHMARK_TYPE(KEY, float);         \
-    CREATE_BENCHMARK_TYPE(KEY, double)
+#define CREATE_BENCHMARK_TYPES(KEY)                \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t);            \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half);     \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t);           \
+    CREATE_BENCHMARK_TYPE(KEY, float);             \
+    CREATE_BENCHMARK_TYPE(KEY, double);            \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t); \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::uint128_t)
 
 // all of the tuned types
-#define CREATE_BENCHMARK_TYPE_TUNING(KEY)      \
-    CREATE_BENCHMARK_TYPE(KEY, int8_t);        \
-    CREATE_BENCHMARK_TYPE(KEY, int16_t);       \
-    CREATE_BENCHMARK_TYPE(KEY, int32_t);       \
-    CREATE_BENCHMARK_TYPE(KEY, int64_t);       \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::half); \
-    CREATE_BENCHMARK_TYPE(KEY, float);         \
-    CREATE_BENCHMARK_TYPE(KEY, double)
+#define CREATE_BENCHMARK_TYPE_TUNING(KEY)          \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t);            \
+    CREATE_BENCHMARK_TYPE(KEY, int16_t);           \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t);           \
+    CREATE_BENCHMARK_TYPE(KEY, int64_t);           \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half);     \
+    CREATE_BENCHMARK_TYPE(KEY, float);             \
+    CREATE_BENCHMARK_TYPE(KEY, double);            \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t); \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::uint128_t)
 
 int main(int argc, char* argv[])
 {
@@ -105,6 +111,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK_TYPES(rocprim::half);
     CREATE_BENCHMARK_TYPES(float);
     CREATE_BENCHMARK_TYPES(double);
+    CREATE_BENCHMARK_TYPES(rocprim::int128_t);
+    CREATE_BENCHMARK_TYPES(rocprim::uint128_t);
 
     // custom types
     using custom_float2  = custom_type<float, float>;

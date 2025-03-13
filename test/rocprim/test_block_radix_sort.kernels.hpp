@@ -153,7 +153,7 @@ __global__ __launch_bounds__(BlockSize) void sort_key_value_kernel(key_type*   d
     }
 }
 
-// Test for radix sort
+// Test for radix sort with keys only
 template<class Key,
          class Value,
          unsigned int Method,
@@ -189,7 +189,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -198,18 +198,11 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
 
         // Generate data
         auto keys_output = std::make_unique<key_type[]>(size);
-        if(rocprim::is_floating_point<key_type>::value)
-        {
-            test_utils::generate_random_data_n(keys_output.get(), size, -100, +100, rng_engine);
-        }
-        else
-        {
-            test_utils::generate_random_data_n(keys_output.get(),
-                                               size,
-                                               test_utils::numeric_limits<key_type>::min(),
-                                               test_utils::numeric_limits<key_type>::max(),
-                                               rng_engine);
-        }
+        test_utils::generate_random_data_n(keys_output.get(),
+                                           size,
+                                           test_utils::generate_limits<key_type>::min(),
+                                           test_utils::generate_limits<key_type>::max(),
+                                           rng_engine);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_output.get(), keys_output.get() + size);
@@ -223,16 +216,10 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
         }
 
         // Preparing device
-        key_type* device_keys_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_keys_output, size * sizeof(key_type)));
-
-        HIP_CHECK(hipMemcpy(device_keys_output,
-                            keys_output.get(),
-                            size * sizeof(keys_output[0]),
-                            hipMemcpyHostToDevice));
+        test_utils::device_ptr<key_type> device_keys_output(keys_output, size);
 
         sort_key_kernel<block_size, items_per_thread, radix_bits_per_pass, key_type>
-            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output,
+            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output.get(),
                                                           to_striped,
                                                           descending,
                                                           start_bit,
@@ -240,22 +227,18 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
         HIP_CHECK(hipGetLastError());
 
         // Getting results to host
-        HIP_CHECK(hipMemcpy(keys_output.get(),
-                            device_keys_output,
-                            size * sizeof(keys_output[0]),
-                            hipMemcpyDeviceToHost));
+        keys_output = device_keys_output.load_to_unique_ptr();
 
         // Verifying results
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output.get(),
                                                       keys_output.get() + size,
                                                       expected.begin(),
                                                       expected.end()));
-
-        HIP_CHECK(hipFree(device_keys_output));
     }
 
 }
 
+// Test for radix_sort with keys and values. Also ensures that (block) radix_sort is stable
 template<class Key,
          class Value,
          unsigned int Method,
@@ -294,7 +277,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
     SCOPED_TRACE(testing::Message() << "with size = " << size);
     SCOPED_TRACE(testing::Message() << "with grid_size = " << grid_size);
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         seed_type seed_value = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -303,20 +286,14 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
 
         // Generate data
         auto keys_output = std::make_unique<key_type[]>(size);
-        if(rocprim::is_floating_point<key_type>::value)
-        {
-            test_utils::generate_random_data_n(keys_output.get(), size, -100, +100, rng_engine);
-        }
-        else
-        {
-            test_utils::generate_random_data_n(keys_output.get(),
-                                               size,
-                                               test_utils::numeric_limits<key_type>::min(),
-                                               test_utils::numeric_limits<key_type>::max(),
-                                               rng_engine);
-        }
+        test_utils::generate_random_data_n(keys_output.get(),
+                                           size,
+                                           test_utils::generate_limits<key_type>::min(),
+                                           test_utils::generate_limits<key_type>::max(),
+                                           rng_engine);
 
-        std::vector<value_type> values_output = test_utils::get_random_data<value_type>(size, 0, 100, seed_value);
+        std::vector<value_type> values_output(size);
+        std::iota(values_output.begin(), values_output.end(), 0u);
 
         using key_value = std::pair<key_type, value_type>;
 
@@ -344,23 +321,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
             values_expected[i] = expected[i].second;
         }
 
-        key_type* device_keys_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_keys_output, size * sizeof(key_type)));
-        value_type* device_values_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_values_output, values_output.size() * sizeof(value_type)));
-
-        HIP_CHECK(hipMemcpy(device_keys_output,
-                            keys_output.get(),
-                            size * sizeof(keys_output[0]),
-                            hipMemcpyHostToDevice));
-
-        HIP_CHECK(
-            hipMemcpy(
-                device_values_output, values_output.data(),
-                values_output.size() * sizeof(typename decltype(values_output)::value_type),
-                hipMemcpyHostToDevice
-            )
-        );
+        test_utils::device_ptr<key_type>   device_keys_output(keys_output, size);
+        test_utils::device_ptr<value_type> device_values_output(values_output);
 
         // Running kernel
         sort_key_value_kernel<block_size,
@@ -368,8 +330,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
                               radix_bits_per_pass,
                               key_type,
                               value_type>
-            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output,
-                                                          device_values_output,
+            <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output.get(),
+                                                          device_values_output.get(),
                                                           to_striped,
                                                           descending,
                                                           start_bit,
@@ -377,27 +339,14 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
         HIP_CHECK(hipGetLastError());
 
         // Getting results to host
-        HIP_CHECK(hipMemcpy(keys_output.get(),
-                            device_keys_output,
-                            size * sizeof(keys_output[0]),
-                            hipMemcpyDeviceToHost));
-
-        HIP_CHECK(
-            hipMemcpy(
-                values_output.data(), device_values_output,
-                values_output.size() * sizeof(typename decltype(values_output)::value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
+        keys_output   = device_keys_output.load_to_unique_ptr();
+        values_output = device_values_output.load();
 
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output.get(),
                                                       keys_output.get() + size,
                                                       keys_expected.begin(),
                                                       keys_expected.end()));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
-
-        HIP_CHECK(hipFree(device_keys_output));
-        HIP_CHECK(hipFree(device_values_output));
     }
 
 }

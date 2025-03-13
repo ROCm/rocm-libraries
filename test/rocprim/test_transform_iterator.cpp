@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
+#include "test_utils_device_ptr.hpp"
 
 // required rocprim headers
 #include <rocprim/functional.hpp>
@@ -73,12 +74,11 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
-    RocprimTransformIteratorParams<int, plus_ten<long>>,
-    RocprimTransformIteratorParams<unsigned int>,
-    RocprimTransformIteratorParams<unsigned long>,
-    RocprimTransformIteratorParams<float, plus_ten<double>, double>
-> RocprimTransformIteratorTestsParams;
+using RocprimTransformIteratorTestsParams
+    = ::testing::Types<RocprimTransformIteratorParams<int, plus_ten<long>>,
+                       RocprimTransformIteratorParams<unsigned int>,
+                       RocprimTransformIteratorParams<unsigned long>,
+                       RocprimTransformIteratorParams<float, plus_ten<double>, double>>;
 
 TYPED_TEST_SUITE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
 
@@ -99,7 +99,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
 
     const size_t size = 1024;
 
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
@@ -108,18 +108,8 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 200, seed_value);
         std::vector<value_type> output(1);
 
-        input_type * d_input;
-        value_type * d_output;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(input_type)));
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(value_type)));
-        HIP_CHECK(
-            hipMemcpy(
-                d_input, input.data(),
-                input.size() * sizeof(input_type),
-                hipMemcpyHostToDevice
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::device_ptr<input_type> d_input(input);
+        test_utils::device_ptr<value_type> d_output(output.size());
 
         auto reduce_op = rocprim::plus<value_type>();
         unary_function transform;
@@ -128,63 +118,41 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         iterator_type x(input.data(), transform);
         value_type expected = std::accumulate(x, x + size, value_type(0), reduce_op);
 
-        auto d_iter = iterator_type(d_input, transform);
+        auto d_iter = iterator_type(d_input.get(), transform);
         // temp storage
         size_t temp_storage_size_bytes;
         // Get size of d_temp_storage
-        HIP_CHECK(
-            rocprim::reduce(
-                nullptr,
-                temp_storage_size_bytes,
-                d_iter,
-                d_output,
-                value_type(0),
-                input.size(),
-                reduce_op,
-                stream
-            )
-        );
+        HIP_CHECK(rocprim::reduce(nullptr,
+                                  temp_storage_size_bytes,
+                                  d_iter,
+                                  d_output.get(),
+                                  value_type(0),
+                                  input.size(),
+                                  reduce_op,
+                                  stream));
 
         // temp_storage_size_bytes must be >0
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        void * d_temp_storage = nullptr;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
-        HIP_CHECK(hipDeviceSynchronize());
-
+        test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         // Run
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage,
-                temp_storage_size_bytes,
-                d_iter,
-                d_output,
-                value_type(0),
-                input.size(),
-                reduce_op,
-                stream,
-                TestFixture::debug_synchronous
-            )
-        );
+        HIP_CHECK(rocprim::reduce(d_temp_storage.get(),
+                                  temp_storage_size_bytes,
+                                  d_iter,
+                                  d_output.get(),
+                                  value_type(0),
+                                  input.size(),
+                                  reduce_op,
+                                  stream,
+                                  TestFixture::debug_synchronous));
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
-        HIP_CHECK(
-            hipMemcpy(
-                output.data(), d_output,
-                output.size() * sizeof(value_type),
-                hipMemcpyDeviceToHost
-            )
-        );
-        HIP_CHECK(hipDeviceSynchronize());
+        output = d_output.load();
 
         // Check if output values are as expected
         test_utils::assert_near(output[0], expected, test_utils::precision<value_type> * size);
-
-        hipFree(d_input);
-        hipFree(d_output);
-        hipFree(d_temp_storage);
     }
 
 }

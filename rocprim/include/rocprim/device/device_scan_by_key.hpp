@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_HPP_
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -56,7 +57,7 @@ template<lookback_scan_determinism Determinism,
          typename BinaryFunction,
          typename LookbackScanState,
          typename AccType>
-void __global__ __launch_bounds__(device_params<Config>().kernel_config.block_size)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
     device_scan_by_key_kernel(const KeyInputIterator                       keys,
                               const InputIterator                          values,
                               const OutputIterator                         output,
@@ -83,23 +84,6 @@ void __global__ __launch_bounds__(device_params<Config>().kernel_config.block_si
         previous_last_value);
 }
 
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
-    do                                                                                           \
-    {                                                                                            \
-        auto _error = hipGetLastError();                                                         \
-        if(_error != hipSuccess)                                                                 \
-            return _error;                                                                       \
-        if(debug_synchronous)                                                                    \
-        {                                                                                        \
-            std::cout << name << "(" << size << ")";                                             \
-            auto __error = hipStreamSynchronize(stream);                                         \
-            if(__error != hipSuccess)                                                            \
-                return __error;                                                                  \
-            auto _end = std::chrono::high_resolution_clock::now();                               \
-            auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-        }                                                                                        \
-    } while(false)
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
@@ -245,14 +229,14 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
         const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
 
         // Start point for time measurements
-        std::chrono::high_resolution_clock::time_point start;
+        std::chrono::steady_clock::time_point start;
         if(debug_synchronous)
         {
             std::cout << "index:            " << i << '\n';
             std::cout << "current_size:     " << current_size << '\n';
             std::cout << "number of blocks: " << scan_blocks << '\n';
 
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
 
         with_scan_state(
@@ -274,7 +258,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 
         if(debug_synchronous)
         {
-            start = std::chrono::high_resolution_clock::now();
+            start = std::chrono::steady_clock::now();
         }
         with_scan_state(
             [&](auto& scan_state)
@@ -304,7 +288,7 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 }
 
 /// \addtogroup devicemodule
@@ -329,41 +313,41 @@ inline hipError_t scan_by_key_impl(void* const           temporary_storage,
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
+/// \tparam ValuesInputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. It can be
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. It can be
 /// a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam KeyCompareFunction - type of binary function used to determine keys equality. Default type
+/// \tparam KeyCompareFunction type of binary function used to determine keys equality. Default type
 /// is \p rocprim::equal_to<T>, where \p T is a \p value_type of \p KeysInputIterator.
-/// \tparam AccType - accumulator type used to propagate the scanned values. Default type
+/// \tparam AccType accumulator type used to propagate the scanned values. Default type
 /// is value type of the input iterator.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - iterator to the first element in the range of keys.
-/// \param [in] values_input - iterator to the first element in the range of values to scan.
-/// \param [out] values_output - iterator to the first element in the output value range.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scanning
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input iterator to the first element in the range of keys.
+/// \param [in] values_input iterator to the first element in the range of values to scan.
+/// \param [out] values_output iterator to the first element in the output value range.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scanning
 /// input values.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is BinaryFunction().
-/// \param [in] key_compare_op - binary operation function object that will be used to determine keys equality.
+/// \param [in] key_compare_op binary operation function object that will be used to determine keys equality.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is KeyCompareFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -521,44 +505,44 @@ inline hipError_t deterministic_inclusive_scan_by_key(void* const               
 /// * Ranges specified by \p keys_input, \p values_input, and \p values_output must have
 /// at least \p size elements.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
-/// \tparam KeysInputIterator - random-access iterator type of the input range. It can be
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_by_key_config`.
+/// \tparam KeysInputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam ValuesInputIterator - random-access iterator type of the input range. It can be
+/// \tparam ValuesInputIterator random-access iterator type of the input range. It can be
 /// a simple pointer type.
-/// \tparam ValuesOutputIterator - random-access iterator type of the output range. It can be
+/// \tparam ValuesOutputIterator random-access iterator type of the output range. It can be
 /// a simple pointer type.
-/// \tparam InitValueType - type of the initial value.
-/// \tparam BinaryFunction - type of binary function used for scan. Default type
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam KeyCompareFunction - type of binary function used to determine keys equality. Default type
+/// \tparam KeyCompareFunction type of binary function used to determine keys equality. Default type
 /// is \p rocprim::equal_to<T>, where \p T is a \p value_type of \p KeysInputIterator.
-/// \tparam AccType - accumulator type used to propagate the scanned values. Default type
+/// \tparam AccType accumulator type used to propagate the scanned values. Default type
 /// is 'InitValueType', unless it's 'rocprim::future_value'. Then it will be the wrapped input type.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the scan operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] keys_input - iterator to the first element in the range of keys.
-/// \param [in] values_input - iterator to the first element in the range of values to scan.
-/// \param [out] values_output - iterator to the first element in the output value range.
-/// \param [in] initial_value - initial value to start the scan.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input iterator to the first element in the range of keys.
+/// \param [in] values_input iterator to the first element in the range of values to scan.
+/// \param [out] values_output iterator to the first element in the output value range.
+/// \param [in] initial_value initial value to start the scan.
 /// A rocpim::future_value may be passed to use a value that will be later computed.
-/// \param [in] size - number of element in the input range.
-/// \param [in] scan_op - binary operation function object that will be used for scanning
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scanning
 /// input values.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is BinaryFunction().
-/// \param [in] key_compare_op - binary operation function object that will be used to determine keys equality.
+/// \param [in] key_compare_op binary operation function object that will be used to determine keys equality.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// Default is KeyCompareFunction().
-/// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of

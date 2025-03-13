@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,9 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Special type used to show that the given device-level operation
-/// will be executed with optimal configuration dependent on types of the function's parameters
-/// and the target device architecture specified by ROCPRIM_TARGET_ARCH.
-/// Algorithms supporting dynamic dispatch will ignore ROCPRIM_TARGET_ARCH and
-/// launch using optimal configuration based on the target architecture derived from the stream.
+/// will be executed with optimal configuration dependent on types of the function's parameters.
+/// With dynamic dispatch algorithms will launch using optimal configuration based on the target
+/// architecture derived from the stream.
 struct default_config
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -75,8 +74,8 @@ struct kernel_config_params
 
 /// \brief Configuration of particular kernels launched by device-level operation
 ///
-/// \tparam BlockSize - number of threads in a block.
-/// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam BlockSize number of threads in a block.
+/// \tparam ItemsPerThread number of items processed by each thread.
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
@@ -133,24 +132,6 @@ struct limit_block_size<MaxBlockSize, SharedMemoryPerThread, MinBlockSize, Extra
     static constexpr unsigned int value = MaxBlockSize;
 };
 
-template<unsigned int Arch, class T>
-struct select_arch_case
-{
-    static constexpr unsigned int arch = Arch;
-    using type = T;
-};
-
-template<unsigned int TargetArch, class Case, class... OtherCases>
-struct select_arch
-    : std::conditional<
-        Case::arch == TargetArch,
-        extract_type<typename Case::type>,
-        select_arch<TargetArch, OtherCases...>
-    >::type { };
-
-template<unsigned int TargetArch, class Universal>
-struct select_arch<TargetArch, Universal> : extract_type<Universal> { };
-
 template<class Config, class Default>
 using default_or_custom_config =
     typename std::conditional<
@@ -169,6 +150,7 @@ enum class target_arch : unsigned int
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
+    gfx942  = 942,
     gfx1030 = 1030,
     gfx1100 = 1100,
     gfx1102 = 1102,
@@ -203,14 +185,22 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
 
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    constexpr const char* target_names[]
-        = {"gfx803", "gfx900", "gfx906", "gfx908", "gfx90a", "gfx1030", "gfx1100", "gfx1102"};
+    constexpr const char* target_names[]         = {"gfx803",
+                                                    "gfx900",
+                                                    "gfx906",
+                                                    "gfx908",
+                                                    "gfx90a",
+                                                    "gfx942",
+                                                    "gfx1030",
+                                                    "gfx1100",
+                                                    "gfx1102"};
     constexpr target_arch target_architectures[] = {
         target_arch::gfx803,
         target_arch::gfx900,
         target_arch::gfx906,
         target_arch::gfx908,
         target_arch::gfx90a,
+        target_arch::gfx942,
         target_arch::gfx1030,
         target_arch::gfx1100,
         target_arch::gfx1102,
@@ -266,6 +256,8 @@ auto dispatch_target_arch(const target_arch target_arch)
             return Config::template architecture_config<target_arch::gfx908>::params;
         case target_arch::gfx90a:
             return Config::template architecture_config<target_arch::gfx90a>::params;
+        case target_arch::gfx942:
+            return Config::template architecture_config<target_arch::gfx942>::params;
         case target_arch::gfx1030:
             return Config::template architecture_config<target_arch::gfx1030>::params;
         case target_arch::gfx1100:
@@ -329,7 +321,7 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
 inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_id)
 {
     static constexpr hipStream_t default_stream = 0;
-    if(stream == default_stream || stream == hipStreamPerThread)
+    if(stream == default_stream || stream == hipStreamPerThread || stream == hipStreamLegacy)
     {
         const hipError_t result = hipGetDevice(&device_id);
         if(result != hipSuccess)
@@ -367,8 +359,8 @@ inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
 
 /// \brief Returns a number of threads in a hardware warp for the actual device.
 /// At host side this constant is available at runtime only.
-/// \param device_id - the device that should be queried.
-/// \param warp_size - out parameter for the warp size.
+/// \param device_id the device that should be queried.
+/// \param warp_size out parameter for the warp size.
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.
@@ -387,8 +379,8 @@ ROCPRIM_HOST inline hipError_t host_warp_size(const int device_id, unsigned int&
 
 /// \brief Returns the number of threads in a hardware warp for the device associated with the stream.
 /// At host side this constant is available at runtime only.
-/// \param stream - the stream, whose device should be queried.
-/// \param warp_size - out parameter for the warp size.
+/// \param stream the stream, whose device should be queried.
+/// \param warp_size out parameter for the warp size.
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.

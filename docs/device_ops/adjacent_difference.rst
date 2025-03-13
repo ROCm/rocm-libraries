@@ -5,7 +5,7 @@
 .. _dev-adjacent_difference:
 
 ********************************************************************
- Adjacent difference
+ Adjacent Difference
 ********************************************************************
 
 Configuring the kernel

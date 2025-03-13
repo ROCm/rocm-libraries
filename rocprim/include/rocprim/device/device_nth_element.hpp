@@ -77,7 +77,7 @@ hipError_t
     const unsigned int     num_blocks            = ceiling_div(size, num_items_per_block);
 
     key_type*                            tree             = nullptr;
-    size_t*                              buckets          = nullptr;
+    unsigned int*                        buckets          = nullptr;
     n_th_element_iteration_data*         nth_element_data = nullptr;
     bool*                                equality_buckets = nullptr;
     nth_element_onesweep_lookback_state* lookback_states  = nullptr;
@@ -178,6 +178,14 @@ hipError_t
 /// * Accepts custom compare_functions for nth_element across the device.
 /// * Streams in graph capture mode are not supported
 ///
+/// \par Stability
+/// \p nth_element is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output keys.
+///
 /// \tparam Config [optional] configuration of the primitive. It has to be `nth_element_config`.
 /// \tparam KeysIterator [inferred] random-access iterator type of the input range. Must meet the
 ///   requirements of a C++ InputIterator concept. It can be a simple pointer type.
@@ -240,14 +248,15 @@ template<class Config = default_config,
          class KeysIterator,
          class BinaryFunction
          = ::rocprim::less<typename std::iterator_traits<KeysIterator>::value_type>>
-ROCPRIM_INLINE hipError_t nth_element(void*          temporary_storage,
-                                      size_t&        storage_size,
-                                      KeysIterator   keys,
-                                      size_t         nth,
-                                      size_t         size,
-                                      BinaryFunction compare_function  = BinaryFunction(),
-                                      hipStream_t    stream            = 0,
-                                      bool           debug_synchronous = false)
+ROCPRIM_INLINE
+hipError_t nth_element(void*          temporary_storage,
+                       size_t&        storage_size,
+                       KeysIterator   keys,
+                       size_t         nth,
+                       size_t         size,
+                       BinaryFunction compare_function  = BinaryFunction(),
+                       hipStream_t    stream            = 0,
+                       bool           debug_synchronous = false)
 {
     return detail::nth_element_impl<Config>(temporary_storage,
                                             storage_size,
@@ -273,6 +282,14 @@ ROCPRIM_INLINE hipError_t nth_element(void*          temporary_storage,
 /// if `temporary_storage` is a null pointer.
 /// * Accepts custom compare_functions for nth_element across the device.
 /// * Streams in graph capture mode are not supported
+///
+/// \par Stability
+/// \p nth_element is <b>not stable</b>: it doesn't necessarily preserve the relative ordering
+/// of equivalent keys.
+/// That is, given two keys \p a and \p b and a binary boolean operation \p op such that:
+///   * \p a precedes \p b in the input keys, and
+///   * op(a, b) and op(b, a) are both false,
+/// then it is <b>not guaranteed</b> that \p a will precede \p b as well in the output keys.
 ///
 /// \tparam Config [optional] configuration of the primitive. It has to be `nth_element_config`.
 /// \tparam KeysInputIterator [inferred] random-access iterator type of the input range. Must meet the
@@ -342,15 +359,16 @@ template<class Config = default_config,
          class KeysOutputIterator,
          class BinaryFunction
          = ::rocprim::less<typename std::iterator_traits<KeysInputIterator>::value_type>>
-ROCPRIM_INLINE hipError_t nth_element(void*              temporary_storage,
-                                      size_t&            storage_size,
-                                      KeysInputIterator  keys_input,
-                                      KeysOutputIterator keys_output,
-                                      size_t             nth,
-                                      size_t             size,
-                                      BinaryFunction     compare_function  = BinaryFunction(),
-                                      hipStream_t        stream            = 0,
-                                      bool               debug_synchronous = false)
+ROCPRIM_INLINE
+hipError_t nth_element(void*              temporary_storage,
+                       size_t&            storage_size,
+                       KeysInputIterator  keys_input,
+                       KeysOutputIterator keys_output,
+                       size_t             nth,
+                       size_t             size,
+                       BinaryFunction     compare_function  = BinaryFunction(),
+                       hipStream_t        stream            = 0,
+                       bool               debug_synchronous = false)
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     static_assert(

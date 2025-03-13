@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,10 +26,11 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../common.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 
-#include "detail/config/device_reduce.hpp"
+#include "detail/config/device_segmented_reduce.hpp"
 #include "detail/device_segmented_reduce.hpp"
 #include "rocprim/type_traits.hpp"
 
@@ -47,14 +48,13 @@ template<class Config,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-ROCPRIM_KERNEL __launch_bounds__(
-    device_params<Config>()
-        .reduce_config.block_size) void segmented_reduce_kernel(InputIterator  input,
-                                                                OutputIterator output,
-                                                                OffsetIterator begin_offsets,
-                                                                OffsetIterator end_offsets,
-                                                                BinaryFunction reduce_op,
-                                                                ResultType     initial_value)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().reduce_config.block_size) void
+    segmented_reduce_kernel(InputIterator  input,
+                            OutputIterator output,
+                            OffsetIterator begin_offsets,
+                            OffsetIterator end_offsets,
+                            BinaryFunction reduce_op,
+                            ResultType     initial_value)
 {
     segmented_reduce<Config>(
         input, output,
@@ -62,21 +62,6 @@ ROCPRIM_KERNEL __launch_bounds__(
         reduce_op, initial_value
     );
 }
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        auto _error = hipGetLastError(); \
-        if(_error != hipSuccess) return _error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto __error = hipStreamSynchronize(stream); \
-            if(__error != hipSuccess) return __error; \
-            auto _end = std::chrono::high_resolution_clock::now(); \
-            auto _d = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
-            std::cout << " " << _d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 template<
     class Config,
@@ -103,7 +88,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
     using result_type =
         typename ::rocprim::invoke_result_binary_op<input_type, BinaryFunction>::type;
 
-    using config = wrapped_reduce_config<Config, result_type>;
+    using config = wrapped_segmented_reduce_config<Config, result_type>;
 
     detail::target_arch target_arch;
     hipError_t          result = host_target_arch(stream, target_arch);
@@ -126,9 +111,9 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
     if( segments == 0u )
         return hipSuccess;
 
-    std::chrono::high_resolution_clock::time_point start;
+    std::chrono::steady_clock::time_point start;
 
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+    if(debug_synchronous) start = std::chrono::steady_clock::now();
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(segmented_reduce_kernel<config>),
         dim3(segments), dim3(block_size), 0, stream,
@@ -141,7 +126,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
     return hipSuccess;
 }
 
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
+
 
 } // end of detail namespace
 
@@ -160,34 +145,34 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
 /// <tt>segments + 1</tt> elements: <tt>offsets</tt> for \p begin_offsets and
 /// <tt>offsets + 1</tt> for \p end_offsets.
 ///
-/// \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
-/// \tparam InputIterator - random-access iterator type of the input range. Must meet the
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `reduce_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
-/// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam OffsetIterator - random-access iterator type of segment offsets. Must meet the
+/// \tparam OffsetIterator random-access iterator type of segment offsets. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-/// \tparam BinaryFunction - type of binary function used for reduction. Default type
+/// \tparam BinaryFunction type of binary function used for reduction. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
-/// \tparam InitValueType - type of the initial value.
+/// \tparam InitValueType type of the initial value.
 ///
-/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
 /// \p storage_size and function returns without performing the reduction operation.
-/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
-/// \param [in] input - iterator to the first element in the range to reduce.
-/// \param [out] output - iterator to the first element in the output range.
-/// \param [in] segments - number of segments in the input range.
-/// \param [in] begin_offsets - iterator to the first element in the range of beginning offsets.
-/// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
-/// \param [in] initial_value - initial value to start the reduction.
-/// \param [in] reduce_op - binary operation function object that will be used for reduction.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to reduce.
+/// \param [out] output iterator to the first element in the output range.
+/// \param [in] segments number of segments in the input range.
+/// \param [in] begin_offsets iterator to the first element in the range of beginning offsets.
+/// \param [in] end_offsets iterator to the first element in the range of ending offsets.
+/// \param [in] initial_value initial value to start the reduction.
+/// \param [in] reduce_op binary operation function object that will be used for reduction.
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it.
 /// The default value is \p BinaryFunction().
-/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] stream [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful reduction; otherwise a HIP runtime error of

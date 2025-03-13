@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \param [in] sizes iterator of range sizes to copy.
 /// \param [in] num_copies number of ranges to copy
 /// \param [in] stream [optional] HIP stream object to enqueue the copy on. Default is `hipStreamDefault`.
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is `false`.
 ///
 /// Performs multiple device to device copies as a single batched operation.

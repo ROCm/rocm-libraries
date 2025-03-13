@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,29 +22,26 @@
 
 function(add_rocprim_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
+
+  if(USE_HIPCXX)
+    set_source_files_properties(${EXAMPLE_SOURCE} PROPERTIES LANGUAGES HIP)
+  endif()
+
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
+
   target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE
-    rocprim_hip
+    rocprim
   )
-  if(NOT USE_HIP_CPU)
+  if(USE_HIPCXX)
     target_link_libraries(${EXAMPLE_TARGET}
       PRIVATE
-        rocprim_hip
+      $<IF:$<LINK_LANGUAGE:HIP>,hip::host,hip::device>
     )
   else()
-    target_link_libraries(${TEST_EXAMPLE_TARGETTARGET}
+    target_link_libraries(${EXAMPLE_TARGET}
       PRIVATE
-        rocprim
-        Threads::Threads
-        hip_cpu_rt::hip_cpu_rt
-    )
-    if(STL_DEPENDS_ON_TBB)
-      target_link_libraries(${EXAMPLE_TARGET}
-        PRIVATE
-          TBB::tbb
-      )
-    endif()
+      hip::device)
   endif()
   set_target_properties(${EXAMPLE_TARGET}
     PROPERTIES
@@ -63,7 +60,7 @@ function(add_rocprim_example EXAMPLE_SOURCE)
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${EXAMPLE_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/example )
     endforeach( file_i )
-  endif()     
+  endif()
 endfunction()
 
 # ****************************************************************************
@@ -71,3 +68,4 @@ endfunction()
 # ****************************************************************************
 
 add_rocprim_example(example_temporary_storage.cpp)
+add_rocprim_example(example_type_traits_interface.cpp)

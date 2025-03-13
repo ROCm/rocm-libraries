@@ -31,24 +31,32 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include <string>
-
-#include <cstddef>
-
-#ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <rocprim/functional.hpp>
+    #include <rocprim/types.hpp>
 #endif
 
-#define CREATE_BENCHMARK(T, REDUCE_OP)                                \
-    {                                                                 \
-        const device_reduce_benchmark<T, REDUCE_OP> instance;         \
-        REGISTER_BENCHMARK(benchmarks, size, seed, stream, instance); \
+#include <cstddef>
+#include <string>
+#include <vector>
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include <stdint.h>
+#endif
+
+#ifndef DEFAULT_BYTES
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
+#endif
+
+#define CREATE_BENCHMARK(T, REDUCE_OP)                                 \
+    {                                                                  \
+        const device_reduce_benchmark<T, REDUCE_OP> instance;          \
+        REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -70,8 +78,8 @@ int main(int argc, char *argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size = parser.get<size_t>("size");
-    const int trials = parser.get<int>("trials");
+    const size_t bytes  = parser.get<size_t>("size");
+    const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
     const managed_seed seed(seed_type);
@@ -81,22 +89,22 @@ int main(int argc, char *argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
 #ifdef BENCHMARK_CONFIG_TUNING
-    const int parallel_instance = parser.get<int>("parallel_instance");
+    const int parallel_instance  = parser.get<int>("parallel_instance");
     const int parallel_instances = parser.get<int>("parallel_instances");
     config_autotune_register::register_benchmark_subset(benchmarks,
                                                         parallel_instance,
                                                         parallel_instances,
-                                                        size,
+                                                        bytes,
                                                         seed,
                                                         stream);
 #else
-    using custom_float2 = custom_type<float, float>;
+    using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
 
     CREATE_BENCHMARK(int, rocprim::plus<int>)
@@ -111,6 +119,9 @@ int main(int argc, char *argv[])
 
     CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
     CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
+
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
 #endif
 
     // Use manual timing

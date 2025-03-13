@@ -34,34 +34,35 @@
 #include <rocprim/block/block_load_func.hpp>
 #include <rocprim/block/block_radix_rank.hpp>
 #include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/types.hpp>
 
 #include <chrono>
-#include <limits>
+#include <stdint.h>
 #include <string>
+#include <vector>
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 128;
+const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 #endif
 
-namespace rp = rocprim;
-
 template<typename T,
-         unsigned int                   BlockSize,
-         unsigned int                   ItemsPerThread,
-         unsigned int                   RadixBits,
-         bool                           Descending,
-         rp::block_radix_rank_algorithm Algorithm,
-         unsigned int                   Trials>
-__global__ __launch_bounds__(BlockSize) void rank_kernel(const T*      keys_input,
-                                                         unsigned int* ranks_output)
+         unsigned int                        BlockSize,
+         unsigned int                        ItemsPerThread,
+         unsigned int                        RadixBits,
+         bool                                Descending,
+         rocprim::block_radix_rank_algorithm Algorithm,
+         unsigned int                        Trials>
+__global__ __launch_bounds__(BlockSize)
+void rank_kernel(const T* keys_input, unsigned int* ranks_output)
 {
-    using rank_type = rp::block_radix_rank<BlockSize, RadixBits, Algorithm>;
+    using rank_type = rocprim::block_radix_rank<BlockSize, RadixBits, Algorithm>;
 
     const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
-    rp::block_load_direct_striped<BlockSize>(lid, keys_input + block_offset, keys);
+    rocprim::block_load_direct_striped<BlockSize>(lid, keys_input + block_offset, keys);
 
     unsigned int ranks[ItemsPerThread];
 
@@ -87,18 +88,23 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T*      keys_inpu
         }
     }
 
-    rp::block_store_direct_striped<BlockSize>(lid, ranks_output + block_offset, ranks);
+    rocprim::block_store_direct_striped<BlockSize>(lid, ranks_output + block_offset, ranks);
 }
 
 template<typename T,
-         unsigned int                   BlockSize,
-         unsigned int                   ItemsPerThread,
-         rp::block_radix_rank_algorithm Algorithm,
-         unsigned int                   RadixBits  = 4,
-         bool                           Descending = false,
-         unsigned int                   Trials     = 10>
-void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, hipStream_t stream)
+         unsigned int                        BlockSize,
+         unsigned int                        ItemsPerThread,
+         rocprim::block_radix_rank_algorithm Algorithm,
+         unsigned int                        RadixBits  = 4,
+         bool                                Descending = false,
+         unsigned int                        Trials     = 10>
+void run_benchmark(benchmark::State&   state,
+                   size_t              bytes,
+                   const managed_seed& seed,
+                   hipStream_t         stream)
 {
+    // Calculate the number of elements N
+    size_t                 N               = bytes / sizeof(T);
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     grid_size       = ((N + items_per_block - 1) / items_per_block);
     const unsigned int     size            = items_per_block * grid_size;
@@ -117,7 +123,7 @@ void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
 
     for(auto _ : state)
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        auto start = std::chrono::steady_clock::now();
 
         hipLaunchKernelGGL(HIP_KERNEL_NAME(rank_kernel<T,
                                                        BlockSize,
@@ -135,7 +141,7 @@ void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
+        auto end = std::chrono::steady_clock::now();
         auto elapsed_seconds
             = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
         state.SetIterationTime(elapsed_seconds.count());
@@ -153,15 +159,15 @@ void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
                                   ",ipt:" #IPT ",method:" #KIND "}}")                       \
             .c_str(),                                                                       \
         run_benchmark<T, BS, IPT, KIND>,                                                    \
-        size,                                                                               \
+        bytes,                                                                              \
         seed,                                                                               \
         stream)
 
 // clang-format off
 #define CREATE_BENCHMARK_KINDS(type, block, ipt)                                       \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::basic),         \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::basic_memoize), \
-    CREATE_BENCHMARK(type, block, ipt, rp::block_radix_rank_algorithm::match)
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic),         \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::basic_memoize), \
+    CREATE_BENCHMARK(type, block, ipt, rocprim::block_radix_rank_algorithm::match)
 
 #define BENCHMARK_TYPE(type, block)          \
     CREATE_BENCHMARK_KINDS(type, block, 1),  \
@@ -173,23 +179,29 @@ void run_benchmark(benchmark::State& state, size_t N, const managed_seed& seed, 
 // clang-format on
 
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        size,
+                    size_t                                        bytes,
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {
-        BENCHMARK_TYPE(int, 128),
-        BENCHMARK_TYPE(int, 256),
-        BENCHMARK_TYPE(int, 512),
+    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 128),
+                                                       BENCHMARK_TYPE(int, 256),
+                                                       BENCHMARK_TYPE(int, 512),
 
-        BENCHMARK_TYPE(uint8_t, 128),
-        BENCHMARK_TYPE(uint8_t, 256),
-        BENCHMARK_TYPE(uint8_t, 512),
+                                                       BENCHMARK_TYPE(uint8_t, 128),
+                                                       BENCHMARK_TYPE(uint8_t, 256),
+                                                       BENCHMARK_TYPE(uint8_t, 512),
 
-        BENCHMARK_TYPE(long long, 128),
-        BENCHMARK_TYPE(long long, 256),
-        BENCHMARK_TYPE(long long, 512),
-    };
+                                                       BENCHMARK_TYPE(long long, 128),
+                                                       BENCHMARK_TYPE(long long, 256),
+                                                       BENCHMARK_TYPE(long long, 512),
+
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 128),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 256),
+                                                       BENCHMARK_TYPE(rocprim::int128_t, 512),
+
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 128),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 256),
+                                                       BENCHMARK_TYPE(rocprim::uint128_t, 512)};
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
@@ -197,7 +209,7 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
 int main(int argc, char* argv[])
 {
     cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
+    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
     parser.set_optional<std::string>("name_format",
                                      "name_format",
@@ -208,7 +220,7 @@ int main(int argc, char* argv[])
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
-    const size_t size   = parser.get<size_t>("size");
+    const size_t bytes  = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
     bench_naming::set_format(parser.get<std::string>("name_format"));
     const std::string  seed_type = parser.get<std::string>("seed");
@@ -219,12 +231,12 @@ int main(int argc, char* argv[])
 
     // Benchmark info
     add_common_benchmark_info();
-    benchmark::AddCustomContext("size", std::to_string(size));
+    benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmarks, size, seed, stream);
+    add_benchmarks(benchmarks, bytes, seed, stream);
 
     // Use manual timing
     for(auto& b : benchmarks)

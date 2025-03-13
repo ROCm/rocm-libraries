@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 #include "../functional.hpp"
 
 #include "block_scan.hpp"
+#include "config.hpp"
 
 #include "detail/block_radix_rank_basic.hpp"
 #include "detail/block_radix_rank_match.hpp"
@@ -60,7 +61,8 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
+             unsigned int BlockSizeZ,
+             block_padding_hint>
     using type = block_radix_rank<BlockSizeX, RadixBits, false, BlockSizeY, BlockSizeZ>;
 };
 
@@ -70,7 +72,8 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::basic_memoize>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
+             unsigned int BlockSizeZ,
+             block_padding_hint>
     using type = block_radix_rank<BlockSizeX, RadixBits, true, BlockSizeY, BlockSizeZ>;
 };
 
@@ -80,8 +83,9 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
     template<unsigned int BlockSizeX,
              unsigned int RadixBits,
              unsigned int BlockSizeY,
-             unsigned int BlockSizeZ>
-    using type = block_radix_rank_match<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>;
+             unsigned int BlockSizeZ,
+             block_padding_hint PaddingHint>
+    using type = block_radix_rank_match<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
 };
 } // namespace detail
 
@@ -90,12 +94,13 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// associates each item with the index it would gain if the keys were sorted into an array,
 /// according to a radix comparison. Ranking is performed in a stable manner.
 ///
-/// \tparam BlockSizeX - the number of threads in a block's x dimension.
-/// \tparam RadixBits - the maximum number of radix digit bits that comparisons are performed by.
-/// \tparam MemoizeOuterScan - whether to cache digit counters in local memory. This omits loading
+/// \tparam BlockSizeX the number of threads in a block's x dimension.
+/// \tparam RadixBits the maximum number of radix digit bits that comparisons are performed by.
+/// \tparam MemoizeOuterScan whether to cache digit counters in local memory. This omits loading
 /// the same values from shared memory twice, at the expense of more register usage.
-/// \tparam BlockSizeY - the number of threads in a block's y dimension, defaults to 1.
-/// \tparam BlockSizeZ - the number of threads in a block's z dimension, defaults to 1.
+/// \tparam BlockSizeY the number of threads in a block's y dimension, defaults to 1.
+/// \tparam BlockSizeZ the number of threads in a block's z dimension, defaults to 1.
+/// \tparam PaddingHint a hint that decides when to use padding. May not always be applicable.
 ///
 /// \par Overview
 /// * Key type must be an arithmetic type (that is, an integral type or a floating point type).
@@ -135,17 +140,18 @@ struct select_block_radix_rank_impl<block_radix_rank_algorithm::match>
 /// \endcode
 template<unsigned int               BlockSizeX,
          unsigned int               RadixBits,
-         block_radix_rank_algorithm Algorithm  = block_radix_rank_algorithm::default_algorithm,
-         unsigned int               BlockSizeY = 1,
-         unsigned int               BlockSizeZ = 1>
+         block_radix_rank_algorithm Algorithm   = block_radix_rank_algorithm::default_algorithm,
+         unsigned int               BlockSizeY  = 1,
+         unsigned int               BlockSizeZ  = 1,
+         block_padding_hint         PaddingHint = block_padding_hint::avoid_conflicts>
 class block_radix_rank
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     : private detail::select_block_radix_rank_impl<
-          Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>
+          Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>
 #endif
 {
     using base_type = typename detail::select_block_radix_rank_impl<
-        Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ>;
+        Algorithm>::template type<BlockSizeX, RadixBits, BlockSizeY, BlockSizeZ, PaddingHint>;
 
 public:
     /// \brief The number of digits each thread will process.
@@ -163,14 +169,14 @@ public:
 
     /// \brief Perform ascending radix rank over keys partitioned across threads in a block.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] storage - reference to a temporary storage object of type \p storage_type.
-    /// \param [in] begin_bit - index of the first (least significant) bit used in key comparison.
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] storage reference to a temporary storage object of type \p storage_type.
+    /// \param [in] begin_bit index of the first (least significant) bit used in key comparison.
     /// Must be in range <tt>[0; 8 * sizeof(Key))</tt>.
-    /// \param [in] pass_bits - [optional] the number of bits used in key comparison. Must be in
+    /// \param [in] pass_bits [optional] the number of bits used in key comparison. Must be in
     /// the range <tt>(0; RadixBits]</tt>. Default value: RadixBits.
     ///
     /// \par Storage reusage
@@ -218,13 +224,13 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is allocated
     /// by the method itself.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] begin_bit - index of the first (least significant) bit used in key comparison.
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] begin_bit index of the first (least significant) bit used in key comparison.
     /// Must be in range <tt>[0; 8 * sizeof(Key))</tt>.
-    /// \param [in] pass_bits - [optional] the number of bits used in key comparison. Must be in
+    /// \param [in] pass_bits [optional] the number of bits used in key comparison. Must be in
     /// the range <tt>(0; RadixBits]</tt>. Default value: RadixBits.
     template<typename Key, unsigned ItemsPerThread>
     ROCPRIM_DEVICE void rank_keys(const Key (&keys)[ItemsPerThread],
@@ -239,13 +245,13 @@ public:
     /// \brief Perform ascending radix rank over bit keys partitioned across threads in a block.
     /// This overload accepts a callback used to extract the radix digit from a key.
     ///
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] storage - reference to a temporary storage object of type \p storage_type.
-    /// \param [in] begin_bit - index of the first (least significant) bit used in key comparison.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] storage reference to a temporary storage object of type \p storage_type.
+    /// \param [in] begin_bit index of the first (least significant) bit used in key comparison.
     /// Must be in range <tt>[0; 8 * sizeof(Key))</tt>.
-    /// \param [in] pass_bits - [optional] the number of bits used in key comparison. Must be in
+    /// \param [in] pass_bits [optional] the number of bits used in key comparison. Must be in
     /// the range <tt>(0; RadixBits]</tt>. Default value: RadixBits.
     ///
     /// \par Storage reusage
@@ -293,13 +299,13 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is allocated
     /// by the method itself.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] begin_bit - index of the first (least significant) bit used in key comparison.
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] begin_bit index of the first (least significant) bit used in key comparison.
     /// Must be in range <tt>[0; 8 * sizeof(Key))</tt>.
-    /// \param [in] pass_bits - [optional] the number of bits used in key comparison. Must be in
+    /// \param [in] pass_bits [optional] the number of bits used in key comparison. Must be in
     /// the range <tt>(0; RadixBits]</tt>. Default value: RadixBits.
     template<typename Key, unsigned ItemsPerThread>
     ROCPRIM_DEVICE void rank_keys_desc(const Key (&keys)[ItemsPerThread],
@@ -314,14 +320,14 @@ public:
     /// \brief Perform ascending radix rank over bit keys partitioned across threads in a block.
     /// This overload accepts a callback used to extract the radix digit from a key.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \tparam DigitExtractor - type of the unary function object used to extract a digit from
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \tparam DigitExtractor type of the unary function object used to extract a digit from
     /// a key.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] storage - reference to a temporary storage object of type \p storage_type.
-    /// \param [in] digit_extractor - function object used to convert a key to a digit.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] storage reference to a temporary storage object of type \p storage_type.
+    /// \param [in] digit_extractor function object used to convert a key to a digit.
     /// The signature of the \p digit_extractor should be equivalent to the following:
     /// <tt>unsigned int f(const Key &key);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -376,13 +382,13 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is allocated
     /// by the method itself.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \tparam DigitExtractor - type of the unary function object used to extract a digit from
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \tparam DigitExtractor type of the unary function object used to extract a digit from
     /// a key.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] digit_extractor - function object used to convert a key to a digit.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] digit_extractor function object used to convert a key to a digit.
     /// The signature of the \p digit_extractor should be equivalent to the following:
     /// <tt>unsigned int f(const Key &key);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -400,14 +406,14 @@ public:
     /// \brief Perform descending radix rank over bit keys partitioned across threads in a block.
     /// This overload accepts a callback used to extract the radix digit from a key.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \tparam DigitExtractor - type of the unary function object used to extract a digit from
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \tparam DigitExtractor type of the unary function object used to extract a digit from
     /// a key.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] storage - reference to a temporary storage object of type \p storage_type.
-    /// \param [in] digit_extractor - function object used to convert a key to a digit.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] storage reference to a temporary storage object of type \p storage_type.
+    /// \param [in] digit_extractor function object used to convert a key to a digit.
     /// The signature of the \p digit_extractor should be equivalent to the following:
     /// <tt>unsigned int f(const Key &key);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -462,13 +468,13 @@ public:
     /// * This overload does not accept storage argument. Required shared memory is allocated
     /// by the method itself.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \tparam DigitExtractor - type of the unary function object used to extract a digit from
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \tparam DigitExtractor type of the unary function object used to extract a digit from
     /// a key.
-    /// \param [in] keys - reference to an array of keys provided by a thread.
-    /// \param [out] ranks - reference to an array where the final ranks are written to.
-    /// \param [in] digit_extractor - function object used to convert a key to a digit.
+    /// \param [in] keys reference to an array of keys provided by a thread.
+    /// \param [out] ranks reference to an array where the final ranks are written to.
+    /// \param [in] digit_extractor function object used to convert a key to a digit.
     /// The signature of the \p digit_extractor should be equivalent to the following:
     /// <tt>unsinged int f(const Key &key);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
@@ -487,23 +493,23 @@ public:
     /// This overload accepts a callback used to extract the radix digit from a key, and provides
     /// the counts of each digit and a prefix scan thereof in a blocked arrangement.
     ///
-    /// \tparam Key - the key type.
-    /// \tparam ItemsPerThread - the number of items contributed by each thread in the block.
-    /// \tparam DigitExtractor - type of the unary function object used to extract a digit from
+    /// \tparam Key the key type.
+    /// \tparam ItemsPerThread the number of items contributed by each thread in the block.
+    /// \tparam DigitExtractor type of the unary function object used to extract a digit from
     /// a key.
-    /// \param [in] keys - reference to an array of keys provided by a thread. Keys are expected in
+    /// \param [in] keys reference to an array of keys provided by a thread. Keys are expected in
     /// warp-striped arrangement.
-    /// \param [out] ranks - reference to an array where the final ranks are written to. Ranks are
+    /// \param [out] ranks reference to an array where the final ranks are written to. Ranks are
     /// provided in warp-striped arrangement.
-    /// \param [in] storage - reference to a temporary storage object of type \p storage_type.
-    /// \param [in] digit_extractor - function object used to convert a key to a digit.
+    /// \param [in] storage reference to a temporary storage object of type \p storage_type.
+    /// \param [in] digit_extractor function object used to convert a key to a digit.
     /// The signature of the \p digit_extractor should be equivalent to the following:
     /// <tt>unsigned int f(const Key &key);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     /// This function will be used during ranking to extract the digit that indicates
     /// the key's value. Values return by this function object must be in range [0; 1 << RadixBits).
-    /// \param [in] prefix - An exclusive prefix scan of the counts per digit.
-    /// \param [in] counts - The number of keys with a particular digit in the input, per digit.
+    /// \param [in] prefix An exclusive prefix scan of the counts per digit.
+    /// \param [in] counts The number of keys with a particular digit in the input, per digit.
     ///
     /// \par Storage reusage
     /// A synchronization barrier should be placed before \p storage is reused

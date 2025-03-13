@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -114,36 +114,36 @@ struct is_default_or_has_tag<default_config, Tag>
 /// in the semi-open interval `[lower_output[i], upper_output[i])` of `haystack,` in case of
 /// being present at all.
 ///
-///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `lower_bound_config`.
-///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
+///  \tparam Config [optional] Configuration of the primitive, must be `default_config` or `lower_bound_config`.
+///  \tparam HaystackIterator [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
-///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet
+///  \tparam NeedlesIterator [inferred] Random-access iterator type of the input range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type. Elements of
 /// the type pointed by it must be comparable to elements of the type pointed by HaystackIterator
 /// as either operand of `compare_op.`
-///  \tparam OutputIterator - [inferred] Random-access iterator type of the output range. Must meet
+///  \tparam OutputIterator [inferred] Random-access iterator type of the output range. Must meet
 /// the requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-///  \tparam CompareFunction - [inferred] Type of binary function that accepts two arguments of the
+///  \tparam CompareFunction [inferred] Type of binary function that accepts two arguments of the
 /// types pointed by `HaystackIterator` and `NeedlesIterator,` and returns a value convertible
 /// to bool. Default type is `::rocprim::less<>.`
-/// \param [in] temporary_storage - Pointer to a device-accessible temporary storage.
-/// \param [in,out] storage_size - Reference to the size (in bytes) of `temporary_storage.`
-/// \param [in] haystack - Iterator to the first element in the search range. Elements of this
+/// \param [in] temporary_storage Pointer to a device-accessible temporary storage.
+/// \param [in,out] storage_size Reference to the size (in bytes) of `temporary_storage.`
+/// \param [in] haystack Iterator to the first element in the search range. Elements of this
 /// range must be sorted.
-/// \param [in] needles - Iterator to the first element in the range of values to search for on
+/// \param [in] needles Iterator to the first element in the range of values to search for on
 /// `haystack.`
-/// \param [out] output - Iterator to the first element in the output range.
-/// \param [in] haystack_size - Number of elements in the search range `haystack.`
-/// \param [in] needles_size - Number of elements in the input range `needles.`
-/// \param [in] compare_op - Binary operation function object that is used to compare values. The
+/// \param [out] output Iterator to the first element in the output range.
+/// \param [in] haystack_size Number of elements in the search range `haystack.`
+/// \param [in] needles_size Number of elements in the input range `needles.`
+/// \param [in] compare_op Binary operation function object that is used to compare values. The
 /// signature of the function should be equivalent to the following:
 /// `bool f(const T &a, const U &b);`. It does not need to have `const &`, but the
 /// function object must not modify the objects passed to it. Default is `CompareFunction().`
-/// \param [in] stream - [optional] HIP stream object. Default is `0` (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
+/// \param [in] stream [optional] HIP stream object. Default is `0` (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel launch is
 /// forced in order to check for errors.
-/// \return `hipSuccess` (`0)` after a successful search; otherwise a HIP runtime error of
-/// type `hipError_t.`
+/// \return `hipSuccess` (0) after a successful search; otherwise a HIP runtime error of
+/// type `hipError_t`.
 ///
 /// \par Example
 /// \parblock
@@ -251,33 +251,33 @@ hipError_t lower_bound(void * temporary_storage,
 /// in the semi-open interval `[lower_output[i], upper_output[i])` of `haystack,` in case of
 /// being present at all.
 ///
-///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `upper_bound_config`.
-///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
+///  \tparam Config [optional] Configuration of the primitive, must be `default_config` or `upper_bound_config`.
+///  \tparam HaystackIterator [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
-///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet
+///  \tparam NeedlesIterator [inferred] Random-access iterator type of the input range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type. Elements of
 /// the type pointed by it must be comparable to elements of the type pointed by HaystackIterator
 /// as either operand of `compare_op.`
-///  \tparam OutputIterator - [inferred] Random-access iterator type of the output range. Must meet
+///  \tparam OutputIterator [inferred] Random-access iterator type of the output range. Must meet
 /// the requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-///  \tparam CompareFunction - [inferred] Type of binary function that accepts two arguments of the
+///  \tparam CompareFunction [inferred] Type of binary function that accepts two arguments of the
 /// types pointed by `HaystackIterator` and `NeedlesIterator,` and returns a value convertible
 /// to bool. Default type is `::rocprim::less<>.`
-/// \param [in] temporary_storage - Pointer to a device-accessible temporary storage.
-/// \param [in,out] storage_size - Reference to the size (in bytes) of `temporary_storage.`
-/// \param [in] haystack - Iterator to the first element in the search range. Elements of this
+/// \param [in] temporary_storage Pointer to a device-accessible temporary storage.
+/// \param [in,out] storage_size Reference to the size (in bytes) of `temporary_storage.`
+/// \param [in] haystack Iterator to the first element in the search range. Elements of this
 /// range must be sorted.
-/// \param [in] needles - Iterator to the first element in the range of values to search for on
+/// \param [in] needles Iterator to the first element in the range of values to search for on
 /// `haystack.`
-/// \param [out] output - Iterator to the first element in the output range.
-/// \param [in] haystack_size - Number of elements in the search range `haystack.`
-/// \param [in] needles_size - Number of elements in the input range `needles.`
-/// \param [in] compare_op - Binary operation function object that is used to compare values. The
+/// \param [out] output Iterator to the first element in the output range.
+/// \param [in] haystack_size Number of elements in the search range `haystack.`
+/// \param [in] needles_size Number of elements in the input range `needles.`
+/// \param [in] compare_op Binary operation function object that is used to compare values. The
 /// signature of the function should be equivalent to the following:
 /// `bool f(const T &a, const U &b);`. It does not need to have `const &`, but the
 /// function object must not modify the objects passed to it. Default is `CompareFunction().`
-/// \param [in] stream - [optional] HIP stream object. Default is `0` (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
+/// \param [in] stream [optional] HIP stream object. Default is `0` (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel launch is
 /// forced in order to check for errors.
 /// \return `hipSuccess` (`0)` after a successful search; otherwise a HIP runtime error of
 /// type `hipError_t.`
@@ -382,33 +382,33 @@ hipError_t upper_bound(void * temporary_storage,
 /// * When a null pointer is passed as `temporary_storage`, the required allocation size (in bytes)
 /// is written to `storage_size` and the function returns without performing the search operation.
 ///
-///  \tparam Config - [optional] Configuration of the primitive, must be `default_config` or `binary_search_config`.
-///  \tparam HaystackIterator - [inferred] Random-access iterator type of the search range. Must meet
+///  \tparam Config [optional] Configuration of the primitive, must be `default_config` or `binary_search_config`.
+///  \tparam HaystackIterator [inferred] Random-access iterator type of the search range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type.
-///  \tparam NeedlesIterator - [inferred] Random-access iterator type of the input range. Must meet
+///  \tparam NeedlesIterator [inferred] Random-access iterator type of the input range. Must meet
 /// the requirements of a C++ InputIterator concept. It can be a simple pointer type. Elements of
 /// the type pointed by it must be comparable to elements of the type pointed by `HaystackIterator`
 /// as either operand of `compare_op`.
-///  \tparam OutputIterator - [inferred] Random-access iterator type of the output range. Must meet
+///  \tparam OutputIterator [inferred] Random-access iterator type of the output range. Must meet
 /// the requirements of a C++ OutputIterator concept. It can be a simple pointer type.
-///  \tparam CompareFunction - [inferred] Type of binary function that accepts two arguments of the
+///  \tparam CompareFunction [inferred] Type of binary function that accepts two arguments of the
 /// types pointed by `HaystackIterator` and `NeedlesIterator`, and returns a value convertible to
 /// bool. Default type is `::rocprim::less<>`.
-/// \param [in] temporary_storage - Pointer to a device-accessible temporary storage.
-/// \param [in,out] storage_size - Reference to the size (in bytes) of `temporary_storage`.
-/// \param [in] haystack - Iterator to the first element in the search range. Elements of this
+/// \param [in] temporary_storage Pointer to a device-accessible temporary storage.
+/// \param [in,out] storage_size Reference to the size (in bytes) of `temporary_storage`.
+/// \param [in] haystack Iterator to the first element in the search range. Elements of this
 /// range must be sorted.
-/// \param [in] needles - Iterator to the first element in the range of values to search for on
+/// \param [in] needles Iterator to the first element in the range of values to search for on
 /// `haystack`.
-/// \param [out] output - Iterator to the first element in the output range of boolean values.
-/// \param [in] haystack_size - Number of elements in the search range `haystack`.
-/// \param [in] needles_size - Number of elements in the input range `needles`.
-/// \param [in] compare_op - Binary operation function object that is used to compare values. The
+/// \param [out] output Iterator to the first element in the output range of boolean values.
+/// \param [in] haystack_size Number of elements in the search range `haystack`.
+/// \param [in] needles_size Number of elements in the input range `needles`.
+/// \param [in] compare_op Binary operation function object that is used to compare values. The
 /// signature of the function should be equivalent to the following:
 /// `bool f(const T &a, const U &b);`. It does not need to have `const &`, but the
 /// function object must not modify the objects passed to it. Default is `CompareFunction()`.
-/// \param [in] stream - [optional] HIP stream object. Default is `0` (default stream).
-/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
+/// \param [in] stream [optional] HIP stream object. Default is `0` (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel launch is
 /// forced in order to check for errors.
 /// \return `hipSuccess` (`0`) after a successful search; otherwise a HIP runtime error of
 /// type `hipError_t`.
