@@ -53,10 +53,13 @@ option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
 option(USE_SHARED_CTX "Request support for shared ctx between WG" OFF)
 option(USE_SINGLE_NODE "Enable single node support only." OFF)
 option(USE_HOST_SIDE_HDP_FLUSH "Use a polling thread to flush the HDP cache on the host." OFF)
+
 option(BUILD_FUNCTIONAL_TESTS "Build the functional tests" ON)
 option(BUILD_EXAMPLES "Build the examples" ON)
 option(BUILD_SOS_TESTS "Build the host-facing tests" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests" ON)
+option(BUILD_TESTS_ONLY "Build only tests. Used to link agains rocSHMEM in a ROCm Release" OFF)
+
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
 
 configure_file(cmake/rocshmem_config.h.in rocshmem_config.h)
@@ -78,191 +81,170 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
 
+if (BUILD_TESTS_ONLY)
+  if (DEFINED ENV{ROCSHMEM_HOME})
+    set(ROCSHMEM_HOME "$ENV{ROCSHMEM_HOME}")
+  else()
+    message("Environment variable ROCSHMEM_HOME is not set.")
+    message("Assuming that rocSHMEM is installed at ${ROCM_PATH}.")
+    set(ROCSHMEM_HOME "${ROCM_PATH}")
+  endif()
+endif()
+
 find_package(ROCM 0.8 REQUIRED PATHS ${ROCM_PATH})
 set(ROCMCHECKS_WARN_TOOLCHAIN_VAR OFF)
 
-find_package(ROCmCMakeBuildTools)
-include(ROCMCreatePackage)
-include(ROCMInstallTargets)
-include(ROCMCheckTargetIds)
-
-###############################################################################
-# PROJECT
-###############################################################################
-rocm_setup_version(VERSION 2.0.0)
-
-project(rocshmem VERSION 2.0.0 LANGUAGES CXX)
-
-###############################################################################
-# SET GPU ARCHITECTURES
-###############################################################################
 include(cmake/rocm_local_targets.cmake)
 
 set(DEFAULT_GPUS
       gfx90a
       gfx942)
 
-if (BUILD_LOCAL_GPU_TARGET_ONLY)
-  message(STATUS "Building only for local GPU target")
-  if (COMMAND rocm_local_targets)
-    rocm_local_targets(DEFAULT_GPUS)
-  else()
-    message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
-  endif()
+###############################################################################
+# PROJECT
+###############################################################################
+find_package(ROCmCMakeBuildTools)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+include(ROCMCheckTargetIds)
+
+rocm_setup_version(VERSION 2.0.0)
+project(rocshmem VERSION 2.0.0 LANGUAGES CXX)
+
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+add_subdirectory(tests)
+
+if (BUILD_EXAMPLES)
+  add_subdirectory(examples)
 endif()
-
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
-    "Target default GPUs if GPU_TARGETS is not defined.")
-
-if (COMMAND rocm_check_target_ids)
-  message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
-  rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
-else()
-  message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
-  set(SUPPORTED_GPUS ${DEFAULT_GPUS})
-endif()
-
-set(COMPILING_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU targets to compile for.")
-message(STATUS "Compiling for ${COMPILING_TARGETS}")
-
-foreach(target ${COMPILING_TARGETS})
-  list(APPEND static_link_flags --offload-arch=${target})
-endforeach()
-list(JOIN static_link_flags " " flags_str)
-add_compile_options(${flags_str})
 
 ###############################################################################
 # CREATE ROCSHMEM LIBRARY
 ###############################################################################
-add_library(${PROJECT_NAME})
-add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+if (NOT BUILD_TESTS_ONLY)
+  add_library(${PROJECT_NAME})
+  add_library(roc::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
+  add_subdirectory(src)
 
-###############################################################################
-# INCLUDE DIRECTORIES
-###############################################################################
-target_include_directories(
-  ${PROJECT_NAME}
-  PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>                 # rocshmem_config.h
-    $<INSTALL_INTERFACE:include>
-)
+  #############################################################################
+  # SET GPU ARCHITECTURES
+  #############################################################################
+  if (BUILD_LOCAL_GPU_TARGET_ONLY)
+    message(STATUS "Building only for local GPU target")
+    if (COMMAND rocm_local_targets)
+      rocm_local_targets(DEFAULT_GPUS)
+    else()
+      message(WARNING "Unable to determine local GPU targets. Falling back to default GPUs.")
+    endif()
+  endif()
 
-###############################################################################
-# SUBDIRECTORY TARGETS
-###############################################################################
-add_subdirectory(src)
-add_subdirectory(tests)
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING
+      "Target default GPUs if GPU_TARGETS is not defined.")
 
-IF (BUILD_EXAMPLES)
-  add_subdirectory(examples)
-ENDIF()
+  if (COMMAND rocm_check_target_ids)
+    message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
+    rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
+  else()
+    message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
+    set(SUPPORTED_GPUS ${DEFAULT_GPUS})
+  endif()
 
-###############################################################################
-# HIP
-###############################################################################
-find_package(hip REQUIRED)
+  set(COMPILING_TARGETS "${SUPPORTED_GPUS}" CACHE STRING "GPU targets to compile for.")
+  message(STATUS "Compiling for ${COMPILING_TARGETS}")
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  PUBLIC
-    hip::device
-    hip::host
-)
+  foreach (target ${COMPILING_TARGETS})
+    list(APPEND static_link_flags --offload-arch=${target})
+  endforeach()
+  list(JOIN static_link_flags " " flags_str)
+  add_compile_options(${flags_str})
 
-###############################################################################
-# HSA-RUNTIME64
-###############################################################################
-find_package(hsa-runtime64 REQUIRED)
+  #############################################################################
+  # PACKAGE DEPENDENCIES
+  #############################################################################
+  find_package(MPI REQUIRED)
+  find_package(hip REQUIRED)
+  find_package(hsa-runtime64 REQUIRED)
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  PUBLIC
-    hsa-runtime64::hsa-runtime64
-)
+  if (USE_GPU_IB)
+    find_package(Ibverbs REQUIRED)
+  endif()
 
-###############################################################################
-# PTHREADS
-###############################################################################
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-find_package(Threads REQUIRED)
+  set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+  set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+  find_package(Threads REQUIRED)
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  PUBLIC
-    Threads::Threads
-)
-
-###############################################################################
-# IBVERBS
-###############################################################################
-IF (USE_GPU_IB)
-  find_package(Ibverbs REQUIRED)
-
+  #############################################################################
+  # LINKING AND INCLUDE DIRECTORIES
+  #############################################################################
   target_include_directories(
     ${PROJECT_NAME}
     PUBLIC
-      ${IBVERBS_INCLUDE_DIRS}
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>               # rocshmem_config.h
+      $<INSTALL_INTERFACE:include>
+      ${MPI_CXX_HEADER_DIR}
   )
 
   target_link_libraries(
     ${PROJECT_NAME}
     PUBLIC
-      ${IBVERBS_LIBRARIES}
+      Threads::Threads
+      ${MPI_mpi_LIBRARY}
+      ${MPI_mpicxx_LIBRARY}
+      hip::device
+      hip::host
+      hsa-runtime64::hsa-runtime64
   )
-ENDIF()
 
-###############################################################################
-# MPI
-###############################################################################
-find_package(MPI REQUIRED)
+  if (USE_GPU_IB)
+    target_include_directories(
+      ${PROJECT_NAME}
+      PUBLIC
+        ${IBVERBS_INCLUDE_DIRS}
+    )
 
-target_include_directories(
-  ${PROJECT_NAME}
-  PUBLIC
-    ${MPI_CXX_HEADER_DIR}
-)
+    target_link_libraries(
+      ${PROJECT_NAME}
+      PUBLIC
+        ${IBVERBS_LIBRARIES}
+    )
+  endif()
 
-target_link_libraries(
-  ${PROJECT_NAME}
-  PUBLIC
-    ${MPI_mpi_LIBRARY}
-    ${MPI_mpicxx_LIBRARY}
-)
+  #############################################################################
+  # INSTALL
+  #############################################################################
+  include(ROCMInstallTargets)
+  include(ROCMCreatePackage)
 
-###############################################################################
-# INSTALL
-###############################################################################
-include(ROCMInstallTargets)
-include(ROCMCreatePackage)
+  rocm_install(TARGETS rocshmem)
 
-rocm_install(TARGETS rocshmem)
+  rocm_install(
+    DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+  )
 
-rocm_install(
-  DIRECTORY ${CMAKE_SOURCE_DIR}/include/
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-)
+  rocm_install(
+    FILES "${CMAKE_BINARY_DIR}/rocshmem_config.h"
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocshmem
+  )
 
-rocm_install(
-  FILES "${CMAKE_BINARY_DIR}/rocshmem_config.h"
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocshmem
-)
+  rocm_package_add_dependencies(
+    DEPENDS
+      hsa-rocr
+      hip-runtime-amd
+      rocm-dev
+  )
 
-rocm_package_add_dependencies(
-  DEPENDS
-    hsa-rocr
-    hip-runtime-amd
-    rocm-dev
-)
+  rocm_export_targets(
+    TARGETS roc::rocshmem
+    NAMESPACE roc::
+  )
 
-rocm_export_targets(
-  TARGETS roc::rocshmem
-  NAMESPACE roc::
-)
-
-rocm_create_package(
-  NAME "rocSHMEM"
-  DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
-  MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
-)
+  rocm_create_package(
+    NAME "rocSHMEM"
+    DESCRIPTION "ROCm OpenSHMEM (rocSHMEM)"
+    MAINTAINER "rocSHMEM Maintainer <rocshmem-maintainer@amd.com>"
+  )
+endif()

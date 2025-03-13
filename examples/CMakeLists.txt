@@ -36,19 +36,51 @@ foreach(SOURCE_FILE IN LISTS EXAMPLE_SOURCES)
 
   add_executable(${EXECUTABLE_NAME} ${SOURCE_FILE})
 
-  target_include_directories(
-    ${EXECUTABLE_NAME}
-    PRIVATE
-      rocshmem::rocshmem
-  )
+  if (BUILD_TESTS_ONLY)
+    find_package(MPI REQUIRED)
 
-  target_link_libraries(
-    ${EXECUTABLE_NAME}
-    PRIVATE
-      roc::rocshmem
-      -fgpu-rdc
-      # xnack allows address translation fault recovery
-      # required option for managed heap configs
-      # -mxnack
-  )
+    target_include_directories(
+      ${EXECUTABLE_NAME}
+      PRIVATE
+        $<BUILD_INTERFACE:${ROCSHMEM_HOME}/include>
+        $<BUILD_INTERFACE:${MPI_CXX_HEADER_DIR}>
+    )
+
+    foreach (target ${DEFAULT_GPUS})
+      list(APPEND static_link_flags --offload-arch=${target})
+    endforeach()
+    list(JOIN static_link_flags " " flags_str)
+
+    target_compile_options(
+      ${EXECUTABLE_NAME}
+      PRIVATE
+        ${flags_str}
+         -fgpu-rdc
+    )
+
+    target_link_libraries(
+      ${EXECUTABLE_NAME}
+      PRIVATE
+        ${MPI_mpi_LIBRARY}
+        ${MPI_mpicxx_LIBRARY}
+        -L${ROCSHMEM_HOME}/lib
+        -lamdhip64
+        -lhsa-runtime64
+        -lrocshmem
+        -fgpu-rdc
+    )
+  else()
+    target_include_directories(
+      ${EXECUTABLE_NAME}
+      PRIVATE
+        roc::rocshmem
+    )
+
+    target_link_libraries(
+      ${EXECUTABLE_NAME}
+      PRIVATE
+        roc::rocshmem
+        -fgpu-rdc
+    )
+  endif()
 endforeach()

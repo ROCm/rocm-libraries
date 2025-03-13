@@ -322,14 +322,22 @@ TestOther() {
 
 ValidateInput() {
   INPUT_COUNT=$1
-  if [ $INPUT_COUNT -eq 0 ] ; then
-    echo "This script must be run with at least 2 arguments."
-    echo 'Usage: ${0} argument1 argument2 [argument3] [argument4]'
+  if [ $INPUT_COUNT -lt 3 ] ; then
+    echo "This script must be run with at least 3 arguments."
+    echo 'Usage: ${0} argument1 argument2 argument3 [argument4]'
     echo "  argument1 : path to the tester driver"
     echo "  argument2 : test type to run, e.g put"
     echo "  argument3 : directory to put the output logs"
     echo "  argument4 : path to hostfile"
     exit 1
+  fi
+}
+
+ValidateLogDir() {
+  if [ ! -d $1 ]; then
+    echo "LOG_DIR=$1 does not exist"
+    mkdir -p $1
+    echo "Created $1"
   fi
 }
 
@@ -341,6 +349,7 @@ HOSTFILE=$4
 DRIVER_RETURN_STATUS=0
 
 ValidateInput $#
+ValidateLogDir $LOG_DIR
 
 case $TEST in
   *"all")

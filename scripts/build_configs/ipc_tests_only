@@ -9,6 +9,11 @@ else
   install_path=$1
 fi
 
+if [ -z $1 ] && [ -z $ROCSHMEM_HOME ]
+then
+  export ROCSHMEM_HOME=/opt/rocm/
+fi
+
 src_path=$(dirname "$(realpath $0)")/../../
 
 cmake \
@@ -27,6 +32,6 @@ cmake \
     -DUSE_SINGLE_NODE=ON \
     -DUSE_HOST_SIDE_HDP_FLUSH=OFF \
     -DBUILD_LOCAL_GPU_TARGET_ONLY=OFF \
+    -DBUILD_TESTS_ONLY=ON \
     $src_path
 cmake --build . --parallel 8
-cmake --install .
