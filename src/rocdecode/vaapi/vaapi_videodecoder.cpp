@@ -228,17 +228,10 @@ rocDecStatus VaapiVideoDecoder::SubmitDecode(RocdecPicParams *pPicParams) {
             slice_params_ptr = (void*)pPicParams->slice_params.av1;
             slice_params_size = sizeof(RocdecAv1SliceParams);
 
-#if VA_CHECK_VERSION(1,6,0)
             if ((pic_params_size != sizeof(VADecPictureParameterBufferAV1)) || (slice_params_size != sizeof(VASliceParameterBufferAV1))) {
                     ERR("AV1 data_buffer parameter_size not matching vaapi parameter buffer size.");
                     return ROCDEC_RUNTIME_ERROR;
             }
-#else
-            if ((pic_params_size != 1160) || (slice_params_size != 40)) {
-                    ERR("AV1 data_buffer parameter_size not matching vaapi parameter buffer size.");
-                    return ROCDEC_RUNTIME_ERROR;
-            }
-#endif
             break;
         }
 
@@ -408,11 +401,7 @@ rocDecStatus VaapiVideoDecoder::CreateDecoderConfig() {
             }
             break;
         case rocDecVideoCodec_AV1:
-#if VA_CHECK_VERSION(1,6,0)
             va_profile_ = VAProfileAV1Profile0;
-#else
-            va_profile_ = static_cast<VAProfile>(32); // VAProfileAV1Profile0;
-#endif
             break;
         default:
             ERR("The codec type is not supported.");
@@ -457,11 +446,7 @@ rocDecStatus VaapiVideoDecoder::CreateSurfaces() {
                 surf_attrib.value.value.i = VA_FOURCC_P010;
             } else if (decoder_create_info_.bit_depth_minus_8 == 4) {
                 surface_format = VA_RT_FORMAT_YUV420_12;
-#if VA_CHECK_VERSION(1,8,0)
                 surf_attrib.value.value.i = VA_FOURCC_P012;
-#else
-                surf_attrib.value.value.i = 0x32313050; // VA_FOURCC_P012
-#endif
             } else {
                 surface_format = VA_RT_FORMAT_YUV420;
                 surf_attrib.value.value.i = VA_FOURCC_NV12;
@@ -667,11 +652,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
             break;
         }
         case rocDecVideoCodec_AV1: {
-        #if VA_CHECK_VERSION(1,6,0)
             va_profile = VAProfileAV1Profile0;
-        #else
-            va_profile = static_cast<VAProfile>(32); // VAProfileAV1Profile0;
-        #endif
             break;
         }
         default: {
