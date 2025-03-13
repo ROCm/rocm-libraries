@@ -465,12 +465,14 @@ TEST_P(ExtOpAMaxWithScaleTest, amaxSuccess)
                                                            testdata.n,
                                                            "94\\d");
     }
+#ifdef ROCM_USE_FLOAT8
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
        && testdata.scaleType == HIP_R_8F_E4M3)
     {
         AMaxTestWithScale<float, float, hipblaslt_f8>(
             testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
     }
+#endif
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
             && testdata.scaleType == HIP_R_8F_E5M2_FNUZ)
     {
@@ -482,12 +484,14 @@ TEST_P(ExtOpAMaxWithScaleTest, amaxSuccess)
                                                             testdata.n,
                                                             "94//d");
     }
+#ifdef ROCM_USE_FLOAT8
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
             && testdata.scaleType == HIP_R_8F_E5M2)
     {
         AMaxTestWithScale<float, float, hipblaslt_bf8>(
             testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
     }
+#endif
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
             && testdata.scaleType == HIP_R_8F_E4M3_FNUZ)
     {
@@ -499,12 +503,14 @@ TEST_P(ExtOpAMaxWithScaleTest, amaxSuccess)
                                                                    testdata.n,
                                                                    "94//d");
     }
+#ifdef ROCM_USE_FLOAT8
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
             && testdata.scaleType == HIP_R_8F_E4M3)
     {
         AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_f8>(
             testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
     }
+#endif
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
             && testdata.scaleType == HIP_R_8F_E5M2_FNUZ)
     {
@@ -516,12 +522,14 @@ TEST_P(ExtOpAMaxWithScaleTest, amaxSuccess)
                                                                     testdata.n,
                                                                     "94//d");
     }
+#ifdef ROCM_USE_FLOAT8
     else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
             && testdata.scaleType == HIP_R_8F_E5M2)
     {
         AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_bf8>(
             testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
     }
+#endif
 }
 
 TEST_P(ExtOpSoftmaxUnsupportedDatatypeTest, softmaxFailureUnsupportedDatatype)
