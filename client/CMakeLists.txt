@@ -91,3 +91,11 @@ rocm_install(
   TARGETS rocroller_gemm rocroller_codegen_stress
   COMPONENT benchmarks
 )
+
+# Add gemm client tests.  Use pytest-cmake integration for parallelism.
+find_package(Pytest)
+pytest_discover_tests(
+  GEMMClientTests
+  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/client
+  ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
+)

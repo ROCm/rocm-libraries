@@ -107,68 +107,101 @@ namespace rocRoller
     {
         constexpr int elementsPerMXBlock = 32;
 
-        AssertFatal(floatA.size() % AX.size() == 0
-                        && floatA.size() / AX.size() == elementsPerMXBlock,
-                    "Matrix A size must be 32 times of the scale vector size.",
-                    ShowValue(floatA.size()),
-                    ShowValue(AX.size()));
-        AssertFatal(floatB.size() % BX.size() == 0
-                        && floatB.size() / BX.size() == elementsPerMXBlock,
-                    "Matrix B size must be 32 times of the scale vector size.",
-                    ShowValue(floatB.size()),
-                    ShowValue(BX.size()));
-
         auto scaledA = floatA;
         auto scaledB = floatB;
 
-        if(transA)
+        if(AX.size() > 1)
         {
+            AssertFatal(floatA.size() % AX.size() == 0
+                            && floatA.size() / AX.size() == elementsPerMXBlock,
+                        "Matrix A size must be 32 times of the scale vector size.",
+                        ShowValue(floatA.size()),
+                        ShowValue(AX.size()));
+
+            if(transA)
+            {
+#pragma omp parallel for
+                for(size_t mk = 0; mk < M * K; ++mk)
+                {
+                    auto  m      = mk / K;
+                    auto  k      = mk % K;
+                    auto  idx    = m * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
+                    float aScale = scaleToFloat(AX[idx]);
+                    scaledA[mk] *= aScale;
+                }
+            }
+            else
+            {
+#pragma omp parallel for
+                for(size_t mk = 0; mk < M * K; ++mk)
+                {
+                    auto  m      = mk % M;
+                    auto  k      = mk / M;
+                    auto  idx    = (k / elementsPerMXBlock) * M + m;
+                    float aScale = scaleToFloat(AX[idx]);
+                    scaledA[mk] *= aScale;
+                }
+            }
+        }
+        else if(AX.size() == 1)
+        {
+            float aScale = scaleToFloat(AX[0]);
 #pragma omp parallel for
             for(size_t mk = 0; mk < M * K; ++mk)
             {
-                auto  m      = mk / K;
-                auto  k      = mk % K;
-                auto  idx    = m * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
-                float aScale = scaleToFloat(AX[idx]);
                 scaledA[mk] *= aScale;
             }
         }
         else
         {
-#pragma omp parallel for
-            for(size_t mk = 0; mk < M * K; ++mk)
-            {
-                auto  m      = mk % M;
-                auto  k      = mk / M;
-                auto  idx    = (k / elementsPerMXBlock) * M + m;
-                float aScale = scaleToFloat(AX[idx]);
-                scaledA[mk] *= aScale;
-            }
+            Throw<FatalError>("Invalid AX.");
         }
 
-        if(transB)
+        if(BX.size() > 1)
         {
+            AssertFatal(floatB.size() % BX.size() == 0
+                            && floatB.size() / BX.size() == elementsPerMXBlock,
+                        "Matrix B size must be 32 times of the scale vector size.",
+                        ShowValue(floatB.size()),
+                        ShowValue(BX.size()));
+
+            if(transB)
+            {
+#pragma omp parallel for
+                for(size_t kn = 0; kn < K * N; ++kn)
+                {
+                    auto  k      = kn / N;
+                    auto  n      = kn % N;
+                    auto  idx    = (k / elementsPerMXBlock) * N + n;
+                    float bScale = scaleToFloat(BX[idx]);
+                    scaledB[kn] *= bScale;
+                }
+            }
+            else
+            {
+#pragma omp parallel for
+                for(size_t kn = 0; kn < K * N; ++kn)
+                {
+                    auto  k      = kn % K;
+                    auto  n      = kn / K;
+                    auto  idx    = n * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
+                    float bScale = scaleToFloat(BX[idx]);
+                    scaledB[kn] *= bScale;
+                }
+            }
+        }
+        else if(BX.size() == 1)
+        {
+            float bScale = scaleToFloat(BX[0]);
 #pragma omp parallel for
             for(size_t kn = 0; kn < K * N; ++kn)
             {
-                auto  k      = kn / N;
-                auto  n      = kn % N;
-                auto  idx    = (k / elementsPerMXBlock) * N + n;
-                float bScale = scaleToFloat(BX[idx]);
                 scaledB[kn] *= bScale;
             }
         }
         else
         {
-#pragma omp parallel for
-            for(size_t kn = 0; kn < K * N; ++kn)
-            {
-                auto  k      = kn % K;
-                auto  n      = kn / K;
-                auto  idx    = n * (K / elementsPerMXBlock) + (k / elementsPerMXBlock);
-                float bScale = scaleToFloat(BX[idx]);
-                scaledB[kn] *= bScale;
-            }
+            Throw<FatalError>("Invalid BX.");
         }
 
         CPUMM(D, C, scaledA, scaledB, M, N, K, alpha, beta, transA, transB);

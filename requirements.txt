@@ -8,6 +8,7 @@ msgpack
 pandas
 plotly
 pytest
+pytest-cmake
 pytest-cov
 pytest-mock
 scipy

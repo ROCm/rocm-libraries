@@ -662,7 +662,7 @@ namespace rocRoller
                                              NaryArgument                  valueArg,
                                              NaryArgument                  scaleArg) {
                     auto mode = op.scaleMode();
-                    AssertFatal(mode == Operations::ScaleMode::Separate, ShowValue(mode));
+                    AssertFatal(mode != Operations::ScaleMode::Inline, ShowValue(mode));
 
                     auto X      = m_dim.at(op.data());
                     auto XScale = m_dim.at(*op.scale());
@@ -724,8 +724,8 @@ namespace rocRoller
 
             void operator()(Operations::BlockScale const& t)
             {
-                AssertFatal(t.scaleMode() == Operations::ScaleMode::Separate,
-                            "Only Separate mode is supported for now.");
+                AssertFatal(t.scaleMode() != Operations::ScaleMode::Inline,
+                            "ScaleMode::Inline not supported yet.");
             }
 
             void operator()(Operations::Literal const& literal)

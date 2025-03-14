@@ -75,7 +75,16 @@ namespace GEMMDriverTest
             return this->createContextForArch(device);
         }
 
+        int m_scaleValueIndex = 0;
+
     public:
+        uint8_t rotatingSingleScaleValue()
+        {
+            const std::vector<float> scaleValues{-1.0, -0.5, 1.0, 1.5};
+            m_scaleValueIndex = (++m_scaleValueIndex) % scaleValues.size();
+            return floatToScale(scaleValues[m_scaleValueIndex]);
+        }
+
         template <typename TA, typename TB = TA, typename TC = TA, typename TD = TC>
         void basicGEMM(const GEMMProblem&      gemm,
                        bool                    debuggable  = false,
@@ -99,15 +108,16 @@ namespace GEMMDriverTest
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
 
-            AssertFatal(gemm.scaleAMode == gemm.scaleBMode,
-                        "Scale modes must match",
-                        ShowValue(gemm.scaleAMode),
-                        ShowValue(gemm.scaleBMode));
             AssertFatal(gemm.scaleAMode == Operations::ScaleMode::None
                             || gemm.scaleAMode == Operations::ScaleMode::SingleScale
                             || gemm.scaleAMode == Operations::ScaleMode::Separate,
                         "Scale mode not supported!",
                         ShowValue(gemm.scaleAMode));
+            AssertFatal(gemm.scaleBMode == Operations::ScaleMode::None
+                            || gemm.scaleBMode == Operations::ScaleMode::SingleScale
+                            || gemm.scaleBMode == Operations::ScaleMode::Separate,
+                        "Scale mode not supported!",
+                        ShowValue(gemm.scaleBMode));
 
             auto dataTypeA = TypeInfo<TA>::Var.dataType;
             auto dataTypeB = TypeInfo<TB>::Var.dataType;
@@ -238,6 +248,13 @@ namespace GEMMDriverTest
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
                 deviceScaleB = make_shared_device(hostScaleB);
 
+            // In SingleScale mode, don't need to copy to device
+            if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
+                hostScaleA = std::vector<uint8_t>{rotatingSingleScaleValue()};
+
+            if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
+                hostScaleB = std::vector<uint8_t>{rotatingSingleScaleValue()};
+
             auto command = std::make_shared<Command>();
 
             std::vector<size_t> oneStridesN
@@ -271,6 +288,16 @@ namespace GEMMDriverTest
                 tagBlockScaleA = mulInputA = command->addOperation(
                     rocRoller::Operations::BlockScale(tagLoadA, 2, tagLoadScaleA, {1, 32}));
             }
+            else if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
+            {
+                // Using Raw32 now so that ArgumentLoader doesn't bail for sub-dword arguments
+                tagTensorScaleA
+                    = command->addOperation(rocRoller::Operations::Scalar(DataType::UInt32));
+                tagLoadScaleA
+                    = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleA));
+                tagBlockScaleA = mulInputA = command->addOperation(
+                    rocRoller::Operations::BlockScale(tagLoadA, 0, tagLoadScaleA));
+            }
 
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
@@ -281,6 +308,16 @@ namespace GEMMDriverTest
 
                 tagBlockScaleB = mulInputB = command->addOperation(
                     rocRoller::Operations::BlockScale(tagLoadB, 2, tagLoadScaleB, {32, 1}));
+            }
+            else if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
+            {
+                // Using Raw32 now so that ArgumentLoader doesn't bail for sub-dword arguments
+                tagTensorScaleB
+                    = command->addOperation(rocRoller::Operations::Scalar(DataType::UInt32));
+                tagLoadScaleB
+                    = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleB));
+                tagBlockScaleB = mulInputB = command->addOperation(
+                    rocRoller::Operations::BlockScale(tagLoadB, 0, tagLoadScaleB));
             }
 
             auto tagTensorC = command->addOperation(
@@ -514,10 +551,14 @@ namespace GEMMDriverTest
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
                 setCommandTensorArg(
                     commandArgs, tagTensorScaleA.value(), descAScale, deviceScaleA.get());
+            if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
+                commandArgs.setArgument(*tagTensorScaleA, ArgumentType::Value, hostScaleA[0]);
 
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
                 setCommandTensorArg(
                     commandArgs, tagTensorScaleB.value(), descBScale, deviceScaleB.get());
+            if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
+                commandArgs.setArgument(*tagTensorScaleB, ArgumentType::Value, hostScaleB[0]);
 
             commandArgs.setArgument(tagScalarAlpha, ArgumentType::Value, alpha);
             commandArgs.setArgument(tagScalarBeta, ArgumentType::Value, beta);
@@ -537,28 +578,22 @@ namespace GEMMDriverTest
 
             // Host result
             std::vector<TD> h_result(M * N, TD{});
-            if(gemm.scaleAMode == Operations::ScaleMode::Separate)
+            if(gemm.scaleAMode != Operations::ScaleMode::None
+               || gemm.scaleBMode != Operations::ScaleMode::None)
             {
-                if constexpr(std::same_as<TD, float>)
-                {
-                    rocRoller::ScaledCPUMM(h_result,
-                                           hostC,
-                                           hostA,
-                                           hostB,
-                                           hostScaleA,
-                                           hostScaleB,
-                                           M,
-                                           N,
-                                           K,
-                                           alpha,
-                                           beta,
-                                           gemm.transA == "T",
-                                           gemm.transB == "T");
-                }
-                else
-                {
-                    GTEST_SKIP() << "Scaled CPUMM only supported with C/D == float";
-                }
+                rocRoller::ScaledCPUMM(h_result,
+                                       hostC,
+                                       hostA,
+                                       hostB,
+                                       hostScaleA,
+                                       hostScaleB,
+                                       M,
+                                       N,
+                                       K,
+                                       alpha,
+                                       beta,
+                                       gemm.transA == "T",
+                                       gemm.transB == "T");
             }
             else if constexpr(std::is_same_v<TC, TD>)
             {
@@ -763,6 +798,8 @@ namespace GEMMDriverTest
         : public BaseGEMMContextFixture<std::tuple<rocRoller::DataType,
                                                    rocRoller::DataType,
                                                    int,
+                                                   rocRoller::Operations::ScaleMode,
+                                                   rocRoller::Operations::ScaleMode,
                                                    bool,
                                                    bool,
                                                    std::pair<std::string, std::string>>>
@@ -2737,6 +2774,32 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
+    TEST_P(GEMMTestGPU, GPU_ScaledLDSGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 64;
+        gemm.macN = 256;
+        gemm.macK = 128;
+        gemm.m    = 2 * gemm.macM;
+        gemm.n    = 3 * gemm.macN;
+        gemm.k    = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = false;
+        gemm.loadLDSB      = false;
+        gemm.loadLDSScaleA = true;
+        gemm.loadLDSScaleB = true;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        basicGEMM<FP8, FP8, float>(gemm);
+    }
+
     TEST_P(MixedGEMMF8F6F4TestGPU, GPU_MixedBasicGEMMF8F6F4)
     {
         auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2793,7 +2856,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
-        auto [typeA, typeB, MFMAK, loadLDSScaleA, loadLDSScaleB, transOp] = std::get<1>(GetParam());
+        auto [typeA, typeB, MFMAK, scaleAMode, scaleBMode, loadLDSScaleA, loadLDSScaleB, transOp]
+            = std::get<1>(GetParam());
 
         int waveM = (MFMAK == 128) ? 16 : 32;
         int waveN = (MFMAK == 128) ? 16 : 32;
@@ -2807,11 +2871,20 @@ namespace GEMMDriverTest
         auto const elementBitsA = DataTypeInfo::Get(typeA).elementBits;
         auto const elementBitsB = DataTypeInfo::Get(typeB).elementBits;
 
-        problem.scaleAMode = rocRoller::Operations::ScaleMode::Separate;
-        problem.scaleBMode = rocRoller::Operations::ScaleMode::Separate;
+        problem.scaleAMode = scaleAMode;
+        problem.scaleBMode = scaleBMode;
 
         problem.loadLDSScaleA = loadLDSScaleA;
         problem.loadLDSScaleB = loadLDSScaleB;
+
+        if(loadLDSScaleA
+           && (scaleAMode == rocRoller::Operations::ScaleMode::None
+               || scaleAMode == rocRoller::Operations::ScaleMode::SingleScale))
+            GTEST_SKIP() << "Meaningless combination of LoadLDSScaleA and ScaleA";
+        if(loadLDSScaleB
+           && (scaleBMode == rocRoller::Operations::ScaleMode::None
+               || scaleBMode == rocRoller::Operations::ScaleMode::SingleScale))
+            GTEST_SKIP() << "Meaningless combination of LoadLDSScaleB and ScaleB";
 
         basicGEMMMixed(typeA, typeB, problem);
     }
@@ -2888,6 +2961,10 @@ namespace GEMMDriverTest
                                                  rocRoller::DataType::BF6,
                                                  rocRoller::DataType::FP4),
                                ::testing::Values(64, 128),
+                               ::testing::Values(rocRoller::Operations::ScaleMode::SingleScale,
+                                                 rocRoller::Operations::ScaleMode::Separate),
+                               ::testing::Values(rocRoller::Operations::ScaleMode::SingleScale,
+                                                 rocRoller::Operations::ScaleMode::Separate),
                                ::testing::Values(false, true),
                                ::testing::Values(false, true),
                                ::testing::Values(std::pair<std::string, std::string>("N", "N"),

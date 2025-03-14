@@ -40,11 +40,14 @@ namespace rocRoller
             , m_data(data)
             , m_scale(scale)
             , m_strides([&]() {
-                AssertFatal(dimensions >= 1);
-                std::vector<size_t> rt(dimensions, 1);
-                rt[0] = 32; // Default value for first stride based on hardware arch
-                std::copy(strides.begin(), strides.end(), rt.begin());
-                return rt;
+                if(dimensions >= 1)
+                {
+                    std::vector<size_t> rt(dimensions, 1);
+                    rt[0] = 32; // Default value for first stride based on hardware arch
+                    std::copy(strides.begin(), strides.end(), rt.begin());
+                    return rt;
+                }
+                return std::vector<size_t>{};
             }())
         {
         }
@@ -84,6 +87,8 @@ namespace rocRoller
 
         ScaleMode BlockScale::scaleMode() const
         {
+            if(m_strides.empty())
+                return ScaleMode::SingleScale;
             return m_scale.has_value() ? ScaleMode::Separate : ScaleMode::Inline;
         }
 

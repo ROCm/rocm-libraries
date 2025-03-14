@@ -474,6 +474,12 @@ namespace rocRoller::KernelGraph
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
             trackRegister(tag, aScale, ReadWrite::READ);
         }
+        else if(op.scaleA == Operations::ScaleMode::SingleScale)
+        {
+            auto aScale = m_graph.mapper.get(tag, NaryArgument::LHS_SCALE);
+            AssertFatal(aScale != -1);
+            trackRegister(tag, aScale, ReadWrite::READ);
+        }
 
         auto b = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
         trackRegister(tag, b, ReadWrite::READ);
@@ -482,6 +488,12 @@ namespace rocRoller::KernelGraph
         {
             auto bScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+            trackRegister(tag, bScale, ReadWrite::READ);
+        }
+        else if(op.scaleB == Operations::ScaleMode::SingleScale)
+        {
+            auto bScale = m_graph.mapper.get(tag, NaryArgument::RHS_SCALE);
+            AssertFatal(bScale != -1);
             trackRegister(tag, bScale, ReadWrite::READ);
         }
 

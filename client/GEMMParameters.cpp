@@ -37,9 +37,18 @@ namespace rocRoller
                 std::ostringstream rv;
                 rv << "GEMM_" << toString(transA) << toString(transB);
 
-                rv << "_";
-                for(auto const& t : {typeA, typeB, typeC, typeD, typeAcc})
-                    rv << t.substr(0, 1);
+                if(scaleA != rocRoller::Operations::ScaleMode::None)
+                    rv << "_mx" << typeA;
+                else
+                    rv << "_" << typeA;
+
+                if(scaleB != rocRoller::Operations::ScaleMode::None)
+                    rv << "_mx" << typeB;
+                else
+                    rv << "_" << typeB;
+
+                for(auto const& t : {typeC, typeD, typeAcc})
+                    rv << "_" << t;
 
                 rv << "_MT";
                 rocRoller::streamJoin(rv, std::vector{macM, macN, macK}, "x");
@@ -49,6 +58,9 @@ namespace rocRoller
 
                 rv << "_LDS";
                 rocRoller::streamJoin(rv, std::vector{loadLDSA, loadLDSB, storeLDSD}, "");
+
+                rv << "_SLDS";
+                rocRoller::streamJoin(rv, std::vector{loadLDSScaleA, loadLDSScaleB}, "");
 
                 rv << "_Direct2LDS";
                 rocRoller::streamJoin(rv, std::vector{direct2LDSA, direct2LDSB}, "");

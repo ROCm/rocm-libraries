@@ -83,6 +83,9 @@ namespace rocRoller
 
                 Operations::ScaleMode scaleA;
                 Operations::ScaleMode scaleB;
+
+                // When scaleA/B is ScaleMode::SingleScale
+                float scaleValueA, scaleValueB;
             };
 
             /**

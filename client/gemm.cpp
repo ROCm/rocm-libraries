@@ -219,7 +219,7 @@ namespace rocRoller::Client::GEMMClient
         // Host result
         std::vector<D> h_result(problemParams.m * problemParams.n, static_cast<D>(0.0));
 
-        if(!h_scaleA.empty() && !h_scaleB.empty())
+        if(!h_scaleA.empty() || !h_scaleB.empty())
         {
             rocRoller::ScaledCPUMM(h_result,
                                    h_C,
@@ -321,10 +321,12 @@ namespace rocRoller::Client::GEMMClient
 
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
         AssertFatal(problemParams.scaleA == Operations::ScaleMode::None
+                        || problemParams.scaleA == Operations::ScaleMode::SingleScale
                         || problemParams.scaleA == Operations::ScaleMode::Separate,
                     "Scale mode not supported!",
                     ShowValue(problemParams.scaleA));
         AssertFatal(problemParams.scaleB == Operations::ScaleMode::None
+                        || problemParams.scaleB == Operations::ScaleMode::SingleScale
                         || problemParams.scaleB == Operations::ScaleMode::Separate,
                     "Scale mode not supported!",
                     ShowValue(problemParams.scaleB));
@@ -357,8 +359,17 @@ namespace rocRoller::Client::GEMMClient
                 {size_t(problemParams.m), size_t(problemParams.k / elementsPerMXBlock)},
                 problemParams.transA == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
-            setCommandTensorArg(commandArgs, aScaleTag, descAScale, deviceScaleA.get());
+            setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
+        else if(problemParams.scaleA == Operations::ScaleMode::SingleScale)
+        {
+            auto scaleValue             = floatToScale(problemParams.scaleValueA);
+            auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
+            commandArgs.setArgument(aScaleTag.value(), ArgumentType::Value, scaleValue);
+
+            hostScaleA = {scaleValue};
+        }
+
         if(problemParams.scaleB == Operations::ScaleMode::Separate)
         {
             auto dataTypeB  = TypeInfo<A>::Var.dataType;
@@ -367,7 +378,15 @@ namespace rocRoller::Client::GEMMClient
                 {size_t(problemParams.k / elementsPerMXBlock), size_t(problemParams.n)},
                 problemParams.transB == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
-            setCommandTensorArg(commandArgs, bScaleTag, descBScale, deviceScaleB.get());
+            setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
+        }
+        else if(problemParams.scaleB == Operations::ScaleMode::SingleScale)
+        {
+            auto scaleValue             = floatToScale(problemParams.scaleValueB);
+            auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
+            commandArgs.setArgument(bScaleTag.value(), ArgumentType::Value, scaleValue);
+
+            hostScaleB = {scaleValue};
         }
 
         gemm->validateRunParameters(command, problemParams, runParams, commandKernel);
@@ -983,6 +1002,9 @@ int main(int argc, const char* argv[])
 
         .alpha = 2.0f,
         .beta  = 0.5f,
+
+        .scaleValueA = 1.0f,
+        .scaleValueB = 1.0f,
     };
 
     rocRoller::Client::GEMMClient::TypeParameters types;
@@ -1022,6 +1044,8 @@ int main(int argc, const char* argv[])
     app.add_option("-K,--K", problem.k, "Tensor size K.");
     app.add_option("--alpha", problem.alpha, "Alpha scalar.");
     app.add_option("--beta", problem.beta, "Beta scalar.");
+    app.add_option("--scaleValue_A", problem.scaleValueA, "Single scale value for A.");
+    app.add_option("--scaleValue_B", problem.scaleValueB, "Single scale value for B.");
 
     //
     // Problem types
@@ -1062,7 +1086,7 @@ int main(int argc, const char* argv[])
             types.scaleA = fromString<Operations::ScaleMode>(res[0]);
             return true;
         },
-        "Enable MX scaling of A matrix [None | Separate].",
+        "Enable MX scaling of A matrix [None | Separate | SingleScale].",
         "Default: None.");
     app.add_option(
         "--scale_B",
@@ -1070,7 +1094,7 @@ int main(int argc, const char* argv[])
             types.scaleB = fromString<Operations::ScaleMode>(res[0]);
             return true;
         },
-        "Enable MX scaling of B matrix [None | Separate].",
+        "Enable MX scaling of B matrix [None | Separate | SingleScale].",
         "Default: None.");
 
     //
@@ -1350,6 +1374,18 @@ int main(int argc, const char* argv[])
         types.transB  = solution.transB;
         types.scaleA  = solution.scaleA;
         types.scaleB  = solution.scaleB;
+    }
+
+    if(types.scaleA != Operations::ScaleMode::None && types.scaleB == Operations::ScaleMode::None)
+    {
+        types.scaleB        = Operations::ScaleMode::SingleScale;
+        problem.scaleValueB = 1.0f;
+    }
+
+    if(types.scaleB != Operations::ScaleMode::None && types.scaleA == Operations::ScaleMode::None)
+    {
+        types.scaleA        = Operations::ScaleMode::SingleScale;
+        problem.scaleValueA = 1.0f;
     }
 
     // Currently, we only support F32 accumulation

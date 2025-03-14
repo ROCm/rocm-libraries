@@ -806,7 +806,12 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
-                auto getWaveTile = [&](NaryArgument arg) {
+                auto getWaveTile = [&](NaryArgument arg) -> std::shared_ptr<WaveTile> {
+                    auto hasWave
+                        = m_graph->mapper.get(tag, Connections::typeArgument<WaveTile>(arg)) != -1;
+                    if(!hasWave)
+                        return nullptr;
+
                     auto [waveTag, wave] = m_graph->getDimension<WaveTile>(
                         tag, Connections::typeArgument<WaveTile>(arg));
                     auto [macTag, mac] = m_graph->getDimension<MacroTile>(
@@ -820,13 +825,25 @@ namespace rocRoller
                 auto waveA = getWaveTile(NaryArgument::LHS);
                 auto waveB = getWaveTile(NaryArgument::RHS);
 
-                AssertFatal(
-                    mult.scaleA == mult.scaleB, ShowValue(mult.scaleA), ShowValue(mult.scaleB));
+                AssertFatal(waveA && waveB, "Wavetile for LHS and/or RHS not found");
+
                 AssertFatal(mult.scaleA == Operations::ScaleMode::None
+                                || mult.scaleA == Operations::ScaleMode::SingleScale
                                 || mult.scaleA == Operations::ScaleMode::Separate,
                             ShowValue(mult.scaleA));
+                AssertFatal(mult.scaleB == Operations::ScaleMode::None
+                                || mult.scaleB == Operations::ScaleMode::SingleScale
+                                || mult.scaleB == Operations::ScaleMode::Separate,
+                            ShowValue(mult.scaleB));
 
-                bool scaled = mult.scaleA != Operations::ScaleMode::None;
+                AssertFatal((mult.scaleA == Operations::ScaleMode::None
+                             && mult.scaleB == Operations::ScaleMode::None)
+                                || (mult.scaleA != Operations::ScaleMode::None
+                                    && mult.scaleB != Operations::ScaleMode::None),
+                            "Both A and B must be scaled, or neither.");
+
+                bool scaled = mult.scaleA != Operations::ScaleMode::None
+                              || mult.scaleB != Operations::ScaleMode::None;
 
                 uint numElements = waveA->sizes[0] * waveB->sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
@@ -859,8 +876,34 @@ namespace rocRoller
                     auto waveScaleA = getWaveTile(NaryArgument::LHS_SCALE);
                     auto waveScaleB = getWaveTile(NaryArgument::RHS_SCALE);
 
-                    auto scaleA = std::make_shared<Expression::Expression>(waveScaleA);
-                    auto scaleB = std::make_shared<Expression::Expression>(waveScaleB);
+                    ExpressionPtr scaleA;
+                    if(waveScaleA)
+                    {
+                        scaleA = std::make_shared<Expression::Expression>(waveScaleA);
+                    }
+                    else
+                    {
+                        auto vgprTag = m_graph->mapper.get(tag, NaryArgument::LHS_SCALE);
+                        AssertFatal(vgprTag != -1);
+                        scaleA
+                            = m_context->registerTagManager()->getRegister(vgprTag)->expression();
+                    }
+
+                    ExpressionPtr scaleB;
+                    if(waveScaleB)
+                    {
+                        scaleB = std::make_shared<Expression::Expression>(waveScaleB);
+                    }
+                    else
+                    {
+                        auto vgprTag = m_graph->mapper.get(tag, NaryArgument::RHS_SCALE);
+                        AssertFatal(vgprTag != -1);
+                        scaleB
+                            = m_context->registerTagManager()->getRegister(vgprTag)->expression();
+                    }
+
+                    AssertFatal(scaleA);
+                    AssertFatal(scaleB);
 
                     expr = std::make_shared<Expression::Expression>(
                         Expression::ScaledMatrixMultiply(A, B, D->expression(), scaleA, scaleB));

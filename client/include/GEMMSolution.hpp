@@ -98,7 +98,8 @@ namespace rocRoller
 
                 virtual ABCDTags getABCDTags() const = 0;
 
-                using ABScaleTags = std::tuple<Operations::OperationTag, Operations::OperationTag>;
+                using ABScaleTags = std::tuple<std::optional<Operations::OperationTag>,
+                                               std::optional<Operations::OperationTag>>;
 
                 virtual ABScaleTags getABScaleTags() const = 0;
 
