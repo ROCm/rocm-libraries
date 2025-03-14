@@ -5,6 +5,10 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.33 (unreleased)
 
+### Optimized
+
+* Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
+
 ### Added
 
 * Added gfx950 support.

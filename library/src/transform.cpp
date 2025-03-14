@@ -432,17 +432,10 @@ void ExecPlan::ExecuteAsync(const rocfft_plan     plan,
     if(info)
         exec_info = *info;
 
-    // allocate stream for async operations if necessary
-    // for a single-device plan, we don't need to create
-    // additional streams or events
-    if(mgpuPlan)
+    // use the local stream if user didn't provide one
+    if(mgpuPlan && !exec_info.rocfft_stream)
     {
-        if(!exec_info.rocfft_stream)
-        {
-            this->stream.alloc();
-            exec_info.rocfft_stream = this->stream;
-        }
-        event.alloc();
+        exec_info.rocfft_stream = this->stream;
     }
 
     // TransformPowX below needs in_buffer, out_buffer to work with.
@@ -538,7 +531,7 @@ void ExecPlan::Wait()
 {
     // for a single-device plan, we don't need to synchronize
     // events
-    if(mgpuPlan)
+    if(mgpuPlan && event)
     {
         if(hipEventSynchronize(event) != hipSuccess)
             throw std::runtime_error("hipEventSynchronize failed");

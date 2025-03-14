@@ -526,8 +526,6 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan     plan,
                                     size_t                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
-    stream.alloc();
-    event.alloc();
 
     if(LOG_PLAN_ENABLED())
     {
@@ -613,7 +611,7 @@ void CommPointToPoint::Wait()
 {
     WaitCommRequests();
 
-    if(hipEventSynchronize(event) != hipSuccess)
+    if(event && hipEventSynchronize(event) != hipSuccess)
         throw std::runtime_error("hipEventSynchronize failed");
 }
 
@@ -641,8 +639,6 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
                                size_t                multiPlanIdx)
 {
     rocfft_scoped_device dev(srcLocation.device);
-    stream.alloc();
-    event.alloc();
 
     if(LOG_PLAN_ENABLED())
     {
@@ -726,8 +722,9 @@ void CommScatter::ExecuteAsync(const rocfft_plan     plan,
 #endif
         }
     }
-    // All work is enqueued to the stream, record the event on the stream
-    if(hipEventRecord(event, stream) != hipSuccess)
+    // All rank-local work is enqueued to the stream, record the
+    // event on the stream
+    if(event && hipEventRecord(event, stream) != hipSuccess)
         throw std::runtime_error("hipEventRecord failed");
 }
 
@@ -735,7 +732,7 @@ void CommScatter::Wait()
 {
     WaitCommRequests();
 
-    if(hipEventSynchronize(event) != hipSuccess)
+    if(event && hipEventSynchronize(event) != hipSuccess)
         throw std::runtime_error("hipEventSynchronize failed");
 }
 
@@ -769,9 +766,6 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
                               rocfft_execution_info info,
                               size_t                multiPlanIdx)
 {
-    streams.resize(ops.size());
-    events.resize(ops.size());
-
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommGather\n");
@@ -784,8 +778,6 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
         auto&       event  = events[opIdx];
 
         rocfft_scoped_device dev(op.srcLocation.device);
-        stream.alloc();
-        event.alloc();
 
         auto srcWithOffset  = ptr_offset(op.srcPtr.get(in_buffer, out_buffer, local_comm_rank),
                                         op.srcOffset,
@@ -859,9 +851,10 @@ void CommGather::ExecuteAsync(const rocfft_plan     plan,
 #endif
         }
 
-        // FIXME: we don't need events for MPI communications.
-        // All work for this stream is enqueued, record the event on the stream
-        if(hipEventRecord(event, stream) != hipSuccess)
+        // All work for this stream is enqueued, record the event on
+        // the stream.  The event is only allocated if necessary, so
+        // check it before recording.
+        if(event && hipEventRecord(event, stream) != hipSuccess)
             throw std::runtime_error("hipEventRecord failed");
     }
 }
@@ -872,7 +865,7 @@ void CommGather::Wait()
 
     for(const auto& event : events)
     {
-        if(hipEventSynchronize(event) != hipSuccess)
+        if(event && hipEventSynchronize(event) != hipSuccess)
             throw std::runtime_error("hipEventSynchronize failed");
     }
 }

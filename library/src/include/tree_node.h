@@ -1011,19 +1011,35 @@ struct MultiPlanItem
 // Communication operations
 struct CommPointToPoint : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
-
-    // number of elements to copy
-    size_t numElems;
-
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
-    size_t            srcOffset = 0;
-
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
-    size_t            destOffset = 0;
+    CommPointToPoint(int               local_comm_rank,
+                     rocfft_precision  _precision,
+                     rocfft_array_type _arrayType,
+                     size_t            _numElems,
+                     rocfft_location_t _srcLocation,
+                     BufferPtr         _srcPtr,
+                     size_t            _srcOffset,
+                     rocfft_location_t _destLocation,
+                     BufferPtr         _destPtr,
+                     size_t            _destOffset)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , numElems(_numElems)
+        , srcLocation(_srcLocation)
+        , srcPtr(_srcPtr)
+        , srcOffset(_srcOffset)
+        , destLocation(_destLocation)
+        , destPtr(_destPtr)
+        , destOffset(_destOffset)
+    {
+        // same-rank communication needs a stream and event to signal completion
+        if(local_comm_rank == srcLocation.comm_rank
+           && srcLocation.comm_rank == destLocation.comm_rank)
+        {
+            rocfft_scoped_device dev(srcLocation.device);
+            stream.alloc();
+            event.alloc();
+        }
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1045,6 +1061,19 @@ struct CommPointToPoint : public MultiPlanItem
     }
 
 private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+
+    // number of elements to copy
+    size_t numElems;
+
+    rocfft_location_t srcLocation;
+    BufferPtr         srcPtr;
+    size_t            srcOffset = 0;
+
+    rocfft_location_t destLocation;
+    BufferPtr         destPtr;
+    size_t            destOffset = 0;
     // Stream to run the async operation in
     hipStream_wrapper_t stream;
     // Event to signal when the async operations are finished.
@@ -1055,11 +1084,17 @@ private:
 // create an MPI group with those ranks.
 struct CommScatter : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
+    CommScatter(rocfft_precision  _precision,
+                rocfft_array_type _arrayType,
 
-    rocfft_location_t srcLocation;
-    BufferPtr         srcPtr;
+                rocfft_location_t _srcLocation,
+                BufferPtr         _srcPtr)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , srcLocation(_srcLocation)
+        , srcPtr(_srcPtr)
+    {
+    }
 
     // one or more ranks to send data to
     struct ScatterOp
@@ -1086,7 +1121,22 @@ struct CommScatter : public MultiPlanItem
         // Number of elements to copy
         size_t numElems;
     };
-    std::vector<ScatterOp> ops;
+
+    // add an operation to scatter to a destination
+    void AddOperation(int local_comm_rank, ScatterOp&& op)
+    {
+        // same-rank communication needs a stream and event to signal completion
+        if(srcLocation.comm_rank == local_comm_rank
+           && op.destLocation.comm_rank == srcLocation.comm_rank)
+        {
+            rocfft_scoped_device dev(srcLocation.device);
+            if(!stream)
+                stream.alloc();
+            if(!event)
+                event.alloc();
+        }
+        ops.emplace_back(std::move(op));
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1116,6 +1166,13 @@ struct CommScatter : public MultiPlanItem
     }
 
 private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+    rocfft_location_t srcLocation;
+    BufferPtr         srcPtr;
+
+    std::vector<ScatterOp> ops;
+
     // Stream to run the async operations in
     hipStream_wrapper_t stream;
     // Event to signal when the async operations are finished.
@@ -1126,11 +1183,17 @@ private:
 // create an MPI group with those ranks.
 struct CommGather : public MultiPlanItem
 {
-    rocfft_precision  precision;
-    rocfft_array_type arrayType;
-
-    rocfft_location_t destLocation;
-    BufferPtr         destPtr;
+    CommGather(int               local_comm_rank,
+               rocfft_precision  _precision,
+               rocfft_array_type _arrayType,
+               rocfft_location_t _destLocation,
+               BufferPtr         _destPtr)
+        : precision(_precision)
+        , arrayType(_arrayType)
+        , destLocation(_destLocation)
+        , destPtr(_destPtr)
+    {
+    }
 
     // one or more ranks to get data from
     struct GatherOp
@@ -1157,7 +1220,27 @@ struct CommGather : public MultiPlanItem
         // Number of elements to copy
         size_t numElems;
     };
-    std::vector<GatherOp> ops;
+
+    // add an operation to gather from a source
+    void AddOperation(int local_comm_rank, GatherOp&& op)
+    {
+        // allocate space to allow each gather operation to have a
+        // stream/event, though we only allocate streams/events for
+        // rank-local communication
+        streams.resize(streams.size() + 1);
+        events.resize(events.size() + 1);
+
+        // look at the actual operation and allocate stream/event for
+        // rank-local communication, so we can get completion information
+        if(destLocation.comm_rank == op.srcLocation.comm_rank
+           && op.srcLocation.comm_rank == local_comm_rank)
+        {
+            rocfft_scoped_device dev(op.srcLocation.device);
+            streams.back().alloc();
+            events.back().alloc();
+        }
+        ops.emplace_back(std::move(op));
+    }
 
     void ExecuteAsync(const rocfft_plan     plan,
                       void*                 in_buffer[],
@@ -1180,6 +1263,15 @@ struct CommGather : public MultiPlanItem
                       return op.srcLocation.comm_rank == comm_rank;
                   });
     }
+
+private:
+    rocfft_precision  precision;
+    rocfft_array_type arrayType;
+
+    rocfft_location_t destLocation;
+    BufferPtr         destPtr;
+
+    std::vector<GatherOp> ops;
 
     // Streams to run the async operations in - since each memcpy is
     // coming from a different source device, each needs a separate
@@ -1237,6 +1329,23 @@ struct CommAllToAllv : public MultiPlanItem
 // memory allocated for things like kernel arguments and twiddles.
 struct ExecPlan : public MultiPlanItem
 {
+    ExecPlan(int local_comm_rank, bool _mgpuPlan, rocfft_location_t _location)
+        : location(_location)
+        , mgpuPlan(_mgpuPlan)
+    {
+        // in a multi-GPU plan, this plan is just one piece of the overall
+        // distributed FFT.  need to allocate stream/event for completion
+        // signalling
+        if(mgpuPlan && location.comm_rank == local_comm_rank)
+        {
+            // if the user provides a stream for us at execute time, we
+            // might not use this stream.  but allocate it during plan
+            // creation because it can be slow to do it during execution
+            rocfft_scoped_device dev(location.device);
+            stream.alloc();
+            event.alloc();
+        }
+    }
     // device where this work will be executed
     rocfft_location_t location;
 

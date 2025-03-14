@@ -1044,12 +1044,9 @@ std::unique_ptr<ExecPlan> transpose_brick(int                        local_comm_
                                           const std::vector<size_t>& strideOut,
                                           std::string&&              description)
 {
-    auto      execPlanMultiItem = std::make_unique<ExecPlan>();
+    auto      execPlanMultiItem = std::make_unique<ExecPlan>(local_comm_rank, true, location);
     ExecPlan& execPlan          = *execPlanMultiItem;
-
-    execPlan.location   = location;
-    execPlan.deviceProp = get_curr_device_prop();
-    execPlan.mgpuPlan   = true;
+    execPlan.deviceProp         = get_curr_device_prop();
 
     // add input buffers provided by users
     execPlan.inputPtr  = inputPtr;
@@ -1313,17 +1310,7 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
 
     const auto local_comm_rank = get_local_comm_rank();
 
-    // Create gather operation
-    auto gatherPtr       = std::make_unique<CommGather>();
-    auto gather          = gatherPtr.get();
-    gather->precision    = precision;
-    gather->arrayType    = arrayType;
-    gather->destLocation = currentLocation;
-    gather->description  = "Gather " + std::to_string(bricks.size()) + " bricks";
-
-    // Add gather to the plan first - we will add operations to it later
-    size_t gatherIdx = AddMultiPlanItem(std::move(gatherPtr), antecedents);
-
+    BufferPtr  gatherDest;
     const bool gatherToTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& brick) {
               return !brick.is_contiguous()
@@ -1338,12 +1325,21 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                                   currentLocation,
                                                   product(field_length.begin(), field_length.end()),
                                                   elem_size);
-        gather->destPtr = BufferPtr::temp(gatherDestBuf->data());
+        gatherDest = BufferPtr::temp(gatherDestBuf->data());
     }
     else
     {
-        gather->destPtr = output;
+        gatherDest = output;
     }
+
+    // Create gather operation
+    auto gatherPtr = std::make_unique<CommGather>(
+        local_comm_rank, precision, arrayType, currentLocation, gatherDest);
+    auto gather         = gatherPtr.get();
+    gather->description = "Gather " + std::to_string(bricks.size()) + " bricks";
+
+    // Add gather to the plan first - we will add operations to it later
+    size_t gatherIdx = AddMultiPlanItem(std::move(gatherPtr), antecedents);
 
     // We'll be packing the brick data contiguously into the output,
     // so keep track of how much of the output we've filled up.
@@ -1364,8 +1360,9 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
         if(brick.is_contiguous())
         {
             // Contiguous brick, just copy the data
-            gather->ops.emplace_back(
-                brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems());
+            gather->AddOperation(
+                local_comm_rank,
+                {brick.location, outputBufs[brickIdx], 0, gatherOffset, brick.count_elems()});
         }
         else
         {
@@ -1391,11 +1388,12 @@ std::vector<size_t> rocfft_plan_t::GatherBricksToField(rocfft_location_t current
                                    antecedents);
             AddAntecedent(gatherIdx, packIdx);
 
-            gather->ops.emplace_back(brick.location,
-                                     BufferPtr::temp(gatherPackBufs.back().data()),
-                                     0,
-                                     gatherOffset,
-                                     brick.count_elems());
+            gather->AddOperation(local_comm_rank,
+                                 {brick.location,
+                                  BufferPtr::temp(gatherPackBufs.back().data()),
+                                  0,
+                                  gatherOffset,
+                                  brick.count_elems()});
         }
 
         // if brick is not contiguous in the field, it was packed to
@@ -1451,18 +1449,7 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
 
     const auto local_comm_rank = get_local_comm_rank();
 
-    // create scatter operation
-    auto scatterPtr = std::make_unique<CommScatter>();
-    auto scatter    = scatterPtr.get();
-
-    scatter->precision   = precision;
-    scatter->arrayType   = arrayType;
-    scatter->srcLocation = currentLocation;
-    scatter->description = "Scatter " + std::to_string(bricks.size()) + " bricks";
-
-    // add scatter to the multi-plan first, add operations afterwards
-    auto scatterIdx = AddMultiPlanItem(std::move(scatterPtr), antecedents);
-
+    BufferPtr  scatterSrc;
     const bool scatterFromTemp
         = std::any_of(bricks.begin(), bricks.end(), [&](const rocfft_brick_t& b) {
               return !b.is_contiguous_in_field(field_length, field_stride);
@@ -1475,13 +1462,24 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                                                   currentLocation,
                                                   product(field_length.begin(), field_length.end()),
                                                   elem_size);
-        scatter->srcPtr = BufferPtr::temp(scatterSrcBuf->data());
+        scatterSrc = BufferPtr::temp(scatterSrcBuf->data());
     }
     else
     {
-        scatter->srcPtr = input;
+        scatterSrc = input;
     }
 
+    // create scatter operation
+    auto scatterPtr
+        = std::make_unique<CommScatter>(precision, arrayType, currentLocation, scatterSrc);
+    auto scatter         = scatterPtr.get();
+    scatter->description = "Scatter " + std::to_string(bricks.size()) + " bricks";
+
+    // add scatter to the multi-plan first, add operations afterwards
+    auto scatterIdx = AddMultiPlanItem(std::move(scatterPtr), antecedents);
+
+    // we'll be packing the brick data contiguously into the output,
+    // so keep track of how much of the output we've filled up
     size_t scatterOffset = 0;
 
     for(size_t brickIdx = 0; brickIdx < bricks.size(); ++brickIdx)
@@ -1491,8 +1489,9 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
         if(brick.is_contiguous_in_field(field_length, field_stride))
         {
             // contiguous brick, just copy the data
-            scatter->ops.emplace_back(
-                brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems());
+            scatter->AddOperation(
+                local_comm_rank,
+                {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
         }
         else
         {
@@ -1519,8 +1518,9 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
             // same shape, then there's no need for unpacking
             if(brick.is_contiguous())
             {
-                scatter->ops.emplace_back(
-                    brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems());
+                scatter->AddOperation(
+                    local_comm_rank,
+                    {brick.location, outputBufs[brickIdx], scatterOffset, 0, brick.count_elems()});
             }
             else
             {
@@ -1529,11 +1529,12 @@ std::vector<size_t> rocfft_plan_t::ScatterFieldToBricks(rocfft_location_t       
                     tempBuffers, local_comm_rank, brick.location, brick.count_elems(), elem_size);
 
                 // send the data
-                scatter->ops.emplace_back(brick.location,
-                                          BufferPtr::temp(scatterPackBufs.back().data()),
-                                          scatterOffset,
-                                          0,
-                                          brick.count_elems());
+                scatter->AddOperation(local_comm_rank,
+                                      {brick.location,
+                                       BufferPtr::temp(scatterPackBufs.back().data()),
+                                       scatterOffset,
+                                       0,
+                                       brick.count_elems()});
 
                 // unpack data after sending
                 description = "unpack brick " + std::to_string(brickIdx) + " after scatter";
@@ -1715,15 +1716,15 @@ static std::unique_ptr<ExecPlan> BuildSingleDevicePlan(NodeMetaData&         roo
                                                        rocfft_location_t     location,
                                                        rocfft_transform_type transformType,
                                                        LoadOps&              loadOps,
-                                                       StoreOps&             storeOps)
+                                                       StoreOps&             storeOps,
+                                                       bool                  partOfMultiPlan)
 {
     rocfft_scoped_device dev(location.device);
 
-    auto      execPlanMultiItem = std::make_unique<ExecPlan>();
-    ExecPlan& execPlan          = *execPlanMultiItem;
+    auto execPlanMultiItem = std::make_unique<ExecPlan>(local_comm_rank, partOfMultiPlan, location);
+    ExecPlan& execPlan     = *execPlanMultiItem;
     try
     {
-        execPlan.location   = location;
         execPlan.deviceProp = rootPlanData.deviceProp;
         execPlan.rootPlan   = NodeFactory::CreateExplicitNode(rootPlanData, nullptr);
 
@@ -1860,7 +1861,8 @@ static size_t C2CBrickOneDimension(rocfft_plan_t&             plan,
                                             location,
                                             plan.transformType,
                                             plan.desc.loadOps,
-                                            plan.desc.storeOps);
+                                            plan.desc.storeOps,
+                                            true);
     singlePlan->mgpuPlan  = true;
     singlePlan->inputPtr  = input;
     singlePlan->outputPtr = output;
@@ -2059,14 +2061,16 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
                 = "pack " + std::to_string(inBrickIdx) + " + " + std::to_string(outBrickIdx);
 
             // send packed data
-            auto sendOp          = std::make_unique<CommPointToPoint>();
-            sendOp->precision    = precision;
-            sendOp->arrayType    = desc.inArrayType;
-            sendOp->numElems     = intersection.count_elems();
-            sendOp->srcLocation  = inBrick.location;
-            sendOp->srcPtr       = BufferPtr::temp(pack.data());
-            sendOp->destLocation = outBrick.location;
-            sendOp->destPtr      = BufferPtr::temp(recv.data());
+            auto sendOp = std::make_unique<CommPointToPoint>(local_comm_rank,
+                                                             precision,
+                                                             desc.inArrayType,
+                                                             intersection.count_elems(),
+                                                             inBrick.location,
+                                                             BufferPtr::temp(pack.data()),
+                                                             0,
+                                                             outBrick.location,
+                                                             BufferPtr::temp(recv.data()),
+                                                             0);
 
             auto sendIdx              = AddMultiPlanItem(std::move(sendOp), {packIdx});
             multiPlan[sendIdx]->group = itemGroup;
@@ -2963,7 +2967,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
                                                           rocfft_location_t::rank0_current_device(),
                                                           plan->transformType,
                                                           plan->desc.loadOps,
-                                                          plan->desc.storeOps);
+                                                          plan->desc.storeOps,
+                                                          false);
             plan->AddMultiPlanItem(std::move(singleDevicePlan), {});
         }
         else
@@ -2985,7 +2990,8 @@ rocfft_status rocfft_plan_create_internal(rocfft_plan                   plan,
                                             rocfft_location_t::rank0_current_device(),
                                             plan->transformType,
                                             plan->desc.loadOps,
-                                            plan->desc.storeOps);
+                                            plan->desc.storeOps,
+                                            true);
 
                 plan->GatherScatterSingleDevicePlan(std::move(singleDevicePlan));
             }
