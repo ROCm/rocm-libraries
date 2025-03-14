@@ -279,6 +279,10 @@ namespace
         {
             return Tensile::LazyLoadingInit::gfx942;
         }
+        else if(deviceString.find("gfx950") != std::string::npos)
+        {
+            return Tensile::LazyLoadingInit::gfx950;
+        }
         else if(deviceString.find("gfx1010") != std::string::npos)
         {
             return Tensile::LazyLoadingInit::gfx1010;
