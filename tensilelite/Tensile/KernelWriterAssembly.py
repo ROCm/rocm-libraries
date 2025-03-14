@@ -487,10 +487,16 @@ class KernelWriterAssembly(KernelWriter):
          or kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat():
         module.add(self.defineSgpr("PackKForV0", 1))
         module.add(self.defineSgpr("PackKForV1", 1))
+        if kernel["StreamK"] != 0:
+          self.states.nonPostLoopSgpr.append("PackKForV0")
+          self.states.nonPostLoopSgpr.append("PackKForV1")
         if (self.states.lrvwTileA > 2 or self.states.lrvwTileB > 2 or self.states.lrvwTileMetadata > 2) and \
             (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
           module.add(self.defineSgpr("PackKForV2", 1))
           module.add(self.defineSgpr("PackKForV3", 1))
+          if kernel["StreamK"] != 0:
+            self.states.nonPostLoopSgpr.append("PackKForV2")
+            self.states.nonPostLoopSgpr.append("PackKForV3")
 
     if kernel["ProblemType"]["StochasticRounding"]:
       module.add(self.defineSgpr("RNDSeed", 1))
