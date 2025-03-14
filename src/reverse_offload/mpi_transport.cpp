@@ -94,7 +94,7 @@ void MPITransport::submitRequestsToMPI() {
     case RO_NET_PUT:
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, true);
+             next_element.status, true);
       DPRINTF("Received PUT dst %p src %p size %lu pe %d win_id %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE, next_element.ro_net_win_id);
@@ -109,7 +109,7 @@ void MPITransport::submitRequestsToMPI() {
 
       putMem(next_element.dst, source_buffer, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, true, true);
+             next_element.status, true, true);
       DPRINTF("Received P dst %p value %p pe %d\n", next_element.dst,
               next_element.src, next_element.PE);
       break;
@@ -117,14 +117,14 @@ void MPITransport::submitRequestsToMPI() {
     case RO_NET_GET:
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, true);
+             next_element.status, true);
       DPRINTF("Received GET dst %p src %p size %lu pe %d\n", next_element.dst,
               next_element.src, next_element.ol1.size, next_element.PE);
       break;
     case RO_NET_PUT_NBI:
       putMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, false);
+             next_element.status, false);
       DPRINTF("Received PUT NBI dst %p src %p size %lu pe %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
@@ -132,7 +132,7 @@ void MPITransport::submitRequestsToMPI() {
     case RO_NET_GET_NBI:
       getMem(next_element.dst, next_element.src, next_element.ol1.size,
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, false);
+             next_element.status, false);
       DPRINTF("Received GET NBI dst %p src %p size %lu pe %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.PE);
@@ -141,7 +141,7 @@ void MPITransport::submitRequestsToMPI() {
       amoFOP(next_element.dst, next_element.src,
              const_cast<unsigned long long *>(&next_element.ol1.atomic_value),
              next_element.PE, next_element.ro_net_win_id, queue_idx,
-             next_element.threadId, true,
+             next_element.status, true,
              static_cast<ROCSHMEM_OP>(next_element.op),
              static_cast<ro_net_types>(next_element.datatype));
       DPRINTF("Received AMO dst %p src %p Val %llu pe %d\n", next_element.dst,
@@ -151,7 +151,7 @@ void MPITransport::submitRequestsToMPI() {
       amoFCAS(next_element.dst, next_element.src,
               const_cast<unsigned long long *>(&next_element.ol1.atomic_value),
               next_element.PE, next_element.ro_net_win_id, queue_idx,
-              next_element.threadId, true,
+              next_element.status, true,
               const_cast<void **>(&next_element.ol2.pWrk),
               static_cast<ro_net_types>(next_element.datatype));
       DPRINTF("Received F_CSWAP dst %p src %p Val %llu pe %d cond %ld\n",
@@ -165,7 +165,7 @@ void MPITransport::submitRequestsToMPI() {
                      next_element.team_comm,
                      static_cast<ROCSHMEM_OP>(next_element.op),
                      static_cast<ro_net_types>(next_element.datatype),
-                     next_element.threadId, true);
+                     next_element.status, true);
       DPRINTF("Received FLOAT_SUM_TEAM_REDUCE dst %p src %p size %lu team %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.team_comm);
@@ -177,7 +177,7 @@ void MPITransport::submitRequestsToMPI() {
                 next_element.PE_size, next_element.ol2.pWrk, next_element.pSync,
                 static_cast<ROCSHMEM_OP>(next_element.op),
                 static_cast<ro_net_types>(next_element.datatype),
-                next_element.threadId, true);
+                next_element.status, true);
       DPRINTF(
           "Received FLOAT_SUM_TO_ALL dst %p src %p size %lu "
           "PE_start %d, logPE_stride %d, PE_size %d, pWrk %p, pSync %p\n",
@@ -190,7 +190,7 @@ void MPITransport::submitRequestsToMPI() {
                      next_element.ro_net_win_id, queue_idx,
                      next_element.team_comm, next_element.PE_root,
                      static_cast<ro_net_types>(next_element.datatype),
-                     next_element.threadId, true);
+                     next_element.status, true);
       DPRINTF(
           "Received TEAM_BROADCAST dst %p src %p size %lu "
           "team %d, PE_root %d \n",
@@ -203,7 +203,7 @@ void MPITransport::submitRequestsToMPI() {
                 next_element.PE, next_element.logPE_stride,
                 next_element.PE_size, next_element.PE_root, next_element.pSync,
                 static_cast<ro_net_types>(next_element.datatype),
-                next_element.threadId, true);
+                next_element.status, true);
       DPRINTF(
           "Received BROADCAST dst %p src %p size %lu PE_start %d, "
           "logPE_stride %d, PE_size %d, PE_root %d, pSync %p\n",
@@ -216,7 +216,7 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ro_net_win_id, queue_idx, next_element.team_comm,
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
-               next_element.threadId, true);
+               next_element.status, true);
       DPRINTF("Received ALLTOALL  dst %p src %p size %lu team %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.team_comm);
@@ -226,26 +226,26 @@ void MPITransport::submitRequestsToMPI() {
                next_element.ro_net_win_id, queue_idx, next_element.team_comm,
                next_element.ol2.pWrk,
                static_cast<ro_net_types>(next_element.datatype),
-               next_element.threadId, true);
+               next_element.status, true);
       DPRINTF("Received FCOLLECT  dst %p src %p size %lu team %d\n",
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.team_comm);
       break;
     case RO_NET_BARRIER_ALL:
-      barrier(queue_idx, next_element.threadId, true, ro_net_comm_world);
+      barrier(queue_idx, next_element.status, true, ro_net_comm_world);
       DPRINTF("Received Barrier_all\n");
       break;
     case RO_NET_SYNC:
-      barrier(queue_idx, next_element.threadId, true, next_element.team_comm);
+      barrier(queue_idx, next_element.status, true, next_element.team_comm);
       DPRINTF("Received Sync\n");
       break;
     case RO_NET_FENCE:
     case RO_NET_QUIET:
-      quiet(queue_idx, next_element.threadId);
+      quiet(queue_idx, next_element.status);
       DPRINTF("Received FENCE/QUIET\n");
       break;
     case RO_NET_FINALIZE:
-      quiet(queue_idx, next_element.threadId);
+      quiet(queue_idx, next_element.status);
       DPRINTF("Received Finalize\n");
       break;
     default:
@@ -256,7 +256,7 @@ void MPITransport::submitRequestsToMPI() {
 }
 
 void MPITransport::initTransport(int num_queues, BackendProxyT *proxy) {
-  waiting_quiet.resize(num_queues, std::vector<int>());
+  waiting_quiet.resize(num_queues, std::vector<volatile char *>());
   outstanding.resize(num_queues, 0);
   transport_up = false;
 
@@ -333,13 +333,13 @@ void MPITransport::global_exit(int status) {
   MPI_Abort(ro_net_comm_world, status);
 }
 
-void MPITransport::barrier(int blockId, int threadId, bool blocking,
-                             MPI_Comm team) {
+void MPITransport::barrier(int contextId, volatile char *status, bool blocking,
+                           MPI_Comm team) {
   MPI_Request request{};
   NET_CHECK(MPI_Ibarrier(team, &request));
 
-  requests.push_back({request, {threadId, blockId, blocking}});
-  outstanding[blockId]++;
+  requests.push_back({request, {status, contextId, blocking}});
+  outstanding[contextId]++;
 }
 
 MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
@@ -397,10 +397,10 @@ static MPI_Datatype convertType(ro_net_types type) {
 }
 
 void MPITransport::reduction(void *dst, void *src, int size, int pe,
-                               int win_id, int blockId, int start, int logPstride,
-                               int sizePE, void *pWrk, long *pSync,
-                               ROCSHMEM_OP op, ro_net_types type, int threadId,
-                               bool blocking) {
+                             int win_id, int contextId, int start,
+                             int logPstride, int sizePE, void *pWrk,
+                             long *pSync, ROCSHMEM_OP op, ro_net_types type,
+                             volatile char *status, bool blocking) {
   MPI_Request request{};
   MPI_Op mpi_op{get_mpi_op(op)};
   MPI_Datatype mpi_type{convertType(type)};
@@ -413,14 +413,15 @@ void MPITransport::reduction(void *dst, void *src, int size, int pe,
     NET_CHECK(MPI_Iallreduce(src, dst, size, mpi_type, mpi_op, comm, &request));
   }
 
-  requests.push_back({request, {threadId, blockId, blocking}});
-  outstanding[blockId]++;
+  requests.push_back({request, {status, contextId, blocking}});
+  outstanding[contextId]++;
 }
 
 void MPITransport::broadcast(void *dst, void *src, int size, int pe,
-                               int win_id, int blockId, int start, int logPstride,
-                               int sizePE, int root, long *pSync,
-                               ro_net_types type, int threadId, bool blocking) {
+                             int win_id, int contextId, int start,
+                             int logPstride, int sizePE, int root, long *pSync,
+                             ro_net_types type, volatile char *status,
+                             bool blocking) {
   MPI_Comm comm{createComm(start, 1 << logPstride, sizePE)};
 
   int new_rank{};
@@ -437,15 +438,15 @@ void MPITransport::broadcast(void *dst, void *src, int size, int pe,
   MPI_Datatype mpi_type{convertType(type)};
   NET_CHECK(MPI_Ibcast(data, size, mpi_type, root, comm, &request));
 
-  requests.push_back({request, {threadId, blockId, blocking}});
+  requests.push_back({request, {status, contextId, blocking}});
 
-  outstanding[blockId]++;
+  outstanding[contextId]++;
 }
 
 void MPITransport::team_reduction(void *dst, void *src, int size, int win_id,
-                                    int blockId, MPI_Comm team, ROCSHMEM_OP op,
-                                    ro_net_types type, int threadId,
-                                    bool blocking) {
+                                  int contextId, MPI_Comm team, ROCSHMEM_OP op,
+                                  ro_net_types type, volatile char* status,
+                                  bool blocking) {
   MPI_Request request{};
 
   MPI_Op mpi_op{get_mpi_op(op)};
@@ -459,15 +460,15 @@ void MPITransport::team_reduction(void *dst, void *src, int size, int win_id,
     NET_CHECK(MPI_Iallreduce(src, dst, size, mpi_type, mpi_op, comm, &request));
   }
 
-  requests.push_back({request, {threadId, blockId, blocking}});
+  requests.push_back({request, {status, contextId, blocking}});
 
-  outstanding[blockId]++;
+  outstanding[contextId]++;
 }
 
 void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
-                                    int blockId, MPI_Comm team, int root,
-                                    ro_net_types type, int threadId,
-                                    bool blocking) {
+                                  int contextId, MPI_Comm team, int root,
+                                  ro_net_types type, volatile char *status,
+                                  bool blocking) {
   MPI_Comm comm{team};
   int new_rank{};
   MPI_Comm_rank(comm, &new_rank);
@@ -482,14 +483,15 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   MPI_Request request{};
   NET_CHECK(MPI_Ibcast(data, size, mpi_type, root, comm, &request));
 
-  requests.push_back({request, {threadId, blockId, blocking}});
+  requests.push_back({request, {status, contextId, blocking}});
 
-  outstanding[blockId]++;
+  outstanding[contextId]++;
 }
 
 void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
-                              int blockId, MPI_Comm team, void *ata_buffptr,
-                              ro_net_types type, int threadId, bool blocking) {
+                            int contextId, MPI_Comm team, void *ata_buffptr,
+                            ro_net_types type, volatile char *status,
+                            bool blocking) {
   int pe_size{};
   NET_CHECK(MPI_Comm_size(team, &pe_size));
 
@@ -502,24 +504,24 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
 #ifdef A2A_HEURISTICS
   if ((pe_size >= 8 || type_size * size < 2048) &&
       num_clust * clust_size == pe_size) {
-    return alltoall_gcen(dst, src, size, win_id, blockId, team, ata_buffptr, type,
-                         threadId, blocking);
+    return alltoall_gcen(dst, src, size, win_id, contextId, team, ata_buffptr,
+                         type, status, blocking);
   } else if (size <= 512) {
 #endif // A2A_HEURISTICS
-    return alltoall_mpi(dst, src, size, blockId, team, ata_buffptr, type,
-                        threadId, blocking);
+    return alltoall_mpi(dst, src, size, contextId, team, ata_buffptr, type,
+                        status, blocking);
 #ifdef A2A_HEURISTICS
   } else {
-    return alltoall_broadcast(dst, src, size, win_id, blockId, team, ata_buffptr,
-                              type, threadId, blocking);
+    return alltoall_broadcast(dst, src, size, win_id, contextId, team,
+                              ata_buffptr, type, status, blocking);
   }
 #endif // A2A_HEURISTICS
 }
 
 void MPITransport::alltoall_broadcast(void *dst, void *src, int size,
-                                        int win_id, int blockId, MPI_Comm team,
-                                        void *ata_buffptr, ro_net_types type,
-                                        int threadId, bool blocking) {
+                                      int win_id, int contextId, MPI_Comm team,
+                                      void *ata_buffptr, ro_net_types type,
+                                      volatile char *status, bool blocking) {
   auto *bp{backend_proxy->get()};
 
   MPI_Comm comm{team};
@@ -563,26 +565,26 @@ void MPITransport::alltoall_broadcast(void *dst, void *src, int size,
   NET_CHECK(MPI_Waitall(pe_size, pe_req.data(), MPI_STATUSES_IGNORE));
   NET_CHECK(MPI_Win_flush_all(bp->heap_window_info[win_id]->get_win()));
 
-  barrier(blockId, threadId, blocking, comm);
+  barrier(contextId, status, blocking, comm);
 }
 
-void MPITransport::alltoall_mpi(void *dst, void *src, int size, int blockId,
-                                  MPI_Comm team, void *ata_buffptr,
-                                  ro_net_types type, int threadId,
-                                  bool blocking) {
+void MPITransport::alltoall_mpi(void *dst, void *src, int size, int contextId,
+                                MPI_Comm team, void *ata_buffptr,
+                                ro_net_types type, volatile char *status,
+                                bool blocking) {
   int new_rank{};
   NET_CHECK(MPI_Comm_rank(team, &new_rank));
   int pe_size{};
   NET_CHECK(MPI_Comm_size(team, &pe_size));
   MPI_Datatype mpi_type{convertType(type)};
   NET_CHECK(MPI_Alltoall(src, size, mpi_type, dst, size, mpi_type, team));
-  quiet(blockId, threadId);
+  quiet(contextId, status);
 }
 
 void MPITransport::alltoall_gcen(void *dst, void *src, int size, int win_id,
-                                   int blockId, MPI_Comm team, void *ata_buffptr,
-                                   ro_net_types type, int threadId,
-                                   bool blocking) {
+                                 int contextId, MPI_Comm team,
+                                 void *ata_buffptr, ro_net_types type,
+                                 volatile char *status, bool blocking) {
   auto *bp{backend_proxy->get()};
 
   int new_rank{};
@@ -664,14 +666,14 @@ void MPITransport::alltoall_gcen(void *dst, void *src, int size, int win_id,
   MPI_Comm comm_ring{createComm(world_ranks[new_rank % clust_size],
                                 stride * clust_size, num_clust)};
 
-  barrier(blockId, threadId, false, comm_cluster);
-  barrier(blockId, threadId, blocking, comm_ring);
+  barrier(contextId, status, false, comm_cluster);
+  barrier(contextId, status, blocking, comm_ring);
 }
 
 void MPITransport::alltoall_gcen2(void *dst, void *src, int size, int win_id,
-                                    int blockId, MPI_Comm team, void *ata_buffptr,
-                                    ro_net_types type, int threadId,
-                                    bool blocking) {
+                                  int contextId, MPI_Comm team,
+                                  void *ata_buffptr, ro_net_types type,
+                                  volatile char *status, bool blocking) {
   // GPU-centric alltoall with in-place blocking synchronization
   auto *bp{backend_proxy->get()};
   int new_rank, pe_size;
@@ -759,12 +761,13 @@ void MPITransport::alltoall_gcen2(void *dst, void *src, int size, int win_id,
   MPI_Comm comm_ring = createComm(world_ranks[new_rank % clust_size],
                                   stride * clust_size, num_clust);
   // Now wait for completion
-  barrier(blockId, threadId, blocking, comm_ring);
+  barrier(contextId, status, blocking, comm_ring);
 }
 
 void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
-                              int blockId, MPI_Comm team, void *ata_buffptr,
-                              ro_net_types type, int threadId, bool blocking) {
+                            int contextId, MPI_Comm team, void *ata_buffptr,
+                            ro_net_types type, volatile char *status,
+                            bool blocking) {
   int pe_size, type_size;
   MPI_Comm comm = team;
   NET_CHECK(MPI_Comm_size(comm, &pe_size));
@@ -780,21 +783,21 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   // In most cases the MPI implementation is optimal
   // But it crashes for > 512 messages
   if (size <= 512) {
-    fcollect_mpi(dst, src, size, blockId, team, ata_buffptr, type,
-                        threadId, blocking);
+    fcollect_mpi(dst, src, size, contextId, team, ata_buffptr, type,
+                 status, blocking);
   } else if (num_clust * clust_size == pe_size) {
-    fcollect_gcen(dst, src, size, win_id, blockId, team, ata_buffptr, type,
-                         threadId, blocking);
+    fcollect_gcen(dst, src, size, win_id, contextId, team, ata_buffptr, type,
+                  status, blocking);
   } else {
-    fcollect_broadcast(dst, src, size, win_id, blockId, team, ata_buffptr,
-                              type, threadId, blocking);
+    fcollect_broadcast(dst, src, size, win_id, contextId, team, ata_buffptr,
+                       type, status, blocking);
   }
 }
 
 void MPITransport::fcollect_broadcast(void *dst, void *src, int size,
-                                        int win_id, int blockId, MPI_Comm team,
-                                        void *ata_buffptr, ro_net_types type,
-                                        int threadId, bool blocking) {
+                                      int win_id, int contextId, MPI_Comm team,
+                                      void *ata_buffptr, ro_net_types type,
+                                      volatile char *status, bool blocking) {
   // Broadcast implementation of fcollect
   auto *bp{backend_proxy->get()};
   int new_rank, pe_size;
@@ -837,13 +840,13 @@ void MPITransport::fcollect_broadcast(void *dst, void *src, int size,
   NET_CHECK(MPI_Win_flush_all(bp->heap_window_info[win_id]->get_win()));
 
   // Now wait for completion
-  barrier(blockId, threadId, blocking, comm);
+  barrier(contextId, status, blocking, comm);
 }
 
-void MPITransport::fcollect_mpi(void *dst, void *src, int size, int blockId,
-                                  MPI_Comm team, void *ata_buffptr,
-                                  ro_net_types type, int threadId,
-                                  bool blocking) {
+void MPITransport::fcollect_mpi(void *dst, void *src, int size, int contextId,
+                                MPI_Comm team, void *ata_buffptr,
+                                ro_net_types type, volatile char *status,
+                                bool blocking) {
   // MPI's implementation of fcollect
   int new_rank, pe_size;
 
@@ -852,13 +855,13 @@ void MPITransport::fcollect_mpi(void *dst, void *src, int size, int blockId,
   NET_CHECK(MPI_Comm_rank(comm, &new_rank));
   NET_CHECK(MPI_Comm_size(comm, &pe_size));
   NET_CHECK(MPI_Allgather(src, size, mpi_type, dst, size, mpi_type, comm));
-  quiet(blockId, threadId);
+  quiet(contextId, status);
 }
 
 void MPITransport::fcollect_gcen(void *dst, void *src, int size, int win_id,
-                                   int blockId, MPI_Comm team, void *ata_buffptr,
-                                   ro_net_types type, int threadId,
-                                   bool blocking) {
+                                 int contextId, MPI_Comm team,
+                                 void *ata_buffptr, ro_net_types type,
+                                 volatile char *status, bool blocking) {
   // GPU-centric implementation of fcollect
   auto *bp{backend_proxy->get()};
   int new_rank, pe_size;
@@ -938,14 +941,14 @@ void MPITransport::fcollect_gcen(void *dst, void *src, int size, int win_id,
   MPI_Comm comm_ring = createComm(world_ranks[new_rank % clust_size],
                                   stride * clust_size, num_clust);
   // Now wait for completion
-  barrier(blockId, threadId, false, comm_cluster);
-  barrier(blockId, threadId, blocking, comm_ring);
+  barrier(contextId, status, false, comm_cluster);
+  barrier(contextId, status, blocking, comm_ring);
 }
 
 void MPITransport::fcollect_gcen2(void *dst, void *src, int size, int win_id,
-                                    int blockId, MPI_Comm team, void *ata_buffptr,
-                                    ro_net_types type, int threadId,
-                                    bool blocking) {
+                                  int contextId, MPI_Comm team,
+                                  void *ata_buffptr, ro_net_types type,
+                                  volatile char *status, bool blocking) {
   // GPU-centric implementation with in-place, blocking synchronization
   auto *bp{backend_proxy->get()};
   int new_rank, pe_size;
@@ -1027,12 +1030,12 @@ void MPITransport::fcollect_gcen2(void *dst, void *src, int size, int win_id,
   MPI_Comm comm_ring = createComm(world_ranks[new_rank % clust_size],
                                   stride * clust_size, num_clust);
   // Now wait for completion
-  barrier(blockId, threadId, blocking, comm_ring);
+  barrier(contextId, status, blocking, comm_ring);
 }
 
 void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
-                            int blockId, int threadId, bool blocking,
-                            bool inline_data) {
+                          int contextId, volatile char *status, bool blocking,
+                          bool inline_data) {
   queue->flush_hdp();
 
   auto *bp{backend_proxy->get()};
@@ -1047,14 +1050,14 @@ void MPITransport::putMem(void *dst, void *src, int size, int pe, int win_id,
   // though it should be in the progress loop.
   NET_CHECK(MPI_Win_flush_all(bp->heap_window_info[win_id]->get_win()));
 
-  requests.push_back({request, {threadId, blockId, blocking}});
+  requests.push_back({request, {status, contextId, blocking}});
 
-  outstanding[blockId]++;
+  outstanding[contextId]++;
 }
 
 void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
-                            int blockId, int threadId, bool blocking,
-                            ROCSHMEM_OP op, ro_net_types type) {
+                          int contextId, volatile char *status, bool blocking,
+                          ROCSHMEM_OP op, ro_net_types type) {
   queue->flush_hdp();
 
   auto *bp{backend_proxy->get()};
@@ -1069,14 +1072,14 @@ void MPITransport::amoFOP(void *dst, void *src, void *val, int pe, int win_id,
   // though it should be in the progress loop.
   NET_CHECK(MPI_Win_flush_local(pe, bp->heap_window_info[win_id]->get_win()));
 
-  queue->notify(blockId, threadId);
+  queue->notify(status);
 
   queue->sfence_flush_hdp();
 }
 
 void MPITransport::amoFCAS(void *dst, void *src, void *val, int pe,
-                             int win_id, int blockId, int threadId, bool blocking,
-                             void *cond, ro_net_types type) {
+                           int win_id, int contextId, volatile char *status,
+                           bool blocking, void *cond, ro_net_types type) {
   queue->flush_hdp();
 
   auto *bp{backend_proxy->get()};
@@ -1091,14 +1094,15 @@ void MPITransport::amoFCAS(void *dst, void *src, void *val, int pe,
   // though it should be in the progress loop.
   NET_CHECK(MPI_Win_flush_local(pe, bp->heap_window_info[win_id]->get_win()));
 
-  queue->notify(blockId, threadId);
+  queue->notify(status);
 
   queue->sfence_flush_hdp();
 }
 
 void MPITransport::getMem(void *dst, void *src, int size, int pe, int win_id,
-                            int blockId, int threadId, bool blocking) {
-  outstanding[blockId]++;
+                          int contextId, volatile char *status,
+                          bool blocking) {
+  outstanding[contextId]++;
 
   auto *bp{backend_proxy->get()};
   MPI_Request request{};
@@ -1106,7 +1110,7 @@ void MPITransport::getMem(void *dst, void *src, int size, int pe, int win_id,
       dst, size, MPI_CHAR, pe, bp->heap_window_info[win_id]->get_offset(src),
       size, MPI_CHAR, bp->heap_window_info[win_id]->get_win(), &request));
 
-  requests.push_back({request, {threadId, blockId, blocking}});
+  requests.push_back({request, {status, contextId, blocking}});
 }
 
 std::unique_ptr<MPI_Request[]> MPITransport::raw_requests() {
@@ -1139,20 +1143,20 @@ void MPITransport::progress() {
     auto *bp{backend_proxy->get()};
     for (int i{0}; i < outcount; i++) {
       int index{testsome_indices[i]};
-      int blockId{requests[index].properties.blockId};
-      int threadId{requests[index].properties.threadId};
+      int contextId{requests[index].properties.contextId};
+      volatile char *status{requests[index].properties.status};
 
-      if (blockId != -1) {
-        outstanding[blockId]--;
+      if (contextId != -1) {
+        outstanding[contextId]--;
         DPRINTF(
-            "Finished op for blockId %d at threadId %d "
+            "Finished op for contextId %d at status addr %p "
             "(%d requests outstanding)\n",
-            blockId, threadId, outstanding[blockId]);
+            contextId, status, outstanding[contextId]);
       }
 
       if (requests[index].properties.blocking) {
-        if (blockId != -1) {
-          queue->notify(blockId, threadId);
+        if (contextId != -1) {
+          queue->notify(status);
         }
         queue->sfence_flush_hdp();
       }
@@ -1163,14 +1167,14 @@ void MPITransport::progress() {
 
       // If the GPU has requested a quiet, notify it of completion when
       // all outstanding requests are complete.
-      if (!outstanding[blockId] && !waiting_quiet[blockId].empty()) {
-        for (const auto threadId : waiting_quiet[blockId]) {
-          DPRINTF("Finished Quiet for blockId %d at threadId %d\n", blockId,
-                  threadId);
-          queue->notify(blockId, threadId);
+      if (!outstanding[contextId] && !waiting_quiet[contextId].empty()) {
+        for (const auto status : waiting_quiet[contextId]) {
+          DPRINTF("Finished Quiet for contextId %d at status addr %p\n", contextId,
+                  status);
+          queue->notify(status);
         }
 
-        waiting_quiet[blockId].clear();
+        waiting_quiet[contextId].clear();
 
         queue->sfence_flush_hdp();
       }
@@ -1185,15 +1189,15 @@ void MPITransport::progress() {
   }
 }
 
-void MPITransport::quiet(int blockId, int threadId) {
+void MPITransport::quiet(int contextId, volatile char *status) {
   auto *bp{backend_proxy->get()};
 
-  if (!outstanding[blockId]) {
-    DPRINTF("Finished Quiet immediately for blockId %d at threadId %d\n", blockId,
-            threadId);
-    queue->notify(blockId, threadId);
+  if (!outstanding[contextId]) {
+    DPRINTF("Finished Quiet immediately for contextId %d at status addr %p\n",
+            contextId, status);
+    queue->notify(status);
   } else {
-    waiting_quiet[blockId].emplace_back(threadId);
+    waiting_quiet[contextId].emplace_back(status);
   }
 }
 

@@ -57,13 +57,13 @@ typedef struct queue_element {
   void *src{nullptr};
   void *dst{nullptr};
   int ro_net_win_id{-1};
-  int threadId{-1};
   int logPE_stride{-1};
   int PE_size{-1};
   long *pSync{nullptr};
   int op{-1};
   int datatype{-1};
   int PE_root{-1};
+  volatile char *status{nullptr};
   MPI_Comm team_comm{};
   union {
     size_t size;

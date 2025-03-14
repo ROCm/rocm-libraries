@@ -33,12 +33,11 @@ Queue::Queue() {
   }
 }
 
-Queue::Queue(size_t max_queues, size_t max_wg_size, size_t queue_size)
+Queue::Queue(size_t max_queues, size_t queue_size)
     : max_queues_{max_queues},
-      max_wg_size_{max_wg_size},
       queue_size_{queue_size},
       queue_proxy_{max_queues, queue_size},
-      queue_desc_proxy_{max_queues, max_wg_size} {
+      queue_desc_proxy_{max_queues} {
 
   gpu_queue = true;
   char *value{nullptr};
@@ -101,8 +100,8 @@ void Queue::sfence_flush_hdp() {
   }
 }
 
-void Queue::notify(int blockId, int threadId) {
-  descriptor(blockId)->status[threadId] = 1;
+void Queue::notify(volatile char* status) {
+  *status = 1;
 }
 
 uint64_t Queue::size() {

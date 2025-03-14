@@ -36,10 +36,8 @@ struct BackendRegister {
   std::atomic<bool> worker_thread_exit{false};
   bool *needs_quiet{nullptr};
   bool *needs_blocking{nullptr};
-  char *g_ret{nullptr};
   HdpPolicy *hdp_policy{nullptr};
   WindowInfo **heap_window_info{nullptr};
-  atomic_ret_t *atomic_ret{nullptr};
   SymmetricHeap *heap_ptr{nullptr};
 };
 

@@ -45,38 +45,22 @@ typedef struct queue_desc {
    */
   uint64_t write_index;
   char padding2[56];
-  /**
-   * This bit is used by the GPU to wait on a blocking operation. The initial
-   * value is 0. When a GPU enqueues a blocking operation, it waits for this
-   * value to resolve to 1, which is set by the CPU when the blocking
-   * operation completes. The GPU then resets status back to zero. There is
-   * a separate status variable for each work-item in a work-group
-   */
-  char *status;
-  char padding3[56];
 } __attribute__((__aligned__(64))) queue_desc_t;
 
 template <typename ALLOCATOR>
 class QueueDescProxy {
   using ProxyT = DeviceProxy<ALLOCATOR, queue_desc_t>;
-  using ProxyStatusT = DeviceProxy<ALLOCATOR, char>;
 
  public:
   QueueDescProxy() = default;
 
-  QueueDescProxy(size_t max_queues, size_t max_threads_per_queue)
-    : max_queues_{max_queues}, max_threads_per_queue_{max_threads_per_queue},
-      max_threads_{max_queues * max_threads_per_queue}, proxy_{max_queues},
-      proxy_status_{max_queues * max_threads_per_queue} {
-    auto *status{proxy_status_.get()};
-    size_t status_bytes{sizeof(char) * max_threads_};
-    memset(status, 0, status_bytes);
+  QueueDescProxy(size_t max_queues)
+    : max_queues_{max_queues}, proxy_{max_queues} {
 
     auto *queue_descs{proxy_.get()};
     for (size_t i{0}; i < max_queues_; i++) {
       queue_descs[i].read_index = 0;
       queue_descs[i].write_index = 0;
-      queue_descs[i].status = status + i * max_threads_per_queue_;
     }
   }
 
@@ -93,13 +77,7 @@ class QueueDescProxy {
  private:
   ProxyT proxy_{};
 
-  ProxyStatusT proxy_status_{};
-
   size_t max_queues_{};
-
-  size_t max_threads_per_queue_{};
-
-  size_t max_threads_{};
 };
 
 using QueueDescProxyT = QueueDescProxy<HIPDefaultFinegrainedAllocator>;

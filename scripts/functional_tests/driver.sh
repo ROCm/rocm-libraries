@@ -179,6 +179,20 @@ TestRMA() {
 
   ExecTest  "teamctxget"       2       1            1         1048576
 
+  ExecTest  "g"                2       1            1         1048576
+  ExecTest  "g"                2       1            1024      512
+  ExecTest  "g"                2       8            1         1048576
+  ExecTest  "g"                2       16           128       8
+  ExecTest  "g"                2       32           256       512
+  ExecTest  "g"                2       64           1024      8
+
+  ExecTest  "p"                2       1            1         1048576
+  ExecTest  "p"                2       1            1024      512
+  ExecTest  "p"                2       8            1         1048576
+  ExecTest  "p"                2       16           128       8
+  ExecTest  "p"                2       32           256       512
+  ExecTest  "p"                2       64           1024      8
+
   ################################ Non-Blocking ################################
 
   ExecTest  "putnbi"           2       1            1         1048576

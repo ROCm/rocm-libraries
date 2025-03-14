@@ -51,7 +51,7 @@ class DeviceProxy {
     /*
      * Default memory provided by the allocation to recognizable bytes.
      */
-    memset(static_cast<void*>(temp), 0xBC, size_bytes);
+    memset(static_cast<void*>(temp), 0, size_bytes);
 
     /*
      * Pass the memory into a unique ptr for tracking.

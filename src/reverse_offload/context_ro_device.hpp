@@ -34,7 +34,7 @@ __device__ void build_queue_element(
     ro_net_cmds type, void *dst, void *src, size_t size, int pe,
     int logPE_stride, int PE_size, int PE_root, void *pWrk, long *pSync,
     MPI_Comm team_comm, int ro_net_win_id, BlockHandle *handle,
-    bool blocking, ROCSHMEM_OP op = ROCSHMEM_SUM,
+    bool blocking, volatile char *status = nullptr, ROCSHMEM_OP op = ROCSHMEM_SUM,
     ro_net_types datatype = RO_NET_INT);
 
 class ROContext : public Context {
@@ -251,7 +251,11 @@ class ROContext : public Context {
   __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
 
  private:
-  __device__ uint64_t *get_unused_atomic();
+  __device__ uint64_t *get_atomic_ret_buf();
+
+  __device__ uint64_t *get_g_ret_buf();
+
+  __device__ volatile char *get_status_flag();
 
   BlockHandle *block_handle{nullptr};
 

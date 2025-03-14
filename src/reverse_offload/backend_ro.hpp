@@ -55,7 +55,9 @@ class ROHostContext;
  * the host (which is an inversion of the normal behavior).
  */
 class ROBackend : public Backend {
-  const unsigned MAX_NUM_BLOCKS{65536};
+  using RetBufferProxyT = DeviceProxy<HIPAllocator, uint64_t>;
+  using StatusProxyT =
+          DeviceProxy<HIPDefaultFinegrainedAllocator, char>;
 
  public:
   /**
@@ -270,6 +272,25 @@ class ROBackend : public Backend {
    * @brief Number of MPI windows used for device contexts in RO Backend
    */
   size_t num_windows_{32};
+
+  /**
+   * @brief Return buffer for rocshmem_g API
+   */
+  RetBufferProxyT g_ret_buffer_;
+
+  /**
+   * @brief Return buffer for rocshmem atomic return APIs
+   */
+  RetBufferProxyT atomic_ret_buffer_;
+
+  /**
+   * This buffer is used by the GPU to wait on a blocking operation. The initial
+   * value is 0. When a GPU enqueues a blocking operation, it waits for this
+   * value to resolve to 1, which is set by the CPU when the blocking
+   * operation completes. The GPU then resets status back to zero. There is
+   * a separate status variable for each work-item in a RO Context
+   */
+  StatusProxyT status_;
 };
 
 }  // namespace rocshmem
