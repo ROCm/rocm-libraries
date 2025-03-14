@@ -127,12 +127,11 @@ namespace rocRollerTest
         kernel->setKernelDimensions(2);
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
-
         kernel->addArgument({"a", floatPtr, DataDirection::WriteOnly});
         kernel->addArgument({"b", floatPtr, DataDirection::ReadOnly});
         kernel->addArgument({"c", {DataType::UInt64}});
-        auto loader = m_context->argLoader();
 
+        auto loader = m_context->argLoader();
         m_context->schedule(kernel->allocateInitialRegisters());
         m_context->schedule(loader->loadAllArguments());
 
@@ -164,27 +163,54 @@ namespace rocRollerTest
         EXPECT_EQ(DataType::UInt64, c->variableType());
 
         EXPECT_EQ(NormalizedSource(""), NormalizedSource(output()));
+    }
 
-        // force 'a' to be loaded again.
+    TEST_F(ArgumentLoaderTest, releaseArguments)
+    {
+        auto kernel = m_context->kernel();
+        kernel->setKernelDimensions(2);
+
+        VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
+        kernel->addArgument({"a", floatPtr, DataDirection::WriteOnly});
+        kernel->addArgument({"b", floatPtr, DataDirection::ReadOnly});
+        kernel->addArgument({"c", {DataType::UInt64}});
+
+        auto loader = m_context->argLoader();
+        m_context->schedule(kernel->allocateInitialRegisters());
+        m_context->schedule(loader->loadAllArguments());
+
+        Register::ValuePtr a, b, c;
+        m_context->schedule(loader->getValue("a", a));
+        m_context->schedule(loader->getValue("b", b));
+        m_context->schedule(loader->getValue("c", c));
+
+        const auto prevUseCount = a.use_count();
+        // Releasing the argument from the loader will reduce the ValuePtr use_count by 1.
         loader->releaseArgument("a");
-        EXPECT_EQ(1, a.use_count());
+        EXPECT_EQ(prevUseCount - 1, a.use_count());
         a.reset();
+
+        // Clearing the KMQueue via a WaitCount::KMCnt ensures that reloading the Value uses
+        // the same set of registers.
+        auto inst = Instruction::Wait(WaitCount::KMCnt(m_context->targetArchitecture(), 0, ""));
+        m_context->schedule(inst);
+        clearOutput();
         m_context->schedule(loader->getValue("a", a));
 
-        // Since loadAllArguments() splits the allocation into each of the individual values,
-        // loading it again will go back into the same set of registers.
         EXPECT_EQ(NormalizedSource("s_load_dwordx2 s[4:5], s[0:1], 0"), NormalizedSource(output()));
         EXPECT_EQ((std::vector<int>{4, 5}), Generated(a->registerIndices()));
         VariableType expectedType = {DataType::Float, PointerType::PointerGlobal};
         EXPECT_EQ(expectedType, a->variableType());
 
-        // This should destroy all remaining pointers to the original Allocation.
+        // Reset all remaining pointers to the original Allocation.
         loader->releaseAllArguments();
         a.reset();
         b.reset();
         c.reset();
         clearOutput();
 
+        m_context->schedule(inst);
+        clearOutput();
         m_context->schedule(loader->getValue("c", c));
 
         EXPECT_EQ(NormalizedSource("s_load_dwordx2 s[4:5], s[0:1], 16"),

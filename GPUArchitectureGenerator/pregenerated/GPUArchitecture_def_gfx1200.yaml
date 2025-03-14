@@ -19,6 +19,7 @@ Architectures:
       HasSMulHi: 0
       HasSplitWaitCounters: 0
       HasWMMA: 0
+      HasWMMA_f8: 0
       HasWave32: 0
       HasWave64: 0
       MaxExpcnt: 7

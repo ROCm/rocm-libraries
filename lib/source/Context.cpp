@@ -112,9 +112,13 @@ namespace rocRoller
             switch(regType)
             {
             case Register::Type::Accumulator:
-                rv->m_allocators[i]
-                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxACCVGPRs);
+            {
+                auto const maxACCVGPRs = rv->m_targetArch.HasCapability(GPUCapability::HasAccCD)
+                                             ? kernelOpts.maxACCVGPRs
+                                             : 0;
+                rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, maxACCVGPRs);
                 break;
+            }
             case Register::Type::Vector:
                 rv->m_allocators[i]
                     = std::make_shared<Register::Allocator>(regType, kernelOpts.maxVGPRs);

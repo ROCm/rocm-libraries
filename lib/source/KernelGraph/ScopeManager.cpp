@@ -25,8 +25,10 @@
  *******************************************************************************/
 
 #include <rocRoller/Context.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/ScopeManager.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
 {
@@ -38,7 +40,7 @@ namespace rocRoller::KernelGraph
 
     void ScopeManager::addRegister(int tag)
     {
-        // if alreay in a scope, skip
+        // Do not add if the tag is already in scope.
         for(auto s : m_tags)
         {
             if(s.count(tag) > 0)
@@ -51,12 +53,9 @@ namespace rocRoller::KernelGraph
     {
         for(auto tag : m_tags.back())
         {
-            // TODO: Add a way to allocate AGPR registers within a loop
-            //       that can be used later in a different loop.
             if(m_context->registerTagManager()->hasRegister(tag))
             {
-                auto reg = m_context->registerTagManager()->getRegister(tag);
-                if(reg->regType() != Register::Type::Accumulator)
+                if(!hasDeallocate(*m_graph, tag))
                     m_context->registerTagManager()->deleteTag(tag);
             }
         }

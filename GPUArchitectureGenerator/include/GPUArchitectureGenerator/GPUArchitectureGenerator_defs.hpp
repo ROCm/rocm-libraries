@@ -114,6 +114,8 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::HasWMMA,
              {{"v_wmma_f16_16x16x16_f16 v[0:3], v[32:35], v[36:39], v[0:3]"}, ""}},
+            {rocRoller::GPUCapability::HasWMMA_f8,
+             {{"v_wmma_f32_16x16x16_fp8_fp8 v[0:7], v[32:33], v[34:35], v[0:7]"}, ""}},
 
             {rocRoller::GPUCapability::HasAccumOffset,
              {{".amdhsa_kernel hello_world\n  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr\n  "
@@ -200,7 +202,16 @@ namespace GPUArchitectureGenerator
             }},
            {rocRoller::GPUCapability::HasAccCD,
             {
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908,
+                                                 {.sramecc = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A,
+                                                 {.xnack = true}},
+                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A,
+                                                 {.sramecc = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,

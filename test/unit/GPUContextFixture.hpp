@@ -164,6 +164,11 @@ inline auto mfmaSupportedISATuples()
     return ::testing::Combine(mfmaSupportedISAValues());
 }
 
+inline auto wmmaSupportedISATuples()
+{
+    return ::testing::Combine(wmmaSupportedISAValues());
+}
+
 class BaseGPUContextFixture : public ContextFixture
 {
 protected:
@@ -202,6 +207,17 @@ using GPUContextFixture = GPUContextFixtureParam<>;
             GTEST_SKIP() << m_context->targetArchitecture().target().toString() \
                          << " has no capability " << cap << std::endl;          \
         }                                                                       \
+    } while(0)
+
+#define REQUIRE_EITHER_ARCH_CAP(capA, capB)                                               \
+    do                                                                                    \
+    {                                                                                     \
+        if(!(m_context->targetArchitecture().HasCapability(capA)                          \
+             || m_context->targetArchitecture().HasCapability(capB)))                     \
+        {                                                                                 \
+            GTEST_SKIP() << m_context->targetArchitecture().target().toString()           \
+                         << " has no capability " << capA << " or " << capB << std::endl; \
+        }                                                                                 \
     } while(0)
 
 #define REQUIRE_NOT_ARCH_CAP(cap)                                               \

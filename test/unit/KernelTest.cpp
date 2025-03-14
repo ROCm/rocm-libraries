@@ -64,7 +64,7 @@ namespace rocRollerTest
         m_context->schedule(k.preamble());
 
         std::string expected = R"(
-            .amdgcn_target "amdgcn-amd-amdhsa--gfx1012:xnack+"
+            .amdgcn_target "amdgcn-amd-amdhsa--gfx908"
             .set .amdgcn.next_free_vgpr, 0
             .set .amdgcn.next_free_sgpr, 0
             .text
@@ -111,8 +111,6 @@ namespace rocRollerTest
             .amdhsa_kernel hello_world
             .amdhsa_next_free_vgpr 0
             .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
-            .amdhsa_wavefront_size32 1
-            //.amdhsa_accum_offset 4
             .amdhsa_user_sgpr_kernarg_segment_ptr 1
             .amdhsa_system_sgpr_workgroup_id_x 1
             .amdhsa_system_sgpr_workgroup_id_y 1
@@ -178,7 +176,7 @@ amdhsa.kernels:
     .max_flat_workgroup_size: 1
     .kernel_dimensions: 3
     .workgroup_size: [1, 1, 1]
-    .wavefront_size: 32
+    .wavefront_size: 64
     .workitem_count: [{is-null: true}, {is-null: true}, {is-null: true}]
     .dynamic_sharedmemory_bytes:
       is-null: true
@@ -234,7 +232,7 @@ amdhsa.kernels:
     .max_flat_workgroup_size: 256
     .kernel_dimensions: 3
     .workgroup_size: [16, 8, 2]
-    .wavefront_size: 32
+    .wavefront_size: 64
     .workitem_count: [{is-null: true}, {is-null: true}, {is-null: true}]
     .dynamic_sharedmemory_bytes:
       is-null: true

@@ -129,6 +129,7 @@ set(
     unit/WaitCountTest.cpp
     unit/WMMAHazardObserverTest.cpp
     unit/WMMAUnitObserverTest.cpp
+    unit/OperationTagTest.cpp
     unit/StreamTest.cpp
     unit/EnumToStringTest.cpp
 )

@@ -137,12 +137,38 @@ namespace rocRoller
             AssertFatal(C->variableType() == D->variableType(),
                         "Invalid D/R2HS (D/C) data types",
                         ShowValue(C->variableType()));
-            AssertFatal(D->regType() == Register::Type::Accumulator,
-                        "Invalid D (D) register type",
-                        ShowValue(A->regType()));
+
+            auto arch = m_context->targetArchitecture();
+            if(arch.HasCapability(GPUCapability::HasAccCD))
+            {
+                AssertFatal(D->regType() == Register::Type::Accumulator,
+                            "Invalid DEST (D) register type",
+                            ShowValue(D->regType()));
+            }
+            else
+            {
+                AssertFatal(D->regType() == Register::Type::Vector,
+                            "Invalid DEST (D) register type",
+                            ShowValue(D->regType()));
+            }
 
             std::string inputType;
             std::string modifier;
+
+            const auto isF8
+                = [](DataType type) { return type == DataType::FP8x4 || type == DataType::BF8x4; };
+
+            const auto isFP8 = [](DataType type) { return type == DataType::FP8x4; };
+
+            const auto isBF8 = [](DataType type) { return type == DataType::BF8x4; };
+
+            const auto isF16 = [](DataType type) {
+                return type == DataType::Halfx2 || type == DataType::BFloat16x2;
+            };
+
+            const auto isFP16 = [](DataType type) { return type == DataType::Halfx2; };
+
+            const auto isBF16 = [](DataType type) { return type == DataType::BFloat16x2; };
 
             if(typeA == typeB)
             {
@@ -153,13 +179,13 @@ namespace rocRoller
                 // For F8 types, result will be "_fp8_fp8" (or "bf8").
                 // Change this to "_f8f6f4" for 32x32x64 and 16x16x128
                 // tile sizes.
-                if(typeA == DataType::FP8x4 || typeA == DataType::BF8x4)
+                if(isF8(typeA))
                 {
                     if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
                         inputType = "_f8f6f4";
                 }
 
-                if(typeA == DataType::BFloat16x2)
+                if(isBF16(typeA))
                 {
                     if(((M == 32) && (N == 32) && (K == 8))
                        || ((M == 16) && (N == 16) && (K == 16)))
@@ -170,11 +196,11 @@ namespace rocRoller
                 // For F16 types, result will be "f16" (or "bf16").
                 if((M == 16 && N == 16 && K == 32) || (M == 32 && N == 32 && K == 16))
                 {
-                    if(typeA == DataType::Halfx2)
+                    if(isFP16(typeA))
                     {
                         inputType = "_f16";
                     }
-                    if(typeA == DataType::BFloat16x2)
+                    if(isBF16(typeA))
                     {
                         inputType = "_bf16";
                     }
@@ -211,9 +237,42 @@ namespace rocRoller
                                        Arithmetic::getModifier(typeB));
             }
 
-            auto mfma = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);
+            if(arch.HasCapability(GPUCapability::HasWMMA))
+            {
+                AssertFatal((M == 16) && (N == 16) && (K == 16 || K == 32),
+                            "Invalid inputs",
+                            ShowValue(M),
+                            ShowValue(N),
+                            ShowValue(K));
 
-            co_yield_(Instruction(mfma, {D}, {A, B, C}, {modifier}, ""));
+                if(isF8(typeA) && isF8(typeB))
+                {
+                    inputType = isFP8(typeA) ? "fp8" : "bf8";
+                    inputType += isFP8(typeB) ? "_fp8" : "_bf8";
+                }
+
+                if(typeA == typeB && isF16(typeA))
+                {
+                    inputType = isFP16(typeA) ? "f16" : "bf16";
+                }
+
+                auto wmma = concatenate(
+                    "v_wmma_", typeStr(typeD), "_", M, "x", N, "x", K, "_", inputType);
+                co_yield_(Instruction(wmma, {D}, {A, B, C}, {}, ""));
+            }
+            else if(arch.HasCapability(GPUCapability::HasMFMA))
+            {
+
+                auto mfma
+                    = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);
+
+                co_yield_(Instruction(mfma, {D}, {A, B, C}, {modifier}, ""));
+            }
+            else
+            {
+                Throw<FatalError>("Matrix Multiplication is not supported for",
+                                  arch.target().toString());
+            }
         }
     }
 }

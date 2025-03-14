@@ -149,6 +149,11 @@ namespace rocRoller
         case DataType::Float:
             if(arg->regType() == rocRoller::Register::Type::Accumulator)
             {
+                const auto& arch = m_context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
+                            concatenate("Architecture",
+                                        arch.target().toString(),
+                                        "does not use Accumulator registers."));
                 // If arg is ACCVGPR, we first copy the value to dest (Vector)
                 // and then convert.
                 co_yield m_context->copier()->copy(dest, arg, "");

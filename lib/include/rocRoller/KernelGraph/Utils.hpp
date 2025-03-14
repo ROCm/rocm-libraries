@@ -539,6 +539,15 @@ namespace rocRoller
         *
         */
         void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph, int opTag1, int opTag2);
+
+        /**
+        * @brief Identifies whether a registerTag has an associated deallocate node.
+        *
+        * @param graph
+        * @param registerTag
+        *
+        */
+        bool hasDeallocate(const KernelGraph& graph, int tag);
     }
 }
 

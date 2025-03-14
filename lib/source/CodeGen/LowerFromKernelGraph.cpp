@@ -267,7 +267,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Kernel const& edge, Transformer coords)
             {
-                auto scope = std::make_shared<ScopeManager>(m_context);
+                auto scope = std::make_shared<ScopeManager>(m_context, m_graph);
                 m_context->setScopeManager(scope);
 
                 scope->pushNewScope();
@@ -582,10 +582,10 @@ namespace rocRoller
                         auto tmp   = m_context->registerTagManager()->getRegister(dimTag);
                         valueCount = tmp->valueCount();
                     }
-                    Log::debug("  immediate: count {}", valueCount);
-                    if(assign.regType == Register::Type::Accumulator)
+                    Log::debug("  immediate: count {}", assign.valueCount);
+                    if(assign.regType == Register::Type::Accumulator
+                       || assign.regType == Register::Type::Vector)
                     {
-                        // ACCVGPR should always be contiguous
                         dest = m_context->registerTagManager()->getRegister(
                             dimTag,
                             assign.regType,
@@ -619,7 +619,8 @@ namespace rocRoller
                 operator()(int tag, Deallocate const& deallocate, Transformer coords)
             {
                 auto dimTag = m_graph->mapper.get<Dimension>(tag);
-                rocRoller::Log::getLogger()->debug("  deallocate dimension: {}", dimTag);
+                rocRoller::Log::getLogger()->debug(
+                    "  deallocate dimension: {} tag {}", dimTag, tag);
                 co_yield Instruction::Comment(concatenate("Deallocate ", dimTag));
                 m_context->registerTagManager()->deleteTag(dimTag);
             }
@@ -847,16 +848,21 @@ namespace rocRoller
 
                 uint numElements = waveA->sizes[0] * waveB->sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
-                uint numAGPR     = numElements / wfs;
+                uint numGPR      = numElements / wfs;
 
                 auto [DTag, _D] = m_graph->getDimension<MacroTile>(
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
+                const auto& arch    = m_context->targetArchitecture();
+                const auto  regType = arch.HasCapability(GPUCapability::HasAccCD)
+                                          ? Register::Type::Accumulator
+                                          : Register::Type::Vector;
+
                 auto D = m_context->registerTagManager()->getRegister(
                     DTag,
-                    Register::Type::Accumulator,
+                    regType,
                     DataType::Float,
-                    numAGPR,
+                    numGPR,
                     Register::AllocationOptions{.contiguousChunkWidth
                                                 = Register::FULLY_CONTIGUOUS});
 

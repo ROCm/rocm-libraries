@@ -59,10 +59,9 @@ namespace rocRoller::KernelGraph
     {
     public:
         ScopeManager() = delete;
-        ScopeManager(ContextPtr context)
+        ScopeManager(ContextPtr context, KernelGraphPtr graph)
             : m_context(context)
-        {
-        }
+            , m_graph(graph){};
 
         /**
          * @brief Create a new Scope and push it onto the scope stack.
@@ -82,6 +81,7 @@ namespace rocRoller::KernelGraph
 
     private:
         ContextPtr                           m_context;
+        KernelGraphPtr                       m_graph;
         std::vector<std::unordered_set<int>> m_tags;
     };
 

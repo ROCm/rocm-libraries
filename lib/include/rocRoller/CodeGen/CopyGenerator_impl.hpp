@@ -87,6 +87,11 @@ namespace rocRoller
         if(dest->regType() == Register::Type::Scalar
            && src->regType() == Register::Type::Accumulator)
         {
+            const auto& arch = context->targetArchitecture();
+            AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
+                        concatenate("Architecture",
+                                    arch.target().toString(),
+                                    "does not use Accumulator registers."));
 
             Throw<FatalError>("Can not copy accumulator register into scalar register");
         }
@@ -150,6 +155,11 @@ namespace rocRoller
         else if(src->regType() == Register::Type::Literal
                 && dest->regType() == Register::Type::Accumulator)
         {
+            const auto& arch = context->targetArchitecture();
+            AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
+                        concatenate("Architecture",
+                                    arch.target().toString(),
+                                    "does not use Accumulator registers."));
             if(dest->variableType().getElementSize() == 4)
             {
                 for(size_t k = 0; k < dest->registerCount(); ++k)
@@ -212,6 +222,11 @@ namespace rocRoller
             // ACCVGPR -> Vector
             else if(src->regType() == Register::Type::Accumulator)
             {
+                const auto& arch = context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
+                            concatenate("Architecture",
+                                        arch.target().toString(),
+                                        "does not use Accumulator registers."));
                 for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
@@ -259,6 +274,11 @@ namespace rocRoller
             // Vector -> ACCVGPR
             if(src->regType() == Register::Type::Vector)
             {
+                const auto& arch = context->targetArchitecture();
+                AssertFatal(arch.HasCapability(GPUCapability::HasAccCD),
+                            concatenate("Architecture",
+                                        arch.target().toString(),
+                                        "does not use Accumulator registers."));
                 for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(

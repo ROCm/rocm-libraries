@@ -1314,10 +1314,24 @@ namespace rocRoller
             uint wfs         = m_context->kernel()->wavefront_size();
             uint numVgpr     = numElements / wfs;
 
+            auto [vgprBlockNumberTag, vgprBlockNumber]
+                = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
+            auto [vgprBlockIndexTag, vgprBlockIndex]
+                = m_graph->getDimension<VGPRBlockIndex>(tag, 0);
+
+            AssertFatal(
+                Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
+                "Could not determine VGPRBlockNumber size at translate-time.");
+            AssertFatal(Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
+                        "Could not determine VGPRBlockIndex size at translate-time.");
+
+            const auto m = getUnsignedInt(evaluate(vgprBlockNumber.size));
+            const auto n = getUnsignedInt(evaluate(vgprBlockIndex.size));
+
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(
                 MemoryInstructions::MemoryKind::Buffer,
-                numVgpr / 4,
-                4,
+                m,
+                n,
                 load.varType,
                 tag,
                 nullptr,
@@ -1438,8 +1452,8 @@ namespace rocRoller
 
             auto [elemXTag, elemX] = m_graph->getDimension<ElementNumber>(tag, 0);
             auto [elemYTag, elemY] = m_graph->getDimension<ElementNumber>(tag, 1);
-            auto const m           = getUnsignedInt(evaluate(elemX.size));
-            auto const n           = getUnsignedInt(evaluate(elemY.size));
+            const auto m           = getUnsignedInt(evaluate(elemX.size));
+            const auto n           = getUnsignedInt(evaluate(elemY.size));
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Local,
@@ -1538,10 +1552,24 @@ namespace rocRoller
             auto agpr    = m_context->registerTagManager()->getRegister(macTileTag);
             AssertFatal(agpr->registerCount() == numVgpr);
 
+            auto [vgprBlockNumberTag, vgprBlockNumber]
+                = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
+            auto [vgprBlockIndexTag, vgprBlockIndex]
+                = m_graph->getDimension<VGPRBlockIndex>(tag, 0);
+
+            AssertFatal(
+                Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
+                "Could not determine VGPRBlockNumber size at translate-time.");
+            AssertFatal(Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
+                        "Could not determine VGPRBlockIndex size at translate-time.");
+
+            const auto m = getUnsignedInt(evaluate(vgprBlockNumber.size));
+            const auto n = getUnsignedInt(evaluate(vgprBlockIndex.size));
+
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Local,
-                numVgpr / 4,
-                4,
+                m,
+                n,
                 dataType,
                 tag,
                 agpr,
@@ -1572,14 +1600,27 @@ namespace rocRoller
             uint wfs         = m_context->kernel()->wavefront_size();
             uint numVgpr     = numElements / wfs;
 
-            auto agpr = m_context->registerTagManager()->getRegister(macTileTag);
+            auto [vgprBlockNumberTag, vgprBlockNumber]
+                = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
+            auto [vgprBlockIndexTag, vgprBlockIndex]
+                = m_graph->getDimension<VGPRBlockIndex>(tag, 0);
 
+            AssertFatal(
+                Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
+                "Could not determine VGPRBlockNumber size at translate-time.");
+            AssertFatal(Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
+                        "Could not determine VGPRBlockIndex size at translate-time.");
+
+            const auto m = getUnsignedInt(evaluate(vgprBlockNumber.size));
+            const auto n = getUnsignedInt(evaluate(vgprBlockIndex.size));
+
+            auto agpr = m_context->registerTagManager()->getRegister(macTileTag);
             AssertFatal(agpr->registerCount() == numVgpr);
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Buffer,
-                numVgpr / 4,
-                4,
+                m,
+                n,
                 store.dataType,
                 tag,
                 agpr,

@@ -39,8 +39,7 @@ void GenericContextFixture::SetUp()
 
 rocRoller::GPUArchitectureTarget GenericContextFixture::targetArchitecture()
 {
-    return rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX1012,
-                                            {.xnack = true}};
+    return rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908};
 }
 
 rocRoller::ContextPtr GenericContextFixture::createContext()

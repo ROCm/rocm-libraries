@@ -1091,5 +1091,22 @@ namespace rocRoller
                 k.mapper.disconnect(opTag1, c.coordinate, c.connection);
             }
         }
+
+        bool hasDeallocate(const KernelGraph& graph, int registerTag)
+        {
+            auto connections = [&]() -> Generator<int> {
+                for(const auto& connection : graph.mapper.getCoordinateConnections(registerTag))
+                    co_yield connection.control;
+            };
+
+            for(const auto& deallocateTag :
+                filter(graph.control.isElemType<Deallocate>(), connections()))
+            {
+                auto dimTag = graph.mapper.get<Dimension>(deallocateTag);
+                if(dimTag == registerTag)
+                    return true;
+            }
+            return false;
+        }
     }
 }

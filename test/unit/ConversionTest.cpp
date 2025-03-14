@@ -252,6 +252,8 @@ namespace rocRollerTest
     void ConversionTest::matrixMultiply(
         int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
         // matrix size: A is MxK; B is KxN; D is MxN
         int M = 512;
         int N = 512;

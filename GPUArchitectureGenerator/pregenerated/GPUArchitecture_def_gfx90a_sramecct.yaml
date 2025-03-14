@@ -4,6 +4,7 @@ Architectures:
       ArchAccUnifiedRegs: 0
       CMPXWritesSGPR: 0
       DefaultWavefrontSize: 64
+      HasAccCD: 0
       HasAccumOffset: 0
       HasAddLshl: 0
       HasAtomicAdd: 0

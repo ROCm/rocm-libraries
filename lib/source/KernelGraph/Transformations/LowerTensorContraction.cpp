@@ -505,10 +505,13 @@ namespace rocRoller
             auto [waveBTag, waveB] = graph.getDimension<WaveTile>(info.loadB.load());
             uint num_elements      = waveA.sizes[0] * waveB.sizes[1];
             uint wfs               = context->kernel()->wavefront_size();
-            uint numAGPRs          = num_elements / wfs; // number of output registers per thread
+            uint numGPRs           = num_elements / wfs; // number of output registers per thread
 
-            auto initD = graph.control.addElement(
-                Assign{Register::Type::Accumulator, literal(0.f), numAGPRs});
+            const auto& arch    = context->targetArchitecture();
+            const auto  regType = arch.HasCapability(GPUCapability::HasAccCD)
+                                      ? Register::Type::Accumulator
+                                      : Register::Type::Vector;
+            auto        initD   = graph.control.addElement(Assign{regType, literal(0.f), numGPRs});
 
             graph.mapper.connect(initD, d, NaryArgument::DEST);
 

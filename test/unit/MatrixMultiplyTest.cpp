@@ -126,10 +126,10 @@ namespace MatrixMultiplyTest
         {
             commandKernel = nullptr;
 
-            REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+                REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
             }
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
@@ -178,7 +178,8 @@ namespace MatrixMultiplyTest
             AssertFatal(mac_m == wave_m, "Single output MacroTile.");
             AssertFatal(mac_n == wave_n, "Single output MacroTile.");
 
-            uint workgroup_size_x = 64;
+            auto arch             = m_context->targetArchitecture();
+            uint workgroup_size_x = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
             uint workgroup_size_y = 1;
 
             auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeA).elementBits, 8u);
@@ -477,28 +478,35 @@ namespace MatrixMultiplyTest
                               bool   transA = false,
                               bool   transB = false)
         {
+            // matrix size: A is MxK; B is KxN; D is MxN
             int const M = 1024;
             int const N = 1024;
             int const K = 512;
-            // matrix size: A is MxK; B is KxN; D is MxN
-            REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(std::is_same_v<T, FP8> || std::is_same_v<T, BF8>)
             {
-                REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_fp8);
+                REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
             }
 
             auto dataTypeAB = TypeInfo<T>::Var.dataType;
             auto dataTypeD  = TypeInfo<ACC>::Var.dataType;
 
+            const auto wavefrontCountX = 2;
+            const auto wavefrontCountY = 2;
+
             // output macro tile size; we will launch 2x2 waves
-            int mac_m = 2 * wave_m;
-            int mac_n = 2 * wave_n;
+            int mac_m = wavefrontCountX * wave_m;
+            int mac_n = wavefrontCountY * wave_n;
             int mac_k = 2 * wave_k;
 
             AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
             AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-            uint workgroup_size_x = 256;
+            auto       arch = m_context->targetArchitecture();
+            const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
+            uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
             uint workgroup_size_y = 1;
 
             auto bpe = CeilDivide(DataTypeInfo::Get(dataTypeAB).elementBits, 8u);
@@ -568,7 +576,7 @@ namespace MatrixMultiplyTest
 
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
-            params->setManualWavefrontCount({2u, 2u});
+            params->setManualWavefrontCount({wavefrontCountX, wavefrontCountY});
             params->transposeMemoryAccess[LayoutType::MATRIX_A] = transA;
             params->transposeMemoryAccess[LayoutType::MATRIX_B] = transB;
 
@@ -603,22 +611,28 @@ namespace MatrixMultiplyTest
         void matrixMultiplyABC(
             int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError)
         {
-            REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
 
             // matrix size: A is MxK; B is KxN; D is MxN
             unsigned M = 1024;
             unsigned N = 1024;
             unsigned K = 512;
 
+            const auto wavefrontCountX = 2;
+            const auto wavefrontCountY = 2;
+
             // output macro tile size
-            int mac_m = 64;
-            int mac_n = 64;
-            int mac_k = 64;
+            int mac_m = wavefrontCountX * wave_m;
+            int mac_n = wavefrontCountY * wave_n;
+            int mac_k = 2 * wave_k;
 
             AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
             AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-            uint workgroup_size_x = 256;
+            auto       arch = m_context->targetArchitecture();
+            const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
+            uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
             uint workgroup_size_y = 1;
 
             uint num_workgroup_x = M / mac_m;
@@ -693,7 +707,7 @@ namespace MatrixMultiplyTest
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
             params->setDimensionInfo(tagLoadC, macTileC);
-            params->setManualWavefrontCount({2u, 2u});
+            params->setManualWavefrontCount({wavefrontCountX, wavefrontCountY});
             params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
             CommandKernel commandKernel(command, "ABC");
@@ -733,6 +747,14 @@ namespace MatrixMultiplyTest
     {
     };
 
+    class MatrixMultiplyWMMATestGPU : public BaseMatrixMultiplyContextFixture<rocRoller::DataType>
+    {
+    };
+
+    class MatrixMultiplyABCWMMATestGPU : public BaseMatrixMultiplyContextFixture<>
+    {
+    };
+
     class MatrixMultiplyTestGPUF8 : public BaseMatrixMultiplyContextFixture<rocRoller::DataType>
     {
     };
@@ -761,6 +783,86 @@ namespace MatrixMultiplyTest
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
         matrixMultiplyMacroTile<float, float, float>(32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMA)
+    {
+        auto typeAB = std::get<1>(GetParam());
+        auto typeStr{"f16"};
+        auto numWMMAs = 0;
+        switch(typeAB)
+        {
+        case DataType::Half:
+            matrixMultiplyMacroTile<Half, Half, float>(16, 16, 16, 1, 2.e-6, false);
+            numWMMAs = 4; // F16 mac_k = 4 * wave_k
+            break;
+        case DataType::BFloat16:
+            matrixMultiplyMacroTile<BFloat16, BFloat16, float>(16, 16, 16, 1, 2.e-6, false);
+            numWMMAs = 4; // F16 mac_k = 4 * wave_k
+            typeStr  = "bf16";
+            break;
+        case DataType::FP8:
+            matrixMultiplyMacroTile<FP8, FP8, float>(16, 16, 16, 1, 2.e-6, false);
+            numWMMAs = 2; // F8 mac_k = 2 * wave_k
+            typeStr  = "fp8_fp8";
+            break;
+        case DataType::BF8:
+            matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 16, 1, 2.e-6, false);
+            numWMMAs = 2; // F8 mac_k = 2 * wave_k
+            typeStr  = "bf8_bf8";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed: Half, Bfloat16, FP8, and BF8)",
+                            toString(typeAB)));
+        };
+
+        std::string const wmmaMnemonic{concatenate("v_wmma_f32_16x16x16_", typeStr)};
+        std::string       generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
+    }
+
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMA)
+    {
+        auto typeAB = std::get<1>(GetParam());
+        auto typeStr{"f16"};
+        switch(typeAB)
+        {
+        case DataType::Half:
+            matrixMultiplyAB<Half, float>(16, 16, 16, 1, 2.e-6);
+            break;
+        case DataType::BFloat16:
+            matrixMultiplyAB<BFloat16, float>(16, 16, 16, 1, 2.e-6);
+            typeStr = "bf16";
+            break;
+        case DataType::FP8:
+            matrixMultiplyAB<FP8, float>(16, 16, 16, 1, 2.e-6);
+            typeStr = "fp8_fp8";
+            break;
+        case DataType::BF8:
+            matrixMultiplyAB<BF8, float>(16, 16, 16, 1, 2.e-6);
+            typeStr = "bf8_bf8";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed: Half, Bfloat16, FP8, and BF8)",
+                            toString(typeAB)));
+        };
+
+        const auto        numWMMAs = 2; // mac_k = 2 * wave_k
+        const std::string wmmaMnemonic{concatenate("v_wmma_f32_16x16x16_", typeStr)};
+        std::string       generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
+    }
+
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCWMMA)
+    {
+        matrixMultiplyABC<Half>(16, 16, 16, 1, 2.e-6);
+
+        const auto        numWMMAs = 2; // mac_k = 2 * wave_k
+        const std::string wmmaMnemonic{"v_wmma_f32_16x16x16_f16"};
+        std::string       generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
     TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
@@ -1290,6 +1392,17 @@ namespace MatrixMultiplyTest
     }
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest, MatrixMultiplyTestGPU, mfmaSupportedISATuples());
+
+    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyWMMATestGPU,
+                             MatrixMultiplyWMMATestGPU,
+                             ::testing::Combine(wmmaSupportedISAValues(),
+                                                ::testing::Values(rocRoller::DataType::Half,
+                                                                  rocRoller::DataType::BFloat16,
+                                                                  rocRoller::DataType::FP8,
+                                                                  rocRoller::DataType::BF8)));
+    INSTANTIATE_TEST_SUITE_P(MatrixMultiplyABCWMMATestGPU,
+                             MatrixMultiplyABCWMMATestGPU,
+                             wmmaSupportedISATuples());
 
     INSTANTIATE_TEST_SUITE_P(MatrixMultiplyTest,
                              MatrixMultiplyTestGPUF8,
