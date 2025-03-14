@@ -47,21 +47,32 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 
-project(ROCJPEG-test)
+project(rocjpeg-test)
 
 # make test with CTest
 enable_testing()
 include(CTest)
 
-# add find modules
-list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/share/rocjpeg/cmake)
+# add ROCm find Config location
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
 
 # find rocDecode
-find_package(rocJPEG QUIET)
+find_package(ROCJPEG QUIET)
 
-if(NOT ROCJPEG_FOUND)
-    message("-- ${Yellow}${PROJECT_NAME} requires rocJPEG. Install rocJPEG before running CTests")
-endif()
+if(ROCJPEG_FOUND)
+  message("-- ${White}${PROJECT_NAME}: rocJPEG found with find_package(ROCJPEG QUIET)${ColourReset}")
+  message("-- \t${White}ROCJPEG_INCLUDE_DIR -- ${ROCJPEG_INCLUDE_DIR}${ColourReset}")
+  message("-- \t${White}ROCJPEG_LIB_DIR -- ${ROCJPEG_LIB_DIR}${ColourReset}")
+  message("-- \t${White}ROCJPEG_LIBRARY -- ${ROCJPEG_LIBRARY}${ColourReset}")
+  message("-- \t${White}ROCJPEG_FOUND -- ${ROCJPEG_FOUND}${ColourReset}")
+  message("-- \t${White}ROCJPEG_VERSION -- ${ROCJPEG_VERSION}${ColourReset}")
+  message("-- \t${White}ROCJPEG_VERSION_MAJOR -- ${ROCJPEG_VERSION_MAJOR}${ColourReset}")
+  message("-- \t${White}ROCJPEG_VERSION_MINOR -- ${ROCJPEG_VERSION_MINOR}${ColourReset}")
+  message("-- \t${White}ROCJPEG_VERSION_PATCH -- ${ROCJPEG_VERSION_PATCH}${ColourReset}")
+else()
+  message("-- ${Yellow}${PROJECT_NAME} requires rocJPEG. Install rocJPEG before running CTests")
+endif(ROCJPEG_FOUND)
+
 
 add_test(
   NAME

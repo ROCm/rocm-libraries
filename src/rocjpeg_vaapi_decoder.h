@@ -43,7 +43,7 @@ THE SOFTWARE.
 #include <va/va_drmcommon.h>
 #include "rocjpeg_commons.h"
 #include "rocjpeg_parser.h"
-#include "../api/rocjpeg.h"
+#include "../api/rocjpeg/rocjpeg.h"
 
 /**
  * @brief Enumeration representing the compute partition for the MI300+ family of GPUs.

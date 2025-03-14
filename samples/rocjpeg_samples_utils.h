@@ -42,7 +42,7 @@ THE SOFTWARE.
     namespace fs = std::experimental::filesystem;
 #endif
 #include <chrono>
-#include "rocjpeg.h"
+#include "rocjpeg/rocjpeg.h"
 
 #define CHECK_ROCJPEG(call) {                                             \
     RocJpegStatus rocjpeg_status = (call);                                \
