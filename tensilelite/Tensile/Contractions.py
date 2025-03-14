@@ -443,7 +443,10 @@ class ProblemPredicate(Properties.Predicate):
             valuepredicates = []
             valuepredicates.append(state["MacroTile0"])
             valuepredicates.append(state["MacroTile1"])
-            valuepredicates.append(state["MIWaveTile"][0]*state["MIWaveTile"][1])
+            if state["EnableMatrixInstruction"]:
+                valuepredicates.append(state["MIWaveTile"][0]*state["MIWaveTile"][1])
+            else:
+                valuepredicates.append(state["ThreadTile0"]*state["ThreadTile1"])
             if state["NumElementsPerBatchStore"] != 0:
                 valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
             else:

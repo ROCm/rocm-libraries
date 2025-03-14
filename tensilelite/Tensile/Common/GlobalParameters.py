@@ -1258,7 +1258,12 @@ validParameters = {
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
     # Enable LDS Transpose Instruction
-    "LDSTrInst": [False, True]
+    "LDSTrInst": [False, True],
+    # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different 
+    #        unroll indices. The local sum from those WorkItems are reduced through LDS.
+    # True:  Use WaveSplitK. Number of WorkGroup[2] threads in the same wave compute the same output elements (matrix D) along different unroll indices.
+    #        The local sum from those threads are reduced through suffling using VALU instructions. Currently only support dot2 kernel.
+    "WaveSplitK": [False, True],
 }
 
 
@@ -1358,7 +1363,8 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"LDSTrInst": [False]}
+    {"LDSTrInst": [False]},
+    {"WaveSplitK": [ False ]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter

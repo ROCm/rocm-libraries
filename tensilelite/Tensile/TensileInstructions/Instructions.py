@@ -23,7 +23,7 @@
 from .Base import Item, fastdeepcopy
 from .Enums import InstType, CvtType
 from .Containers import DSModifiers, FLATModifiers, MUBUFModifiers, SMEMModifiers, SDWAModifiers, VOP3PModifiers, VCC, \
-                        RegisterContainer, HolderContainer, EXEC
+                        RegisterContainer, HolderContainer, EXEC, DPPModifiers
 from .Formatting import formatStr, printExit
 import abc
 from enum import Enum
@@ -116,16 +116,18 @@ class CompositeInstruction(Instruction):
         self.preStr()
         return '\n'.join([str(s) for s in self.instructions])
 
+# dot2: add dpp modifiers
 class CommonInstruction(Instruction):
     def __init__(self, instType: InstType, dst, srcs: list, \
                  sdwa: Optional[SDWAModifiers]=None, vop3: Optional[VOP3PModifiers]=None, \
-                 comment="") -> None:
+                 dpp: Optional[DPPModifiers]=None, comment="") -> None:
         super().__init__(instType, comment)
         self.dst      = dst
         self.dst1     = None # Usually we don't need this
         self.srcs     = srcs
         self.sdwa     = sdwa
         self.vop3     = vop3
+        self.dpp      = dpp
 
     def getArgStr(self) -> str:
         kStr = ""
@@ -164,6 +166,7 @@ class CommonInstruction(Instruction):
             l.extend(self.srcs)
         l.extend(self.sdwa.toList()) if self.sdwa else ""
         l.extend(self.vop3.toList()) if self.vop3 else ""
+        l.extend(self.dpp.toList()) if self.dpp else ""
         l.append(self.comment)
         return l
 
@@ -172,6 +175,7 @@ class CommonInstruction(Instruction):
         kStr = self.instStr + " " + self.getArgStr()
         kStr += str(self.sdwa) if self.sdwa else ""
         kStr += str(self.vop3) if self.vop3 else ""
+        kStr += str(self.dpp) if self.dpp else ""
         return self.formatWithComment(kStr)
 
 class BranchInstruction(Instruction):
@@ -190,11 +194,11 @@ class BranchInstruction(Instruction):
 
 class VCmpInstruction(CommonInstruction):
     def __init__(self, instType: InstType, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(instType, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(instType, dst, [src0, src1], sdwa, None, None, comment)
 
 class VCmpXInstruction(CommonInstruction):
     def __init__(self, instType: InstType, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(instType, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(instType, dst, [src0, src1], sdwa, None, None, comment)
 
     def toList(self) -> list:
         self.preStr()
@@ -269,9 +273,9 @@ class VCvtInstruction(CommonInstruction):
 #    def __init__(self, cvtType: CvtType, dst, src, sdwa: Optional[SDWAModifiers] = None, \
                  comment="") -> None:
         if isinstance(src, list):
-            super().__init__(InstType.INST_CVT, dst, src, sdwa, vop3, comment)
+            super().__init__(InstType.INST_CVT, dst, src, sdwa, vop3, None, comment)
         else:
-            super().__init__(InstType.INST_CVT, dst, [src], sdwa, vop3, comment)
+            super().__init__(InstType.INST_CVT, dst, [src], sdwa, vop3, None, comment)
         self.cvtType = cvtType
 
 class MFMAInstruction(Instruction):
@@ -1196,232 +1200,232 @@ class DSBPermuteB32(DSStoreInstruction):
 # Abs
 class SAbsI32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src], None, None, None, comment)
         self.setInst("s_abs_i32")
 
 # Min Max
 class SMaxI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_max_i32")
 class SMaxU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_max_u32")
 class SMinI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_min_i32")
 class SMinU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_min_u32")
 
 # Arithmetic
 class SAddI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_add_i32")
 class SAddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_add_u32")
 
 class SAddCU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_addc_u32")
 
 class SMulI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_mul_i32")
 
 class SMulHII32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_HI_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_HI_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_mul_hi_i32")
 
 class SMulHIU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_mul_hi_u32")
 
 class SMulLOU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_mul_lo_u32")
 
 class SSubI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_sub_i32")
 
 class SSubU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_sub_u32")
 
 class SSubBU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_subb_u32")
 
 # Cmp
 class SCmpEQI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_eq_i32")
 
 class SCmpEQU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_eq_u32")
 
 class SCmpEQU64(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U64, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U64, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_eq_u64")
 
 class SCmpGeI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_ge_i32")
 
 class SCmpGeU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_ge_u32")
 
 class SCmpGtI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_gt_i32")
 
 class SCmpGtU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_gt_u32")
 
 class SCmpGeU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_ge_u32")
 
 class SCmpLeI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_le_i32")
 
 class SCmpLeU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_le_u32")
 
 # SCC = (S0 != S1)
 class SCmpLgU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_lg_u32")
 
 class SCmpLgI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_lg_i32")
 
 class SCmpLgU64(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U64, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U64, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_lg_u64")
 
 class SCmpLtI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_lt_i32")
 
 class SCmpLtU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_lt_u32")
 
 class SCmpGtI32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_gt_i32")
 
 class SCmpGtU32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_cmp_gt_u32")
 
 # S bitcmp
 class SBitcmp1B32(CommonInstruction):
     def __init__(self, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, None, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, None, [src0, src1], None, None, None, comment)
         self.setInst("s_bitcmp1_b32")
 
 # S Cmp K
 # SCC = (S0.u == SIMM16)
 class _SCmpKEQU32(CommonInstruction):
     def __init__(self, src, simm16: Union[int, str], comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, None, comment)
         self.setInst("s_cmpk_eq_u32")
 
 class SCmpKEQU32(CommonInstruction):
     def __init__(self, src, simm16: Union[int, str], comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, None, comment)
         self.setInst("s_cmpk_eq_u32")
 
 class SCmpKGeU32(CommonInstruction):
     def __init__(self, src, simm16: str, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, None, comment)
         self.setInst("s_cmpk_ge_u32")
 
 class SCmpKGtU32(CommonInstruction):
     def __init__(self, src, simm16: str, comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, None, comment)
         self.setInst("s_cmpk_gt_u32")
 
 class SCmpKLGU32(CommonInstruction):
     def __init__(self, src, simm16: Union[int, str], comment="") -> None:
-        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, comment)
+        super().__init__(InstType.INST_U32, None, [src, simm16], None, None, None, comment)
         self.setInst("s_cmpk_lg_u32")
 
 # S Select
 # D.u = SCC ? S0.u : S1.u
 class SCSelectB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_cselect_b32")
 
 # Logic
 class SAndB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_and_b32")
 
 class SAndB64(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_and_b64")
 
 class SAndN2B32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_andn2_b32")
 
 class SOrB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_or_b32")
 
 class SXorB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_xor_b32")
 class SOrB64(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_or_b64")
 
 # Branch
@@ -1452,7 +1456,7 @@ class SCBranchVCCZ(BranchInstruction):
 # S PC
 class SGetPCB64(CommonInstruction):
     def __init__(self, dst, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [], None, None, None, comment)
         self.setInst("s_getpc_b64")
 
 class SSetPCB64(BranchInstruction):
@@ -1493,54 +1497,54 @@ class SCBranchExecNZ(BranchInstruction):
 # S Shift
 class SLShiftLeftB32(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src, shiftHex], None, None, None, comment)
         self.setInst("s_lshl_b32")
 
 class SLShiftRightB32(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src, shiftHex], None, None, None, comment)
         self.setInst("s_lshr_b32")
 
 class SLShiftLeftB64(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src, shiftHex], None, None, None, comment)
         self.setInst("s_lshl_b64")
 
 class SLShiftRightB64(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src, shiftHex], None, None, None, comment)
         self.setInst("s_lshr_b64")
 
 # Arithmetic shift right (preserve sign bit)
 class SAShiftRightI32(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src, shiftHex], None, None, None, comment)
         self.setInst("s_ashr_i32")
 
 class SLShiftLeft1AddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_lshl1_add_u32")
 
 class SLShiftLeft2AddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_lshl2_add_u32")
 
 class SLShiftLeft3AddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_lshl3_add_u32")
 
 class SLShiftLeft4AddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_lshl4_add_u32")
 
 # S mov
 class SSetMask(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         if self.kernel.wavefrontSize == 32:
             self.instType = InstType.INST_B32
             self.setInst("s_mov_b32")
@@ -1549,66 +1553,66 @@ class SSetMask(CommonInstruction):
 
 class SMovB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_mov_b32")
 
 class SMovB64(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         self.setInst("s_mov_b64")
 
 class SCMovB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_cmov_b32")
 
 class SCMovB64(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         self.setInst("s_cmov_b64")
 
 # Find first bit
 class SFf1B32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_ff1_i32_b32")
 
 # Bit field mask
 class SBfmB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("s_bfm_b32")
 
 # Sign ext
 class SMovkI32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src], None, None, None, comment)
         self.setInst("s_movk_i32")
 
 class SSExtI16toI32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src], None, None, None, comment)
         self.setInst("s_sext_i32_i16")
 
 # S exec
 class SAndSaveExecB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_and_saveexec_b32")
 
 class SAndSaveExecB64(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         self.setInst("s_and_saveexec_b64")
 
 class SOrSaveExecB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_or_saveexec_b32")
 
 class SOrSaveExecB64(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         self.setInst("s_or_saveexec_b64")
 
 class SSetPrior(Instruction):
@@ -1703,17 +1707,17 @@ class SSleep(Instruction):
 # S Reg
 class SGetRegB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_getreg_b32")
 
 class SSetRegB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_setreg_b32")
 
 class SSetRegIMM32B32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("s_setreg_IMM32_b32")
 
 # S WaitCnt
@@ -1942,22 +1946,23 @@ class SStoreB512(SMemStoreInstruction):
 # Arithmetic
 class VAddF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_add_f16")
 
+# dot2: add dpp modifiers
 class VAddF32(CommonInstruction):
-    def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, comment)
+    def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, dpp: Optional[DPPModifiers] = None, comment="") -> None:
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, dpp, comment)
         self.setInst("v_add_f32")
 
 class VAddF64(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_add_f64")
 
 class VAddI32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_add_i32")
 
     def preStr(self):
@@ -1970,7 +1975,7 @@ class VAddI32(CommonInstruction):
 
 class VAddU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
 
     def preStr(self):
         if self.asmBugs["ExplicitNC"]:
@@ -1985,7 +1990,7 @@ class VAddU32(CommonInstruction):
 
 class VAddCOU32(CommonInstruction):
     def __init__(self, dst, dst1, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.dst1 = dst1
 
     def preStr(self):
@@ -1996,7 +2001,7 @@ class VAddCOU32(CommonInstruction):
 
 class VAddCCOU32(CommonInstruction):
     def __init__(self, dst, dst1, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, None, None, comment)
         self.dst1 = dst1
         self.setInst("_v_addc_co_u32")
 
@@ -2010,12 +2015,12 @@ class VAddCCOU32(CommonInstruction):
 
 class VAddPKF16(CommonInstruction):
     def __init__(self, dst, src0, src1, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], None, vop3, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], None, vop3, None, comment)
         self.setInst("v_pk_add_f16")
 
 class _VAddPKF32(CommonInstruction):
     def __init__(self, dst, src0, src1, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], None, vop3, None, comment)
         self.setInst("v_pk_add_f32")
 
 class VAddPKF32(CompositeInstruction):
@@ -2044,44 +2049,44 @@ class VAddPKF32(CompositeInstruction):
                 else:
                     srcs1.append(s)
                     srcs2.append(s)
-            self.instructions = [VAddF32(dst1, srcs1[0], srcs1[1], None, self.comment),
-                                VAddF32(dst2, srcs2[0], srcs2[1], None, self.comment)]
+            self.instructions = [VAddF32(dst1, srcs1[0], srcs1[1], None, None, self.comment),
+                                VAddF32(dst2, srcs2[0], srcs2[1], None, None, self.comment)]
 
         assert all(inst.vop3 is None for inst in self.instructions), "Currently does not support with vop3 enabled"
 
 class VAdd3U32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_add3_u32")
 
 class VMulF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_mul_f16")
 
 class VMulF32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_mul_f32")
 
 class VMulF64(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_mul_f64")
 
 class VMulPKF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, vop3, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, vop3, None, comment)
         self.setInst("v_pk_mul_f16")
 
 class VMulPKF32S(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, vop3, None, comment)
         self.setInst("v_pk_mul_f32")
 
 class _VMulPKF32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, vop3, None, comment)
         self.setInst("v_pk_mul_f32")
 
 class VMulPKF32(CompositeInstruction):
@@ -2133,37 +2138,37 @@ class VMulPKF32(CompositeInstruction):
 
 class VMulLOU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_LO_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_LO_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_mul_lo_u32")
 
 class VMulHII32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_HI_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_HI_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_mul_hi_i32")
 
 class VMulHIU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_HI_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_mul_hi_u32")
 
 class VMulI32I24(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_mul_i32_i24")
 
 class VMulU32U24(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_mul_u32_u24")
 
 class VSubF32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_sub_f32")
 
 class VSubI32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], None, None, None, comment)
 
     def preStr(self):
         if self.asmBugs["ExplicitNC"]:
@@ -2175,7 +2180,7 @@ class VSubI32(CommonInstruction):
 
 class VSubU32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
 
     def preStr(self):
         if self.asmBugs["ExplicitNC"]:
@@ -2187,7 +2192,7 @@ class VSubU32(CommonInstruction):
 
 class VSubCoU32(CommonInstruction):
     def __init__(self, dst, dst1, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1], None, None, None, comment)
         self.dst1 = dst1
 
     def preStr(self):
@@ -2199,7 +2204,7 @@ class VSubCoU32(CommonInstruction):
 # MAC
 class VMacF32(CommonInstruction):
     def __init__(self, dst, src0, src1, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], None, vop3, None, comment)
         self.setInst("v_mac_f32")
         self.addDstToSrc = False
 
@@ -2223,7 +2228,7 @@ class VMacF32(CommonInstruction):
 # Dot
 class VDot2CF32F16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, None, comment)
         self.setInst("v_dot2c_f32_f16")
 
     def preStr(self):
@@ -2232,97 +2237,97 @@ class VDot2CF32F16(CommonInstruction):
 
 class VDot2F32F16(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_dot2_f32_f16")
 
 # TODO- enable this for available GPU
 class VDot2F32BF16(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_dot2_f32_bf16")
 
 # Fma
 class VFmaF16(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_fma_f16")
 
 class VFmaF32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_fma_f32")
 
 class VFmaF64(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F64, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F64, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_fma_f64")
 
 class VFmaPKF16(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_pk_fma_f16")
 
 class VFmaMixF32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_fma_mix_f32")
 
 # V Mad
 class VMadI32I24(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_mad_i32_i24")
 
 class VMadU32U24(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_mad_u32_u24")
 
 class VMadMixF32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, vop3, None, comment)
         self.setInst("v_mad_mix_f32")
 
 # Exp, rcp
 class VExpF16(CommonInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, None, comment)
         self.setInst("v_exp_f16")
 
 class VExpF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_exp_f32")
 
 class VRcpF16(CommonInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, None, comment)
         self.setInst("v_rcp_f16")
 
 class VRcpF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_rcp_f32")
 
 class VRcpIFlagF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_rcp_iflag_f32")
 
 # Rsq,
 class VRsqF16(CommonInstruction):
     def __init__(self, dst, src, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src], sdwa, None, None, comment)
         self.setInst("v_rsq_f16")
 
 class VRsqF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_rsq_f32")
 
 class VRsqIFlagF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_rsq_iflag_f32")
 
 # Cmp
@@ -2506,88 +2511,88 @@ class VCmpXNeU32(VCmpXInstruction):
 # Min Max
 class VMaxF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_max_f16")
 
 class VMaxF32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_max_f32")
 
 class VMaxF64(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_max_f64")
 
 class VMaxI32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_max_i32")
 
 class VMaxPKF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, vop3, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, vop3, None, comment)
         self.setInst("v_pk_max_f16")
 
 class VMed3I32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_med3_i32")
 
 class VMed3F32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_med3_f32")
 
 class VMinF16(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F16, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_min_f16")
 
 class VMinF32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_min_f32")
 
 class VMinF64(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_F64, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_min_f64")
 
 class VMinI32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_min_i32")
 
 # V Logic
 class VAndB32(CommonInstruction):
     def __init__(self, dst, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, None, None, comment)
         self.setInst("v_and_b32")
 
 class VAndOrB32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_and_or_b32")
 
 class VNotB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_not_b32")
 
 class VOrB32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers]=None, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_or_b32")
 
 class VXorB32(CommonInstruction):
     def __init__(self, dst, src0, src1, sdwa: Optional[SDWAModifiers]=None, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], sdwa, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], sdwa, None, None, comment)
         self.setInst("v_xor_b32")
 
 class VPrngB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_prng_b32")
 
 # V Convert
@@ -2716,33 +2721,33 @@ class VCvtPkF32toBF16(VCvtInstruction):
 # V Mask
 class VCndMaskB32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2 = VCC(), sdwa: Optional[SDWAModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], sdwa, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], sdwa, None, None, comment)
         self.setInst("v_cndmask_b32")
 
 # V Shift
 class VLShiftLeftB16(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B16, dst, [shiftHex, src], None, None, comment)
+        super().__init__(InstType.INST_B16, dst, [shiftHex, src], None, None, None, comment)
         self.setInst("v_lshlrev_b16")
 
 class VLShiftLeftB32(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [shiftHex, src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [shiftHex, src], None, None, None, comment)
         self.setInst("v_lshlrev_b32")
 
 class VLShiftRightB32(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [shiftHex, src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [shiftHex, src], None, None, None, comment)
         self.setInst("v_lshrrev_b32")
 
 class VLShiftLeftB64(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [shiftHex, src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [shiftHex, src], None, None, None, comment)
         self.setInst("v_lshlrev_b64")
 
 class VLShiftRightB64(CommonInstruction):
     def __init__(self, dst, shiftHex, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [shiftHex, src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [shiftHex, src], None, None, None, comment)
         self.setInst("v_lshrrev_b64")
 
 class _VLShiftLeftOrB32(CommonInstruction):
@@ -2781,7 +2786,7 @@ class VLShiftLeftOrB32(CompositeInstruction):
 # V Add + Shift
 class _VAddLShiftLeftU32(CommonInstruction):
     def __init__(self, dst, shiftHex, src0, src1, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1, shiftHex], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1, shiftHex], None, None, None, comment)
         self.setInst("v_add_lshl_u32")
 
 class VAddLShiftLeftU32(CompositeInstruction):
@@ -2810,7 +2815,7 @@ class VAddLShiftLeftU32(CompositeInstruction):
 
 class _VLShiftLeftAddU32(CommonInstruction):
     def __init__(self, dst, shiftHex, src0, src1, vop3: Optional[VOP3PModifiers] = None, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, shiftHex, src1], None, vop3, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, shiftHex, src1], None, vop3, None, comment)
         self.setInst("v_lshl_add_u32")
 
 class VLShiftLeftAddU32(CompositeInstruction):
@@ -2839,12 +2844,12 @@ class VLShiftLeftAddU32(CompositeInstruction):
 # V Mov
 class VMovB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_mov_b32")
 
 class _VMovB64(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B64, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B64, dst, [src], None, None, None, comment)
         self.setInst("v_mov_b64")
 
 class VMovB64(CompositeInstruction):
@@ -2874,56 +2879,56 @@ class VMovB64(CompositeInstruction):
 # V Bfe
 class VBfeI32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_I32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_bfe_i32")
 
 # D.u = (S0.u >> S1.u[4:0]) & ((1 << S2.u[4:0]) - 1)
 class VBfeU32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_U32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_bfe_u32")
 
 # V Bfi
 # D.u = (S0.u & S1.u) | (~S0.u & S2.u)
 class VBfiB32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_bfi_b32")
 
 # V Pack
 class VPackF16toB32(CommonInstruction):
     def __init__(self, dst, src0, src1, vop3: Optional[VOP3PModifiers]=None, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1], None, vop3, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1], None, vop3, None, comment)
         self.setInst("v_pack_b32_f16")
 
 # Read/ Write
 class VAccvgprReadB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_accvgpr_read_b32")
 
 class VAccvgprWrite(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_NOTYPE, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_NOTYPE, dst, [src], None, None, None, comment)
         self.setInst("v_accvgpr_write")
 
 class VAccvgprWriteB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_accvgpr_write_b32")
 
 class VReadfirstlaneB32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
         self.setInst("v_readfirstlane_b32")
 
 # Rounding
 class VRndneF32(CommonInstruction):
     def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_F32, dst, [src], None, None, comment)
+        super().__init__(InstType.INST_F32, dst, [src], None, None, None, comment)
         self.setInst("v_rndne_f32")
 
 class VPermB32(CommonInstruction):
     def __init__(self, dst, src0, src1, src2, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, comment)
+        super().__init__(InstType.INST_B32, dst, [src0, src1, src2], None, None, None, comment)
         self.setInst("v_perm_b32")

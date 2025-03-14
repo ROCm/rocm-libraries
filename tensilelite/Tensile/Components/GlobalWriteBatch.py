@@ -288,7 +288,11 @@ class GlobalWriteBatchWriter:
   def GSUSynccodegen(self, labelend, vgprstart, globalOffset, vgproffset):
     module = Module("GSUSYNC")
 
-    WaveNum = str(self.kernel["MIWaveGroup"][0]*self.kernel["MIWaveGroup"][1])
+    # dot2: enable GSU for non-MFMA mode
+    if self.kernel["EnableMatrixInstruction"]:
+      WaveNum = str(self.kernel["MIWaveGroup"][0]*self.kernel["MIWaveGroup"][1])
+    else:
+      WaveNum = str(self.kernel["NumThreads"] // self.kernel["WavefrontSize"])
 
     module.addComment("check done start")
 
@@ -672,7 +676,7 @@ class GlobalWriteBatchWriter:
     loadedDataScaleBVec = {}
     loadedDataScaleAlphaVec = {}
 
-    if self.kernel["BufferStore"] and self.edge:
+    if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
       bufferOOB = self.tmpVgpr + self.tmpVgprSize - 1
       module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
     else:

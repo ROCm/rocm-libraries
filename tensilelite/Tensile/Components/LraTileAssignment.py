@@ -49,6 +49,13 @@ class LraTileAssignmentVALU(LraTileAssignment):
         # allocate resources
         qReg    = writer.vgprPool.checkOut(1,"qReg") # quotient
         rReg    = writer.vgprPool.checkOut(1,"rReg") # remainder
+        # dot2: currently only support unroll major LDS
+        tc               = tP["tensorChar"]
+        umlds            = kernel["UnrollMajorLDS%s" % tc]
+        LdsPad           = kernel["LdsPad%s" % tc] if kernel["LdsBlockSizePerPad%s" % tc] == 0 else 0
+        strideTile       = kernel["_DepthU%s"%tc] + LdsPad if umlds else 1
+        tmpVgpr          = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
+        tmpVgprRes       = RegisterPoolResource(tmpVgpr, 2)
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
             if tP["tileIdx"] == 0:
@@ -59,9 +66,25 @@ class LraTileAssignmentVALU(LraTileAssignment):
                 # constant
                 dividendReg = "Serial" # local serial
                 divisor = kernel["SubGroup0"]
-
-                # generate instruction
-                module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpSgprInfo))
+                # dot2: waveSplitK
+                if kernel["UseDotInstruction"]:
+                    if kernel["NumWaveSplitK"] > 1:
+                        newSerial = writer.vgprPool.checkOut(1,"newSerial")
+                        module.add(vectorStaticDivide(newSerial, dividendReg, kernel["NumWaveSplitK"], tmpVgprRes, \
+                        "Divided by NumWaveSplitK(%u)" % kernel["NumWaveSplitK"]))
+                        # generate instruction
+                        module.add(vectorStaticDivideAndRemainder(qReg, rReg, newSerial, divisor, tmpVgprRes))
+                        # tile offset
+                        module.add(staticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
+                        "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
+                        writer.vgprPool.checkIn(newSerial)
+                    else:
+                        module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
+                        # tile offset
+                        module.add(staticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
+                        "1. M offset: mOffset = mIdx * mStride(%u)" % strideTile))
+                else:
+                    module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
 
                 # release and return resource
                 tP["gpr"]["lro"] = rReg
@@ -74,15 +97,21 @@ class LraTileAssignmentVALU(LraTileAssignment):
                 # constant
                 divisor = kernel["SubGroup1"]
                 dividendReg = writer.tmplro
-
                 # generate instruction
-                module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpSgprInfo))
+                module.add(vectorStaticDivideAndRemainder(qReg, rReg, dividendReg, divisor, tmpVgprRes))
+
+                if kernel["UseDotInstruction"]:
+                    # tile offset
+                    module.add(staticMultiply(vgpr(rReg), vgpr(rReg), strideTile, tmpSgprInfo, \
+                    "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
 
                 # release and return resource
                 tP["gpr"]["lro"] = rReg
 
                 writer.vgprPool.checkIn(writer.tmplro) # old
                 writer.vgprPool.checkIn(qReg)
+
+        writer.vgprPool.checkIn(tmpVgpr)
 
         return module
 

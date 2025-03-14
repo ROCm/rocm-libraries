@@ -72,8 +72,13 @@ def vectorStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Option
         module.add(VLShiftRightB64(dst=vgpr(tmpVgpr,2), shiftHex=hex(shift), src=vgpr(tmpVgpr,2), comment=dComment))
         module.add(VMovB32(dst=vgpr(qReg), src=vgpr(tmpVgpr), comment=dComment))
         if doRemainder:
-            module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=vgpr(qReg), src1=hex(divisor), comment=rComment))
+            if divisor <= 64 and divisor >= -16:
+                module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=vgpr(qReg), src1=hex(divisor), comment=rComment))
+            else:
+                module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=hex(divisor)))
+                module.add(VMulLOU32(dst=vgpr(tmpVgpr), src0=vgpr(qReg), src1=vgpr(tmpVgpr+1), comment=rComment))
             module.add(VSubU32(dst=vgpr(rReg), src0=vgpr(dReg), src1=vgpr(tmpVgpr), comment=rComment))
+            
     return module
 
 def vectorStaticDivide(qReg, dReg, divisor, tmpVgprRes: Optional[RegisterPoolResource], comment=""):

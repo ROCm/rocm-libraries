@@ -2381,7 +2381,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       for plrIdx in range(0, self.states.numItersPLR):
         pack[plrIdx] = Module()
         for iui in range(0,kernel["InnerUnroll"]):
-
           if iui*self.states.numReadsIterCoalescedA < kernel["InnerUnroll"]:
             module.addComment1("prefetch local a")
             localReadCodeA, packCodeA = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadA, iui*self.states.numReadsIterCoalescedA, 0, tensorParametersA)
@@ -3039,7 +3038,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         KinInnerUnroll *= kernel["MatrixInstK"]
 
       tailLoopInnerUnroll = 1
-      if (kernel["AssertSummationElementMultiple"] % KinInnerUnroll == 0):
+      # dot2: currently force tailLoopInnerUnroll = 1
+      if (not kernel["UseDotInstruction"]) and (kernel["AssertSummationElementMultiple"] % KinInnerUnroll == 0):
         tailLoopInnerUnroll = kernel["InnerUnroll"]
 
       for mValue in range(mEnd):
@@ -3153,7 +3153,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ####################################
     # Shift Vector Components
     ####################################
-    if kernel["EdgeType"] == "ShiftPtr":
+    # TODO: support edge case for dot2
+    if kernel["EdgeType"] == "ShiftPtr" and not kernel["UseDotInstruction"]:
       # GuaranteeNoPartial means each component in the vector loads is always valid.  In this case we
       # don't need the unshift code
 
@@ -3166,6 +3167,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not kernel["GuaranteeNoPartialB"] and tensorParametersB["rtv"]:
         module.addComment1("shift vector components d1")
         module.add(self.shiftVectorComponents(kernel, tensorParametersB))
+
+    # dot2: WaveSplitK reduction
+    if kernel["NumWaveSplitK"] > 1:
+      module.add(self.waveSplitKReduction(kernel))
 
     ####################################
     # LocalSplitU reduction
@@ -3414,8 +3419,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numReadsIterCoalescedA = ceil(self.states.lrvwUnrollA / kernel["MIInputPerThreadA"])
       self.states.numReadsIterCoalescedB = ceil(self.states.lrvwUnrollB / kernel["MIInputPerThreadB"])
     else:
-      self.states.numReadsIterCoalescedA  = 1
-      self.states.numReadsIterCoalescedB  = 1
+      self.states.numReadsIterCoalescedA = self.states.lrvwUnrollA // kernel["NumDotElements"] if kernel["UseDotInstruction"] else 1
+      self.states.numReadsIterCoalescedB = self.states.lrvwUnrollB // kernel["NumDotElements"] if kernel["UseDotInstruction"] else 1
     self.states.numIterPerCoalescedReadA = max(1,self.states.numReadsIterCoalescedA//kernel["InnerUnroll"])
     self.states.numIterPerCoalescedReadB = max(1,self.states.numReadsIterCoalescedB//kernel["InnerUnroll"])
 
@@ -3785,8 +3790,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       valuBlocksA = (1 + kernel["PrefetchLocalRead"]) * kernel["InnerUnroll"]
       valuBlocksB = (1 + kernel["PrefetchLocalRead"]) * kernel["InnerUnroll"]
 
-      self.states.a.numVgprValuPerBlock = kernel["ThreadTileA"] * tensorParametersA["bpe"] // self.states.bpr
-      self.states.b.numVgprValuPerBlock = kernel["ThreadTileB"] * tensorParametersB["bpe"] // self.states.bpr
+      if kernel["UseDotInstruction"]:
+        # dot2: at least read NumDotElements elements
+        self.states.a.numVgprValuPerBlock = kernel["ThreadTileA"] * tensorParametersA["bpe"] * kernel["NumDotElements"] // self.states.bpr
+        self.states.b.numVgprValuPerBlock = kernel["ThreadTileB"] * tensorParametersB["bpe"] * kernel["NumDotElements"] // self.states.bpr
+      else:
+        self.states.a.numVgprValuPerBlock = kernel["ThreadTileA"] * tensorParametersA["bpe"] // self.states.bpr
+        self.states.b.numVgprValuPerBlock = kernel["ThreadTileB"] * tensorParametersB["bpe"] // self.states.bpr
 
       self.states.c.numVgprValu = kernel["ThreadTile0"] * kernel["ThreadTile1"] * kernel["ProblemType"]["ComputeDataType"].numRegisters()
       self.states.a.numVgprValu = self.states.a.numVgprValuPerBlock * valuBlocksA
@@ -4098,6 +4108,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if(self.states.archCaps["VgprBank"]):
       if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
         vgprIdx += 2
+    # dot2: alignment hack for wider local read
+    if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:
+      vgprIdx = ((vgprIdx+3)//4)*4 
     self.states.a.startVgprValu  = vgprIdx
     self.states.startVgpr        = vgprIdx
     vgprIdx += self.states.a.numVgprValu
@@ -4641,8 +4654,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numB //= self.states.numReadsIterCoalescedB
 
     else: # mac instruction
-      numA = kernel["InnerUnroll"]*(kernel["ThreadTile0"] // kernel["VectorWidthA"]) // tensorParametersA["localReadInstruction"].numOffsets
-      numB = kernel["InnerUnroll"]*(kernel["ThreadTile1"] // kernel["VectorWidthB"]) // tensorParametersB["localReadInstruction"].numOffsets
+      if kernel["UseDotInstruction"]:
+        # dot2: InnerUnroll are used for wider local read
+        numA = kernel["ThreadTile0"] // tensorParametersA["localReadInstruction"].numOffsets
+        numB = kernel["ThreadTile1"] // tensorParametersB["localReadInstruction"].numOffsets
+      else:
+        numA = kernel["InnerUnroll"]*(kernel["ThreadTile0"] // kernel["VectorWidthA"]) // tensorParametersA["localReadInstruction"].numOffsets
+        numB = kernel["InnerUnroll"]*(kernel["ThreadTile1"] // kernel["VectorWidthB"]) // tensorParametersB["localReadInstruction"].numOffsets
 
     if not kernel["DirectToVgprA"]:
       self.states.numReadsPerIterA = numA
@@ -5305,6 +5323,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   @abc.abstractmethod
   def isSwapGlobalReadOrderForDtvOrDtl(self, kernel, prefetch1=False):
+    return ""
+
+  ##############################################################################
+  # WaveSplitK Reduction
+  ##############################################################################
+  @abc.abstractmethod
+  def waveSplitKReduction(self, kernel):
     return ""
 
   ##############################################################################

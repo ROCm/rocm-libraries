@@ -22,14 +22,71 @@
 #
 ################################################################################
 
-from ..TensileInstructions import DataType, Module
+from ..TensileInstructions import DataType, Module, vgpr, SSetPrior, VFmaMixF32, VMadMixF32, VOP3PModifiers, VDot2F32F16, VDot2CF32F16
 from ..Component import Component, MAC
 
+# dot2
+class FMA_F16_HPA_DOT2(MAC):
+    asmCaps = lambda caps: caps['v_dot2_f32_f16'] or caps['v_dot2c_f32_f16']
+    #archCaps = {}
+    kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+                              "HighPrecisionAccumulate": True},
+              "UseDotInstruction": True,
+             }
+
+    def __call__(self, writer, tPA, tPB, m, innerUnroll):
+        kernel = writer.states.kernel
+
+        module = Module("FMA_F16_HPA_DOT2")
+        module.addComment(self.commentHeader())
+
+        vars = {}
+
+        if writer.states.asmCaps["v_dot2_f32_f16"]:
+            instruction = VDot2F32F16
+        else:
+            instruction = VDot2CF32F16
+
+        vars["m"] = m
+        vars["kernel"] = kernel
+
+        vars["ThreadTile0"] = kernel["ThreadTile0"]
+        vars["ThreadTile1"] = kernel["ThreadTile1"]
+
+        for block1 in range(0, kernel["ThreadTile1"]):
+            for block0 in range(0, kernel["ThreadTile0"]):
+                for iui in range(0, innerUnroll):
+                    vars["block0"] = block0
+                    vars["block1"] = block1
+                    vars["blockA"] = block0 if tPA["tileIdx"] == 0 else block1
+                    vars["blockB"] = block1 if tPB["tileIdx"] != 0 else block0
+                    vars["iui"] = iui
+
+                    vars["cIdxExpr"] = "%d+%d" % (vars["block0"], vars["block1"]*vars["ThreadTile0"])
+                    cidx = eval(vars["cIdxExpr"])
+                    cStr = "ValuC+{cIdxExpr}".format_map(vars)
+                    aStr = "ValuA_X{m}_I{iui}+{blockA}".format_map(vars)
+                    bStr = "ValuB_X{m}_I{iui}+{blockB}".format_map(vars)
+                    if instruction == VDot2F32F16:
+                        module.add(instruction(dst=vgpr(cStr), src0=vgpr(aStr), src1=vgpr(bStr), src2=vgpr(cStr), \
+                                            comment="ValuC[%u] iui=%u" % (cidx, vars["iui"])))
+                    else:
+                        module.add(instruction(dst=vgpr(cStr), src0=vgpr(aStr), src1=vgpr(bStr), \
+                                            comment="ValuC[%u] iui=%u" % (cidx, vars["iui"])))
+
+                    if (block1 == 0) and (block0 == 0) and (iui == 0):
+                        module.add(SSetPrior(prior=1, comment="Raise priority while processing macs"))
+
+        module.add(SSetPrior(prior=0, comment="Reset priority after macs"))
+
+        return module
+    
 class FMA_F16_HPA_MAD_MIX(MAC):
     asmCaps = lambda caps: caps['v_mad_mix_f32'] or caps['v_fma_mix_f32']
     #archCaps = {}
     kernel = {"ProblemType": {"DataType": DataType(DataType.half),
                               "HighPrecisionAccumulate": True},
+              "UseDotInstruction": False,
              }
 
     def __call__(self, writer, m, innerUnroll):
