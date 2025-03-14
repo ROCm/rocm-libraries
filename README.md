@@ -31,6 +31,7 @@ newer. Release notes are available for each release on the releases tab.
 ## Required ROCM library
 
 * hipSPARSE (for the header file)
+* roctracer
 
 ## Quickstart hipSPARSELt build
 
