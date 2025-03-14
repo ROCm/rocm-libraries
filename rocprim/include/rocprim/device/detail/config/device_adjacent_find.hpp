@@ -204,6 +204,142 @@ struct default_adjacent_find_config<
 // Based on input_type = double
 template<class input_type>
 struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 8) && (sizeof(input_type) > 4))>>
+    : adjacent_find_config<64, 2>
+{};
+
+// Based on input_type = float
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 4) && (sizeof(input_type) > 2))>>
+    : adjacent_find_config<128, 4>
+{};
+
+// Based on input_type = rocprim::half
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 2))>> : adjacent_find_config<64, 64>
+{};
+
+// Based on input_type = int64_t
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 8) && (sizeof(input_type) > 4))>>
+    : adjacent_find_config<64, 4>
+{};
+
+// Based on input_type = int
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 4) && (sizeof(input_type) > 2))>>
+    : adjacent_find_config<128, 32>
+{};
+
+// Based on input_type = short
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 2) && (sizeof(input_type) > 1))>>
+    : adjacent_find_config<256, 32>
+{};
+
+// Based on input_type = int8_t
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 1))>> : adjacent_find_config<256, 64>
+{};
+
+// Based on input_type = double
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 8) && (sizeof(input_type) > 4))>>
+    : adjacent_find_config<64, 2>
+{};
+
+// Based on input_type = float
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 4) && (sizeof(input_type) > 2))>>
+    : adjacent_find_config<64, 32>
+{};
+
+// Based on input_type = rocprim::half
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 2))>> : adjacent_find_config<256, 16>
+{};
+
+// Based on input_type = int64_t
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 8) && (sizeof(input_type) > 4))>>
+    : adjacent_find_config<512, 2>
+{};
+
+// Based on input_type = int
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 4) && (sizeof(input_type) > 2))>>
+    : adjacent_find_config<64, 16>
+{};
+
+// Based on input_type = short
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 2) && (sizeof(input_type) > 1))>>
+    : adjacent_find_config<256, 2>
+{};
+
+// Based on input_type = int8_t
+template<class input_type>
+struct default_adjacent_find_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    input_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<input_type>::value)
+                      && (sizeof(input_type) <= 1))>> : adjacent_find_config<128, 64>
+{};
+
+// Based on input_type = double
+template<class input_type>
+struct default_adjacent_find_config<
     static_cast<unsigned int>(target_arch::gfx906),
     input_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<input_type>::value)

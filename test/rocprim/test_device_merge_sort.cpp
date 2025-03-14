@@ -343,7 +343,15 @@ void testLargeIndices()
     // at least some sizes that fit into device memory.
     using config = rocprim::merge_sort_config<256, 256, 1, 128, 128, 1, (1 << 17)>;
 
-    for(size_t size : test_utils::get_large_sizes(seeds[0]))
+    // On Windows, sizes above 2^34 cause issues that we can't currently catch by examining
+    // the hipMalloc return value or querying available memory. Workaround this for now
+    // by setting a different maximum size for that platform.
+#if defined(_WIN32)
+    const size_t max_pow2 = 34;
+#else
+    const size_t max_pow2 = 37;
+#endif
+    for(size_t size : test_utils::get_large_sizes<max_pow2>(seeds[0]))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
