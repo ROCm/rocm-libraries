@@ -1849,6 +1849,270 @@ struct default_segmented_radix_sort_config<
           1>
 {};
 
+// Based on key_type = double, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = float, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = rocprim::half, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int64_t, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = short, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int8_t, value_type = empty_type
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          0,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = double, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 4>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = float, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = rocprim::half, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 4>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int64_t, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 4>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 4>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = short, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1) && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 4>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
+// Based on key_type = int8_t, value_type = int8_t
+template<class key_type, typename value_type>
+struct default_segmented_radix_sort_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (sizeof(value_type) <= 1)
+                      && (!std::is_same<value_type, rocprim::empty_type>::value))>>
+    : segmented_radix_sort_config<
+          8,
+          8,
+          kernel_config<256, 8>,
+          typename std::conditional<1,
+                                    WarpSortConfig<8, 4, 256, 64, 16, 8, 256>,
+                                    DisabledWarpSortConfig>::type,
+          1>
+{};
+
 // Based on key_type = double, value_type = rocprim::int128_t
 template<class key_type, typename value_type>
 struct default_segmented_radix_sort_config<

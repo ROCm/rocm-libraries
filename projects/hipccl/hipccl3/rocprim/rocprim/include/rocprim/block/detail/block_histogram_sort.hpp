@@ -103,14 +103,10 @@ public:
         ::rocprim::syncthreads(); // Fix race condition that appeared on Vega10 hardware, storage LDS is reused below.
 
         ROCPRIM_UNROLL
-        for(unsigned int offset = 0; offset < Bins; offset += BlockSize)
+        for(unsigned int offset = 0; offset + flat_tid < Bins; offset += BlockSize)
         {
-            const unsigned int offset_tid = offset + flat_tid;
-            if(offset_tid < Bins)
-            {
-                storage_.start[offset_tid] = tile_size;
-                storage_.end[offset_tid] = tile_size;
-            }
+            storage_.start[offset + flat_tid] = tile_size;
+            storage_.end[offset + flat_tid] = tile_size;
         }
         ::rocprim::syncthreads();
 

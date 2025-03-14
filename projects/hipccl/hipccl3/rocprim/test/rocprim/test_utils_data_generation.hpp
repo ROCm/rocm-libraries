@@ -35,6 +35,7 @@
 #include <iterator>
 #include <random>
 #include <vector>
+#include <algorithm>
 
 namespace test_utils {
 
@@ -505,7 +506,7 @@ std::vector<size_t> get_sizes(T seed_value)
 template<unsigned int MaxPow2 = 37, class T>
 std::vector<size_t> get_large_sizes(T seed_value)
 {
-    std::vector<size_t> sizes = {
+    std::vector<size_t> test_sizes = {
         (size_t{1} << 30) - 1,
         size_t{1} << 31,
         (size_t{1} << 32) - 15,
@@ -519,7 +520,18 @@ std::vector<size_t> get_large_sizes(T seed_value)
                                               (size_t{1} << 30) + 1,
                                               (size_t{1} << MaxPow2) - 2,
                                               seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+
+    std::vector<size_t> sizes(test_sizes.size() + random_sizes.size());
+    int count = 0;
+    auto predicate = [&count](const size_t& val) {
+        const bool result = (val <= (size_t{1} << MaxPow2));
+        count += (result ? 1 : 0);
+        return result;
+    };
+    std::copy_if(test_sizes.begin(), test_sizes.end(), sizes.begin(), predicate);
+    std::copy_if(random_sizes.begin(), random_sizes.end(), sizes.begin() + count, predicate);
+    sizes.resize(count);
+
     std::sort(sizes.begin(), sizes.end());
     return sizes;
 }

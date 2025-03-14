@@ -256,6 +256,188 @@ struct default_non_trivial_runs_config<
 // Based on key_type = double
 template<typename key_type>
 struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4))>>
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = float
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2))>>
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = rocprim::half
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value)
+                      && (sizeof(key_type) <= 2))>>
+    : non_trivial_runs_config<128,
+                              32,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int64_t
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4))>>
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2))>>
+    : non_trivial_runs_config<256,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = short
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1))>>
+    : non_trivial_runs_config<128,
+                              16,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int8_t
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1200),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value)
+                      && (sizeof(key_type) <= 1))>>
+    : non_trivial_runs_config<128,
+                              32,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = double
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4))>>
+    : non_trivial_runs_config<512,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = float
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2))>>
+    : non_trivial_runs_config<256,
+                              16,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = rocprim::half
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value)
+                      && (sizeof(key_type) <= 2))>>
+    : non_trivial_runs_config<128,
+                              32,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int64_t
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4))>>
+    : non_trivial_runs_config<512,
+                              8,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2))>>
+    : non_trivial_runs_config<256,
+                              16,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = short
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1))>>
+    : non_trivial_runs_config<256,
+                              16,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = int8_t
+template<typename key_type>
+struct default_non_trivial_runs_config<
+    static_cast<unsigned int>(target_arch::gfx1201),
+    key_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value)
+                      && (sizeof(key_type) <= 1))>>
+    : non_trivial_runs_config<128,
+                              32,
+                              ::rocprim::block_load_method::block_load_vectorize,
+                              ::rocprim::block_scan_algorithm::using_warp_scan>
+{};
+
+// Based on key_type = double
+template<typename key_type>
+struct default_non_trivial_runs_config<
     static_cast<unsigned int>(target_arch::gfx906),
     key_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
