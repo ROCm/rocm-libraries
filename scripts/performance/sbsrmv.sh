@@ -26,7 +26,7 @@ path=../../build/release/clients/staging
 # Parse command line parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,device:,path:,matrices-dir:,blockdim: --options hd:p:m:b: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,device:,path:,matrices-dir:,samples-dir:,blockdim: --options hd:p:m:s:b: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -44,12 +44,17 @@ else
     matrices_dir=${MATRICES_DIR}
 fi
 
+samples_dir=../samples
+
 eval set -- "${GETOPT_PARSE}"
 
 while true; do
     case "${1}" in
         -m|--matrices-dir)
             matrices_dir=${2}
+            shift 2 ;;
+        -s|--samples-dir)
+            samples_dir=${2}
             shift 2 ;;
         -h|--help)
             display_help
@@ -86,7 +91,10 @@ logname=sbsrmv_$(date +'%Y%m%d%H%M%S').log
 truncate -s 0 $logname
 which=`ls $matrices_dir/*.csr`
 filenames=`for i in $which;do basename $i;done`
+
+arguments=`python3 ${samples_dir}/readConfig.py ${samples_dir}/qa/bsrmv/float_3.json`
+
 # Run bsrmv for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f bsrmv --precision s --device $dev --blockdim $blockdim --alpha 1 --beta 0 --iters 20 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir $(eval echo ${arguments}) 2>&1 | tee -a $logname
 done

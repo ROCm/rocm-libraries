@@ -26,7 +26,7 @@ sizen=7
 # Parse command line parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,device:,path:,sizen: --options hd:p:n: -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,device:,path:,matrices-dir:,samples-dir:,sizen: --options hd:p:m:s:n: -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -42,6 +42,8 @@ if [[ ( ${MATRICES_DIR} == "" ) ]];then
 else
     matrices_dir=${MATRICES_DIR}
 fi
+
+samples_dir=../samples
 
 eval set -- "${GETOPT_PARSE}"
 
@@ -85,7 +87,10 @@ logname=scsrmm_$(date +'%Y%m%d%H%M%S').log
 truncate -s 0 $logname
 which=`ls $matrices_dir/*.csr`
 filenames=`for i in $which;do basename $i;done`
+
+arguments=`python3 ${samples_dir}/readConfig.py ${samples_dir}/qa/csrmm/float_transpose_7.json`
+
 # Run csrmm for all matrices available
 for filename in $filenames; do
-    $bench --matrices-dir $matrices_dir -f csrmm --precision s --device $dev --sizen $sizen --transposeB T --alpha 1 --beta 0 --iters 4 --rocalution $filename 2>&1 | tee -a $logname
+    $bench --matrices-dir $matrices_dir $(eval echo ${arguments}) 2>&1 | tee -a $logname
 done
