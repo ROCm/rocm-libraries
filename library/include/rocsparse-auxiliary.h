@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -165,7 +165,7 @@ rocsparse_status rocsparse_get_stream(rocsparse_handle handle, hipStream_t* stre
  *  \details
  *  \p rocsparse_set_pointer_mode specifies the pointer mode to be used by the rocSPARSE
  *  library context and all subsequent function calls. For example, many rocSPARSE routines take
- *  \f$\alpha\f$ and \f$\beta\f$ pointers as parameters. These can be either host memory pointers 
+ *  \f$\alpha\f$ and \f$\beta\f$ pointers as parameters. These can be either host memory pointers
  *  or device memory pointers depending on what the pointer mode is set to. By default, all values are passed
  *  using host pointer mode. Valid pointer modes are \ref rocsparse_pointer_mode_host
  *  or \ref rocsparse_pointer_mode_device.
@@ -259,12 +259,12 @@ rocsparse_status rocsparse_get_git_rev(rocsparse_handle handle, char* rev);
  *  \p rocsparse_create_mat_descr creates a matrix descriptor. It initializes
  *  \ref rocsparse_matrix_type to \ref rocsparse_matrix_type_general, \ref rocsparse_fill_mode
  *  to \ref rocsparse_fill_mode_lower, \ref rocsparse_diag_type to \ref rocsparse_diag_type_non_unit,
- *  \ref rocsparse_index_base to \ref rocsparse_index_base_zero, and \ref rocsparse_storage_mode 
- *  to \ref rocsparse_storage_mode_sorted.  It should be destroyed at the end using 
+ *  \ref rocsparse_index_base to \ref rocsparse_index_base_zero, and \ref rocsparse_storage_mode
+ *  to \ref rocsparse_storage_mode_sorted.  It should be destroyed at the end using
  *  \ref rocsparse_destroy_mat_descr().
  *
- *  The matrix type, fill mode, diag type, index base, and storage mode can be set using the 
- *  \ref rocsparse_set_mat_type, \ref rocsparse_set_mat_fill_mode, \ref rocsparse_set_mat_diag_type, 
+ *  The matrix type, fill mode, diag type, index base, and storage mode can be set using the
+ *  \ref rocsparse_set_mat_type, \ref rocsparse_set_mat_fill_mode, \ref rocsparse_set_mat_diag_type,
  *  \ref rocsparse_set_mat_index_base, and \ref rocsparse_set_mat_storage_mode APIs respectively.
  *
  *  @param[out]
@@ -1137,6 +1137,8 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  \p rocsparse_create_bell_descr creates a sparse blocked ELL matrix descriptor. It should be
  *  destroyed at the end using \p rocsparse_destroy_spmat_descr.
  *
+ *  Currently the only routine that supports the Blocked ELL format is \ref rocsparse_spmm.
+ *
  *  @param[out]
  *  descr         the pointer to the sparse blocked ELL matrix descriptor.
  *  @param[in]
@@ -1200,6 +1202,8 @@ rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* 
  *  \details
  *  \p rocsparse_destroy_spmat_descr destroys a sparse matrix descriptor and releases all
  *  resources used by the descriptor.
+ *
+ *  Currently the only routine that supports the Blocked ELL format is \ref rocsparse_spmm.
  *
  *  @param[in]
  *  descr   the matrix descriptor.
