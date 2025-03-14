@@ -1388,33 +1388,6 @@ public:
         return true; // Must return something, as this function gets called in global scope.
     }
 
-    // Register a subset of all benchmarks for the current parallel instance.
-    void register_sorted_subset(int parallel_instance_index, int parallel_instance_count)
-    {
-        // Sort to get a consistent order, because the order of static variable initialization is undefined by the C++ standard.
-        std::sort(sorted_benchmarks().begin(),
-                  sorted_benchmarks().end(),
-                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
-
-        size_t configs_per_instance
-            = (sorted_benchmarks().size() + parallel_instance_count - 1) / parallel_instance_count;
-        size_t start
-            = std::min(parallel_instance_index * configs_per_instance, sorted_benchmarks().size());
-        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance,
-                              sorted_benchmarks().size());
-
-        for(size_t i = start; i < end; ++i)
-        {
-            autotune_interface* benchmark = sorted_benchmarks().at(i).get();
-
-            apply_settings(benchmark::RegisterBenchmark(
-                benchmark->name().c_str(),
-                [benchmark](benchmark::State& gbench_state, state state)
-                { benchmark->run(gbench_state, state); },
-                m_state));
-        }
-    }
-
     void run()
     {
         register_sorted_subset(parallel_instance, parallel_instances);
@@ -1423,24 +1396,6 @@ public:
     }
 
 private:
-    static std::vector<std::unique_ptr<autotune_interface>>& sorted_benchmarks()
-    {
-        static std::vector<std::unique_ptr<autotune_interface>> sorted_benchmarks;
-        return sorted_benchmarks;
-    }
-
-    void apply_settings(benchmark::internal::Benchmark* b)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-
-        // trials is -1 by default.
-        if(trials > 0)
-        {
-            b->Iterations(trials);
-        }
-    }
-
     void set_optional_parser_flags(cli::Parser& parser,
                                    size_t       default_bytes,
                                    size_t       default_batch_iterations,
@@ -1512,6 +1467,51 @@ private:
         parallel_instances = parser.get<int>("parallel_instances");
 
         bench_naming::set_format(parser.get<std::string>("name_format"));
+    }
+
+    static std::vector<std::unique_ptr<autotune_interface>>& sorted_benchmarks()
+    {
+        static std::vector<std::unique_ptr<autotune_interface>> sorted_benchmarks;
+        return sorted_benchmarks;
+    }
+
+    void apply_settings(benchmark::internal::Benchmark* b)
+    {
+        b->UseManualTime();
+        b->Unit(benchmark::kMillisecond);
+
+        // trials is -1 by default.
+        if(trials > 0)
+        {
+            b->Iterations(trials);
+        }
+    }
+
+    // Register a subset of all benchmarks for the current parallel instance.
+    void register_sorted_subset(int parallel_instance_index, int parallel_instance_count)
+    {
+        // Sort to get a consistent order, because the order of static variable initialization is undefined by the C++ standard.
+        std::sort(sorted_benchmarks().begin(),
+                  sorted_benchmarks().end(),
+                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
+
+        size_t configs_per_instance
+            = (sorted_benchmarks().size() + parallel_instance_count - 1) / parallel_instance_count;
+        size_t start
+            = std::min(parallel_instance_index * configs_per_instance, sorted_benchmarks().size());
+        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance,
+                              sorted_benchmarks().size());
+
+        for(size_t i = start; i < end; ++i)
+        {
+            autotune_interface* benchmark = sorted_benchmarks().at(i).get();
+
+            apply_settings(benchmark::RegisterBenchmark(
+                benchmark->name().c_str(),
+                [benchmark](benchmark::State& gbench_state, state state)
+                { benchmark->run(gbench_state, state); },
+                m_state));
+        }
     }
 
     state m_state;

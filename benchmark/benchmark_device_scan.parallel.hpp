@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,10 @@
 
 #include "benchmark_utils.hpp"
 
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include "../common/utils_custom_type.hpp"
+#endif
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -41,6 +45,9 @@
     #include <rocprim/block/block_load.hpp>
     #include <rocprim/block/block_scan.hpp>
     #include <rocprim/block/block_store.hpp>
+#else
+    #include <rocprim/functional.hpp>
+    #include <rocprim/types.hpp>
 #endif
 
 #include <cstddef>
@@ -49,6 +56,8 @@
 #include <vector>
 #ifdef BENCHMARK_CONFIG_TUNING
     #include <memory>
+#else
+    #include <stdint.h>
 #endif
 
 template<typename Config>
@@ -66,12 +75,12 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<bool Exclusive     = false,
-         typename T         = int,
-         typename ScanOp    = rocprim::plus<T>,
-         bool Deterministic = false,
-         typename Config    = rocprim::default_config>
-struct device_scan_benchmark : public config_autotune_interface
+template<bool Exclusive,
+         typename T,
+         typename ScanOp,
+         bool Deterministic,
+         typename Config = rocprim::default_config>
+struct device_scan_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -156,11 +165,12 @@ struct device_scan_benchmark : public config_autotune_interface
         }
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(T);
 
@@ -191,58 +201,20 @@ struct device_scan_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < 5; ++i)
-        {
-            HIP_CHECK((run_device_scan(d_temp_storage,
-                                       temp_storage_size_bytes,
-                                       d_input,
-                                       d_output,
-                                       initial_value,
-                                       size,
-                                       scan_op,
-                                       stream)));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state,
+                  [&]
+                  {
+                      HIP_CHECK((run_device_scan(d_temp_storage,
+                                                 temp_storage_size_bytes,
+                                                 d_input,
+                                                 d_output,
+                                                 initial_value,
+                                                 size,
+                                                 scan_op,
+                                                 stream)));
+                  });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        const unsigned int batch_size = 10;
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                HIP_CHECK((run_device_scan(d_temp_storage,
-                                           temp_storage_size_bytes,
-                                           d_input,
-                                           d_output,
-                                           initial_value,
-                                           size,
-                                           scan_op,
-                                           stream)));
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<T>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -264,7 +236,8 @@ struct device_scan_benchmark_generator
             template<unsigned int ItemsPerThread>
             struct create_ipt
             {
-                void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+                void operator()(
+                    std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
                 {
                     storage.emplace_back(
                         std::make_unique<device_scan_benchmark<
@@ -280,7 +253,8 @@ struct device_scan_benchmark_generator
                 }
             };
 
-            void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+            void operator()(
+                std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
             {
                 // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread
@@ -292,18 +266,49 @@ struct device_scan_benchmark_generator
             static constexpr unsigned int block_size = 1u << BlockSizeExponent;
         };
 
-        static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        static void
+            create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             static_for_each<index_range, create_block_size>(storage);
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         // Block sizes 64, 128, 256
         create_block_scan_algorithm<make_index_range<unsigned int, 6, 8>>::create(storage);
     }
 };
+
+#else
+
+    #define CREATE_EXCL_INCL_BENCHMARK(EXCL, T, SCAN_OP) \
+        executor.queue_instance(device_scan_benchmark<EXCL, T, SCAN_OP, Deterministic>());
+
+    #define CREATE_BENCHMARK(T, SCAN_OP)              \
+        CREATE_EXCL_INCL_BENCHMARK(false, T, SCAN_OP) \
+        CREATE_EXCL_INCL_BENCHMARK(true, T, SCAN_OP)
+
+template<bool Deterministic>
+void add_benchmarks(benchmark_utils::executor& executor)
+{
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
+
+    CREATE_BENCHMARK(int, rocprim::plus<int>)
+    CREATE_BENCHMARK(float, rocprim::plus<float>)
+    CREATE_BENCHMARK(double, rocprim::plus<double>)
+    CREATE_BENCHMARK(long long, rocprim::plus<long long>)
+    CREATE_BENCHMARK(float2, rocprim::plus<float2>)
+    CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
+    CREATE_BENCHMARK(double2, rocprim::plus<double2>)
+    CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
+    CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
+    CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
+    CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
+    CREATE_BENCHMARK(rocprim::int128_t, rocprim::plus<rocprim::int128_t>)
+    CREATE_BENCHMARK(rocprim::uint128_t, rocprim::plus<rocprim::uint128_t>)
+}
 
 #endif // BENCHMARK_CONFIG_TUNING
 
