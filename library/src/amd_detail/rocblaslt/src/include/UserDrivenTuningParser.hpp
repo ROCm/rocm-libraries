@@ -49,7 +49,8 @@ namespace TensileLite
         ProblemOverride();
         ProblemOverride(bool     transA,
                         bool     transB,
-                        DataType inputType,
+                        DataType inputTypeA,
+                        DataType inputTypeB,
                         DataType computeType,
                         DataType outputType,
                         size_t   m,
@@ -66,9 +67,13 @@ namespace TensileLite
         {
             return m_transB;
         }
-        inline DataType inputType() const
+        inline DataType inputTypeA() const
         {
-            return m_inputType;
+            return m_inputTypeA;
+        }
+        inline DataType inputTypeB() const
+        {
+            return m_inputTypeB;
         }
         inline DataType computeType() const
         {
@@ -98,7 +103,8 @@ namespace TensileLite
     private:
         bool     m_transA;
         bool     m_transB;
-        DataType m_inputType;
+        DataType m_inputTypeA;
+        DataType m_inputTypeB;
         DataType m_computeType;
         DataType m_outputType;
         size_t   m_m;
@@ -125,8 +131,10 @@ namespace TensileLite
                                         rhs.transA(),
                                         lhs.transB(),
                                         rhs.transB(),
-                                        lhs.inputType(),
-                                        rhs.inputType(),
+                                        lhs.inputTypeA(),
+                                        rhs.inputTypeA(),
+                                        lhs.inputTypeB(),
+                                        rhs.inputTypeB(),
                                         lhs.computeType(),
                                         rhs.computeType(),
                                         lhs.outputType(),
@@ -205,7 +213,8 @@ namespace std
         {
             return TensileLite::hash_combine(po.transA(),
                                              po.transB(),
-                                             po.inputType(),
+                                             po.inputTypeA(),
+                                             po.inputTypeB(),
                                              po.computeType(),
                                              po.outputType(),
                                              po.m(),

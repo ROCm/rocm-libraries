@@ -74,7 +74,8 @@ namespace TensileLite
         bool transB = (entries[1] != "N");
 
         size_t   m, n, b, k;
-        DataType inputType   = DataType::None;
+        DataType inputTypeA  = DataType::None;
+        DataType inputTypeB  = DataType::None;
         DataType outputType  = DataType::None;
         DataType computeType = DataType::None;
 
@@ -89,7 +90,8 @@ namespace TensileLite
             m            = std::stol(entries[4]);
             n            = std::stol(entries[5]);
             k            = std::stol(entries[6]);
-            inputType    = hipDataType_to_tensile_type(string_to_hip_datatype(entries[17]));
+            inputTypeA   = hipDataType_to_tensile_type(string_to_hip_datatype(entries[17]));
+            inputTypeB   = hipDataType_to_tensile_type(string_to_hip_datatype(entries[18]));
             outputType   = hipDataType_to_tensile_type(string_to_hip_datatype(entries[19]));
             computeType  = hipDataType_to_tensile_type(string_to_hip_datatype(entries[21]));
             solution_idx = std::stoi(entries[34]);
@@ -103,13 +105,14 @@ namespace TensileLite
             return std::make_pair(ProblemOverride{}, -1);
         }
 
-        if(inputType == DataType::None || outputType == DataType::None
-           || computeType == DataType::None)
+        if(inputTypeA == DataType::None || inputTypeB == DataType::None
+           || outputType == DataType::None || computeType == DataType::None)
         {
             return std::make_pair(ProblemOverride{}, -1);
         }
 
-        ProblemOverride po(transA, transB, inputType, computeType, outputType, m, n, k, b);
+        ProblemOverride po(
+            transA, transB, inputTypeA, inputTypeB, computeType, outputType, m, n, k, b);
 
         return std::make_pair(po, solution_idx);
     }
@@ -117,7 +120,8 @@ namespace TensileLite
     ProblemOverride::ProblemOverride()
         : m_transA(false)
         , m_transB(false)
-        , m_inputType(DataType::None)
+        , m_inputTypeA(DataType::None)
+        , m_inputTypeB(DataType::None)
         , m_computeType(DataType::None)
         , m_outputType(DataType::None)
         , m_m(0)
@@ -129,7 +133,8 @@ namespace TensileLite
 
     ProblemOverride::ProblemOverride(bool     transA,
                                      bool     transB,
-                                     DataType inputType,
+                                     DataType inputTypeA,
+                                     DataType inputTypeB,
                                      DataType computeType,
                                      DataType outputType,
                                      size_t   m,
@@ -138,7 +143,8 @@ namespace TensileLite
                                      size_t   batchSize)
         : m_transA(transA)
         , m_transB(transB)
-        , m_inputType(inputType)
+        , m_inputTypeA(inputTypeA)
+        , m_inputTypeB(inputTypeB)
         , m_computeType(computeType)
         , m_outputType(outputType)
         , m_m(m)
@@ -153,7 +159,8 @@ namespace TensileLite
 
         m_transA      = problem.transA();
         m_transB      = problem.transB();
-        m_inputType   = problem.inputType();
+        m_inputTypeA  = problem.inputTypeA();
+        m_inputTypeB  = problem.inputTypeB();
         m_computeType = problem.computeType();
         m_outputType  = problem.outputType();
         m_m           = problem.m();
