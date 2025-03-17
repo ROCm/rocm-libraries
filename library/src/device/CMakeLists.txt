@@ -76,7 +76,7 @@ endforeach()
 # Set LD_LIBRARY_PATH for running the executable from build directory
 add_custom_command(OUTPUT function_pool.cpp
   OUTPUT ${FUNCTION_POOLS}
-  COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ${PYTHON3_EXE} ${kgen}
+  COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ${Python3_EXECUTABLE} ${kgen}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
   --num-files=${ROCFFT_FUNCTION_POOL_N}
   generate $<TARGET_FILE:stockham_gen>

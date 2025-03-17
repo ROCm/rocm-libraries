@@ -84,10 +84,6 @@ include( GenerateExportHeader )
 
 find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
-if( NOT DEFINED PYTHON3_EXE )
-  set(PYTHON3_EXE python3)
-endif()
-
 add_subdirectory( device )
 
 #
@@ -188,7 +184,7 @@ set( kgen_logic_files
 
 add_custom_command(
   OUTPUT ${kgen_embed_cpp}
-  COMMAND ${PYTHON3_EXE} ${kgen_embed_command}
+  COMMAND ${Python3_EXECUTABLE} ${kgen_embed_command}
   --embed ${kgen_embed_files} --logic ${kgen_logic_files} --output ${kgen_embed_cpp}
   DEPENDS ${kgen_embed_command} ${kgen_embed_files} ${kgen_logic_files}
 )
@@ -208,7 +204,7 @@ file(GLOB solution_map_files "${ROCFFT_SOLUTION_MAP_DIR}/*.dat")
 
 add_custom_command(
   OUTPUT ${gen_solutions}
-  COMMAND ${PYTHON3_EXE} ${solship_py}
+  COMMAND ${Python3_EXECUTABLE} ${solship_py}
   --gpu-arch="${sol_gpu_arch}"
   --data-folder=${ROCFFT_SOLUTION_MAP_DIR}
   DEPENDS ${solution_map_files}
