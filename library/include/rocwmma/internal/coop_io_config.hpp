@@ -72,7 +72,7 @@ namespace rocwmma
     {
         using IOShape = IOShape<MatrixT, BlockM, BlockN, BlockK>;
         using IOLayout
-            = IOLayoutInt<MatrixT, IOShape::BlockDim, IOShape::KDim, DataT, DataLayoutT, WaveCount>;
+            = IOLayout<MatrixT, IOShape::BlockDim, IOShape::KDim, DataT, DataLayoutT, WaveCount>;
         using IOTraits = IOTraits<IOShape::BlockDim, IOShape::KDim, DataT, IOLayout::VW>;
 
         using PackUtil = PackUtil<DataT>;
