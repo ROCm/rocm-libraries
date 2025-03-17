@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -308,11 +308,8 @@ void near_check_general_template(int64_t                        M,
     {
         for(int64_t i = 0; i < M; ++i)
         {
-            rocsparse_float_complex compare_val
-                = rocsparse_float_complex(std::max(std::abs(std::real(A[i + j * LDA]) * tol),
-                                                   10 * std::numeric_limits<float>::epsilon()),
-                                          std::max(std::abs(std::imag(A[i + j * LDA]) * tol),
-                                                   10 * std::numeric_limits<float>::epsilon()));
+            float compare_val = std::max(std::abs(A[i + j * LDA]) * tol,
+                                         10 * std::numeric_limits<float>::epsilon());
 #ifdef GOOGLE_TEST
             if(rocsparse_isnan(A[i + j * LDA]))
             {
@@ -328,10 +325,7 @@ void near_check_general_template(int64_t                        M,
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
                 {
-                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                           <= std::real(compare_val) * k
-                       && std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                              <= std::imag(compare_val) * k)
+                    if(std::abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
                     {
                         break;
                     }
@@ -339,10 +333,7 @@ void near_check_general_template(int64_t                        M,
 
                 if(k > MAX_TOL_MULTIPLIER)
                 {
-                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                           > std::abs(std::real(compare_val))
-                       || std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                              > std::abs(std::imag(compare_val)))
+                    if(std::abs(A[i + j * LDA] - B[i + j * LDB]) > compare_val)
                     {
                         if(passed)
                         {
@@ -353,13 +344,9 @@ void near_check_general_template(int64_t                        M,
                                       << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
                         }
 
-                        float min_passing_tol_tmp = std::max(
-                            std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                                / std::max(std::abs(std::real(A[i + j * LDA])),
-                                           std::abs(std::real(B[i + j * LDB]))),
-                            std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                                / std::max(std::abs(std::imag(A[i + j * LDA])),
-                                           std::abs(std::imag(B[i + j * LDB]))));
+                        float min_passing_tol_tmp
+                            = std::abs(A[i + j * LDA] - B[i + j * LDB])
+                              / std::max(std::abs(A[i + j * LDA]), std::abs(B[i + j * LDB]));
 
                         min_passing_tol = std::max(min_passing_tol, min_passing_tol_tmp);
                         passed          = false;
@@ -403,11 +390,8 @@ void near_check_general_template(int64_t                         M,
     {
         for(int64_t i = 0; i < M; ++i)
         {
-            rocsparse_double_complex compare_val
-                = rocsparse_double_complex(std::max(std::abs(std::real(A[i + j * LDA]) * tol),
-                                                    10 * std::numeric_limits<double>::epsilon()),
-                                           std::max(std::abs(std::imag(A[i + j * LDA]) * tol),
-                                                    10 * std::numeric_limits<double>::epsilon()));
+            double compare_val = std::max(std::abs(A[i + j * LDA]) * tol,
+                                          10 * std::numeric_limits<double>::epsilon());
 #ifdef GOOGLE_TEST
             if(rocsparse_isnan(A[i + j * LDA]))
             {
@@ -423,10 +407,7 @@ void near_check_general_template(int64_t                         M,
                 int k;
                 for(k = 1; k <= MAX_TOL_MULTIPLIER; ++k)
                 {
-                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                           <= std::real(compare_val) * k
-                       && std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                              <= std::imag(compare_val) * k)
+                    if(std::abs(A[i + j * LDA] - B[i + j * LDB]) <= compare_val * k)
                     {
                         break;
                     }
@@ -434,10 +415,7 @@ void near_check_general_template(int64_t                         M,
 
                 if(k > MAX_TOL_MULTIPLIER)
                 {
-                    if(std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                           > std::abs(std::real(compare_val))
-                       || std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                              > std::abs(std::imag(compare_val)))
+                    if(std::abs(A[i + j * LDA] - B[i + j * LDB]) > compare_val)
                     {
                         if(passed)
                         {
@@ -448,13 +426,9 @@ void near_check_general_template(int64_t                         M,
                                       << compare_val * MAX_TOL_MULTIPLIER << " ]" << std::endl;
                         }
 
-                        double min_passing_tol_tmp = std::max(
-                            std::abs(std::real(A[i + j * LDA]) - std::real(B[i + j * LDB]))
-                                / std::max(std::abs(std::real(A[i + j * LDA])),
-                                           std::abs(std::real(B[i + j * LDB]))),
-                            std::abs(std::imag(A[i + j * LDA]) - std::imag(B[i + j * LDB]))
-                                / std::max(std::abs(std::imag(A[i + j * LDA])),
-                                           std::abs(std::imag(B[i + j * LDB]))));
+                        double min_passing_tol_tmp
+                            = std::abs(A[i + j * LDA] - B[i + j * LDB])
+                              / std::max(std::abs(A[i + j * LDA]), std::abs(B[i + j * LDB]));
 
                         min_passing_tol = std::max(min_passing_tol, min_passing_tol_tmp);
                         passed          = false;
