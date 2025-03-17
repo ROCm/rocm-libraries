@@ -48,14 +48,23 @@ class IpcOnImpl {
 
   char **ipc_bases{nullptr};
 
+  int *pes_with_ipc_avail{nullptr};
+
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);
 
   __host__ void ipcHostStop();
 
   __device__ bool isIpcAvailable(int my_pe, int target_pe) {
-    return my_pe / shm_size == target_pe / shm_size;
+    if (nullptr == pes_with_ipc_avail) { return false; }
+
+    for (int i=0; i<shm_size; i++) {
+      if (pes_with_ipc_avail[i] == target_pe) { return true; }
+    }
+
+    return false;
   }
+
   __device__ void ipcGpuInit(Backend *gpu_backend, Context *ctx, int thread_id);
 
   __device__ void ipcCopy(void *dst, void *src, size_t size);

@@ -106,6 +106,9 @@ rocSHMEM has the following enviroment variables:
     ROCSHMEM_HEAP_SIZE (default : 1 GB)
                         Defines the size of the rocSHMEM symmetric heap
                         Note the heap is on the GPU memory.
+
+    ROCSHMEM_RO_DISABLE_IPC (default : 0)
+                        Disables IPC support for the reverse offload backend.
 ```
 
 ## Examples

@@ -146,4 +146,15 @@ uint64_t wallClk_freq_mhz() {
   return 0;
 }
 
+struct rocshmem_env_config_t rocshmem_env_config;
+
+void rocshmem_env_config_init(void) {
+  char* env_value = NULL;
+
+  env_value = getenv("ROCSHMEM_RO_DISABLE_IPC");
+  if (NULL != env_value) {
+    rocshmem_env_config.ro_disable_ipc = atoi(env_value);
+  }
+}
+
 }  // namespace rocshmem

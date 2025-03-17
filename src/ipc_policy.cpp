@@ -106,6 +106,15 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * addresses.
    */
   free(vec_ipc_handle);
+
+  if (0 == rocshmem_env_config.ro_disable_ipc) {
+    int thread_comm_rank;
+
+    CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
+
+    MPI_Comm_rank(thread_comm, &thread_comm_rank);
+    MPI_Allgather(&thread_comm_rank, 1, MPI_INT, pes_with_ipc_avail, 1, MPI_INT, shmcomm);
+  }
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -115,6 +124,10 @@ __host__ void IpcOnImpl::ipcHostStop() {
     }
   }
   CHECK_HIP(hipFree(ipc_bases));
+
+  if (nullptr != pes_with_ipc_avail) {
+    CHECK_HIP(hipFree(pes_with_ipc_avail));
+  }
 }
 
 __device__ void IpcOnImpl::ipcCopy(void *dst, void *src, size_t size) {

@@ -54,6 +54,7 @@ __host__ ROContext::ROContext(Backend *b, size_t block_id)
 
   ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = b->ipcImpl.shm_size;
+  ipcImpl_.pes_with_ipc_avail = b->ipcImpl.pes_with_ipc_avail;
 }
 
 __device__ void ROContext::putmem(void *dest, const void *source, size_t nelems,
