@@ -555,16 +555,20 @@ public:
     {
         std::vector<fft_brick> bricks;
 
-        void sort_by_rank()
+        // Brick ordering is significant - a rank needs to pass
+        // pointers to execute() in the order that the bricks were
+        // added to the field.
+        //
+        // But we also want to sort the bricks by rank, so that we can
+        // efficiently find the bricks for a given rank.  So do a
+        // stable sort to preserve the relative order of bricks on any
+        // rank, even after they're sorted.
+        void stable_sort_by_rank()
         {
-            std::sort(bricks.begin(), bricks.end(), [](const fft_brick& a, const fft_brick& b) {
-                if(a.rank != b.rank)
+            std::stable_sort(
+                bricks.begin(), bricks.end(), [](const fft_brick& a, const fft_brick& b) {
                     return a.rank < b.rank;
-                if(a.device != b.device)
-                    return a.device < b.device;
-                return std::lexicographical_compare(
-                    a.lower.begin(), a.lower.end(), b.lower.begin(), b.lower.end());
-            });
+                });
         }
     };
 
