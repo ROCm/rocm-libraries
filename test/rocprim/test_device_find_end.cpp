@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,20 +20,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+
 // required test headers
 #include "indirect_iterator.hpp"
-#include "test_utils_assertions.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include "test_utils_hipgraphs.hpp"
 
-#include "../common_test_header.hpp"
+// required common headers
+#include "../../common/utils_device_ptr.hpp"
 
-#include "rocprim/device/device_find_end.hpp"
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
+#include <rocprim/device/device_find_end.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
 
+#include <algorithm>
 #include <cstddef>
+#include <stdint.h>
 #include <vector>
 
 // Params for tests
@@ -74,7 +87,7 @@ using RocprimDeviceFindEndTestsParams = ::testing::Types<
     DeviceFindEndParams<signed char>,
     DeviceFindEndParams<int, int, unsigned int>,
     DeviceFindEndParams<int, int, int>,
-    DeviceFindEndParams<test_utils::custom_test_type<int>>,
+    DeviceFindEndParams<common::custom_type<int, int, true>>,
     DeviceFindEndParams<unsigned long>,
     DeviceFindEndParams<long long>,
     DeviceFindEndParams<float>,
@@ -87,7 +100,7 @@ using RocprimDeviceFindEndTestsParams = ::testing::Types<
                         rocprim::equal_to<rocprim::bfloat16>>,
     DeviceFindEndParams<short>,
     DeviceFindEndParams<double>,
-    DeviceFindEndParams<test_utils::custom_test_type<float>>,
+    DeviceFindEndParams<common::custom_type<float, float, true>>,
     DeviceFindEndParams<test_utils::custom_float_type>,
     DeviceFindEndParams<test_utils::custom_test_array_type<int, 4>>,
     DeviceFindEndParams<int, int, size_t, rocprim::equal_to<int>, rocprim::default_config, true>,
@@ -160,14 +173,17 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEnd)
                 std::vector<value_type> input;
                 if(rocprim::is_floating_point<value_type>::value)
                 {
-                    input = test_utils::get_random_data<value_type>(size, -1000, 1000, seed_value);
+                    input = test_utils::get_random_data_wrapped<value_type>(size,
+                                                                            -1000,
+                                                                            1000,
+                                                                            seed_value);
                 }
                 else
                 {
-                    input = test_utils::get_random_data<value_type>(
+                    input = test_utils::get_random_data_wrapped<value_type>(
                         size,
-                        test_utils::numeric_limits<value_type>::min(),
-                        test_utils::numeric_limits<value_type>::max(),
+                        rocprim::numeric_limits<value_type>::min(),
+                        rocprim::numeric_limits<value_type>::max(),
                         seed_value);
                 }
 
@@ -181,9 +197,9 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEnd)
                     keys.assign(input.begin() + pattern, input.end());
                 }
 
-                test_utils::device_ptr<value_type> d_input(input);
-                test_utils::device_ptr<key_type>   d_keys(keys);
-                test_utils::device_ptr<index_type> d_output(1);
+                common::device_ptr<value_type> d_input(input);
+                common::device_ptr<key_type>   d_keys(keys);
+                common::device_ptr<index_type> d_output(1);
 
                 const auto input_it
                     = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_input.get());
@@ -212,7 +228,7 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEnd)
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
                 // allocate temporary storage
-                test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+                common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
                 test_utils::GraphHelper gHelper;
                 if(TestFixture::use_graphs)
@@ -305,14 +321,17 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEndRepetition)
             std::vector<key_type> keys;
             if(rocprim::is_floating_point<value_type>::value)
             {
-                keys = test_utils::get_random_data<key_type>(key_size, -1000, 1000, seed_value);
+                keys = test_utils::get_random_data_wrapped<key_type>(key_size,
+                                                                     -1000,
+                                                                     1000,
+                                                                     seed_value);
             }
             else
             {
-                keys = test_utils::get_random_data<key_type>(
+                keys = test_utils::get_random_data_wrapped<key_type>(
                     key_size,
-                    test_utils::numeric_limits<key_type>::min(),
-                    test_utils::numeric_limits<key_type>::max(),
+                    rocprim::numeric_limits<key_type>::min(),
+                    rocprim::numeric_limits<key_type>::max(),
                     seed_value);
             }
 
@@ -322,9 +341,9 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEndRepetition)
                 std::copy(keys.begin(), keys.end(), input.begin() + i * key_size);
             }
 
-            test_utils::device_ptr<value_type> d_input(input);
-            test_utils::device_ptr<key_type>   d_keys(keys);
-            test_utils::device_ptr<index_type> d_output(1);
+            common::device_ptr<value_type> d_input(input);
+            common::device_ptr<key_type>   d_keys(keys);
+            common::device_ptr<index_type> d_output(1);
 
             const auto input_it
                 = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(d_input.get());
@@ -349,7 +368,7 @@ TYPED_TEST(RocprimDeviceFindEndTests, FindEndRepetition)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)

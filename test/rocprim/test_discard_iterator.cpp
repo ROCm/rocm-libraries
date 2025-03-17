@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,18 @@
 
 #include "../common_test_header.hpp"
 
+#include "../../common/utils_device_ptr.hpp"
+
+// required test headers
+#include "test_seed.hpp"
+#include "test_utils_data_generation.hpp"
+
 // required rocprim headers
 #include <rocprim/device/device_reduce_by_key.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
 
-// required test headers
-#include "test_seed.hpp"
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include <cstddef>
 
 TEST(RocprimDiscardIteratorTests, Equal)
 {
@@ -107,9 +110,9 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
     std::vector<int> aggregates_expected = {3, 2, 2, 4};
 
     // device input/output
-    test_utils::device_ptr<int> d_keys_input(keys_input);
-    test_utils::device_ptr<int> d_values_input(values_input);
-    test_utils::device_ptr<int> d_aggregates_output(aggregates_expected.size());
+    common::device_ptr<int> d_keys_input(keys_input);
+    common::device_ptr<int> d_values_input(values_input);
+    common::device_ptr<int> d_aggregates_output(aggregates_expected.size());
 
     // Get temporary storage size
     size_t temporary_storage_bytes;
@@ -129,7 +132,7 @@ TEST(RocprimDiscardIteratorTests, ReduceByKey)
 
     ASSERT_GT(temporary_storage_bytes, 0);
 
-    test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
     HIP_CHECK(rocprim::reduce_by_key(d_temporary_storage.get(),
                                      temporary_storage_bytes,

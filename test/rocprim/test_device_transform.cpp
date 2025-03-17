@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,30 @@
 
 #include "../common_test_header.hpp"
 
-// required rocprim headers
-#include <rocprim/device/device_transform.hpp>
-#include <rocprim/iterator/counting_iterator.hpp>
-#include <rocprim/iterator/discard_iterator.hpp>
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 // required test headers
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include "identity_iterator.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
+
+// required rocprim headers
+#include <rocprim/config.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
+#include <rocprim/device/device_transform.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/discard_iterator.hpp>
+#include <rocprim/types.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <stdint.h>
+#include <vector>
 
 // Params for tests
 template<class InputType,
@@ -62,9 +78,9 @@ public:
     static constexpr bool   use_graphs            = Params::use_graphs;
 };
 
-using custom_short2  = test_utils::custom_test_type<short>;
-using custom_int2    = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
+using custom_short2  = common::custom_type<short, short, true>;
+using custom_int2    = common::custom_type<int, int, true>;
+using custom_double2 = common::custom_type<double, double, true>;
 
 using RocprimDeviceTransformTestsParams
     = ::testing::Types<DeviceTransformParams<int, int, true>,
@@ -141,10 +157,10 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
 
-            test_utils::device_ptr<T> d_input(input);
-            test_utils::device_ptr<U> d_output(input.size());
+            common::device_ptr<T> d_input(input);
+            common::device_ptr<U> d_output(input.size());
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
@@ -231,12 +247,14 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
-            std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 100, seed_value);
+            std::vector<T1> input1
+                = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+            std::vector<T2> input2
+                = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value);
 
-            test_utils::device_ptr<T1> d_input1(input1);
-            test_utils::device_ptr<T2> d_input2(input2);
-            test_utils::device_ptr<U>  d_output(input1.size());
+            common::device_ptr<T1> d_input1(input1);
+            common::device_ptr<T2> d_input2(input2);
+            common::device_ptr<U>  d_output(input1.size());
 
             // Calculate expected results on host
             std::vector<U> expected(input1.size());
@@ -342,7 +360,7 @@ void testLargeIndices()
 
             // Using char instead of bool here, since C++ vectors pack bools in single bits
             std::vector<char>            flags = {false, false};
-            test_utils::device_ptr<char> d_flag(flags);
+            common::device_ptr<char>     d_flag(flags);
 
             const auto expected = test_utils::get_random_value<T>(0, size - 1, seed_value);
             const auto limit    = ROCPRIM_GRID_SIZE_LIMIT;

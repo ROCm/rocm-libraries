@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,12 +23,16 @@
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
+#include "../common/predicate_iterator.hpp"
+#include "../common/utils_custom_type.hpp"
+
 #include <benchmark/benchmark.h>
 
 #include <hip/hip_runtime.h>
 
 // rocPRIM
 #include <rocprim/device/device_transform.hpp>
+#include <rocprim/functional.hpp>
 #include <rocprim/iterator/predicate_iterator.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
 #include <rocprim/types.hpp>
@@ -45,16 +49,6 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
 
-template<typename T>
-struct identity
-{
-    __device__
-    T operator()(T value)
-    {
-        return value;
-    }
-};
-
 template<typename T, int C>
 struct less_than
 {
@@ -62,16 +56,6 @@ struct less_than
     bool operator()(T value) const
     {
         return value < T{C};
-    }
-};
-
-template<typename T, int I>
-struct increment
-{
-    __device__
-    T operator()(T value) const
-    {
-        return value + T{I};
     }
 };
 
@@ -94,7 +78,7 @@ struct transform_it
     {
         auto t_it
             = rocprim::make_transform_iterator(d_input, transform_op<T, Predicate, Transform>{});
-        HIP_CHECK(rocprim::transform(t_it, d_output, size, identity<T>{}, stream));
+        HIP_CHECK(rocprim::transform(t_it, d_output, size, rocprim::identity<T>{}, stream));
     }
 };
 
@@ -107,7 +91,7 @@ struct read_predicate_it
     {
         auto t_it = rocprim::make_transform_iterator(d_input, Transform{});
         auto r_it = rocprim::make_predicate_iterator(t_it, d_input, Predicate{});
-        HIP_CHECK(rocprim::transform(r_it, d_output, size, identity<T>{}, stream));
+        HIP_CHECK(rocprim::transform(r_it, d_output, size, rocprim::identity<T>{}, stream));
     }
 };
 
@@ -120,7 +104,7 @@ struct write_predicate_it
     {
         auto t_it = rocprim::make_transform_iterator(d_input, Transform{});
         auto w_it = rocprim::make_predicate_iterator(d_output, d_input, Predicate{});
-        HIP_CHECK(rocprim::transform(t_it, w_it, size, identity<T>{}, stream));
+        HIP_CHECK(rocprim::transform(t_it, w_it, size, rocprim::identity<T>{}, stream));
     }
 };
 
@@ -191,7 +175,7 @@ void run_benchmark(benchmark::State&   state,
     benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:device,algo:" #B ",p:p" #C        \
                                                            ",key_type:" #T ",cfg:default_config}") \
                                      .c_str(),                                                     \
-                                 run_benchmark<B<T, less_than<T, C>, increment<T, 5>>>,            \
+                                 run_benchmark<B<T, less_than<T, C>, common::increment_by<5>>>,    \
                                  bytes,                                                            \
                                  seed,                                                             \
                                  stream)
@@ -243,7 +227,7 @@ int main(int argc, char* argv[])
     benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
-    using custom_128 = custom_type<int64_t, int64_t>;
+    using custom_128 = common::custom_type<int64_t, int64_t>;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks

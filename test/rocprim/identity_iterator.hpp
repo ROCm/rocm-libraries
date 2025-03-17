@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,12 @@
 
 #ifndef TEST_IDENTITY_ITERATOR_HPP_
 #define TEST_IDENTITY_ITERATOR_HPP_
+
+#include <rocprim/config.hpp>
+
+#include <cstddef>
+#include <iterator>
+#include <type_traits>
 
 namespace test_utils
 {

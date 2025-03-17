@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_DEVICE_NTH_ELEMENT_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -80,8 +82,8 @@ struct device_nth_element_benchmark : public config_autotune_interface
         // Generate data
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
-                                        generate_limits<key_type>::min(),
-                                        generate_limits<key_type>::max(),
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
         key_type* d_keys_input;

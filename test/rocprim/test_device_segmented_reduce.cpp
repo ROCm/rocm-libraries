@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,18 +21,34 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
-#include "../rocprim/test_utils_device_ptr.hpp"
 
-// required rocprim headers
-#include <rocprim/device/device_segmented_reduce.hpp>
-#include <rocprim/iterator/counting_iterator.hpp>
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 // required test headers
-#include "test_utils_types.hpp"
+#include "identity_iterator.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_custom_test_types.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
+
+// required rocprim headers
+#include <rocprim/block/block_reduce.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
+#include <rocprim/device/device_segmented_reduce.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/types.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <random>
+#include <stdint.h>
 #include <vector>
 
 using bra = ::rocprim::block_reduce_algorithm;
@@ -92,9 +108,9 @@ public:
     using params = Params;
 };
 
-using custom_short2  = test_utils::custom_test_type<short>;
-using custom_int2    = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
+using custom_short2  = common::custom_type<short, short, true>;
+using custom_int2    = common::custom_type<int, int, true>;
+using custom_double2 = common::custom_type<double, double, true>;
 using half           = rocprim::half;
 using bfloat16       = rocprim::bfloat16;
 
@@ -167,10 +183,10 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     const input_type init              = input_type{TestFixture::params::init};
     const bool       debug_synchronous = false;
 
-    std::random_device                    rd;
-    const size_t                          seed = rd();
-    std::default_random_engine            gen(seed);
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    std::random_device                       rd;
+    const size_t                             seed = rd();
+    std::default_random_engine               gen(seed);
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -195,15 +211,17 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             std::vector<output_type> aggregates_expected;
 
             std::vector<input_type> values_input
-                = test_utils::get_random_data<input_type>(size, 0, 100, seed_value);
+                = test_utils::get_random_data_wrapped<input_type>(size, 0, 100, seed_value);
 
             std::vector<offset_type> offsets;
+            std::vector<size_t>      sizes;
             unsigned int             segments_count     = 0;
             size_t                   offset             = 0;
             size_t                   max_segment_length = 0;
             while(offset < size)
             {
                 const size_t segment_length = segment_length_dis(gen);
+                sizes.push_back(segment_length);
                 offsets.push_back(offset);
 
                 const size_t end   = std::min(size, offset + segment_length);
@@ -236,9 +254,9 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 continue;
             }
 
-            test_utils::device_ptr<input_type>  d_values_input(values_input);
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
-            test_utils::device_ptr<output_type> d_aggregates_output(segments_count);
+            common::device_ptr<input_type>  d_values_input(values_input);
+            common::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<output_type> d_aggregates_output(segments_count);
 
             size_t temp_storage_bytes;
 
@@ -256,7 +274,7 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
 
             ASSERT_GT(temp_storage_bytes, 0);
 
-            test_utils::device_ptr<void> d_temp_storage(temp_storage_bytes);
+            common::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
@@ -291,8 +309,19 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 HIP_CHECK(hipStreamDestroy(stream));
             }
             SCOPED_TRACE(testing::Message() << "with seed = " << seed);
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_near(aggregates_output, aggregates_expected, precision));
+
+            if(size > 0)
+            {
+                const float single_op_precision = precision / max_segment_length;
+
+                for(size_t i = 0; i < aggregates_output.size(); ++i)
+                {
+                    ASSERT_NO_FATAL_FAILURE(
+                        test_utils::assert_near(aggregates_output[i],
+                                                aggregates_expected[i],
+                                                single_op_precision * (sizes[i] - 1)));
+                }
+            }
         }
     }
 }
@@ -331,11 +360,11 @@ void testLargeIndices()
                   : large_segment_size;
         const T max_segment_length = size;
 
-        std::random_device                    rd;
-        const size_t                          seed = rd();
-        std::default_random_engine            gen(seed);
-        std::uniform_int_distribution<size_t> segment_length_dis(min_segment_length,
-                                                                 max_segment_length);
+        std::random_device                       rd;
+        const size_t                             seed = rd();
+        std::default_random_engine               gen(seed);
+        common::uniform_int_distribution<size_t> segment_length_dis(min_segment_length,
+                                                                    max_segment_length);
 
         const auto gauss_sum
             = [&](T n) { return (n % 2 == 0) ? (n / 2) * (n - 1) : n * ((n - 1) / 2); };
@@ -361,10 +390,10 @@ void testLargeIndices()
 
         // Device inputs
         const Iterator            values_input{0};
-        test_utils::device_ptr<T> d_offsets(offsets);
+        common::device_ptr<T>     d_offsets(offsets);
 
         // Device outputs
-        test_utils::device_ptr<T> d_aggregates_output(segments_count);
+        common::device_ptr<T> d_aggregates_output(segments_count);
 
         // temp storage
         size_t temp_storage_size_bytes = 0;
@@ -382,7 +411,7 @@ void testLargeIndices()
                                             debug_synchronous));
 
         // Allocate temporary storage
-        test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         test_utils::GraphHelper gHelper;

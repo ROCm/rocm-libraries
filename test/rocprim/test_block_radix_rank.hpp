@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,29 @@
 
 #ifndef TEST_BLOCK_RADIX_RANK_HPP_
 #define TEST_BLOCK_RADIX_RANK_HPP_
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_data_generation.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_sort_comparator.hpp"
+
+#include <rocprim/block/block_exchange.hpp>
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_radix_rank.hpp>
+#include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <vector>
 
 template<class Params>
 class RocprimBlockRadixRank : public ::testing::Test
@@ -140,10 +163,10 @@ void test_block_radix_rank()
 
         // Generate data
         std::vector<T> keys_input
-            = test_utils::get_random_data<T>(size,
-                                             test_utils::generate_limits<T>::min(),
-                                             test_utils::generate_limits<T>::max(),
-                                             seed_value);
+            = test_utils::get_random_data_wrapped<T>(size,
+                                                     common::generate_limits<T>::min(),
+                                                     common::generate_limits<T>::max(),
+                                                     seed_value);
 
         // Calculated expected results on host
         std::vector<unsigned int> expected(size);
@@ -168,8 +191,8 @@ void test_block_radix_rank()
             }
         }
 
-        test_utils::device_ptr<T>            d_keys_input(keys_input);
-        test_utils::device_ptr<unsigned int> d_ranks_output(size);
+        common::device_ptr<T>            d_keys_input(keys_input);
+        common::device_ptr<unsigned int> d_ranks_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(

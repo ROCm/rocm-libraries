@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,121 +21,148 @@
 #ifndef ROCPRIM_TEST_UTILS_DATA_GENERATION_HPP
 #define ROCPRIM_TEST_UTILS_DATA_GENERATION_HPP
 
-#include "common_test_header.hpp"
-#include "test_utils_bfloat16.hpp"
-#include "test_utils_custom_test_types.hpp"
-#include "test_utils_half.hpp"
+#include "../../common/utils.hpp"
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_data_generation.hpp"
 
-#include <rocprim/test_seed.hpp>
+#include "test_seed.hpp"
+#include "test_utils_custom_float_traits_type.hpp"
+#include "test_utils_custom_float_type.hpp"
+#include "test_utils_custom_test_types.hpp"
+
+#include <rocprim/config.hpp>
 #include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
 #include <rocprim/types.hpp>
 
-// Std::memcpy and std::memcmp
-#include <cstring>
-#include <iterator>
-#include <random>
-#include <vector>
 #include <algorithm>
+#include <cstddef>
+#include <iterator>
+#include <limits>
+#include <random>
+#include <set>
+#include <stdint.h>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-namespace test_utils {
+BEGIN_ROCPRIM_NAMESPACE
 
-static constexpr uint32_t random_data_generation_segments = 32;
-static constexpr uint32_t random_data_generation_repeat_strides = 4;
-
-// std::uniform_int_distribution is undefined for anything other than
-// short, int, long, long long, unsigned short, unsigned int, unsigned long, or unsigned long long.
-template <typename T>
-struct is_valid_for_int_distribution :
-    std::integral_constant<bool,
-                           std::is_same<short, T>::value ||
-                               std::is_same<unsigned short, T>::value ||
-                               std::is_same<int, T>::value ||
-                               std::is_same<unsigned int, T>::value ||
-                               std::is_same<long, T>::value ||
-                               std::is_same<unsigned long, T>::value ||
-                               std::is_same<long long, T>::value ||
-                               std::is_same<unsigned long long, T>::value
-                           > {};
 namespace detail
 {
-template<class T>
-struct numeric_limits_custom_test_type : public rocprim::numeric_limits<typename T::value_type>
+
+template<typename T>
+struct numeric_limits_custom_test_type : public numeric_limits<typename T::value_type>
 {};
+
 } // namespace detail
 
-// Numeric limits which also supports custom_test_type<U> and custom_test_array_type<U> classes
-template<class T>
-struct numeric_limits
-    : public std::conditional<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value,
-                              detail::numeric_limits_custom_test_type<T>,
-                              rocprim::numeric_limits<T>>::type
+// Numeric limits which also supports common::custom_type<T, T, true> and custom_test_array_type<T, N> classes
+template<>
+struct numeric_limits<test_utils::custom_float_traits_type>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_float_traits_type>
 {};
 
-template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<test_utils::half> {
+template<>
+struct numeric_limits<test_utils::custom_float_type>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_float_type>
+{};
+
+template<typename T>
+struct numeric_limits<common::custom_type<T, T, true>>
+    : detail::numeric_limits_custom_test_type<common::custom_type<T, T, true>>
+{};
+
+template<typename T>
+struct numeric_limits<test_utils::custom_non_copyable_type<T>>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_non_copyable_type<T>>
+{};
+
+template<typename T>
+struct numeric_limits<test_utils::custom_non_moveable_type<T>>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_non_moveable_type<T>>
+{};
+
+template<typename T>
+struct numeric_limits<test_utils::custom_non_default_type<T>>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_non_default_type<T>>
+{};
+
+template<typename T, size_t N>
+struct numeric_limits<test_utils::custom_test_array_type<T, N>>
+    : detail::numeric_limits_custom_test_type<test_utils::custom_test_array_type<T, N>>
+{};
+
+template<>
+struct numeric_limits<half> : std::numeric_limits<half>
+{
 public:
-    using T = test_utils::half;
-    static inline T min() {
-        return T(0.00006104f);
+    static inline half min()
+    {
+        return half(0.00006104f);
     };
-    static inline T max() {
-        return T(65504.0f);
+    static inline half max()
+    {
+        return half(65504.0f);
     };
-    static inline T lowest() {
-        return T(-65504.0f);
+    static inline half lowest()
+    {
+        return half(-65504.0f);
     };
-    static inline T infinity() {
-        return T(std::numeric_limits<float>::infinity());
+    static inline half infinity()
+    {
+        return half(std::numeric_limits<float>::infinity());
     };
-    static inline T quiet_NaN() {
-        return T(std::numeric_limits<float>::quiet_NaN());
+    static inline half quiet_NaN()
+    {
+        return half(std::numeric_limits<float>::quiet_NaN());
     };
-    static inline T signaling_NaN() {
-        return T(std::numeric_limits<float>::signaling_NaN());
+    static inline half signaling_NaN()
+    {
+        return half(std::numeric_limits<float>::signaling_NaN());
     };
 };
 
-template<> class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16> {
+template<>
+struct numeric_limits<bfloat16> : std::numeric_limits<bfloat16>
+{
 public:
-    using T = test_utils::bfloat16;
-
-    static inline T max() {
-        return T(std::numeric_limits<float>::max()*0.998);
+    static inline bfloat16 max()
+    {
+        return bfloat16(std::numeric_limits<float>::max() * 0.998);
     };
-    static inline T min() {
-        return T(std::numeric_limits<float>::min());
+    static inline bfloat16 min()
+    {
+        return bfloat16(std::numeric_limits<float>::min());
     };
-    static inline T lowest() {
-        return T(std::numeric_limits<float>::lowest()*0.998);
+    static inline bfloat16 lowest()
+    {
+        return bfloat16(std::numeric_limits<float>::lowest() * 0.998);
     };
-    static inline T infinity() {
-        return T(std::numeric_limits<float>::infinity());
+    static inline bfloat16 infinity()
+    {
+        return bfloat16(std::numeric_limits<float>::infinity());
     };
-    static inline T quiet_NaN() {
-        return T(std::numeric_limits<float>::quiet_NaN());
+    static inline bfloat16 quiet_NaN()
+    {
+        return bfloat16(std::numeric_limits<float>::quiet_NaN());
     };
-    static inline T signaling_NaN() {
-        return T(std::numeric_limits<float>::signaling_NaN());
+    static inline bfloat16 signaling_NaN()
+    {
+        return bfloat16(std::numeric_limits<float>::signaling_NaN());
     };
 };
 // End of extended numeric_limits
 
-template<class T, class enable = void>
-struct generate_limits
+END_ROCPRIM_NAMESPACE
+
+namespace common
 {
-    static inline T min()
-    {
-        return rocprim::numeric_limits<T>::min();
-    }
-    static inline T max()
-    {
-        return rocprim::numeric_limits<T>::max();
-    }
-};
 
 template<class T>
-struct generate_limits<
-    T,
-    std::enable_if_t<is_custom_test_array_type<T>::value || is_custom_test_type<T>::value>>
+struct generate_limits<T,
+                       std::enable_if_t<test_utils::is_custom_test_array_type<T>::value
+                                        || common::is_custom_type<T>::value>>
 {
     using Type = typename T::value_type;
     static inline Type min()
@@ -148,18 +175,13 @@ struct generate_limits<
     }
 };
 
-template<class T>
-struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
+} // namespace common
+
+namespace test_utils
 {
-    static inline T min()
-    {
-        return T(-1000);
-    }
-    static inline T max()
-    {
-        return T(1000);
-    }
-};
+
+static constexpr uint32_t random_data_generation_segments       = 32;
+static constexpr uint32_t random_data_generation_repeat_strides = 4;
 
 // Converts possible device side types to their relevant host side native types
 inline rocprim::native_half convert_to_native(const rocprim::half& value)
@@ -200,13 +222,13 @@ public:
         }
         else
         {
-            std::vector<T> r = {test_utils::numeric_limits<T>::quiet_NaN(),
-                                sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
+            std::vector<T> r = {rocprim::numeric_limits<T>::quiet_NaN(),
+                                sign_bit_flip(rocprim::numeric_limits<T>::quiet_NaN()),
                                 // TODO: switch on when signaling_NaN will be supported on NVIDIA
-                                //test_utils::numeric_limits<T>::signaling_NaN(),
-                                //sign_bit_flip(test_utils::numeric_limits<T>::signaling_NaN()),
-                                test_utils::numeric_limits<T>::infinity(),
-                                sign_bit_flip(test_utils::numeric_limits<T>::infinity()),
+                                //rocprim::numeric_limits<T>::signaling_NaN(),
+                                //sign_bit_flip(rocprim::numeric_limits<T>::signaling_NaN()),
+                                rocprim::numeric_limits<T>::infinity(),
+                                sign_bit_flip(rocprim::numeric_limits<T>::infinity()),
                                 T(0.0),
                                 T(-0.0)};
             return r;
@@ -215,17 +237,14 @@ public:
 };
 // end of special_values helpers
 
-template<typename Iterator>
-using it_value_t = typename std::iterator_traits<Iterator>::value_type;
-
 /// Insert special values of type T at a random place in the source vector
 /// \tparam T
 /// \param source The source vector<T> to modify
 template<class OutputIter, class Generator>
 void add_special_values(OutputIter it, const size_t size, Generator&& gen)
 {
-    using T                       = it_value_t<OutputIter>;
-    std::vector<T> special_values = test_utils::special_values<T>::vector();
+    using T                       = common::it_value_t<OutputIter>;
+    std::vector<T> special_values = ::test_utils::special_values<T>::vector();
     if(size > special_values.size())
     {
         unsigned int start = gen() % (size - special_values.size());
@@ -272,13 +291,13 @@ template<typename Res, typename T>
 constexpr Res saturate_cast(T x) noexcept
 {
     // Handle overflow
-    if(test_utils::cmp_less(x, numeric_limits<Res>::min()))
+    if(cmp_less(x, rocprim::numeric_limits<Res>::min()))
     {
-        return numeric_limits<Res>::min();
+        return rocprim::numeric_limits<Res>::min();
     }
-    if(test_utils::cmp_greater(x, numeric_limits<Res>::max()))
+    if(cmp_greater(x, rocprim::numeric_limits<Res>::max()))
     {
-        return numeric_limits<Res>::max();
+        return rocprim::numeric_limits<Res>::max();
     }
     // No overflow
     return static_cast<Res>(x);
@@ -317,27 +336,27 @@ inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& g
 
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<rocprim::is_integral<it_value_t<OutputIter>>::value, OutputIter>
+    -> std::enable_if_t<rocprim::is_integral<common::it_value_t<OutputIter>>::value, OutputIter>
 {
-    using T = it_value_t<OutputIter>;
+    using T = common::it_value_t<OutputIter>;
 
     using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
+        common::is_valid_for_int_distribution<T>::value,
         T,
         typename std::conditional<rocprim::is_signed<T>::value, int, unsigned int>::type>::type;
-    std::uniform_int_distribution<dis_type> distribution(test_utils::saturate_cast<dis_type>(min),
-                                                         test_utils::saturate_cast<dis_type>(max));
+    common::uniform_int_distribution<dis_type> distribution(saturate_cast<dis_type>(min),
+                                                            saturate_cast<dis_type>(max));
 
     return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
 
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<rocprim::is_floating_point<it_value_t<OutputIter>>::value
-                            && !is_custom_test_type<it_value_t<OutputIter>>::value,
+    -> std::enable_if_t<rocprim::is_floating_point<common::it_value_t<OutputIter>>::value
+                            && !common::is_custom_type<common::it_value_t<OutputIter>>::value,
                         OutputIter>
 {
-    using T = it_value_t<OutputIter>;
+    using T = common::it_value_t<OutputIter>;
 
     // Generate floats when T is half or bfloat16
     using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value || std::is_same<rocprim::bfloat16, T>::value, float, T>::type;
@@ -348,27 +367,27 @@ inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Gen
 }
 
 template<class OutputIter, class Generator>
-inline auto generate_random_data_n(OutputIter             it,
-                                   size_t                 size,
-                                   it_value_t<OutputIter> min,
-                                   it_value_t<OutputIter> max,
-                                   Generator&&            gen)
+inline auto generate_random_data_n(OutputIter                     it,
+                                   size_t                         size,
+                                   common::it_value_t<OutputIter> min,
+                                   common::it_value_t<OutputIter> max,
+                                   Generator&&                    gen)
     -> std::enable_if_t<
-        is_custom_test_type<it_value_t<OutputIter>>::value
-            && rocprim::is_integral<typename it_value_t<OutputIter>::value_type>::value,
+        common::is_custom_type<common::it_value_t<OutputIter>>::value
+            && rocprim::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
         OutputIter>
 {
-    using T = it_value_t<OutputIter>;
+    using T       = common::it_value_t<OutputIter>;
     using value_t = typename T::value_type;
 
     using distribution_t
-        = std::conditional_t<is_valid_for_int_distribution<value_t>::value,
+        = std::conditional_t<common::is_valid_for_int_distribution<value_t>::value,
                              value_t,
                              std::conditional_t<std::is_signed<value_t>::value, int, unsigned int>>;
 
-    std::uniform_int_distribution<distribution_t> distribution(
-        test_utils::saturate_cast<distribution_t>(min.x),
-        test_utils::saturate_cast<distribution_t>(max.x));
+    common::uniform_int_distribution<distribution_t> distribution(
+        saturate_cast<distribution_t>(min.x),
+        saturate_cast<distribution_t>(max.x));
 
     return segmented_generate_n(it,
                                 size,
@@ -379,15 +398,15 @@ inline auto generate_random_data_n(OutputIter             it,
 }
 
 template<class OutputIter, class Generator>
-inline auto generate_random_data_n(OutputIter             it,
-                                   size_t                 size,
-                                   it_value_t<OutputIter> min,
-                                   it_value_t<OutputIter> max,
-                                   Generator&&            gen)
-    -> std::enable_if_t<
-        is_custom_test_type<it_value_t<OutputIter>>::value
-            && rocprim::is_floating_point<typename it_value_t<OutputIter>::value_type>::value,
-        OutputIter>
+inline auto generate_random_data_n(OutputIter                     it,
+                                   size_t                         size,
+                                   common::it_value_t<OutputIter> min,
+                                   common::it_value_t<OutputIter> max,
+                                   Generator&&                    gen)
+    -> std::enable_if_t<common::is_custom_type<common::it_value_t<OutputIter>>::value
+                            && rocprim::is_floating_point<
+                                typename common::it_value_t<OutputIter>::value_type>::value,
+                        OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
 
@@ -399,18 +418,19 @@ inline auto generate_random_data_n(OutputIter             it,
 }
 
 template<class OutputIter, class Generator>
-inline auto generate_random_data_n(OutputIter                                  it,
-                                   size_t                                      size,
-                                   typename it_value_t<OutputIter>::value_type min,
-                                   typename it_value_t<OutputIter>::value_type max,
-                                   Generator&&                                 gen)
-    -> std::enable_if_t<is_custom_test_array_type<it_value_t<OutputIter>>::value
-                            && std::is_integral<typename it_value_t<OutputIter>::value_type>::value,
-                        OutputIter>
+inline auto generate_random_data_n(OutputIter                                          it,
+                                   size_t                                              size,
+                                   typename common::it_value_t<OutputIter>::value_type min,
+                                   typename common::it_value_t<OutputIter>::value_type max,
+                                   Generator&&                                         gen)
+    -> std::enable_if_t<
+        is_custom_test_array_type<common::it_value_t<OutputIter>>::value
+            && std::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
+        OutputIter>
 {
     using T = typename std::iterator_traits<OutputIter>::value_type;
 
-    std::uniform_int_distribution<typename T::value_type> distribution(min, max);
+    common::uniform_int_distribution<typename T::value_type> distribution(min, max);
     return std::generate_n(it,
                            size,
                            [&]()
@@ -444,9 +464,10 @@ inline auto get_random_value(U min, V max, seed_type seed_value)
 }
 
 template<class T>
-inline auto
-    get_random_value(typename T::value_type min, typename T::value_type max, seed_type seed_value)
-        -> std::enable_if_t<is_custom_test_type<T>::value || is_custom_test_array_type<T>::value, T>
+inline auto get_random_value(typename T::value_type min,
+                             typename T::value_type max,
+                             seed_type              seed_value)
+    -> std::enable_if_t<common::is_custom_type<T>::value || is_custom_test_array_type<T>::value, T>
 {
     typename T::value_type result;
     engine_type            gen(seed_value);
@@ -484,18 +505,16 @@ std::vector<size_t> get_sizes(T seed_value)
         (1 << 20) + 123
     };
     // clang-format on
-    if(!test_common_utils::use_hmm())
+    if(!common::use_hmm())
     {
         // hipMallocManaged() currently doesnt support zero byte allocation
         sizes.push_back(0);
     }
 
-    const std::vector<size_t> random_sizes1
-        = test_utils::get_random_data<size_t>(2, 2, 1 << 20, seed_value);
+    const std::vector<size_t> random_sizes1 = get_random_data<size_t>(2, 2, 1 << 20, seed_value);
     sizes.insert(sizes.end(), random_sizes1.begin(), random_sizes1.end());
 
-    const std::vector<size_t> random_sizes2
-        = test_utils::get_random_data<size_t>(3, 2, 1 << 17, seed_value);
+    const std::vector<size_t> random_sizes2 = get_random_data<size_t>(3, 2, 1 << 17, seed_value);
     sizes.insert(sizes.end(), random_sizes2.begin(), random_sizes2.end());
 
     std::sort(sizes.begin(), sizes.end());
@@ -516,14 +535,12 @@ std::vector<size_t> get_large_sizes(T seed_value)
         (size_t{1} << MaxPow2) - 1,
     };
     const std::vector<size_t> random_sizes
-        = test_utils::get_random_data<size_t>(2,
-                                              (size_t{1} << 30) + 1,
-                                              (size_t{1} << MaxPow2) - 2,
-                                              seed_value);
+        = get_random_data<size_t>(2, (size_t{1} << 30) + 1, (size_t{1} << MaxPow2) - 2, seed_value);
 
     std::vector<size_t> sizes(test_sizes.size() + random_sizes.size());
-    int count = 0;
-    auto predicate = [&count](const size_t& val) {
+    int                 count     = 0;
+    auto                predicate = [&count](const size_t& val)
+    {
         const bool result = (val <= (size_t{1} << MaxPow2));
         count += (result ? 1 : 0);
         return result;
@@ -558,10 +575,11 @@ std::vector<size_t> get_block_size_multiples(T seed_value, const unsigned int bl
                    sizes.end(),
                    sizes.begin(),
                    [block_size](size_t size)
-                   { return test_utils::closest_greater_multiple(size, block_size); });
+                   { return closest_greater_multiple(size, block_size); });
     std::set<size_t> unique_sizes(sizes.begin(), sizes.end());
     return std::vector<size_t>(unique_sizes.begin(), unique_sizes.end());
 }
-}
+
+} // namespace test_utils
 
 #endif //ROCPRIM_TEST_UTILS_DATA_GENERATION_HPP

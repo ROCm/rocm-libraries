@@ -1,6 +1,6 @@
 /******************************************************************************
 * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022-2024, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -87,376 +87,376 @@ namespace detail
         }
     }
 
-    template<unsigned int BlockSize,
+    template<class Key,
+             class Value,
+             unsigned int BlockSize,
              unsigned int ItemsPerThread,
-             class KeysInputIterator,
-             class KeysOutputIterator,
-             class ValuesInputIterator,
-             class ValuesOutputIterator,
-             class OffsetT,
-             class BinaryFunction,
-             class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
-                                                                      KeysOutputIterator   keys_output,
-                                                                      ValuesInputIterator  values_input,
-                                                                      ValuesOutputIterator values_output,
-                                                                      const OffsetT        input_size,
-                                                                      const OffsetT  sorted_block_size,
-                                                                      const unsigned int   num_blocks,
-                                                                      BinaryFunction compare_function,
-                                                                      const OffsetT* merge_partitions)
-        -> std::enable_if_t<(!std::is_trivially_copyable<ValueType>::value
-                             || rocprim::is_floating_point<ValueType>::value
-                             || std::is_integral<ValueType>::value),
-                            void>
+             typename Enable = void>
+    struct block_merge_impl;
+
+    template<class Key, class Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+    struct block_merge_impl<Key,
+                            Value,
+                            BlockSize,
+                            ItemsPerThread,
+                            std::enable_if_t<!std::is_trivially_copyable<Value>::value
+                                             || rocprim::is_floating_point<Value>::value
+                                             || std::is_integral<Value>::value>>
     {
-        using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-        using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-        constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-        constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-        using block_store = block_store_impl<with_values, BlockSize, ItemsPerThread, key_type, value_type>;
+        static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
+        static constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-        using keys_storage_ = key_type[items_per_tile + 1];
-        using values_storage_ = value_type[items_per_tile + 1];
+        using block_store = block_store_impl<with_values, BlockSize, ItemsPerThread, Key, Value>;
 
-        ROCPRIM_SHARED_MEMORY union {
+        using keys_storage_   = Key[items_per_tile + 1];
+        using values_storage_ = Value[items_per_tile + 1];
+
+        union storage_type
+        {
             typename block_store::storage_type   store;
             ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
             detail::raw_storage<keys_storage_>   keys;
             detail::raw_storage<values_storage_> values;
             ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-        } storage;
+        };
 
-        auto& keys_shared = storage.keys.get();
-        auto& values_shared = storage.values.get();
-
-        const unsigned short flat_id = block_thread_id<0>();
-        const unsigned int flat_block_id = ::rocprim::flat_block_id();
-        if(flat_block_id >= num_blocks)
+        template<class KeysInputIterator,
+                 class KeysOutputIterator,
+                 class ValuesInputIterator,
+                 class ValuesOutputIterator,
+                 class OffsetT,
+                 class BinaryFunction>
+        ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void process_tile(KeysInputIterator    keys_input,
+                                                              KeysOutputIterator   keys_output,
+                                                              ValuesInputIterator  values_input,
+                                                              ValuesOutputIterator values_output,
+                                                              const OffsetT        input_size,
+                                                              const OffsetT        sorted_block_size,
+                                                              const unsigned int   num_blocks,
+                                                              BinaryFunction       compare_function,
+                                                              const OffsetT*       merge_partitions,
+                                                              storage_type&        storage)
         {
-            return;
-        }
 
-        const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
+            auto& keys_shared   = storage.keys.get();
+            auto& values_shared = storage.values.get();
 
-        const OffsetT partition_beg = merge_partitions[flat_block_id];
-        const OffsetT partition_end = merge_partitions[flat_block_id + 1];
+            const unsigned short flat_id       = block_thread_id<0>();
+            const unsigned int   flat_block_id = ::rocprim::flat_block_id();
+            if(flat_block_id >= num_blocks)
+            {
+                return;
+            }
 
-        const unsigned int merged_tiles_number = sorted_block_size / items_per_tile;
-        const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
-        const unsigned int mask  = target_merged_tiles_number - 1;
-        const unsigned int tilegroup_start_id  = ~mask & flat_block_id;
+            const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
 
-        const OffsetT tilegroup_start
-            = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile; // Tile-group starts here
-        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
+            const OffsetT partition_beg = merge_partitions[flat_block_id];
+            const OffsetT partition_end = merge_partitions[flat_block_id + 1];
 
+            const unsigned int merged_tiles_number        = sorted_block_size / items_per_tile;
+            const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
+            const unsigned int mask                       = target_merged_tiles_number - 1;
+            const unsigned int tilegroup_start_id         = ~mask & flat_block_id;
 
-        const OffsetT keys1_beg = partition_beg;
-        OffsetT keys1_end = partition_end;
-        const OffsetT keys2_beg = rocprim::min(input_size, 2 * tilegroup_start + sorted_block_size + diag - partition_beg);
-        OffsetT keys2_end = rocprim::min(input_size, 2 * tilegroup_start + sorted_block_size + diag + items_per_tile - partition_end);
+            const OffsetT tilegroup_start = static_cast<OffsetT>(tilegroup_start_id)
+                                            * items_per_tile; // Tile-group starts here
+            const OffsetT diag
+                = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
 
-        if (mask == (mask & flat_block_id)) // If last tile in the tile-group
-        {
-            keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
-            keys2_end = rocprim::min(input_size, tilegroup_start + sorted_block_size * 2);
-        }
+            const OffsetT keys1_beg = partition_beg;
+            OffsetT       keys1_end = partition_end;
+            const OffsetT keys2_beg
+                = rocprim::min(input_size,
+                               2 * tilegroup_start + sorted_block_size + diag - partition_beg);
+            OffsetT keys2_end = rocprim::min(input_size,
+                                             2 * tilegroup_start + sorted_block_size + diag
+                                                 + items_per_tile - partition_end);
 
-        // Number of keys per tile
-        const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
-        const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
-        // Load keys1 & keys2
-        key_type keys[ItemsPerThread];
-        gmem_to_reg<ItemsPerThread>(keys,
-                                    keys_input + keys1_beg,
-                                    keys_input + keys2_beg,
-                                    num_keys1,
-                                    num_keys2,
-                                    is_incomplete_tile);
-        // Load keys into shared memory
-        reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
+            if(mask == (mask & flat_block_id)) // If last tile in the tile-group
+            {
+                keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
+                keys2_end = rocprim::min(input_size, tilegroup_start + sorted_block_size * 2);
+            }
 
-        value_type values[ItemsPerThread];
-        if ROCPRIM_IF_CONSTEXPR(with_values){
-            gmem_to_reg<ItemsPerThread>(values,
-                                        values_input + keys1_beg,
-                                        values_input + keys2_beg,
+            // Number of keys per tile
+            const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
+            const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
+            // Load keys1 & keys2
+            Key keys[ItemsPerThread];
+            gmem_to_reg<ItemsPerThread>(keys,
+                                        keys_input + keys1_beg,
+                                        keys_input + keys2_beg,
                                         num_keys1,
                                         num_keys2,
                                         is_incomplete_tile);
-        }
-        rocprim::syncthreads();
+            // Load keys into shared memory
+            reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
 
-        const unsigned int diag0_local = rocprim::min(num_keys1 + num_keys2, ItemsPerThread * flat_id);
-
-        const unsigned int keys1_beg_local = merge_path(keys_shared,
-                                                        &keys_shared[num_keys1],
-                                                        num_keys1,
-                                                        num_keys2,
-                                                        diag0_local,
-                                                        compare_function);
-        const unsigned int keys1_end_local = num_keys1;
-        const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
-        const unsigned int keys2_end_local = num_keys2;
-
-        range_t<> range_local{keys1_beg_local,
-                              keys1_end_local,
-                              keys2_beg_local + keys1_end_local,
-                              keys2_end_local + keys1_end_local};
-
-        unsigned int indices[ItemsPerThread];
-
-        serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
-        rocprim::syncthreads();
-
-        if ROCPRIM_IF_CONSTEXPR(with_values){
-            reg_to_shared<BlockSize, ItemsPerThread>(values_shared, values);
-
+            Value values[ItemsPerThread];
+            if ROCPRIM_IF_CONSTEXPR(with_values)
+            {
+                gmem_to_reg<ItemsPerThread>(values,
+                                            values_input + keys1_beg,
+                                            values_input + keys2_beg,
+                                            num_keys1,
+                                            num_keys2,
+                                            is_incomplete_tile);
+            }
             rocprim::syncthreads();
 
-            ROCPRIM_UNROLL
-            for (unsigned int item = 0; item < ItemsPerThread; ++item)
+            const unsigned int diag0_local
+                = rocprim::min(num_keys1 + num_keys2, ItemsPerThread * flat_id);
+
+            const unsigned int keys1_beg_local = merge_path(keys_shared,
+                                                            &keys_shared[num_keys1],
+                                                            num_keys1,
+                                                            num_keys2,
+                                                            diag0_local,
+                                                            compare_function);
+            const unsigned int keys1_end_local = num_keys1;
+            const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
+            const unsigned int keys2_end_local = num_keys2;
+
+            range_t<> range_local{keys1_beg_local,
+                                  keys1_end_local,
+                                  keys2_beg_local + keys1_end_local,
+                                  keys2_end_local + keys1_end_local};
+
+            unsigned int indices[ItemsPerThread];
+
+            serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
+            rocprim::syncthreads();
+
+            if ROCPRIM_IF_CONSTEXPR(with_values)
             {
-                values[item] = values_shared[indices[item]];
+                reg_to_shared<BlockSize, ItemsPerThread>(values_shared, values);
+
+                rocprim::syncthreads();
+
+                ROCPRIM_UNROLL
+                for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                {
+                    values[item] = values_shared[indices[item]];
+                }
+
+                rocprim::syncthreads();
             }
 
-            rocprim::syncthreads();
+            const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
+            block_store().store(offset,
+                                input_size - offset,
+                                is_incomplete_tile,
+                                keys_output,
+                                values_output,
+                                keys,
+                                values,
+                                storage.store);
         }
-
-        const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
-        block_store().store(offset,
-                            input_size - offset,
-                            is_incomplete_tile,
-                            keys_output,
-                            values_output,
-                            keys,
-                            values,
-                            storage.store);
-    }
+    };
 
     // The specialization below exists because the compiler creates slow code for
     // ValueTypes with misaligned datastructures in them (e.g. custom_char_double)
     // when storing/loading those ValueTypes to/from registers.
     // Thus this is a temporary workaround.
-    template<unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             class KeysInputIterator,
-             class KeysOutputIterator,
-             class ValuesInputIterator,
-             class ValuesOutputIterator,
-             class OffsetT,
-             class BinaryFunction,
-             class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
-                                                                      KeysOutputIterator   keys_output,
-                                                                      ValuesInputIterator  values_input,
-                                                                      ValuesOutputIterator values_output,
-                                                                      const OffsetT        input_size,
-                                                                      const OffsetT  sorted_block_size,
-                                                                      const unsigned int   num_blocks,
-                                                                      BinaryFunction compare_function,
-                                                                      const OffsetT* merge_partitions)
-        -> std::enable_if_t<(std::is_trivially_copyable<ValueType>::value
-                             && !rocprim::is_floating_point<ValueType>::value
-                             && !std::is_integral<ValueType>::value),
-                            void>
+    template<class Key, class Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+    struct block_merge_impl<Key,
+                            Value,
+                            BlockSize,
+                            ItemsPerThread,
+                            std::enable_if_t<std::is_trivially_copyable<Value>::value
+                                             && !rocprim::is_floating_point<Value>::value
+                                             && !std::is_integral<Value>::value>>
     {
-        using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-        using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-        constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-        constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-        using block_store = block_store_impl<false, BlockSize, ItemsPerThread, key_type, value_type>;
+        static constexpr bool with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
+        static constexpr unsigned int items_per_tile = BlockSize * ItemsPerThread;
 
-        using keys_storage_   = key_type[items_per_tile];
-        using values_storage_ = value_type[items_per_tile];
+        using block_store = block_store_impl<false, BlockSize, ItemsPerThread, Key, Value>;
 
-        ROCPRIM_SHARED_MEMORY union {
+        using keys_storage_   = Key[items_per_tile + 1];
+        using values_storage_ = Value[items_per_tile + 1];
+
+        union storage_type
+        {
             typename block_store::storage_type   store;
             ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
             detail::raw_storage<keys_storage_>   keys;
             detail::raw_storage<values_storage_> values;
             ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-        } storage;
+        };
 
-        auto& keys_shared = storage.keys.get();
-        auto& values_shared = storage.values.get();
-
-        const unsigned short flat_id            = block_thread_id<0>();
-        const unsigned int flat_block_id = ::rocprim::flat_block_id();
-        if(flat_block_id >= num_blocks)
+        template<class KeysInputIterator,
+                 class KeysOutputIterator,
+                 class ValuesInputIterator,
+                 class ValuesOutputIterator,
+                 class OffsetT,
+                 class BinaryFunction>
+        ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void process_tile(KeysInputIterator  keys_input,
+                                                              KeysOutputIterator   keys_output,
+                                                              ValuesInputIterator  values_input,
+                                                              ValuesOutputIterator values_output,
+                                                              const OffsetT        input_size,
+                                                              const OffsetT        sorted_block_size,
+                                                              const unsigned int   num_blocks,
+                                                              BinaryFunction       compare_function,
+                                                              const OffsetT*       merge_partitions,
+                                                              storage_type&        storage)
         {
-            return;
-        }
 
-        const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
+            auto& keys_shared   = storage.keys.get();
+            auto& values_shared = storage.values.get();
 
-        const OffsetT partition_beg = merge_partitions[flat_block_id];
-        const OffsetT partition_end = merge_partitions[flat_block_id + 1];
-
-        const unsigned int merged_tiles_number = sorted_block_size / items_per_tile;
-        const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
-        const unsigned int mask  = target_merged_tiles_number - 1;
-        const unsigned int tilegroup_start_id  = ~mask & flat_block_id;
-        const OffsetT tilegroup_start
-            = static_cast<OffsetT>(tilegroup_start_id) * items_per_tile; // Tile-group starts here
-        const OffsetT diag = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
-
-
-        const OffsetT keys1_beg = partition_beg;
-        OffsetT keys1_end = partition_end;
-        const OffsetT keys2_beg = rocprim::min(input_size, 2 * tilegroup_start + sorted_block_size + diag - partition_beg);
-        OffsetT keys2_end = rocprim::min(input_size, 2 * tilegroup_start + sorted_block_size + diag + items_per_tile - partition_end);
-
-        if (mask == (mask & flat_block_id)) // If last tile in the tile-group
-        {
-            keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
-            keys2_end = rocprim::min(input_size, tilegroup_start + sorted_block_size * 2);
-        }
-
-        // Number of keys per tile
-        const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
-        const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
-        // Load keys1 & keys2
-        key_type keys[ItemsPerThread];
-        gmem_to_reg<ItemsPerThread>(keys,
-                                    keys_input + keys1_beg,
-                                    keys_input + keys2_beg,
-                                    num_keys1,
-                                    num_keys2,
-                                    is_incomplete_tile);
-        // Load keys into shared memory
-        reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
-
-        rocprim::syncthreads();
-
-        const unsigned int diag0_local = rocprim::min(num_keys1 + num_keys2, ItemsPerThread * flat_id);
-
-        const unsigned int keys1_beg_local = merge_path(keys_shared,
-                                                        &keys_shared[num_keys1],
-                                                        num_keys1,
-                                                        num_keys2,
-                                                        diag0_local,
-                                                        compare_function);
-        const unsigned int keys1_end_local = num_keys1;
-        const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
-        const unsigned int keys2_end_local = num_keys2;
-
-        range_t<> range_local{keys1_beg_local,
-                              keys1_end_local,
-                              keys2_beg_local + keys1_end_local,
-                              keys2_end_local + keys1_end_local};
-
-        unsigned int indices[ItemsPerThread];
-
-        serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
-        rocprim::syncthreads();
-
-        if ROCPRIM_IF_CONSTEXPR(with_values)
-        {
-            const ValuesInputIterator input1 = values_input + keys1_beg;
-            const ValuesInputIterator input2 = values_input + keys2_beg;
-            if(is_incomplete_tile)
+            const unsigned short flat_id       = block_thread_id<0>();
+            const unsigned int   flat_block_id = ::rocprim::flat_block_id();
+            if(flat_block_id >= num_blocks)
             {
-                ROCPRIM_UNROLL
-                for (unsigned int item = 0; item < ItemsPerThread; ++item)
-                {
-                    const unsigned int idx = BlockSize * item + threadIdx.x;
-                    if(idx < num_keys1)
-                    {
-                        values_shared[idx] = input1[idx];
-                    }
-                    else if(idx - num_keys1 < num_keys2)
-                    {
-                        values_shared[idx] = input2[idx - num_keys1];
-                    }
-                }
+                return;
             }
-            else
+
+            const bool is_incomplete_tile = flat_block_id == (input_size / items_per_tile);
+
+            const OffsetT partition_beg = merge_partitions[flat_block_id];
+            const OffsetT partition_end = merge_partitions[flat_block_id + 1];
+
+            const unsigned int merged_tiles_number        = sorted_block_size / items_per_tile;
+            const unsigned int target_merged_tiles_number = merged_tiles_number * 2;
+            const unsigned int mask                       = target_merged_tiles_number - 1;
+            const unsigned int tilegroup_start_id         = ~mask & flat_block_id;
+            const OffsetT      tilegroup_start            = static_cast<OffsetT>(tilegroup_start_id)
+                                            * items_per_tile; // Tile-group starts here
+            const OffsetT diag
+                = static_cast<OffsetT>(flat_block_id) * items_per_tile - tilegroup_start;
+
+            const OffsetT keys1_beg = partition_beg;
+            OffsetT       keys1_end = partition_end;
+            const OffsetT keys2_beg
+                = rocprim::min(input_size,
+                               2 * tilegroup_start + sorted_block_size + diag - partition_beg);
+            OffsetT keys2_end = rocprim::min(input_size,
+                                             2 * tilegroup_start + sorted_block_size + diag
+                                                 + items_per_tile - partition_end);
+
+            if(mask == (mask & flat_block_id)) // If last tile in the tile-group
             {
-                ROCPRIM_UNROLL
-                for (unsigned int item = 0; item < ItemsPerThread; ++item)
-                {
-                    const unsigned int idx = BlockSize * item + threadIdx.x;
-                    if(idx < num_keys1)
-                    {
-                        values_shared[idx] = input1[idx];
-                    }
-                    else
-                    {
-                        values_shared[idx] = input2[idx - num_keys1];
-                    }
-                }
+                keys1_end = rocprim::min(input_size, tilegroup_start + sorted_block_size);
+                keys2_end = rocprim::min(input_size, tilegroup_start + sorted_block_size * 2);
             }
+
+            // Number of keys per tile
+            const unsigned int num_keys1 = static_cast<unsigned int>(keys1_end - keys1_beg);
+            const unsigned int num_keys2 = static_cast<unsigned int>(keys2_end - keys2_beg);
+            // Load keys1 & keys2
+            Key keys[ItemsPerThread];
+            gmem_to_reg<ItemsPerThread>(keys,
+                                        keys_input + keys1_beg,
+                                        keys_input + keys2_beg,
+                                        num_keys1,
+                                        num_keys2,
+                                        is_incomplete_tile);
+            // Load keys into shared memory
+            reg_to_shared<BlockSize, ItemsPerThread>(keys_shared, keys);
 
             rocprim::syncthreads();
-            const OffsetT thread_offset = items_per_tile * static_cast<OffsetT>(flat_block_id) + ItemsPerThread * flat_id;
-            if(is_incomplete_tile)
+
+            const unsigned int diag0_local
+                = rocprim::min(num_keys1 + num_keys2, ItemsPerThread * flat_id);
+
+            const unsigned int keys1_beg_local = merge_path(keys_shared,
+                                                            &keys_shared[num_keys1],
+                                                            num_keys1,
+                                                            num_keys2,
+                                                            diag0_local,
+                                                            compare_function);
+            const unsigned int keys1_end_local = num_keys1;
+            const unsigned int keys2_beg_local = diag0_local - keys1_beg_local;
+            const unsigned int keys2_end_local = num_keys2;
+
+            range_t<> range_local{keys1_beg_local,
+                                  keys1_end_local,
+                                  keys2_beg_local + keys1_end_local,
+                                  keys2_end_local + keys1_end_local};
+
+            unsigned int indices[ItemsPerThread];
+
+            serial_merge<false>(keys_shared, keys, indices, range_local, compare_function);
+            rocprim::syncthreads();
+
+            if ROCPRIM_IF_CONSTEXPR(with_values)
             {
-                ROCPRIM_UNROLL
-                for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                const ValuesInputIterator input1 = values_input + keys1_beg;
+                const ValuesInputIterator input2 = values_input + keys2_beg;
+                if(is_incomplete_tile)
                 {
-                    if(flat_id * ItemsPerThread + item < num_keys1 + num_keys2)
+                    ROCPRIM_UNROLL
+                    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                    {
+                        const unsigned int idx = BlockSize * item + threadIdx.x;
+                        if(idx < num_keys1)
+                        {
+                            values_shared[idx] = input1[idx];
+                        }
+                        else if(idx - num_keys1 < num_keys2)
+                        {
+                            values_shared[idx] = input2[idx - num_keys1];
+                        }
+                    }
+                }
+                else
+                {
+                    ROCPRIM_UNROLL
+                    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                    {
+                        const unsigned int idx = BlockSize * item + threadIdx.x;
+                        if(idx < num_keys1)
+                        {
+                            values_shared[idx] = input1[idx];
+                        }
+                        else
+                        {
+                            values_shared[idx] = input2[idx - num_keys1];
+                        }
+                    }
+                }
+
+                rocprim::syncthreads();
+                const OffsetT thread_offset = items_per_tile * static_cast<OffsetT>(flat_block_id)
+                                              + ItemsPerThread * flat_id;
+                if(is_incomplete_tile)
+                {
+                    ROCPRIM_UNROLL
+                    for(unsigned int item = 0; item < ItemsPerThread; ++item)
+                    {
+                        if(flat_id * ItemsPerThread + item < num_keys1 + num_keys2)
+                        {
+                            values_output[thread_offset + item] = values_shared[indices[item]];
+                        }
+                    }
+                }
+                else
+                {
+                    ROCPRIM_UNROLL
+                    for(unsigned int item = 0; item < ItemsPerThread; ++item)
                     {
                         values_output[thread_offset + item] = values_shared[indices[item]];
                     }
                 }
-            }
-            else
-            {
-                ROCPRIM_UNROLL
-                for(unsigned int item = 0; item < ItemsPerThread; ++item)
-                {
-                    values_output[thread_offset + item] = values_shared[indices[item]];
-                }
+
+                rocprim::syncthreads();
             }
 
-            rocprim::syncthreads();
+            const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
+            Value         values[ItemsPerThread];
+            block_store().store(offset,
+                                input_size - offset,
+                                is_incomplete_tile,
+                                keys_output,
+                                values_output,
+                                keys,
+                                values,
+                                storage.store);
         }
-
-        const OffsetT offset = static_cast<OffsetT>(flat_block_id) * items_per_tile;
-        value_type values[ItemsPerThread];
-        block_store().store(offset,
-                            input_size - offset,
-                            is_incomplete_tile,
-                            keys_output,
-                            values_output,
-                            keys,
-                            values,
-                            storage.store);
-    }
-
-    template<unsigned int BlockSize,
-             unsigned int ItemsPerThread,
-             class KeysInputIterator,
-             class KeysOutputIterator,
-             class ValuesInputIterator,
-             class ValuesOutputIterator,
-             class OffsetT,
-             class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-        block_merge_mergepath_kernel(KeysInputIterator    keys_input,
-                                     KeysOutputIterator   keys_output,
-                                     ValuesInputIterator  values_input,
-                                     ValuesOutputIterator values_output,
-                                     const OffsetT        input_size,
-                                     const OffsetT        sorted_block_size,
-                                     const unsigned int   num_blocks,
-                                     BinaryFunction       compare_function,
-                                     const OffsetT*       merge_partitions)
-    {
-        block_merge_process_tile<BlockSize, ItemsPerThread>(keys_input,
-                                                            keys_output,
-                                                            values_input,
-                                                            values_output,
-                                                            input_size,
-                                                            sorted_block_size,
-                                                            num_blocks,
-                                                            compare_function,
-                                                            merge_partitions);
-    }
+    };
 
 } // end of detail namespace
 

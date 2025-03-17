@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_custom_type.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -83,8 +85,8 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
-    using custom_float2                                     = custom_type<float, float>;
-    using custom_double2                                    = custom_type<double, double>;
+    using custom_float2                                     = common::custom_type<float, float>;
+    using custom_double2                                    = common::custom_type<double, double>;
 
     CREATE_BENCHMARK(int, rocprim::plus<int>)
     CREATE_BENCHMARK(float, rocprim::plus<float>)

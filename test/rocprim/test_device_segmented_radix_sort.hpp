@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,15 +24,30 @@
 #define TEST_DEVICE_SEGMENTED_RADIX_SORT_HPP_
 
 #include "../common_test_header.hpp"
-#include "../rocprim/test_utils_device_ptr.hpp"
 
-// required rocprim headers
-#include <rocprim/device/device_segmented_radix_sort.hpp>
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 // required test headers
-#include "test_utils_custom_float_type.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
 #include "test_utils_sort_comparator.hpp"
-#include "test_utils_types.hpp"
+
+// required rocprim headers
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
+#include <rocprim/device/device_segmented_radix_sort.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types/double_buffer.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <random>
+#include <utility>
+#include <vector>
 
 template<class Key,
          class Value,
@@ -125,7 +140,7 @@ inline void sort_keys()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -140,10 +155,10 @@ inline void sort_keys()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> offsets;
@@ -158,10 +173,10 @@ inline void sort_keys()
             }
             offsets.push_back(size);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(size);
 
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<offset_type> d_offsets(offsets);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -187,7 +202,7 @@ inline void sort_keys()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -255,19 +270,19 @@ inline void sort_keys_empty_data()
             SCOPED_TRACE(testing::Message() << "with segments_count = " << segments_count);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> offsets(2);
             offsets[0] = 0;
             offsets[1] = 0;
 
-            test_utils::device_ptr<key_type> d_keys(keys_input);
+            common::device_ptr<key_type> d_keys(keys_input);
 
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<offset_type> d_offsets(offsets);
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(nullptr,
@@ -283,7 +298,7 @@ inline void sort_keys_empty_data()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -350,21 +365,21 @@ inline void sort_keys_large_segments()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<key_type> keys_input
-            = test_utils::get_random_data<key_type>(size,
-                                                    test_utils::generate_limits<key_type>::min(),
-                                                    test_utils::generate_limits<key_type>::max(),
-                                                    seed_value);
+        std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
+            size,
+            common::generate_limits<key_type>::min(),
+            common::generate_limits<key_type>::max(),
+            seed_value);
 
         std::vector<offset_type> offsets(3);
         offsets[0] = 0;
         offsets[1] = static_cast<offset_type>(size / 2);
         offsets[2] = static_cast<offset_type>(size);
 
-        test_utils::device_ptr<key_type> d_keys_input(keys_input);
-        test_utils::device_ptr<key_type> d_keys_output(size);
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        test_utils::device_ptr<offset_type> d_offsets(offsets);
+        common::device_ptr<offset_type> d_offsets(offsets);
 
         // Calculate expected results on host
         std::vector<key_type> expected(keys_input);
@@ -390,7 +405,7 @@ inline void sort_keys_large_segments()
 
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         if(descending)
         {
@@ -447,7 +462,7 @@ inline void sort_keys_unspecified_ranges()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -462,10 +477,10 @@ inline void sort_keys_unspecified_ranges()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> begin_offsets;
@@ -496,11 +511,11 @@ inline void sort_keys_unspecified_ranges()
                 }
             }
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(keys_input);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(keys_input);
 
-            test_utils::device_ptr<offset_type> d_offsets_begin(begin_offsets);
-            test_utils::device_ptr<offset_type> d_offsets_end(end_offsets);
+            common::device_ptr<offset_type> d_offsets_begin(begin_offsets);
+            common::device_ptr<offset_type> d_offsets_end(end_offsets);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -526,7 +541,7 @@ inline void sort_keys_unspecified_ranges()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -587,7 +602,7 @@ inline void sort_pairs()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -602,10 +617,10 @@ inline void sort_pairs()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> offsets;
@@ -623,13 +638,13 @@ inline void sort_pairs()
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(size);
 
-            test_utils::device_ptr<value_type> d_values_input(values_input);
-            test_utils::device_ptr<value_type> d_values_output(size);
+            common::device_ptr<value_type> d_values_input(values_input);
+            common::device_ptr<value_type> d_values_output(size);
 
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<offset_type> d_offsets(offsets);
 
             using key_value = std::pair<key_type, value_type>;
 
@@ -673,7 +688,7 @@ inline void sort_pairs()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -741,7 +756,7 @@ inline void sort_pairs_unspecified_ranges()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -756,10 +771,10 @@ inline void sort_pairs_unspecified_ranges()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<value_type> values_input(size);
@@ -793,14 +808,14 @@ inline void sort_pairs_unspecified_ranges()
                 }
             }
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(keys_input);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(keys_input);
 
-            test_utils::device_ptr<value_type> d_values_input(values_input);
-            test_utils::device_ptr<value_type> d_values_output(values_input);
+            common::device_ptr<value_type> d_values_input(values_input);
+            common::device_ptr<value_type> d_values_output(values_input);
 
-            test_utils::device_ptr<offset_type> d_offsets_begin(begin_offsets);
-            test_utils::device_ptr<offset_type> d_offsets_end(end_offsets);
+            common::device_ptr<offset_type> d_offsets_begin(begin_offsets);
+            common::device_ptr<offset_type> d_offsets_end(end_offsets);
 
             using key_value = std::pair<key_type, value_type>;
 
@@ -837,7 +852,7 @@ inline void sort_pairs_unspecified_ranges()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -907,7 +922,7 @@ inline void sort_keys_double_buffer()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -922,10 +937,10 @@ inline void sort_keys_double_buffer()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> offsets;
@@ -940,10 +955,10 @@ inline void sort_keys_double_buffer()
             }
             offsets.push_back(size);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(size);
 
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<offset_type> d_offsets(offsets);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
@@ -970,7 +985,7 @@ inline void sort_keys_double_buffer()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {
@@ -1035,7 +1050,7 @@ inline void sort_pairs_double_buffer()
     std::random_device         rd;
     std::default_random_engine gen(rd());
 
-    std::uniform_int_distribution<size_t> segment_length_dis(
+    common::uniform_int_distribution<size_t> segment_length_dis(
         TestFixture::params::min_segment_length,
         TestFixture::params::max_segment_length);
 
@@ -1050,10 +1065,10 @@ inline void sort_pairs_double_buffer()
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+            std::vector<key_type> keys_input = test_utils::get_random_data_wrapped<key_type>(
                 size,
-                test_utils::generate_limits<key_type>::min(),
-                test_utils::generate_limits<key_type>::max(),
+                common::generate_limits<key_type>::min(),
+                common::generate_limits<key_type>::max(),
                 seed_value);
 
             std::vector<offset_type> offsets;
@@ -1071,13 +1086,13 @@ inline void sort_pairs_double_buffer()
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input);
+            common::device_ptr<key_type> d_keys_output(size);
 
-            test_utils::device_ptr<value_type> d_values_input(values_input);
-            test_utils::device_ptr<value_type> d_values_output(size);
+            common::device_ptr<value_type> d_values_input(values_input);
+            common::device_ptr<value_type> d_values_output(size);
 
-            test_utils::device_ptr<offset_type> d_offsets(offsets);
+            common::device_ptr<offset_type> d_offsets(offsets);
 
             using key_value = std::pair<key_type, value_type>;
 
@@ -1123,7 +1138,7 @@ inline void sort_pairs_double_buffer()
 
             ASSERT_GT(temporary_storage_bytes, 0U);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(descending)
             {

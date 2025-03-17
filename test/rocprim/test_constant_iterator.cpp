@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,20 @@
 
 #include "../common_test_header.hpp"
 
-// required rocprim headers
-#include <rocprim/iterator/constant_iterator.hpp>
-#include <rocprim/device/device_transform.hpp>
-
 // required test headers
-#include "test_utils_device_ptr.hpp"
+#include "../../common/utils_device_ptr.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
 #include "test_utils_types.hpp"
+
+// required rocprim headers
+#include <rocprim/device/device_transform.hpp>
+#include <rocprim/iterator/constant_iterator.hpp>
+
+#include <cstddef>
+#include <vector>
 
 // Params for tests
 template<class InputType>
@@ -87,7 +94,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
         Iterator input_begin(value);
 
         std::vector<T> output(size);
-        test_utils::device_ptr<T> d_output(output.size());
+        common::device_ptr<T> d_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(size, transform<T>()(value));

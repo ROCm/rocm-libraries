@@ -21,17 +21,21 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
-#include "rocprim/device/config_types.hpp"
+
+#include "../../common/utils.hpp"
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
 #include "test_seed.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 
-#include <rocprim/detail/various.hpp>
+#include "test_utils_sort_checker.hpp"
+
 #include <rocprim/device/device_merge_inplace.hpp>
+#include <rocprim/functional.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
-
-#include <gtest/gtest.h>
 
 #include <hip/driver_types.h>
 #include <hip/hip_runtime.h>
@@ -39,7 +43,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
-#include <rocprim/test_utils_device_ptr.hpp>
+#include <random>
+#include <tuple>
+#include <type_traits>
+#include <vector>
 
 TEST(RocprimDeviceMergeInplaceTests, Basic)
 {
@@ -65,13 +72,13 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
         h_data[left_size + i] = i * 2 + 1;
     }
 
-    test_utils::device_ptr<value_type> d_data(h_data);
+    common::device_ptr<value_type>     d_data(h_data);
     std::vector<value_type>            h_expected(h_data);
 
     // get temporary storage
     HIP_CHECK(rocprim::merge_inplace(nullptr, storage_size, d_data.get(), left_size, right_size));
 
-    test_utils::device_ptr<void> d_temp_storage(storage_size);
+    common::device_ptr<void> d_temp_storage(storage_size);
 
     HIP_CHECK(rocprim::merge_inplace(d_temp_storage.get(),
                                      storage_size,
@@ -84,7 +91,7 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
     h_data = d_data.load();
     d_data.free_manually();
 
-    test_utils::assert_eq(h_expected, h_data);
+    test_utils::assert_eq(h_data, h_expected);
 }
 
 struct small_sizes
@@ -133,7 +140,7 @@ struct linear_data_generator
     auto get_iterator(seed_type /* seed */)
     {
         return rocprim::make_transform_iterator(rocprim::make_counting_iterator(0),
-                                                [](T v) { return v * increment + start; });
+                                                [](T value) { return value * increment + start; });
     }
 
     auto get_max_size()
@@ -155,16 +162,16 @@ struct random_data_generator
         using value_type      = T;
 
         // not all integral types are valid for int distribution
-        using dist_value_type = std::conditional_t<
-            std::is_integral<T>::value
-                && !test_utils::is_valid_for_int_distribution<value_type>::value,
-            int,
-            value_type>;
+        using dist_value_type
+            = std::conditional_t<std::is_integral<T>::value
+                                     && !common::is_valid_for_int_distribution<value_type>::value,
+                                 int,
+                                 value_type>;
 
         using val_dist_type = std::conditional_t<std::is_integral<T>::value,
-                                                 std::uniform_int_distribution<dist_value_type>,
+                                                 common::uniform_int_distribution<dist_value_type>,
                                                  std::uniform_real_distribution<dist_value_type>>;
-        using dup_dist_type = std::uniform_int_distribution<int>;
+        using dup_dist_type = common::uniform_int_distribution<int>;
 
         seed_type seed;
         int       duplicates;
@@ -189,7 +196,9 @@ struct random_data_generator
 
             // if we have duplicates left over, do nothing
             if(duplicates > 0 || value >= std::numeric_limits<value_type>::max() - increment)
+            {
                 return;
+            }
 
             // get new duplicates
             duplicates = max_duplicates > 1 ? dup_dist(engine) : 1;
@@ -311,15 +320,14 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
 
     for(auto size : sizes)
     {
-        size_t num_seeds
-            = gen_a_type::is_random || gen_b_type::is_random ? (random_seeds_count + seed_size) : 1;
+        size_t num_seeds = gen_a_type::is_random || gen_b_type::is_random ? number_of_runs : 1;
 
         size_t size_a     = std::get<0>(size);
         size_t size_b     = std::get<1>(size);
         size_t size_total = size_a + size_b;
 
         // hipMallocManaged() currently doesnt support zero byte allocation
-        if((size_a == 0 || size_b == 0) && test_common_utils::use_hmm())
+        if((size_a == 0 || size_b == 0) && common::use_hmm())
         {
             continue;
         }
@@ -335,7 +343,7 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
 
         std::vector<value_type> h_data(size_total);
 
-        size_t total_bytes  = sizeof(value_type) * size_total;
+        size_t total_bytes = sizeof(value_type) * size_total;
 
         // Limit the total size to slightly saner numbers.
         if(total_bytes >= 1LL << 35 /* 32 GiB */)
@@ -363,8 +371,8 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
         }
 
         // We only allocate on the device *after* ensuring we have enough available vram.
-        test_utils::device_ptr<value_type> d_data = test_utils::device_ptr<value_type>(h_data);
-        test_utils::device_ptr<void>       d_temp_storage(storage_size);
+        common::device_ptr<value_type> d_data = common::device_ptr<value_type>(h_data);
+        common::device_ptr<void>       d_temp_storage(storage_size);
 
         for(size_t seed_index = 0; seed_index < num_seeds; seed_index++)
         {
@@ -398,6 +406,18 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
                                              compare_op,
                                              stream));
 
+            // check if is sorted on device
+            bool is_sorted
+                = test_utils::device_sort_check(d_data.get(), size_total, compare_op, stream);
+
+            // skip host-side reference check with large inputs
+            if(size_total > 16ULL * 1024 * 1024)
+            {
+                // input too big, only check device sort
+                ASSERT_TRUE(is_sorted);
+                continue;
+            }
+
             // compare with reference
             auto h_output = d_data.load_async(stream);
 
@@ -409,7 +429,11 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
                        h_data.end(),
                        h_reference.begin());
 
+            // assert on host first, as this will print the offending value and index
             ASSERT_NO_FATAL_FAILURE((test_utils::assert_eq(h_output, h_reference)));
+
+            // then check the result from device for good measure
+            ASSERT_TRUE(is_sorted);
         }
 
         d_data.free_manually();

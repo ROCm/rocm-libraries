@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,11 @@
 #ifndef ROCPRIM_DETAIL_VARIOUS_HPP_
 #define ROCPRIM_DETAIL_VARIOUS_HPP_
 
+#include <chrono>
+#include <iostream>
 #include <type_traits>
 
+#include "../common.hpp"
 #include "../config.hpp"
 #include "../functional.hpp"
 #include "../type_traits.hpp"
@@ -438,6 +441,102 @@ struct select_max_by_value<T, U, Vs...>
 
 template<typename... Ts>
 using select_max_by_value_t = typename select_max_by_value<Ts...>::type;
+
+/// \brief Gets the maximum grid size to have all blocks active.
+template<typename Kernel>
+ROCPRIM_HOST
+hipError_t
+    grid_dim_for_max_active_blocks(int& grid_dim, int block_size, Kernel kernel, hipStream_t stream)
+{
+    hipDevice_t default_device;
+    ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(0, &default_device));
+
+    hipDevice_t stream_device;
+    ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
+
+    // after setting device, we can't just exit on non-success
+    hipError_t result = hipSetDevice(stream_device);
+
+    int occupancy;
+    if(result == hipSuccess)
+    {
+        result = hipOccupancyMaxActiveBlocksPerMultiprocessor(&occupancy, kernel, block_size, 0);
+
+        // workaround for when 'hipOccupancyMaxActiveBlocksPerMultiprocessor'
+        // outputs 0.
+        if(occupancy == 0)
+        {
+            std::cerr << "Could not get max active blocks per multiprocessor! "
+                         "Assuming '1'..."
+                      << std::endl;
+            occupancy = 1;
+        }
+    }
+
+    int num_multi_processors;
+    if(result == hipSuccess)
+    {
+        result = hipDeviceGetAttribute(&num_multi_processors,
+                                       hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
+                                       stream_device);
+        // sanity check
+        if(num_multi_processors == 0)
+        {
+            result = hipErrorUnknown;
+        }
+    }
+
+    if(result == hipSuccess)
+    {
+        grid_dim = occupancy * num_multi_processors;
+    }
+
+    // always attempt to restore to default device
+    hipError_t set_result = hipSetDevice(default_device);
+    ROCPRIM_RETURN_ON_ERROR(result);
+
+    return set_result;
+}
+
+/// \brief Checks if the device on stream supports cooperative groups
+inline hipError_t supports_cooperative_groups(bool& has_support, hipStream_t stream)
+{
+    hipDevice_t stream_device;
+    hipError_t  result = hipStreamGetDevice(stream, &stream_device);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    int value;
+    result = hipDeviceGetAttribute(&value,
+                                   hipDeviceAttribute_t::hipDeviceAttributeCooperativeLaunch,
+                                   stream_device);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    has_support = value != 0;
+
+    return hipSuccess;
+}
+
+/// Computes the time difference between now and the passed time reference.
+/// Returns the time difference in milliseconds and updates the time reference
+/// with now.
+inline float update_time_point(std::chrono::high_resolution_clock::time_point& t_time)
+{
+    std::chrono::high_resolution_clock::time_point t_stop
+        = std::chrono::high_resolution_clock::now();
+
+    float delta_time
+        = std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(t_stop - t_time)
+              .count();
+    t_time = t_stop;
+
+    return delta_time;
+}
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

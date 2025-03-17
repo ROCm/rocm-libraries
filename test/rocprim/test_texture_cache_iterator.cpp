@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,20 @@
 
 #include "../common_test_header.hpp"
 
-// required rocprim headers
-#include <rocprim/iterator/texture_cache_iterator.hpp>
-#include <rocprim/device/device_transform.hpp>
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 // required test headers
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include "test_utils_data_generation.hpp"
+
+// required rocprim headers
+#include <rocprim/device/device_transform.hpp>
+#include <rocprim/iterator/texture_cache_iterator.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <string>
+#include <vector>
 
 // Params for tests
 template<class InputType>
@@ -51,8 +58,8 @@ using RocprimTextureCacheIteratorTestsParams
                        RocprimTextureCacheIteratorParams<unsigned char>,
                        RocprimTextureCacheIteratorParams<float>,
                        RocprimTextureCacheIteratorParams<unsigned long long>,
-                       RocprimTextureCacheIteratorParams<test_utils::custom_test_type<int>>,
-                       RocprimTextureCacheIteratorParams<test_utils::custom_test_type<float>>>;
+                       RocprimTextureCacheIteratorParams<common::custom_type<int, int, true>>,
+                       RocprimTextureCacheIteratorParams<common::custom_type<float, float, true>>>;
 
 TYPED_TEST_SUITE(RocprimTextureCacheIteratorTests, RocprimTextureCacheIteratorTestsParams);
 
@@ -102,8 +109,8 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         }
 
         std::vector<T> output(size);
-        test_utils::device_ptr<T> d_input(input);
-        test_utils::device_ptr<T> d_output(output.size());
+        common::device_ptr<T> d_input(input);
+        common::device_ptr<T> d_output(output.size());
 
         Iterator x;
         HIP_CHECK(x.bind_texture(d_input.get(), sizeof(T) * input.size()));

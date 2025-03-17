@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include "test_utils_device_ptr.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 using rocprim::detail::target_arch;
 
@@ -73,7 +73,7 @@ TEST(RocprimConfigDispatchTests, HostMatchesDevice)
     target_arch host_arch;
     HIP_CHECK(rocprim::detail::host_target_arch(stream, host_arch));
 
-    test_utils::device_ptr<target_arch> device_arch_ptr(1);
+    common::device_ptr<target_arch> device_arch_ptr(1);
 
     hipLaunchKernelGGL(write_target_arch, dim3(1), dim3(1), 0, stream, device_arch_ptr.get());
     HIP_CHECK(hipGetLastError());

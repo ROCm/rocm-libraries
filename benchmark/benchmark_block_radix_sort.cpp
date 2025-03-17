@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,9 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_custom_type.hpp"
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -54,7 +57,7 @@ enum class benchmark_kinds
 };
 
 template<typename T>
-using select_decomposer_t = std::conditional_t<is_custom_type<T>::value,
+using select_decomposer_t = std::conditional_t<common::is_custom_type<T>::value,
                                                custom_type_decomposer<T>,
                                                rocprim::identity_decomposer>;
 
@@ -140,8 +143,8 @@ void run_benchmark(benchmark::State&   state,
     const auto     size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
     std::vector<T> input = get_random_data<T>(size,
-                                              generate_limits<T>::min(),
-                                              generate_limits<T>::max(),
+                                              common::generate_limits<T>::min(),
+                                              common::generate_limits<T>::max(),
                                               seed.get_0());
 
     T* d_input;
@@ -230,7 +233,7 @@ void add_benchmarks(benchmark_kinds                               benchmark_kind
                     const managed_seed&                           seed,
                     hipStream_t                                   stream)
 {
-    using custom_int_type = custom_type<int, int>;
+    using custom_int_type = common::custom_type<int, int>;
 
     std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int, 64, 3),
                                                        BENCHMARK_TYPE(int, 512, 3),

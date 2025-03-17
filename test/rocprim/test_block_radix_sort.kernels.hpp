@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,31 @@
 
 #ifndef TEST_BLOCK_RADIX_SORT_KERNELS_HPP_
 #define TEST_BLOCK_RADIX_SORT_KERNELS_HPP_
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_data_generation.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_sort_comparator.hpp"
+
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_radix_sort.hpp>
+#include <rocprim/block/block_store_func.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <memory>
+#include <numeric>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 static constexpr size_t n_sizes = 12;
 static constexpr unsigned int items_radix[n_sizes] = {
@@ -200,8 +225,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
         auto keys_output = std::make_unique<key_type[]>(size);
         test_utils::generate_random_data_n(keys_output.get(),
                                            size,
-                                           test_utils::generate_limits<key_type>::min(),
-                                           test_utils::generate_limits<key_type>::max(),
+                                           common::generate_limits<key_type>::min(),
+                                           common::generate_limits<key_type>::max(),
                                            rng_engine);
 
         // Calculate expected results on host
@@ -216,7 +241,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
         }
 
         // Preparing device
-        test_utils::device_ptr<key_type> device_keys_output(keys_output, size);
+        common::device_ptr<key_type> device_keys_output(keys_output, size);
 
         sort_key_kernel<block_size, items_per_thread, radix_bits_per_pass, key_type>
             <<<dim3(grid_size), dim3(block_size), 0, 0>>>(device_keys_output.get(),
@@ -235,7 +260,6 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
                                                       expected.begin(),
                                                       expected.end()));
     }
-
 }
 
 // Test for radix_sort with keys and values. Also ensures that (block) radix_sort is stable
@@ -288,8 +312,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
         auto keys_output = std::make_unique<key_type[]>(size);
         test_utils::generate_random_data_n(keys_output.get(),
                                            size,
-                                           test_utils::generate_limits<key_type>::min(),
-                                           test_utils::generate_limits<key_type>::max(),
+                                           common::generate_limits<key_type>::min(),
+                                           common::generate_limits<key_type>::max(),
                                            rng_engine);
 
         std::vector<value_type> values_output(size);
@@ -321,8 +345,8 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
             values_expected[i] = expected[i].second;
         }
 
-        test_utils::device_ptr<key_type>   device_keys_output(keys_output, size);
-        test_utils::device_ptr<value_type> device_values_output(values_output);
+        common::device_ptr<key_type>   device_keys_output(keys_output, size);
+        common::device_ptr<value_type> device_values_output(values_output);
 
         // Running kernel
         sort_key_value_kernel<block_size,
@@ -348,7 +372,6 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
                                                       keys_expected.end()));
         ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
     }
-
 }
 
 // Static for-loop

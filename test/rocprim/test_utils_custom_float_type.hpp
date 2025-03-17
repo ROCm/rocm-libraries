@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -92,16 +92,19 @@ inline std::ostream& operator<<(std::ostream& stream, const custom_float_type& v
 }
 
 template<>
-struct is_custom_test_type<custom_float_type> : std::true_type
-{};
-
-template<>
 struct inner_type<custom_float_type>
 {
     using type = custom_float_type::value_type;
 };
 
 } // namespace test_utils
+
+namespace common
+{
+template<>
+struct is_custom_type<test_utils::custom_float_type> : std::true_type
+{};
+} // namespace common
 
 // This is how libraries "hack" rocprim to accept "custom" floating point types in radix based sorts
 // because this is something that is unavoidable in some cases we should provide clear customization

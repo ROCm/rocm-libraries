@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_data_generation.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -130,8 +132,8 @@ struct device_segmented_radix_sort_benchmark : public config_autotune_interface
 
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
-                                        generate_limits<key_type>::min(),
-                                        generate_limits<key_type>::max(),
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
         size_t batch_size = 1;

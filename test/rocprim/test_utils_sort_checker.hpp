@@ -26,7 +26,8 @@
 #include <rocprim/detail/various.hpp>
 
 #include "../common_test_header.hpp"
-#include "test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 #include <rocprim/device/device_reduce.hpp>
 #include <rocprim/device/device_transform.hpp>
@@ -131,7 +132,7 @@ inline bool device_sort_check(const InputIterator  input,
         return true;
     }
 
-    test_utils::device_ptr<int> d_success_flag(std::vector<int>({1}));
+    common::device_ptr<int>     d_success_flag(std::vector<int>({1}));
     int* const                  d_success_flag_pointer = d_success_flag.get();
 
     const auto deref_op = [=](const input_type& i) -> input_type

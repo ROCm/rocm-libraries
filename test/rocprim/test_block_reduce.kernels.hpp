@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,21 @@
 
 #ifndef TEST_BLOCK_REDUCE_KERNELS_HPP_
 #define TEST_BLOCK_REDUCE_KERNELS_HPP_
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <rocprim/block/block_reduce.hpp>
+#include <rocprim/functional.hpp>
+
+#include <cmath>
+#include <cstddef>
+#include <iostream>
+#include <vector>
 
 template<
     unsigned int BlockSize,
@@ -247,7 +262,7 @@ void test_block_reduce_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 0, 100, seed_value);
 
         // Output reduce results
         std::vector<T> output_reductions(size / block_size, T(0));
@@ -267,8 +282,8 @@ void test_block_reduce_input_arrays()
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_output(output);
-        test_utils::device_ptr<T> device_output_reductions(output_reductions);
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Running kernel
         hipLaunchKernelGGL(

@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,19 +21,28 @@
 #ifndef ROCPRIM_TEST_UTILS_ASSERTIONS_HPP
 #define ROCPRIM_TEST_UTILS_ASSERTIONS_HPP
 
-#include "test_utils_half.hpp"
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_half.hpp"
+
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
 
-#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
 
 #include <gtest/gtest.h>
 
 // Std::memcpy and std::memcmp
+#include <algorithm>
+#include <cstdlib>
 #include <cstring>
+#include <ios>
 #include <iterator>
 #include <ostream>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -69,9 +78,9 @@ void assert_eq(const std::vector<T>& result,
 }
 
 template<class T>
-void assert_eq(const std::vector<custom_test_type<T>>& result,
-               const std::vector<custom_test_type<T>>& expected,
-               const size_t                            max_length = SIZE_MAX)
+void assert_eq(const std::vector<common::custom_type<T, T, true>>& result,
+               const std::vector<common::custom_type<T, T, true>>& expected,
+               const size_t                                        max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size())
     {
@@ -96,7 +105,8 @@ inline void assert_eq<rocprim::half>(const std::vector<rocprim::half>& result,
     {
         if(bit_equal(result[i], expected[i]))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-        ASSERT_EQ(half_to_native(result[i]), half_to_native(expected[i])) << "where index = " << i;
+        ASSERT_EQ(common::half_to_native(result[i]), common::half_to_native(expected[i]))
+            << "where index = " << i;
     }
 }
 
@@ -124,7 +134,8 @@ void assert_eq(const T& result, const T& expected)
 }
 
 template<class T>
-void assert_eq(const custom_test_type<T>& result, const custom_test_type<T>& expected)
+void assert_eq(const common::custom_type<T, T, true>& result,
+               const common::custom_type<T, T, true>& expected)
 {
     if(bit_equal(result.x, expected.x) && bit_equal(result.y, expected.y))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
@@ -136,7 +147,7 @@ inline void assert_eq<rocprim::half>(const rocprim::half& result, const rocprim:
 {
     if(bit_equal(result, expected))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    ASSERT_EQ(half_to_native(result), half_to_native(expected));
+    ASSERT_EQ(common::half_to_native(result), common::half_to_native(expected));
 }
 
 template<>
@@ -157,10 +168,12 @@ void assert_eq(ResultIt   result_begin,
     ASSERT_EQ(std::distance(result_begin, result_end), std::distance(expected_begin, expected_end));
     auto result_it   = result_begin;
     auto expected_it = expected_begin;
-    for(; result_it != result_end; ++result_it, ++expected_it)
+    for(size_t i = 0; result_it != result_end; ++result_it, ++expected_it, ++i)
     {
-        assert_eq(static_cast<typename std::iterator_traits<ResultIt>::value_type>(*result_it),
-                  static_cast<typename std::iterator_traits<ExpectedIt>::value_type>(*expected_it));
+        SCOPED_TRACE(testing::Message() << "with index = " << i);
+        ASSERT_NO_FATAL_FAILURE(assert_eq(
+            static_cast<typename std::iterator_traits<ResultIt>::value_type>(*result_it),
+            static_cast<typename std::iterator_traits<ExpectedIt>::value_type>(*expected_it)));
     }
 }
 // end assert_eq
@@ -204,8 +217,10 @@ void assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
 }
 
 template<class T>
-auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
-    -> typename std::enable_if<std::is_floating_point<T>::value>::type
+auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
+                 const std::vector<common::custom_type<T, T, true>>& expected,
+                 const float                                         percent) ->
+    typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -218,8 +233,9 @@ auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vect
 }
 
 template<class T>
-auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
+                 const std::vector<common::custom_type<T, T, true>>& expected,
+                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -229,9 +245,14 @@ auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vect
     }
 }
 
-template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
-                                        std::is_same<T, rocprim::half>::value, bool> = true>
-void assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+template<class T,
+         std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value
+                              || std::is_same<T, rocprim::half>::value,
+                          bool>
+         = true>
+void assert_near(const std::vector<common::custom_type<T, T, true>>& result,
+                 const std::vector<common::custom_type<T, T, true>>& expected,
+                 const float                                         percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -272,8 +293,10 @@ void assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
-    -> typename std::enable_if<std::is_floating_point<T>::value>::type
+auto assert_near(const common::custom_type<T, T, true>& result,
+                 const common::custom_type<T, T, true>& expected,
+                 const float                            percent) ->
+    typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     auto diff1 = std::abs(percent * expected.x);
     auto diff2 = std::abs(percent * expected.y);
@@ -282,11 +305,21 @@ auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& e
 }
 
 template<class T>
-auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float)
-    -> typename std::enable_if<std::is_integral<T>::value>::type
+auto assert_near(const common::custom_type<T, T, true>& result,
+                 const common::custom_type<T, T, true>& expected,
+                 const float) -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.x,expected.x);
     ASSERT_EQ(result.y,expected.y);
+}
+
+template<class T>
+auto assert_near(const T& result, const T& expected, const float /*percent*/) ->
+    typename std::enable_if<!std::is_integral<T>::value && !std::is_floating_point<T>::value
+                            && !(std::is_same<T, rocprim::bfloat16>::value
+                                 || std::is_same<T, rocprim::half>::value)>::type
+{
+    ASSERT_EQ(result, expected);
 }
 
 // End assert_near
@@ -370,6 +403,7 @@ void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
 {
     assert_bit_eq(result.begin(), result.end(), expected.begin(), expected.end());
 }
-}
+
+} // namespace test_utils
 
 #endif //ROCPRIM_TEST_UTILS_ASSERTIONS_HPP

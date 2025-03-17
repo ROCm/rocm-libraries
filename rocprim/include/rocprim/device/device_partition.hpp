@@ -39,6 +39,8 @@
 #include "detail/device_scan_common.hpp"
 #include "device_partition_config.hpp"
 #include "device_transform.hpp"
+#include "rocprim/detail/virtual_shared_memory.hpp"
+#include "rocprim/device/config_types.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -73,21 +75,67 @@ ROCPRIM_KERNEL
                      InequalityOp            inequality_op,
                      OffsetLookbackScanState offset_scan_state,
                      const unsigned int      number_of_blocks,
+                     detail::vsmem_t         vsmem,
                      UnaryPredicates... predicates)
 {
-    partition_kernel_impl<SelectMethod, OnlySelected, Config>(keys_input,
-                                                              values_input,
-                                                              flags,
-                                                              keys_output,
-                                                              values_output,
-                                                              selected_count,
-                                                              prev_selected_count,
-                                                              prev_processed,
-                                                              total_size,
-                                                              inequality_op,
-                                                              offset_scan_state,
-                                                              number_of_blocks,
-                                                              predicates...);
+    using offset_type = typename OffsetLookbackScanState::value_type;
+    using key_type    = typename std::iterator_traits<KeyIterator>::value_type;
+    using value_type  = typename std::iterator_traits<ValueIterator>::value_type;
+    using flag_type =
+        typename std::conditional<SelectMethod == select_method::predicated_flag,
+                                  typename std::iterator_traits<FlagIterator>::value_type,
+                                  bool>::type;
+
+    using partition_kernel_impl_t = partition_kernel_impl_<SelectMethod,
+                                                           OnlySelected,
+                                                           Config,
+                                                           key_type,
+                                                           value_type,
+                                                           flag_type,
+                                                           offset_type>;
+
+    using VSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
+    ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+    // Get temporary storage
+    typename partition_kernel_impl_t::storage_type& storage
+        = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
+
+    partition_kernel_impl_t().partition(keys_input,
+                                        values_input,
+                                        flags,
+                                        keys_output,
+                                        values_output,
+                                        selected_count,
+                                        prev_selected_count,
+                                        prev_processed,
+                                        total_size,
+                                        inequality_op,
+                                        offset_scan_state,
+                                        number_of_blocks,
+                                        storage,
+                                        predicates...);
+}
+
+template<select_method SelectMethod,
+         bool          OnlySelected,
+         class Config,
+         class Key,
+         class Value,
+         class FlagType,
+         class OffsetLookbackScanState>
+inline size_t get_partition_vsmem_size_per_block()
+{
+    using offset_type             = typename OffsetLookbackScanState::value_type;
+    using partition_kernel_impl_t = partition_kernel_impl_<SelectMethod,
+                                                           OnlySelected,
+                                                           Config,
+                                                           Key,
+                                                           Value,
+                                                           FlagType,
+                                                           offset_type>;
+
+    using PartitionVSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
+    return PartitionVSmemHelperT::vsmem_per_block;
 }
 
 template<partition_subalgo SubAlgo,
@@ -178,6 +226,40 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         return result;
     }
 
+    bool use_sleep;
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleep));
+
+    // vsmem size
+    void*  vsmem                      = nullptr;
+    size_t virtual_shared_memory_size = 0;
+    using flag_type =
+        typename std::conditional<method == select_method::predicated_flag,
+                                  typename std::iterator_traits<FlagIterator>::value_type,
+                                  bool>::type;
+    if(use_sleep)
+    {
+        virtual_shared_memory_size
+            = get_partition_vsmem_size_per_block<method,
+                                                 write_only_selected,
+                                                 config,
+                                                 key_type,
+                                                 value_type,
+                                                 flag_type,
+                                                 offset_scan_state_with_sleep_type>();
+    }
+    else
+    {
+        virtual_shared_memory_size = get_partition_vsmem_size_per_block<method,
+                                                                        write_only_selected,
+                                                                        config,
+                                                                        key_type,
+                                                                        value_type,
+                                                                        flag_type,
+                                                                        offset_scan_state_type>();
+    }
+    virtual_shared_memory_size *= number_of_blocks;
+
+    // temporary storage partition
     result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
@@ -188,7 +270,11 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             // simultaneously.
             // They have the same base type, so there is no padding between the types.
             detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
-            detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size)));
+            detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size),
+            // vsmem
+            detail::temp_storage::make_partition(&vsmem,
+                                                 virtual_shared_memory_size,
+                                                 cache_line_size)));
     if(result != hipSuccess || temporary_storage == nullptr)
     {
         return result;
@@ -196,13 +282,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
-
-    bool use_sleep;
-    result = is_sleep_scan_state_used(stream, use_sleep);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
 
     // Create and initialize lookback_scan_state obj
     offset_scan_state_type offset_scan_state{};
@@ -311,6 +390,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                         inequality_op,
                         scan_state,
                         current_number_of_blocks,
+                        detail::vsmem_t{vsmem},
                         predicates...);
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);

@@ -21,7 +21,15 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_MEMCPY_CONFIG_HPP_
 #define ROCPRIM_DEVICE_DEVICE_MEMCPY_CONFIG_HPP_
 
+#include <type_traits>
+
+#include "../config.hpp"
+#include "../detail/various.hpp"
+#include "../functional.hpp"
+
 #include "config_types.hpp"
+#include "detail/config/device_batch_copy.hpp"
+#include "detail/config/device_batch_memcpy.hpp"
 #include "detail/device_config_helper.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
@@ -29,49 +37,52 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief
-///
-/// \tparam NonBlevBlockSize number of threads per block for thread- and warp-level copy.
-/// \tparam NonBlevBuffersPerThreaed number of buffers processed per thread.
-/// \tparam TlevBytesPerThread number of bytes per thread for thread-level copy.
-/// \tparam BlevBlockSize number of thread per block for block-level copy.
-/// \tparam BlevBytesPerThread number of bytes per thread for block-level copy.
-/// \tparam WlevSizeThreshold minimum size to use warp-level copy instead of thread-level.
-/// \tparam BlevSizeThreshold minimum size to use block-level copy instead of warp-level.
-template<unsigned int NonBlevBlockSize         = 256,
-         unsigned int NonBlevBuffersPerThreaed = 2,
-         unsigned int TlevBytesPerThread       = 8,
-         unsigned int BlevBlockSize            = 128,
-         unsigned int BlevBytesPerThread       = 32,
-         unsigned int WlevSizeThreshold        = 128,
-         unsigned int BlevSizeThreshold        = 1024>
-struct batch_memcpy_config
+namespace detail
 {
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-    /// \brief Number of threads per block for thread- and warp-level copy
-    static constexpr unsigned int non_blev_block_size = NonBlevBlockSize;
+// Specialization for user provided configuration
+template<typename BatchMemcpyConfig, typename, bool>
+struct wrapped_batch_memcpy_config
+{
+    static_assert(std::is_same<typename BatchMemcpyConfig::tag, batch_memcpy_config_tag>::value,
+                  "Config must be a specialization of struct template batch_memcpy_config");
 
-    /// \brief Number of buffers processed per thread
-    static constexpr unsigned int non_blev_buffers_per_thread = NonBlevBuffersPerThreaed;
-
-    /// \brief Number of bytes per thread for thread-level copy
-    static constexpr unsigned int tlev_bytes_per_thread = TlevBytesPerThread;
-
-    /// \brief Number of thread per block for block-level copy
-    static constexpr unsigned int blev_block_size = BlevBlockSize;
-
-    /// \brief Number of bytes per thread for block-level copy
-    static constexpr unsigned int blev_bytes_per_thread = BlevBytesPerThread;
-
-    /// \brief Minimum size to use warp-level copy instead of thread-level
-    static constexpr unsigned int wlev_size_threshold = WlevSizeThreshold;
-
-    /// \brief Minimum size to use block-level copy instead of warp-level
-    static constexpr unsigned int blev_size_threshold = BlevSizeThreshold;
-
-#endif
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr batch_memcpy_config_params params = BatchMemcpyConfig{};
+    };
 };
+
+// Specialization for selecting the default configuration for out of place
+template<typename Value, bool IsMemCpy>
+struct wrapped_batch_memcpy_config<default_config, Value, IsMemCpy>
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr batch_memcpy_config_params params
+            = IsMemCpy ? (batch_memcpy_config_params)
+                      default_batch_memcpy_config<static_cast<unsigned int>(Arch), Value>{}
+                       : (batch_memcpy_config_params)
+                           default_batch_copy_config<static_cast<unsigned int>(Arch), Value>{};
+    };
+};
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<class BatchMemcpyConfig, class Value, bool IsMemCpy>
+template<target_arch Arch>
+constexpr batch_memcpy_config_params
+    wrapped_batch_memcpy_config<BatchMemcpyConfig, Value, IsMemCpy>::architecture_config<
+        Arch>::params;
+template<class Value, bool IsMemCpy>
+template<target_arch Arch>
+constexpr batch_memcpy_config_params
+    wrapped_batch_memcpy_config<rocprim::default_config, Value, IsMemCpy>::architecture_config<
+        Arch>::params;
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
+} // namespace detail
 
 END_ROCPRIM_NAMESPACE
 

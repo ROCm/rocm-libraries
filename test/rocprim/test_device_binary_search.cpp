@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,13 +22,30 @@
 
 #include "../common_test_header.hpp"
 
-// required rocprim headers
-#include <rocprim/functional.hpp>
-#include <rocprim/device/device_binary_search.hpp>
+#include "../../common/utils_custom_type.hpp"
 
 // required test headers
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
+
+// required common headers
+#include "../../common/utils_device_ptr.hpp"
+
+// required rocprim headers
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
+#include <rocprim/device/device_binary_search.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <stdint.h>
+#include <type_traits>
+#include <vector>
 
 template<class Haystack,
          class Needle,
@@ -52,8 +69,8 @@ public:
     using params = Params;
 };
 
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
+using custom_int2    = common::custom_type<int, int, true>;
+using custom_double2 = common::custom_type<double, double, true>;
 
 struct use_custom_config
 {};
@@ -117,19 +134,23 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
             const size_t d = haystack_size / 100;
 
             // Generate data
-            std::vector<haystack_type> haystack = test_utils::get_random_data<haystack_type>(
-                haystack_size, 0, haystack_size + 2 * d, seed_value
-            );
+            std::vector<haystack_type> haystack
+                = test_utils::get_random_data_wrapped<haystack_type>(haystack_size,
+                                                                     0,
+                                                                     haystack_size + 2 * d,
+                                                                     seed_value);
             std::sort(haystack.begin(), haystack.end(), compare_op);
 
             // Use a narrower range for needles for checking out-of-haystack cases
-            std::vector<needle_type> needles = test_utils::get_random_data<needle_type>(
-                needles_size, d, haystack_size + d, seed_value
-            );
+            std::vector<needle_type> needles
+                = test_utils::get_random_data_wrapped<needle_type>(needles_size,
+                                                                   d,
+                                                                   haystack_size + d,
+                                                                   seed_value);
 
-            test_utils::device_ptr<haystack_type> d_haystack(haystack);
-            test_utils::device_ptr<needle_type>   d_needles(needles);
-            test_utils::device_ptr<output_type>   d_output(needles_size);
+            common::device_ptr<haystack_type> d_haystack(haystack);
+            common::device_ptr<needle_type>   d_needles(needles);
+            common::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -154,9 +175,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -232,19 +253,23 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
             const size_t d = haystack_size / 100;
 
             // Generate data
-            std::vector<haystack_type> haystack = test_utils::get_random_data<haystack_type>(
-                haystack_size, 0, haystack_size + 2 * d, seed_value
-            );
+            std::vector<haystack_type> haystack
+                = test_utils::get_random_data_wrapped<haystack_type>(haystack_size,
+                                                                     0,
+                                                                     haystack_size + 2 * d,
+                                                                     seed_value);
             std::sort(haystack.begin(), haystack.end(), compare_op);
 
             // Use a narrower range for needles for checking out-of-haystack cases
-            std::vector<needle_type> needles = test_utils::get_random_data<needle_type>(
-                needles_size, d, haystack_size + d, seed_value
-            );
+            std::vector<needle_type> needles
+                = test_utils::get_random_data_wrapped<needle_type>(needles_size,
+                                                                   d,
+                                                                   haystack_size + d,
+                                                                   seed_value);
 
-            test_utils::device_ptr<haystack_type> d_haystack(haystack);
-            test_utils::device_ptr<needle_type>   d_needles(needles);
-            test_utils::device_ptr<output_type>   d_output(needles_size);
+            common::device_ptr<haystack_type> d_haystack(haystack);
+            common::device_ptr<needle_type>   d_needles(needles);
+            common::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -269,9 +294,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -350,19 +375,23 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
             const size_t d = haystack_size / 100;
 
             // Generate data
-            std::vector<haystack_type> haystack = test_utils::get_random_data<haystack_type>(
-                haystack_size, 0, haystack_size + 2 * d, seed_value
-            );
+            std::vector<haystack_type> haystack
+                = test_utils::get_random_data_wrapped<haystack_type>(haystack_size,
+                                                                     0,
+                                                                     haystack_size + 2 * d,
+                                                                     seed_value);
             std::sort(haystack.begin(), haystack.end(), compare_op);
 
             // Use a narrower range for needles for checking out-of-haystack cases
-            std::vector<needle_type> needles = test_utils::get_random_data<needle_type>(
-                needles_size, d, haystack_size + d, seed_value
-            );
+            std::vector<needle_type> needles
+                = test_utils::get_random_data_wrapped<needle_type>(needles_size,
+                                                                   d,
+                                                                   haystack_size + d,
+                                                                   seed_value);
 
-            test_utils::device_ptr<haystack_type> d_haystack(haystack);
-            test_utils::device_ptr<needle_type>   d_needles(needles);
-            test_utils::device_ptr<output_type>   d_output(needles_size);
+            common::device_ptr<haystack_type> d_haystack(haystack);
+            common::device_ptr<needle_type>   d_needles(needles);
+            common::device_ptr<output_type>   d_output(needles_size);
 
             // Calculate expected results on host
             std::vector<output_type> expected(needles_size);
@@ -385,9 +414,9 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);

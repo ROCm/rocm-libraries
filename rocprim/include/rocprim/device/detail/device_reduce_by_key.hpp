@@ -192,16 +192,51 @@ struct scatter_helper
                                 const unsigned int flat_thread_id,
                                 storage_type&      storage)
     {
+        // Check if all threads in the warp are selecting the same location (selected or rejected)
+        uint8_t all_check = 3; // [true, true]
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            all_check &= is_selected[i] ? 1 /* [false, true] */ : 2 /* [true, false] */;
+        }
+        // all_check:
+        //   0: mixed selection
+        //   1: all selected
+        //   2: all rejected
+        //   3: impossible
+
+        // If selected_in_tile >= BlockSize, use shared memory for storing scattered data
         if(selected_in_tile >= BlockSize)
         {
             auto& scatter_storage = storage.get();
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+
+            // If all threads in the warp are storing to the same location, we can skip the conditional
+            if(all_check == 1)
             {
-                if(is_selected[i])
+                // Perform the scatter directly for selected items
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     scatter_storage[block_indices(i)] = values(i);
                 }
             }
+            else if(all_check == 2)
+            {
+                // If all threads reject, we can skip doing any work for the selected items
+                // (nothing to store to the scatter storage)
+            }
+            else
+            {
+                // Otherwise, process each item individually
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                {
+                    if(is_selected[i])
+                    {
+                        scatter_storage[block_indices(i)] = values(i);
+                    }
+                }
+            }
+
             ::rocprim::syncthreads();
 
             // Coalesced write from shared memory to global memory
@@ -212,11 +247,30 @@ struct scatter_helper
         }
         else
         {
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            // When selected_in_tile < BlockSize, store directly to global memory
+            if(all_check == 1)
             {
-                if(is_selected[i])
+                // Directly store all values since they are all selected
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
                 {
                     tile_values[block_indices(i)] = values(i);
+                }
+            }
+            else if(all_check == 2)
+            {
+                // If all are rejected, do nothing
+            }
+            else
+            {
+                // Process selected items
+                ROCPRIM_UNROLL
+                for(unsigned int i = 0; i < ItemsPerThread; ++i)
+                {
+                    if(is_selected[i])
+                    {
+                        tile_values[block_indices(i)] = values(i);
+                    }
                 }
             }
         }

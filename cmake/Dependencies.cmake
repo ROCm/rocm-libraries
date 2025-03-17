@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,9 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 # when VerifyCompiler.cmake is included.
 
 include(FetchContent)
+
+# For downloading, building, and installing required dependencies
+include(cmake/DownloadProject.cmake)
 
 # Test dependencies
 if(BUILD_TEST)
@@ -172,6 +175,44 @@ if(NOT ROCM_FOUND)
 else()
   find_package(ROCM 0.11.0 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
+
+
+# rocRAND (https://github.com/ROCmSoftwarePlatform/rocRAND)
+if(WITH_ROCRAND)
+  find_package(rocrand QUIET)
+endif()
+if(WITH_ROCRAND AND NOT rocrand_FOUND)
+  message(STATUS "Downloading and building rocrand.")
+  set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
+
+  set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
+  # CMAKE_ARGS of download_project (or ExternalProject_Add) can't contain ; so another separator
+  # is needed and LIST_SEPARATOR is passed to download_project()
+  string(REPLACE ";" "|" EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS}")
+  # Pass launcher so sccache can be used to speed up building rocRAND
+  if(CMAKE_CXX_COMPILER_LAUNCHER)
+    set(EXTRA_CMAKE_ARGS "${EXTRA_CMAKE_ARGS} -DCMAKE_CXX_COMPILER_LAUNCHER=${CMAKE_CXX_COMPILER_LAUNCHER}")
+  endif()
+  download_project(
+    PROJ                  rocrand
+    GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
+    GIT_TAG               develop
+    GIT_SHALLOW           TRUE
+    INSTALL_DIR           ${ROCRAND_ROOT}
+    LIST_SEPARATOR        |
+    CMAKE_ARGS            -DCMAKE_CXX_COMPILER=hipcc -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
+    LOG_DOWNLOAD          TRUE
+    LOG_CONFIGURE         TRUE
+    LOG_BUILD             TRUE
+    LOG_INSTALL           TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+    BUILD_PROJECT         TRUE
+    UPDATE_DISCONNECTED   TRUE
+  )
+  find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
+endif()
+
+
 
 # Restore user global state
 set(CMAKE_CXX_FLAGS ${USER_CXX_FLAGS})

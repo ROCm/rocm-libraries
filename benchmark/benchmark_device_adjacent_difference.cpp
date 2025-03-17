@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,11 @@
 
 #include "benchmark_device_adjacent_difference.parallel.hpp"
 #include "benchmark_utils.hpp"
+
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include "../common/device_adjacent_difference.hpp"
+    #include "../common/utils_custom_type.hpp"
+#endif
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -56,10 +61,10 @@ constexpr std::size_t DEFAULT_BYTES = 1024LL * 1024LL * 1024LL * 2LL;
 
 // clang-format off
 #define CREATE_BENCHMARKS(T)          \
-    CREATE_BENCHMARK(T, true,  false) \
-    CREATE_BENCHMARK(T, true,  true)  \
-    CREATE_BENCHMARK(T, false, false) \
-    CREATE_BENCHMARK(T, false, true)
+    CREATE_BENCHMARK(T, true,  common::api_variant::no_alias) \
+    CREATE_BENCHMARK(T, true,  common::api_variant::in_place)  \
+    CREATE_BENCHMARK(T, false, common::api_variant::no_alias) \
+    CREATE_BENCHMARK(T, false, common::api_variant::in_place)
 // clang-format on
 
 int main(int argc, char* argv[])
@@ -112,8 +117,8 @@ int main(int argc, char* argv[])
                                                         seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
-    using custom_float2  = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
     // Add benchmarks
     CREATE_BENCHMARKS(int)
     CREATE_BENCHMARKS(std::int64_t)

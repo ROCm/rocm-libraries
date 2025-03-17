@@ -2,7 +2,8 @@
 #include "../../common_test_header.hpp"
 #include "../test_utils_assertions.hpp"
 #include "../test_utils_data_generation.hpp"
-#include "rocprim/test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 #include <rocprim/block/block_store_func.hpp>
 #include <rocprim/detail/merge_path.hpp>
@@ -26,7 +27,7 @@ void serial_merge(std::vector<T>& input,
 {
     static_assert(IPT >= N, "Kernel must be launched such that all items can be processed!");
 
-    test_utils::device_ptr<T> device_data(input);
+    common::device_ptr<T> device_data(input);
 
     merge_kernel<IPT>
         <<<1, 1>>>(device_data.get(), rocprim::detail::range_t<>{0, mid, mid, N}, compare_function);

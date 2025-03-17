@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "../common_test_header.hpp"
+#include "test_utils.hpp"
+
+#include "../../common/utils.hpp"
+#include "../../common/utils_device_ptr.hpp"
+#include "test_seed.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
 #include "test_utils_sort_comparator.hpp"
+
+#include <rocprim/block/block_sort.hpp>
+#include <rocprim/detail/various.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/types/tuple.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <stdint.h>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 block_sort_test_suite_type_def(suite_name, name_suffix);
 
@@ -62,9 +83,9 @@ void TestSortKeyValue()
 
         // Generate data
         std::vector<key_type> output_key
-            = test_utils::get_random_data<key_type>(size, 0, 100, seed_value);
+            = test_utils::get_random_data_wrapped<key_type>(size, 0, 100, seed_value);
         std::vector<value_type> output_value
-            = test_utils::get_random_data<value_type>(size, -100, 100, seed_value);
+            = test_utils::get_random_data_wrapped<value_type>(size, -100, 100, seed_value);
 
         // Combine vectors to form pairs with key and value
         std::vector<std::pair<key_type, value_type>> target(size);
@@ -87,8 +108,8 @@ void TestSortKeyValue()
         }
 
         // Preparing device
-        test_utils::device_ptr<key_type>   device_key_output(output_key);
-        test_utils::device_ptr<value_type> device_value_output(output_value);
+        common::device_ptr<key_type>   device_key_output(output_key);
+        common::device_ptr<value_type> device_value_output(output_value);
 
         // Running kernel, ignored if invalid size
         if(size > 0)
@@ -171,14 +192,14 @@ void TestSortKey(std::vector<size_t> sizes)
         for(size_t size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            if(size == 0 && test_common_utils::use_hmm())
+            if(size == 0 && common::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
                 continue;
             }
             // Generate data
             std::vector<key_type> output
-                = test_utils::get_random_data<key_type>(size, -100, 100, seed_value);
+                = test_utils::get_random_data_wrapped<key_type>(size, -100, 100, seed_value);
 
             // Calculate expected results on host
             std::vector<key_type> expected(output);
@@ -191,7 +212,7 @@ void TestSortKey(std::vector<size_t> sizes)
             }
 
             // Preparing device
-            test_utils::device_ptr<key_type> device_key_output(output);
+            common::device_ptr<key_type> device_key_output(output);
 
             const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
             // Running kernel, ignored if invalid size
@@ -256,7 +277,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
         for(size_t size : sizes)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
-            if(size == 0 && test_common_utils::use_hmm())
+            if(size == 0 && common::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
                 continue;
@@ -264,7 +285,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
 
             // Generate data
             std::vector<key_type> keys
-                = test_utils::get_random_data<key_type>(size, -10, 10, seed_value);
+                = test_utils::get_random_data_wrapped<key_type>(size, -10, 10, seed_value);
 
             std::vector<index_type> values(size);
             std::iota(values.begin(), values.end(), 0u);
@@ -278,7 +299,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
             }
 
             // Preparing device
-            test_utils::device_ptr<tuple_type> device_tuples_output(tuples);
+            common::device_ptr<tuple_type> device_tuples_output(tuples);
 
             const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
 

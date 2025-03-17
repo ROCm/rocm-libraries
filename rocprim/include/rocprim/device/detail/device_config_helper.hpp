@@ -25,6 +25,7 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../../detail/virtual_shared_memory.hpp"
 
 #include "../../block/block_load.hpp"
 #include "../../block/block_reduce.hpp"
@@ -98,9 +99,14 @@ template<class Key, class Value>
 struct merge_sort_block_sort_config_base
 {
     static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                             * merge_sort_items_per_thread(item_scale) * item_scale
+                                         <= max_smem_per_block;
     // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
-    static constexpr unsigned int block_size       = merge_sort_block_size(item_scale) * 2;
-    static constexpr unsigned int items_per_thread = merge_sort_items_per_thread(item_scale);
+    static constexpr unsigned int block_size
+        = use_fallback ? merge_sort_block_size(item_scale) * 2 : 256;
+    static constexpr unsigned int items_per_thread
+        = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
     using type                                     = merge_sort_block_sort_config<block_size,
                                               items_per_thread,
                                               block_sort_algorithm::stable_merge_sort>;
@@ -156,9 +162,13 @@ template<class Key, class Value>
 struct merge_sort_block_merge_config_base
 {
     static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
-
-    static constexpr unsigned int block_size       = merge_sort_block_size(item_scale);
-    static constexpr unsigned int items_per_thread = merge_sort_items_per_thread(item_scale);
+    static constexpr bool         use_fallback = merge_sort_block_size(item_scale) * 2
+                                             * merge_sort_items_per_thread(item_scale) * item_scale
+                                         <= max_smem_per_block;
+    static constexpr unsigned int block_size
+        = use_fallback ? merge_sort_block_size(item_scale) : 128;
+    static constexpr unsigned int items_per_thread
+        = use_fallback ? merge_sort_items_per_thread(item_scale) : 1;
     using type                                     = merge_sort_block_merge_config<block_size,
                                                1,
                                                (1 << 17) + 70000,
@@ -868,6 +878,120 @@ struct default_adjacent_difference_config_base
 namespace detail
 {
 
+struct batch_memcpy_config_tag
+{};
+
+struct batch_memcpy_config_params
+{
+    /// \brief Kernel config for thread- and warp-level copy
+    kernel_config_params non_blev_batch_memcpy_kernel_config;
+
+    /// \brief Number of bytes per thread for thread-level copy
+    unsigned int tlev_items_per_thread;
+
+    /// \brief Kernel config for block-level copy
+    kernel_config_params blev_batch_memcpy_kernel_config;
+
+    /// \brief Minimum size to use warp-level copy instead of thread-level
+    unsigned int wlev_size_threshold;
+
+    /// \brief Minimum size to use block-level copy instead of warp-level
+    unsigned int blev_size_threshold;
+};
+} // namespace detail
+
+/// \brief Configuration of device-level batch memcopy primitives.
+///
+/// \tparam BlockSize - number of threads in a block.
+/// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam BlockLoadMethod - method for loading input values.
+/// \tparam BlockStoreMethod - method for storing values.
+/// \tparam SizeLimit - limit on the number of items for a single adjacent difference kernel launch.
+template<unsigned int NonBlevBlockSize,
+         unsigned int NonBlevItemsPerThread,
+         unsigned int TlevItemsPerThread,
+         unsigned int BlevBlockSize,
+         unsigned int BlevItemsPerThread,
+         unsigned int WlevSizeThreshold,
+         unsigned int BlevSizeThreshold,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct batch_memcpy_config : public detail::batch_memcpy_config_params
+{
+    /// \brief Identifies the algorithm associated to the config.
+    using tag = detail::batch_memcpy_config_tag;
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    static constexpr unsigned int non_blev_block_size       = NonBlevBlockSize;
+    static constexpr unsigned int non_blev_items_per_thread = NonBlevItemsPerThread;
+    static constexpr unsigned int tlev_items_per_thread     = TlevItemsPerThread;
+    static constexpr unsigned int blev_block_size           = BlevBlockSize;
+    static constexpr unsigned int blev_items_per_thread     = BlevItemsPerThread;
+    static constexpr unsigned int wlev_size_threshold       = WlevSizeThreshold;
+    static constexpr unsigned int blev_size_threshold       = BlevSizeThreshold;
+
+    constexpr batch_memcpy_config()
+        : detail::batch_memcpy_config_params{
+            {NonBlevBlockSize, NonBlevItemsPerThread, SizeLimit},
+            TlevItemsPerThread,
+            {   BlevBlockSize,    BlevItemsPerThread, SizeLimit},
+            WlevSizeThreshold,
+            BlevSizeThreshold
+    } {};
+#endif
+};
+
+namespace detail
+{
+
+template<class Value>
+struct default_batch_memcpy_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type
+        = batch_memcpy_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                              ::rocprim::max(1u, 16u / item_scale),
+                              ::rocprim::max(1u, 16u / item_scale),
+                              limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                              ::rocprim::max(1u, 16u / item_scale),
+                              128,
+                              1024>;
+};
+
+} // namespace detail
+
+/// \brief
+///
+/// \tparam NonBlevBlockSize - number of threads per block for thread- and warp-level copy.
+/// \tparam NonBlevBuffersPerThreaed - number of buffers processed per thread.
+/// \tparam TlevBytesPerThread - number of bytes per thread for thread-level copy.
+/// \tparam BlevBlockSize - number of thread per block for block-level copy.
+/// \tparam BlevBytesPerThread - number of bytes per thread for block-level copy.
+/// \tparam WlevSizeThreshold - minimum size to use warp-level copy instead of thread-level.
+/// \tparam BlevSizeThreshold - minimum size to use block-level copy instead of warp-level.
+template<unsigned int NonBlevBlockSize        = 256,
+         unsigned int NonBlevBuffersPerThread = 2,
+         unsigned int TlevBytesPerThread      = 8,
+         unsigned int BlevBlockSize           = 128,
+         unsigned int BlevBytesPerThread      = 32,
+         unsigned int WlevSizeThreshold       = 128,
+         unsigned int BlevSizeThreshold       = 1024>
+struct batch_copy_config
+    : public batch_memcpy_config<NonBlevBlockSize,
+                                 NonBlevBuffersPerThread,
+                                 TlevBytesPerThread,
+                                 BlevBlockSize,
+                                 BlevBytesPerThread,
+                                 WlevSizeThreshold,
+                                 BlevSizeThreshold>
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+#endif
+};
+
+namespace detail
+{
+
 struct partition_config_params
 {
     kernel_config_params kernel_config;
@@ -945,7 +1069,7 @@ struct default_partition_config_base
                                                 lookback_scan_state<offset_t>>::storage_type);
 
     using type = select_config<
-        limit_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
+        fallback_block_size<256U, sizeof(Key), ROCPRIM_WARP_SIZE_64, shared_mem_offset>::value,
         ::rocprim::max(1u, ItemScaleBase / item_scale),
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_load_method::block_load_transpose,

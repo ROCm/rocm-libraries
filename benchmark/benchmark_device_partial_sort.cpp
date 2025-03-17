@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_custom_type.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -94,11 +96,11 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    using custom_float2          = custom_type<float, float>;
-    using custom_double2         = custom_type<double, double>;
-    using custom_int2            = custom_type<int, int>;
-    using custom_char_double     = custom_type<char, double>;
-    using custom_longlong_double = custom_type<long long, double>;
+    using custom_float2          = common::custom_type<float, float>;
+    using custom_double2         = common::custom_type<double, double>;
+    using custom_int2            = common::custom_type<int, int>;
+    using custom_char_double     = common::custom_type<char, double>;
+    using custom_longlong_double = common::custom_type<long long, double>;
 
     CREATE_BENCHMARK(custom_float2)
     CREATE_BENCHMARK(custom_double2)

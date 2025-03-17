@@ -20,13 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#ifndef TEST_UTILS_SORT_CHECKER_CPP_
-#define TEST_UTILS_SORT_CHECKER_CPP_
+#include "../common_test_header.hpp"
 
+#include "../../common/utils_device_ptr.hpp"
+
+#include "test_seed.hpp"
+#include "test_utils_data_generation.hpp"
 #include "test_utils_sort_checker.hpp"
-#include "test_utils_device_ptr.hpp"
 #include "test_utils_sort_comparator.hpp"
-#include "test_utils_types.hpp"
+
+#include <rocprim/functional.hpp>
+#include <rocprim/type_traits.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <vector>
 
 template<class InputType, class OpType = rocprim::less<InputType>>
 struct RocprimSortCheckerParams
@@ -60,7 +68,7 @@ TYPED_TEST(RocprimSortCheckerTests, TrueTest)
 
     const auto op = op_type{};
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -74,12 +82,12 @@ TYPED_TEST(RocprimSortCheckerTests, TrueTest)
             std::vector<input_type> input = test_utils::get_random_data<input_type>(
                 size,
                 0,
-                test_utils::numeric_limits<input_type>::max(),
+                rocprim::numeric_limits<input_type>::max(),
                 ++seed_value);
 
             std::sort(input.begin(), input.end(), op);
 
-            test_utils::device_ptr<input_type> d_input(input);
+            common::device_ptr<input_type> d_input(input);
             ASSERT_TRUE(test_utils::device_sort_check(d_input.get(), size, op));
         }
     }
@@ -93,7 +101,7 @@ TEST(RocprimSortCheckerTests, FalseTest)
     int device_id = test_common_utils::obtain_device_from_ctest();
     HIP_CHECK(hipSetDevice(device_id));
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -111,7 +119,7 @@ TEST(RocprimSortCheckerTests, FalseTest)
             std::vector<input_type> input = test_utils::get_random_data<input_type>(
                 size,
                 0,
-                test_utils::numeric_limits<input_type>::max(),
+                rocprim::numeric_limits<input_type>::max(),
                 ++seed_value);
             bool all_equal = true;
             for(const auto i : input)
@@ -124,12 +132,10 @@ TEST(RocprimSortCheckerTests, FalseTest)
             }
             std::sort(input.begin(), input.end(), rocprim::less<input_type>{});
 
-            test_utils::device_ptr<input_type> d_input(input);
+            common::device_ptr<input_type> d_input(input);
             ASSERT_FALSE(
                 test_utils::device_sort_check(d_input.get(), size, rocprim::greater<input_type>{}));
         }
     }
     SUCCEED();
 }
-
-#endif // TEST_UTILS_SORT_CHECKER_CPP_

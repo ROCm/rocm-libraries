@@ -155,6 +155,24 @@ void warp_exclusive_scan_reduce_kernel(T* device_input,
 }
 
 template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
+__global__
+__launch_bounds__(BlockSize)
+void warp_broadcast_kernel(T* device_input, T* device_output)
+{
+    const unsigned int index    = threadIdx.x + (blockIdx.x * blockDim.x);
+    const unsigned int warp_id  = index / LogicalWarpSize;
+    const unsigned int src_lane = warp_id % LogicalWarpSize;
+
+    T value = device_input[index];
+
+    using wscan_t = rocprim::warp_scan<T, LogicalWarpSize>;
+    __shared__ typename wscan_t::storage_type storage;
+    value         = wscan_t().broadcast(value, src_lane, storage);
+
+    device_output[index] = value;
+}
+
+template<class T, unsigned int BlockSize, unsigned int LogicalWarpSize>
 __global__ __launch_bounds__(BlockSize)
 void warp_exclusive_scan_wo_init_kernel(T* device_input, T* device_output)
 {

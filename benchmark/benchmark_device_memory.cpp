@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -339,8 +341,8 @@ void run_benchmark(benchmark::State&   state,
 {
     const size_t   grid_size = size / (BlockSize * ItemsPerThread);
     std::vector<T> input     = get_random_data<T>(size,
-                                              generate_limits<T>::min(),
-                                              generate_limits<T>::max(),
+                                              common::generate_limits<T>::min(),
+                                              common::generate_limits<T>::max(),
                                               seed.get_0());
 
     T* d_input;

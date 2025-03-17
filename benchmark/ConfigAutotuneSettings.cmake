@@ -29,10 +29,10 @@ set(LIMITED_TUNING_TYPES "rocprim::int128_t int64_t int short int8_t")
 
 function(read_config_autotune_settings file list_across_names list_across output_pattern_suffix)
   if(file STREQUAL "benchmark_device_adjacent_difference")
-    set(list_across_names "DataType;Left;InPlace;BlockSize" PARENT_SCOPE)
+    set(list_across_names "DataType;Left;Aliasing;BlockSize" PARENT_SCOPE)
     set(list_across "${TUNING_TYPES};\
-true;false true;32 64 128 256 512 1024" PARENT_SCOPE)
-    set(output_pattern_suffix "@DataType@_@Left@_@InPlace@_@BlockSize@" PARENT_SCOPE)
+true;no_alias in_place;32 64 128 256 512 1024" PARENT_SCOPE)
+    set(output_pattern_suffix "@DataType@_@Left@_@Aliasing@_@BlockSize@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_adjacent_find")
     set(list_across_names "InputType;BlockSize" PARENT_SCOPE)
     set(list_across "${TUNING_TYPES};64 128 256 512 1024" PARENT_SCOPE)

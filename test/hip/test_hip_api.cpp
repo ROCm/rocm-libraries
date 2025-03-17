@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "../rocprim/test_utils_device_ptr.hpp"
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 template<class T>
 __device__
@@ -53,8 +54,8 @@ TEST(HIPTests, Saxpy)
     std::vector<float> x(N, 2.0f);
     std::vector<float> y(N, 1.0f);
 
-    test_utils::device_ptr<float> d_x(x);
-    test_utils::device_ptr<float> d_y(y);
+    common::device_ptr<float> d_x(x);
+    common::device_ptr<float> d_y(y);
 
     hipLaunchKernelGGL(HIP_KERNEL_NAME(saxpy_kernel<float>),
                        dim3((N + 255) / 256),

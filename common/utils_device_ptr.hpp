@@ -18,17 +18,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_TEST_UTILS_DEVICE_PTR_HPP
-#define ROCPRIM_TEST_UTILS_DEVICE_PTR_HPP
+#ifndef ROCPRIM_UTILS_DEVICE_PTR_HPP
+#define ROCPRIM_UTILS_DEVICE_PTR_HPP
 
-#include "../common_test_header.hpp"
+#include "utils.hpp"
 
 #include <array>
 #include <cstddef>
 #include <memory>
 #include <vector>
 
-namespace test_utils
+namespace common
 {
 
 /// \brief An RAII friendly class to manage the memory allocated on device.
@@ -57,7 +57,7 @@ public:
         : device_raw_ptr_(nullptr), number_of_ele_(pre_alloc_number_of_ele)
     {
         size_type storage_size = number_of_ele_ * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
     };
 
     device_ptr(device_ptr const&) = delete;
@@ -77,7 +77,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = number_of_ele_ * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpy(device_raw_ptr_, data.data(), storage_size, hipMemcpyHostToDevice));
     }
 
@@ -89,7 +89,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = number_of_ele_ * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpyAsync(device_raw_ptr_,
                                  data.data(),
                                  storage_size,
@@ -105,7 +105,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = Size * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpy(device_raw_ptr_, data.data(), storage_size, hipMemcpyHostToDevice));
     }
 
@@ -117,7 +117,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = Size * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpyAsync(device_raw_ptr_,
                                  data.data(),
                                  storage_size,
@@ -133,7 +133,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = size * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpy(device_raw_ptr_, uptr.get(), storage_size, hipMemcpyHostToDevice));
     }
 
@@ -147,7 +147,7 @@ public:
                       "value_type of input must have the same size with device_ptr::value_type");
 
         size_type storage_size = size * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpyAsync(device_raw_ptr_,
                                  uptr.get(),
                                  storage_size,
@@ -181,7 +181,7 @@ public:
         device_ptr ret;
         ret.number_of_ele_     = number_of_ele_;
         size_type storage_size = number_of_ele_ * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&ret.device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&ret.device_raw_ptr_, storage_size));
         HIP_CHECK(
             hipMemcpy(ret.device_raw_ptr_, device_raw_ptr_, storage_size, hipMemcpyDeviceToDevice));
         return ret;
@@ -192,7 +192,7 @@ public:
         device_ptr ret;
         ret.number_of_ele_     = number_of_ele_;
         size_type storage_size = number_of_ele_ * value_size;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&ret.device_raw_ptr_, storage_size));
+        HIP_CHECK(common::hipMallocHelper(&ret.device_raw_ptr_, storage_size));
         HIP_CHECK(hipMemcpyAsync(ret.device_raw_ptr_,
                                  device_raw_ptr_,
                                  storage_size,
@@ -248,8 +248,7 @@ public:
         else
         {
             value_type* device_temp_ptr = nullptr;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&device_temp_ptr,
-                                                         new_number_of_ele * value_size));
+            HIP_CHECK(common::hipMallocHelper(&device_temp_ptr, new_number_of_ele * value_size));
             HIP_CHECK(hipMemcpy(device_temp_ptr,
                                 device_raw_ptr_,
                                 std::min(new_number_of_ele, number_of_ele_) * value_size,
@@ -269,8 +268,7 @@ public:
         else
         {
             value_type* device_temp_ptr = nullptr;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&device_temp_ptr,
-                                                         new_number_of_ele * value_size));
+            HIP_CHECK(common::hipMallocHelper(&device_temp_ptr, new_number_of_ele * value_size));
             HIP_CHECK(hipMemcpyAsync(device_temp_ptr,
                                      device_raw_ptr_,
                                      std::min(new_number_of_ele, number_of_ele_) * value_size,
@@ -292,8 +290,8 @@ public:
         else
         {
             value_type* device_temp_ptr = nullptr;
-            const auto  err             = test_common_utils::hipMallocHelper(&device_temp_ptr,
-                                                                new_number_of_ele * value_size);
+            const auto  err
+                = common::hipMallocHelper(&device_temp_ptr, new_number_of_ele * value_size);
             if(err == hipErrorOutOfMemory)
             {
                 return false;
@@ -319,8 +317,8 @@ public:
         else
         {
             value_type* device_temp_ptr = nullptr;
-            const auto  err             = test_common_utils::hipMallocHelper(&device_temp_ptr,
-                                                                new_number_of_ele * value_size);
+            const auto  err
+                = common::hipMallocHelper(&device_temp_ptr, new_number_of_ele * value_size);
             if(err == hipErrorOutOfMemory)
             {
                 return false;
@@ -611,6 +609,6 @@ private:
     size_type   number_of_ele_;
 };
 
-} // namespace test_utils
+} // namespace common
 
 #endif

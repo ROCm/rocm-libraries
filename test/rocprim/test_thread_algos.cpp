@@ -27,17 +27,28 @@
  *
  ******************************************************************************/
 
-#include "rocprim/thread/thread_load.hpp"
-#include "rocprim/thread/thread_store.hpp"
-#include "rocprim/thread/thread_reduce.hpp"
-#include "rocprim/thread/thread_scan.hpp"
-#include "rocprim/thread/thread_search.hpp"
-
 #include "../common_test_header.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
 #include "test_utils.hpp"
-#include "test_utils_device_ptr.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <rocprim/config.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/thread/thread_load.hpp>
+#include <rocprim/thread/thread_reduce.hpp>
+#include <rocprim/thread/thread_scan.hpp>
+#include <rocprim/thread/thread_search.hpp>
+#include <rocprim/thread/thread_store.hpp>
+#include <rocprim/types.hpp>
 
 #include <algorithm>
+#include <cstddef>
+#include <stdint.h>
 #include <vector>
 
 template<class T>
@@ -53,22 +64,23 @@ public:
     using type = typename Params::type;
 };
 
-using ThreadOperationTestParams = ::testing::Types<params<uint8_t>,
-                                                   params<uint16_t>,
-                                                   params<uint32_t>,
-                                                   params<uint64_t>,
-                                                   params<int>,
-                                                   params<rocprim::half>,
-                                                   params<rocprim::bfloat16>,
-                                                   params<float>,
-                                                   params<double>,
-                                                   params<test_utils::custom_test_type<uint64_t>>,
-                                                   params<test_utils::custom_test_type<double>>
+using ThreadOperationTestParams
+    = ::testing::Types<params<uint8_t>,
+                       params<uint16_t>,
+                       params<uint32_t>,
+                       params<uint64_t>,
+                       params<int>,
+                       params<rocprim::half>,
+                       params<rocprim::bfloat16>,
+                       params<float>,
+                       params<double>,
+                       params<common::custom_type<uint64_t, uint64_t, true>>,
+                       params<common::custom_type<double, double, true>>
 #if ROCPRIM_HAS_INT128_SUPPORT
-                                                   ,
-                                                   params<rocprim::uint128_t>
+                       ,
+                       params<rocprim::uint128_t>
 #endif
-                                                   >;
+                       >;
 
 TYPED_TEST_SUITE(RocprimThreadOperationTests, ThreadOperationTestParams);
 
@@ -78,38 +90,34 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if(index % 8 == 0)
+    if(index % rocprim::load_count == rocprim::load_default)
     {
         device_output[index] = rocprim::thread_load(device_input + index);
     }
-    else if(index % 8 == 1)
+    else if(index % rocprim::load_count == rocprim::load_ca)
     {
         device_output[index] = rocprim::thread_load<rocprim::load_ca>(device_input + index);
     }
-    else if(index % 8 == 2)
+    else if(index % rocprim::load_count == rocprim::load_cg)
     {
         device_output[index] = rocprim::thread_load<rocprim::load_cg>(device_input + index);
     }
-    else if(index % 8 == 3)
+    else if(index % rocprim::load_count == rocprim::load_nontemporal)
     {
         device_output[index]
             = rocprim::thread_load<rocprim::load_nontemporal>(device_input + index);
     }
-    else if(index % 8 == 4)
+    else if(index % rocprim::load_count == rocprim::load_cv)
     {
         device_output[index] = rocprim::thread_load<rocprim::load_cv>(device_input + index);
     }
-    else if(index % 8 == 5)
+    else if(index % rocprim::load_count == rocprim::load_ldg)
     {
         device_output[index] = rocprim::thread_load<rocprim::load_ldg>(device_input + index);
     }
-    else if(index % 8 == 6)
+    else // index % rocprim::load_count == rocprim::load_volatile
     {
         device_output[index] = rocprim::thread_load<rocprim::load_volatile>(device_input + index);
-    }
-    else // index % 8 == 7
-    {
-        device_output[index] = rocprim::thread_load<rocprim::load_cs>(device_input + index);
     }
 }
 
@@ -126,15 +134,15 @@ TYPED_TEST(RocprimThreadOperationTests, Load)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
         std::vector<T> output(size);
 
         // Calculate expected results on host
         std::vector<T> expected = input;
 
         // Preparing device
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(input.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(input.size());
 
         thread_load_kernel<T><<<grid_size, block_size>>>(device_input.get(), device_output.get());
         HIP_CHECK(hipGetLastError());
@@ -187,8 +195,8 @@ TYPED_TEST(RocprimThreadOperationTests, CopyUnroll)
         std::vector<T> expected = input;
 
         // Preparing device
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(input.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(input.size());
 
         thread_copy_unroll_kernel<ItemsPerThread, T>
             <<<grid_size, block_size>>>(device_input.get(), device_output.get());
@@ -208,34 +216,30 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
 {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if(index % 7 == 0)
+    if(index % rocprim::store_count == rocprim::store_default)
     {
         rocprim::thread_store(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 1)
+    else if(index % rocprim::store_count == rocprim::store_wb)
     {
         rocprim::thread_store<rocprim::store_wb>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 2)
+    else if(index % rocprim::store_count == rocprim::store_cg)
     {
         rocprim::thread_store<rocprim::store_cg>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 3)
+    else if(index % rocprim::store_count == rocprim::store_nontemporal)
     {
         rocprim::thread_store<rocprim::store_nontemporal>(device_output + index,
                                                           device_input[index]);
     }
-    else if(index % 7 == 4)
+    else if(index % rocprim::store_count == rocprim::store_wt)
     {
         rocprim::thread_store<rocprim::store_wt>(device_output + index, device_input[index]);
     }
-    else if(index % 7 == 5)
+    else // index % rocprim::store_count == rocprim::store_volatile
     {
         rocprim::thread_store<rocprim::store_volatile>(device_output + index, device_input[index]);
-    }
-    else // index % 7 == 6
-    {
-        rocprim::thread_store<rocprim::store_cs>(device_output + index, device_input[index]);
     }
 }
 
@@ -253,15 +257,15 @@ TYPED_TEST(RocprimThreadOperationTests, StoreNontemporal)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
         std::vector<T> output(size);
 
         // Calculate expected results on host
         std::vector<T> expected = input;
 
         // Preparing device
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(input.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(input.size());
 
         thread_store_kernel<T><<<grid_size, block_size>>>(device_input.get(), device_output.get());
         HIP_CHECK(hipGetLastError());
@@ -308,7 +312,7 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -326,11 +330,10 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
                 expected[offset] = result;
             }
         }
-        //std::vector<T> expected = input;
 
         // Preparing device
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(input.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(input.size());
 
         thread_reduce_kernel<T, length>
             <<<grid_size, block_size>>>(device_input.get(), device_output.get());
@@ -374,7 +377,7 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
@@ -395,8 +398,8 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(input.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(input.size());
 
         thread_scan_kernel<T, length>
             <<<grid_size, block_size>>>(device_input.get(), device_output.get());
@@ -486,8 +489,8 @@ void merge_path_search_test()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input1 = test_utils::get_random_data<T>(size, 2, 200, seed_value);
-        std::vector<T> input2 = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> input1 = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
+        std::vector<T> input2 = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
 
         std::sort(input1.begin(), input1.end(), bin_op);
         std::sort(input2.begin(), input2.end(), bin_op);
@@ -497,12 +500,12 @@ void merge_path_search_test()
         OffsetT              output_oob_x, output_oob_y;
 
         // Preparing device
-        test_utils::device_ptr<T>       device_input1(input1);
-        test_utils::device_ptr<T>       device_input2(input2);
-        test_utils::device_ptr<OffsetT> device_output_x(index_size);
-        test_utils::device_ptr<OffsetT> device_output_y(index_size);
-        test_utils::device_ptr<OffsetT> device_output_oob_x(1);
-        test_utils::device_ptr<OffsetT> device_output_oob_y(1);
+        common::device_ptr<T>       device_input1(input1);
+        common::device_ptr<T>       device_input2(input2);
+        common::device_ptr<OffsetT> device_output_x(index_size);
+        common::device_ptr<OffsetT> device_output_y(index_size);
+        common::device_ptr<OffsetT> device_output_oob_x(1);
+        common::device_ptr<OffsetT> device_output_oob_y(1);
 
         thread_search_kernel<T, OffsetT, BinaryFunction, length>
             <<<grid_size, block_size>>>(device_input1.get(),

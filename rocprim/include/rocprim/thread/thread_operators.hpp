@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,8 +31,11 @@
 #define ROCPRIM_THREAD_THREAD_OPERATORS_HPP_
 
 #include "../config.hpp"
-#include "../types.hpp"
+#include "../functional.hpp"
+#include "../types/key_value_pair.hpp"
 
+#include <iterator>
+#include <type_traits>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -142,7 +145,12 @@ struct arg_max
     operator()(const key_value_pair<Key, Value>& a,
                const key_value_pair<Key, Value>& b) const
     {
-        return ((b.value > a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+        greater<Value>  greater_v;
+        equal_to<Value> eq_v;
+        less<Key>       less_k;
+        return (greater_v(b.value, a.value) || (eq_v(a.value, b.value) && less_k(b.key, a.key)))
+                   ? b
+                   : a;
     }
 };
 
@@ -163,7 +171,11 @@ struct arg_min
     operator()(const key_value_pair<Key, Value>& a,
                const key_value_pair<Key, Value>& b) const
     {
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
+        less<Value>     less_v;
+        equal_to<Value> eq_v;
+        less<Key>       less_k;
+        return (less_v(b.value, a.value) || (eq_v(a.value, b.value) && less_k(b.key, a.key))) ? b
+                                                                                              : a;
     }
 };
 

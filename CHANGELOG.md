@@ -17,6 +17,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added `rocprim::int128_t` to the supported autotuning types to improve performance for 128-bit integers.
 * Added the `rocprim::merge_inplace` function for merging in-place.
 * Added initial value support for warp- and block-level inclusive scan.
+* Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 
 ### Changed
 

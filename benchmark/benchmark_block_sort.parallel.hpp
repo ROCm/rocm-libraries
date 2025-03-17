@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_BLOCK_SORT_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -243,10 +245,11 @@ public:
 
         const auto size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
-        std::vector<KeyType> input = get_random_data<KeyType>(size,
-                                                              generate_limits<KeyType>::min(),
-                                                              generate_limits<KeyType>::max(),
-                                                              seed.get_0());
+        std::vector<KeyType> input
+            = get_random_data<KeyType>(size,
+                                       common::generate_limits<KeyType>::min(),
+                                       common::generate_limits<KeyType>::max(),
+                                       seed.get_0());
 
         KeyType* d_input;
         KeyType* d_output;

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,14 +22,27 @@
 
 #include "../common_test_header.hpp"
 
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_custom_test_types.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_reduce_by_key.hpp>
 #include <rocprim/device/device_scan.hpp>
 #include <rocprim/device/device_scan_by_key.hpp>
+#include <rocprim/functional.hpp>
 #include <rocprim/iterator/discard_iterator.hpp>
+#include <rocprim/types.hpp>
 
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
-
+#include <algorithm>
+#include <cstddef>
+#include <random>
 #include <vector>
 
 template<typename T>
@@ -42,11 +55,11 @@ std::vector<size_t> get_sizes(T seed_value)
                                  (1 << 20) + 123};
 
     const std::vector<size_t> random_sizes1
-        = test_utils::get_random_data<size_t>(2, 2, 1 << 20, seed_value);
+        = test_utils::get_random_data_wrapped<size_t>(2, 2, 1 << 20, seed_value);
     sizes.insert(sizes.end(), random_sizes1.begin(), random_sizes1.end());
 
     const std::vector<size_t> random_sizes2
-        = test_utils::get_random_data<size_t>(3, 2, 1 << 17, seed_value);
+        = test_utils::get_random_data_wrapped<size_t>(3, 2, 1 << 17, seed_value);
     sizes.insert(sizes.end(), random_sizes2.begin(), random_sizes2.end());
 
     std::sort(sizes.begin(), sizes.end());
@@ -74,14 +87,14 @@ using Suite = testing::Types<TestParams<int>, // Sanity check
                              TestParams<rocprim::half>,
                              TestParams<float>,
                              TestParams<double>,
-                             TestParams<test_utils::custom_test_type<double>>>;
+                             TestParams<common::custom_type<double, double, true>>>;
 
 TYPED_TEST_SUITE(RocprimLookbackReproducibilityTests, Suite);
 
 template<typename S, typename F>
 void test_reproducibility(S scan_op, F run_test)
 {
-    test_utils::device_ptr<int> d_enable_sleep_ptr(1);
+    common::device_ptr<int>     d_enable_sleep_ptr(1);
     int*                        d_enable_sleep = d_enable_sleep_ptr.get();
 
     // Delay the operator by a semi-random amount to increase the likelyhood
@@ -114,8 +127,8 @@ template<typename T>
 std::vector<T>
     generate_segments(size_t seed, size_t n, size_t min_segment_length, size_t max_segment_length)
 {
-    std::default_random_engine            gen(seed);
-    std::uniform_int_distribution<size_t> key_count_dis(min_segment_length, max_segment_length);
+    std::default_random_engine               gen(seed);
+    common::uniform_int_distribution<size_t> key_count_dis(min_segment_length, max_segment_length);
 
     std::vector<T> values(n);
     size_t         i = 0;
@@ -157,10 +170,11 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, -1000, 1000, seed_value);
+            std::vector<T> input
+                = test_utils::get_random_data_wrapped<T>(size, -1000, 1000, seed_value);
 
-            test_utils::device_ptr<T> d_input(input);
-            test_utils::device_ptr<T> d_output(input.size());
+            common::device_ptr<T> d_input(input);
+            common::device_ptr<T> d_output(input.size());
             scan_op_type scan_op;
 
             test_reproducibility(
@@ -168,7 +182,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, Scan)
                 [&](auto test_scan_op)
                 {
                     size_t temp_storage_size_bytes;
-                    test_utils::device_ptr<void> d_temp_storage;
+                    common::device_ptr<void> d_temp_storage;
                     HIP_CHECK(rocprim::deterministic_inclusive_scan<Config>(nullptr,
                                                                             temp_storage_size_bytes,
                                                                             d_input.get(),
@@ -226,13 +240,14 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            std::vector<V> input = test_utils::get_random_data<V>(size, -1000, 1000, seed_value);
+            std::vector<V> input
+                = test_utils::get_random_data_wrapped<V>(size, -1000, 1000, seed_value);
             std::vector<K> keys
                 = generate_segments<K>(seed_value, size, min_segment_length, max_segment_length);
 
-            test_utils::device_ptr<K> d_keys(keys);
-            test_utils::device_ptr<V> d_input(input);
-            test_utils::device_ptr<V> d_output(input.size());
+            common::device_ptr<K> d_keys(keys);
+            common::device_ptr<V> d_input(input);
+            common::device_ptr<V> d_output(input.size());
 
             scan_op_type    scan_op;
             compare_op_type compare_op;
@@ -241,7 +256,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ScanByKey)
                                  [&](auto test_scan_op)
                                  {
                                      size_t                       temp_storage_size_bytes;
-                                     test_utils::device_ptr<void> d_temp_storage;
+                                     common::device_ptr<void>     d_temp_storage;
                                      HIP_CHECK(rocprim::deterministic_inclusive_scan_by_key<Config>(
                                          nullptr,
                                          temp_storage_size_bytes,
@@ -306,14 +321,15 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            std::vector<V> input = test_utils::get_random_data<V>(size, -1000, 1000, seed_value);
+            std::vector<V> input
+                = test_utils::get_random_data_wrapped<V>(size, -1000, 1000, seed_value);
             std::vector<K> keys
                 = generate_segments<K>(seed_value, size, min_segment_length, max_segment_length);
 
-            test_utils::device_ptr<K>      d_keys(keys);
-            test_utils::device_ptr<V>      d_input(input);
-            test_utils::device_ptr<V>      d_output(input.size());
-            test_utils::device_ptr<size_t> d_unique_count_output(1);
+            common::device_ptr<K>      d_keys(keys);
+            common::device_ptr<V>      d_input(input);
+            common::device_ptr<V>      d_output(input.size());
+            common::device_ptr<size_t> d_unique_count_output(1);
 
             scan_op_type    scan_op;
             compare_op_type compare_op;
@@ -327,7 +343,7 @@ TYPED_TEST(RocprimLookbackReproducibilityTests, ReduceByKey)
                 [&](auto test_scan_op)
                 {
                     size_t                       temp_storage_size_bytes;
-                    test_utils::device_ptr<void> d_temp_storage;
+                    common::device_ptr<void>     d_temp_storage;
                     HIP_CHECK(
                         rocprim::deterministic_reduce_by_key<Config>(nullptr,
                                                                      temp_storage_size_bytes,

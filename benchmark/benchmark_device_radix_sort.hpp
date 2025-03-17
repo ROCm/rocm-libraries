@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
 #define ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_custom_type.hpp"
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -74,8 +77,8 @@ struct device_radix_sort_benchmark : public config_autotune_interface
 
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
-                                        generate_limits<key_type>::min(),
-                                        generate_limits<key_type>::max(),
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
         key_type* d_keys_input;
@@ -175,8 +178,8 @@ struct device_radix_sort_benchmark : public config_autotune_interface
 
         std::vector<key_type> keys_input
             = get_random_data<key_type>(size,
-                                        generate_limits<key_type>::min(),
-                                        generate_limits<key_type>::max(),
+                                        common::generate_limits<key_type>::min(),
+                                        common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
         std::vector<value_type> values_input(size);
@@ -295,7 +298,8 @@ private:
                                   V*          values_output,
                                   size_t      size,
                                   hipStream_t stream)
-        -> std::enable_if_t<!is_custom_type<K>::value && std::is_same<V, rp::empty_type>::value,
+        -> std::enable_if_t<!common::is_custom_type<K>::value
+                                && std::is_same<V, rp::empty_type>::value,
                             hipError_t>
     {
         (void)values_input;
@@ -319,7 +323,8 @@ private:
                                   V*          values_output,
                                   size_t      size,
                                   hipStream_t stream)
-        -> std::enable_if_t<is_custom_type<K>::value && std::is_same<V, rp::empty_type>::value,
+        -> std::enable_if_t<common::is_custom_type<K>::value
+                                && std::is_same<V, rp::empty_type>::value,
                             hipError_t>
     {
         (void)values_input;
@@ -342,7 +347,8 @@ private:
                                   V*          values_output,
                                   size_t      size,
                                   hipStream_t stream)
-        -> std::enable_if_t<!is_custom_type<K>::value && !std::is_same<V, rp::empty_type>::value,
+        -> std::enable_if_t<!common::is_custom_type<K>::value
+                                && !std::is_same<V, rp::empty_type>::value,
                             hipError_t>
     {
         return rp::radix_sort_pairs<Config>(d_temporary_storage,
@@ -366,7 +372,8 @@ private:
                                   V*          values_output,
                                   size_t      size,
                                   hipStream_t stream)
-        -> std::enable_if_t<is_custom_type<K>::value && !std::is_same<V, rp::empty_type>::value,
+        -> std::enable_if_t<common::is_custom_type<K>::value
+                                && !std::is_same<V, rp::empty_type>::value,
                             hipError_t>
     {
         return rp::radix_sort_pairs<Config>(d_temporary_storage,
@@ -392,7 +399,7 @@ inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*
                                      const managed_seed&                           seed,
                                      hipStream_t                                   stream)
 {
-    using custom_key = custom_type<float, int16_t>;
+    using custom_key = common::custom_type<float, int16_t>;
     CREATE_RADIX_SORT_BENCHMARK(int)
     CREATE_RADIX_SORT_BENCHMARK(float)
     CREATE_RADIX_SORT_BENCHMARK(long long)
@@ -410,9 +417,9 @@ inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark
                                       const managed_seed&                           seed,
                                       hipStream_t                                   stream)
 {
-    using custom_float2  = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
-    using custom_key     = custom_type<float, int16_t>;
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
+    using custom_key     = common::custom_type<float, int16_t>;
 
     CREATE_RADIX_SORT_BENCHMARK(int, float)
     CREATE_RADIX_SORT_BENCHMARK(int, double)

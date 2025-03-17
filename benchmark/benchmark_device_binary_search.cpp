@@ -26,6 +26,8 @@
 // CmdParser
 #include "cmdparser.hpp"
 
+#include "../common/utils_custom_type.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -252,8 +254,8 @@ int main(int argc, char* argv[])
                                                         seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
-    using custom_float2  = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
 
     benchmarks = {BENCHMARK_TYPE(float),
                   BENCHMARK_TYPE(double),

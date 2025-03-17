@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,28 @@
 
 #ifndef TEST_BLOCK_EXCHANGE_KERNELS_HPP_
 #define TEST_BLOCK_EXCHANGE_KERNELS_HPP_
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_types.hpp"
+
+#include <rocprim/block/block_exchange.hpp>
+#include <rocprim/block/block_load_func.hpp>
+#include <rocprim/block/block_store_func.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/type_traits.hpp>
+
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <random>
+#include <type_traits>
+#include <vector>
 
 template<
     class Type,
@@ -204,8 +226,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -222,8 +244,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    test_utils::device_ptr<type>        device_input(input);
-    test_utils::device_ptr<output_type> device_output(size);
+    common::device_ptr<type>        device_input(input);
+    common::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
@@ -276,8 +298,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -294,8 +316,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    test_utils::device_ptr<type>        device_input(input);
-    test_utils::device_ptr<output_type> device_output(size);
+    common::device_ptr<type>        device_input(input);
+    common::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
@@ -355,8 +377,8 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -379,8 +401,8 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 2>:
     }
 
     // Preparing device
-    test_utils::device_ptr<type>        device_input(input);
-    test_utils::device_ptr<output_type> device_output(size);
+    common::device_ptr<type>        device_input(input);
+    common::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
@@ -440,8 +462,8 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t wi = 0; wi < warps_no; wi++)
@@ -464,8 +486,8 @@ auto test_block_exchange(int device_id) -> typename std::enable_if<Method == 3>:
     }
 
     // Preparing device
-    test_utils::device_ptr<type>        device_input(input);
-    test_utils::device_ptr<output_type> device_output(size);
+    common::device_ptr<type>        device_input(input);
+    common::device_ptr<output_type> device_output(size);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
@@ -526,8 +548,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -544,9 +566,9 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    test_utils::device_ptr<type>         device_input(input);
-    test_utils::device_ptr<output_type>  device_output(size);
-    test_utils::device_ptr<unsigned int> device_ranks(ranks);
+    common::device_ptr<type>         device_input(input);
+    common::device_ptr<output_type>  device_output(size);
+    common::device_ptr<unsigned int> device_ranks(ranks);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
@@ -608,8 +630,8 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     test_utils::iota_modulo(values.begin(),
                             values.end(),
                             0,
-                            std::min<size_t>(test_utils::numeric_limits<type>::max(),
-                                             test_utils::numeric_limits<output_type>::max()));
+                            std::min<size_t>(rocprim::numeric_limits<type>::max(),
+                                             rocprim::numeric_limits<output_type>::max()));
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
         for(size_t ti = 0; ti < block_size; ti++)
@@ -628,9 +650,9 @@ auto test_block_exchange(int /*device_id*/) -> typename std::enable_if<Method ==
     }
 
     // Preparing device
-    test_utils::device_ptr<type>         device_input(input);
-    test_utils::device_ptr<output_type>  device_output(size);
-    test_utils::device_ptr<unsigned int> device_ranks(ranks);
+    common::device_ptr<type>         device_input(input);
+    common::device_ptr<output_type>  device_output(size);
+    common::device_ptr<unsigned int> device_ranks(ranks);
 
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
