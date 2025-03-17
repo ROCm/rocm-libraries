@@ -153,16 +153,16 @@ namespace rocRoller
                                          hipStream_t               stream)
     {
         // TODO: implement formatter for container and library types
-        Log::info(fmt::format("Launching kernel {}: Workgroup: [{}, {}, {}], Workitems: [{}, {}, "
-                              "{}]\nKernel arguments: {}\n",
-                              m_kernelName,
-                              invocation.workgroupSize[0],
-                              invocation.workgroupSize[1],
-                              invocation.workgroupSize[2],
-                              invocation.workitemCount[0],
-                              invocation.workitemCount[1],
-                              invocation.workitemCount[2],
-                              args.toString()));
+        Log::debug(fmt::format("Launching kernel {}: Workgroup: [{}, {}, {}], Workitems: [{}, {}, "
+                               "{}]\nKernel arguments: {}\n",
+                               m_kernelName,
+                               invocation.workgroupSize[0],
+                               invocation.workgroupSize[1],
+                               invocation.workgroupSize[2],
+                               invocation.workitemCount[0],
+                               invocation.workitemCount[1],
+                               invocation.workitemCount[2],
+                               args.toString()));
 
         if(!kernelLoaded())
             throw std::runtime_error("Attempting to execute a kernel before it is loaded");
