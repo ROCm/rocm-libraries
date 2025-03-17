@@ -152,7 +152,7 @@ public:
     }
 #endif // _CCCL_HAS_CONSTEXPR_ALLOCATION
     {
-      return static_cast<_Tp*>(_CUDA_VSTD::__cccl_allocate(__n * sizeof(_Tp), _LIBCUDACXX_ALIGNOF(_Tp)));
+      return static_cast<_Tp*>(_CUDA_VSTD::__cccl_allocate(__n * sizeof(_Tp), alignof(_Tp)));
     }
   }
 
@@ -174,7 +174,7 @@ public:
     else
 #endif // _CCCL_STD_VER >= 2020
     {
-      _CUDA_VSTD::__cccl_deallocate((void*) __p, __n * sizeof(_Tp), _LIBCUDACXX_ALIGNOF(_Tp));
+      _CUDA_VSTD::__cccl_deallocate((void*) __p, __n * sizeof(_Tp), alignof(_Tp));
     }
   }
 
@@ -254,7 +254,7 @@ public:
     }
     else
     {
-      return static_cast<const _Tp*>(_CUDA_VSTD::__cccl_allocate(__n * sizeof(_Tp), _LIBCUDACXX_ALIGNOF(_Tp)));
+      return static_cast<const _Tp*>(_CUDA_VSTD::__cccl_allocate(__n * sizeof(_Tp), alignof(_Tp)));
     }
   }
 
@@ -273,7 +273,7 @@ public:
     }
     else
     {
-      _CUDA_VSTD::__cccl_deallocate((void*) const_cast<_Tp*>(__p), __n * sizeof(_Tp), _LIBCUDACXX_ALIGNOF(_Tp));
+      _CUDA_VSTD::__cccl_deallocate((void*) const_cast<_Tp*>(__p), __n * sizeof(_Tp), alignof(_Tp));
     }
   }
 
