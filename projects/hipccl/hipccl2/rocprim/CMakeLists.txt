@@ -68,6 +68,7 @@ include(CMakeDependentOption)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
 cmake_dependent_option(BUILD_TEST "Build tests (requires googletest)" OFF "NOT ONLY_INSTALL" OFF)
+option(WITH_ROCRAND "Build tests with device-side data generation(requires rocRAND)" OFF)
 cmake_dependent_option(BUILD_BENCHMARK "Build benchmarks" OFF "NOT ONLY_INSTALL" OFF)
 cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
@@ -131,6 +132,7 @@ set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 
 # Get dependencies (required here to get rocm-cmake)
 include(cmake/Dependencies.cmake)
+
 # Use target ID syntax if supported for GPU_TARGETS
 if(USE_HIPCXX)
   enable_language(HIP)

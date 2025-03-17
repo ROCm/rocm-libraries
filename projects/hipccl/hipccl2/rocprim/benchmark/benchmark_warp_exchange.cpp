@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
 // CmdParser
 #include "cmdparser.hpp"
 
+#include "../common/utils.hpp"
+#include "../common/warp_exchange.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -45,70 +48,6 @@
 const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
 #endif
 
-struct BlockedToStripedOp
-{
-    template<
-        typename warp_exchange_type,
-        typename T,
-        unsigned int ItemsPerThread
-    >
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void operator()(warp_exchange_type warp_exchange,
-                    T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& storage) const
-    {
-        warp_exchange.blocked_to_striped(items, items, storage);
-    }
-};
-
-struct StripedToBlockedOp
-{
-    template<
-        typename warp_exchange_type,
-        typename T,
-        unsigned int ItemsPerThread
-    >
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void operator()(warp_exchange_type warp_exchange,
-                    T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& storage) const
-    {
-        warp_exchange.striped_to_blocked(items, items, storage);
-    }
-};
-
-struct BlockedToStripedShuffleOp
-{
-    template<
-        typename warp_exchange_type,
-        typename T,
-        unsigned int ItemsPerThread
-    >
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void operator()(warp_exchange_type warp_exchange,
-                    T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& /*storage*/) const
-    {
-        warp_exchange.blocked_to_striped_shuffle(items, items);
-    }
-};
-
-struct StripedToBlockedShuffleOp
-{
-    template<
-        typename warp_exchange_type,
-        typename T,
-        unsigned int ItemsPerThread
-    >
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void operator()(warp_exchange_type warp_exchange,
-                    T (&items)[ItemsPerThread],
-                    typename warp_exchange_type::storage_type& /*storage*/) const
-    {
-        warp_exchange.striped_to_blocked_shuffle(items, items);
-    }
-};
-
 struct ScatterToStripedOp
 {
     template<typename T, typename OffsetT, typename warp_exchange_type, unsigned int ItemsPerThread>
@@ -129,7 +68,7 @@ template<unsigned int BlockSize,
          typename T>
 __device__
 auto warp_exchange_benchmark(T* d_output, unsigned int trials)
-    -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
+    -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>
                         && !std::is_same<Op, ScatterToStripedOp>::value>
 {
     T thread_data[ItemsPerThread];
@@ -168,7 +107,7 @@ template<unsigned int BlockSize,
          typename T>
 __device__
 auto warp_exchange_benchmark(T* d_output, unsigned int trials)
-    -> std::enable_if_t<device_test_enabled_for_warp_size_v<LogicalWarpSize>
+    -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>
                         && std::is_same<Op, ScatterToStripedOp>::value>
 {
     T                      thread_data[ItemsPerThread];
@@ -213,7 +152,7 @@ template<unsigned int BlockSize,
          typename T>
 __device__
 auto warp_exchange_benchmark(T* /*d_output*/, unsigned int /*trials*/)
-    -> std::enable_if_t<!device_test_enabled_for_warp_size_v<LogicalWarpSize>>
+    -> std::enable_if_t<!common::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {}
 
 template<unsigned int BlockSize,
@@ -313,37 +252,37 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks{
-        CREATE_BENCHMARK(int, 256, 1, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 1, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 4, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 4, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 16, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(int, 256, 32, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 1, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 1, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 4, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 4, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 16, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 16, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(int, 256, 32, 32, common::BlockedToStripedOp),
 
-        CREATE_BENCHMARK(int, 256, 1, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 1, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 4, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 4, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 16, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(int, 256, 32, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 1, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 1, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 4, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 4, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 16, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 16, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(int, 256, 32, 32, common::StripedToBlockedOp),
 
-        CREATE_BENCHMARK(int, 256, 1, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 1, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 4, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 4, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 16, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 32, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 1, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 1, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 4, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 4, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 16, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 16, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 32, 32, common::BlockedToStripedShuffleOp),
 
-        CREATE_BENCHMARK(int, 256, 1, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 1, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 4, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 4, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 16, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 32, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 1, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 1, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 4, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 4, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 16, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 16, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(int, 256, 32, 32, common::StripedToBlockedShuffleOp),
 
         CREATE_BENCHMARK(int, 256, 1, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(int, 256, 1, 32, ScatterToStripedOp),
@@ -352,33 +291,33 @@ int main(int argc, char* argv[])
         CREATE_BENCHMARK(int, 256, 16, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(int, 256, 16, 32, ScatterToStripedOp),
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::BlockedToStripedOp),
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::StripedToBlockedOp),
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::BlockedToStripedShuffleOp),
 
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, common::StripedToBlockedShuffleOp),
 
         CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 32, ScatterToStripedOp),
@@ -387,33 +326,33 @@ int main(int argc, char* argv[])
         CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 32, ScatterToStripedOp),
 
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, BlockedToStripedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::BlockedToStripedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::BlockedToStripedOp),
 
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, StripedToBlockedOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::StripedToBlockedOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::StripedToBlockedOp),
 
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, BlockedToStripedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::BlockedToStripedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::BlockedToStripedShuffleOp),
 
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 32, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 16, common::StripedToBlockedShuffleOp),
+        CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 32, common::StripedToBlockedShuffleOp),
 
         CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 16, ScatterToStripedOp),
         CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 32, ScatterToStripedOp),
@@ -427,65 +366,65 @@ int main(int argc, char* argv[])
     if(is_warp_size_supported(64, hip_device))
     {
         std::vector<benchmark::internal::Benchmark*> additional_benchmarks{
-            CREATE_BENCHMARK(int, 256, 1, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(int, 256, 4, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(int, 256, 64, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(int, 256, 1, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(int, 256, 4, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(int, 256, 16, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(int, 256, 64, 64, common::BlockedToStripedOp),
 
-            CREATE_BENCHMARK(int, 256, 1, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(int, 256, 4, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(int, 256, 64, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(int, 256, 1, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(int, 256, 4, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(int, 256, 16, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(int, 256, 64, 64, common::StripedToBlockedOp),
 
-            CREATE_BENCHMARK(int, 256, 1, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 4, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 64, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 1, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 4, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 16, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 64, 64, common::BlockedToStripedShuffleOp),
 
-            CREATE_BENCHMARK(int, 256, 1, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 4, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 64, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 1, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 4, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 16, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(int, 256, 64, 64, common::StripedToBlockedShuffleOp),
 
             CREATE_BENCHMARK(int, 256, 1, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(int, 256, 4, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(int, 256, 16, 64, ScatterToStripedOp),
 
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::BlockedToStripedOp),
 
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::StripedToBlockedOp),
 
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::BlockedToStripedShuffleOp),
 
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, common::StripedToBlockedShuffleOp),
 
             CREATE_BENCHMARK(rocprim::int128_t, 256, 1, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(rocprim::int128_t, 256, 4, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(rocprim::int128_t, 256, 16, 64, ScatterToStripedOp),
 
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, BlockedToStripedOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::BlockedToStripedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::BlockedToStripedOp),
 
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, StripedToBlockedOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::StripedToBlockedOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::StripedToBlockedOp),
 
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, BlockedToStripedShuffleOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::BlockedToStripedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::BlockedToStripedShuffleOp),
 
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, common::StripedToBlockedShuffleOp),
+            CREATE_BENCHMARK(rocprim::uint128_t, 256, 16, 64, common::StripedToBlockedShuffleOp),
 
             CREATE_BENCHMARK(rocprim::uint128_t, 256, 1, 64, ScatterToStripedOp),
             CREATE_BENCHMARK(rocprim::uint128_t, 256, 4, 64, ScatterToStripedOp),

@@ -29,7 +29,10 @@
 #endif
 
 #include "../common_test_header.hpp"
-#include "test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+
+#include "test_utils.hpp"
 #include "test_utils_types.hpp"
 
 #include <rocprim/functional.hpp>
@@ -47,8 +50,8 @@ void TEST_FUNC(size_t size)
     // Generate data
     std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100, seed_value);
 
-    test_utils::device_ptr<T> d_input(input);
-    test_utils::device_ptr<T> d_output(input.size());
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(input.size());
 
     std::vector<T> expected(size);
     // Calculate expected results on host
@@ -79,7 +82,7 @@ void TEST_FUNC(size_t size)
 #endif
 
     // allocate temporary storage
-    test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
     // Run
     HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),

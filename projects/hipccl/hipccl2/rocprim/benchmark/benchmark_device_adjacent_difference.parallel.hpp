@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/device_adjacent_difference.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -32,10 +34,10 @@
 #include <hip/hip_runtime_api.h>
 
 // rocPRIM
+#include <rocprim/config.hpp>
 #include <rocprim/detail/various.hpp>
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
-#include <rocprim/device/device_adjacent_difference.hpp>
 #include <rocprim/functional.hpp>
 
 #include <array>
@@ -43,7 +45,6 @@
 #include <memory>
 #include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 template<typename Config>
@@ -60,10 +61,10 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T      = int,
-         bool Left       = false,
-         bool InPlace    = false,
-         typename Config = rocprim::default_config>
+template<typename T                   = int,
+         bool                Left     = false,
+         common::api_variant Aliasing = common::api_variant::no_alias,
+         typename Config              = rocprim::default_config>
 struct device_adjacent_difference_benchmark : public config_autotune_interface
 {
 
@@ -71,76 +72,14 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
     {
 
         using namespace std::string_literals;
-        return bench_naming::format_name("{lvl:device,algo:adjacent_difference"
-                                         + (Left ? ""s : "_right"s) + (InPlace ? "_inplace"s : ""s)
-                                         + ",value_type:" + std::string(Traits<T>::name())
-                                         + ",cfg:" + config_name<Config>() + "}");
+        return bench_naming::format_name(
+            "{lvl:device,algo:adjacent_difference" + (Left ? ""s : "_right"s)
+            + (Aliasing == common::api_variant::no_alias ? ""s : "_inplace"s) + ",value_type:"
+            + std::string(Traits<T>::name()) + ",cfg:" + config_name<Config>() + "}");
     }
 
     static constexpr unsigned int batch_size  = 10;
     static constexpr unsigned int warmup_size = 5;
-
-    template<typename InputIt, typename OutputIt, typename... Args>
-    auto dispatch_adjacent_difference(std::true_type /*left*/,
-                                      std::false_type /*in_place*/,
-                                      void* const    temporary_storage,
-                                      std::size_t&   storage_size,
-                                      const InputIt  input,
-                                      const OutputIt output,
-                                      Args&&... args) const
-    {
-        return ::rocprim::adjacent_difference<Config>(temporary_storage,
-                                                      storage_size,
-                                                      input,
-                                                      output,
-                                                      std::forward<Args>(args)...);
-    }
-
-    template<typename InputIt, typename OutputIt, typename... Args>
-    auto dispatch_adjacent_difference(std::false_type /*left*/,
-                                      std::false_type /*in_place*/,
-                                      void* const    temporary_storage,
-                                      std::size_t&   storage_size,
-                                      const InputIt  input,
-                                      const OutputIt output,
-                                      Args&&... args) const
-    {
-        return ::rocprim::adjacent_difference_right<Config>(temporary_storage,
-                                                            storage_size,
-                                                            input,
-                                                            output,
-                                                            std::forward<Args>(args)...);
-    }
-
-    template<typename InputIt, typename OutputIt, typename... Args>
-    auto dispatch_adjacent_difference(std::true_type /*left*/,
-                                      std::true_type /*in_place*/,
-                                      void* const   temporary_storage,
-                                      std::size_t&  storage_size,
-                                      const InputIt input,
-                                      const OutputIt /*output*/,
-                                      Args&&... args) const
-    {
-        return ::rocprim::adjacent_difference_inplace<Config>(temporary_storage,
-                                                              storage_size,
-                                                              input,
-                                                              std::forward<Args>(args)...);
-    }
-
-    template<typename InputIt, typename OutputIt, typename... Args>
-    auto dispatch_adjacent_difference(std::false_type /*left*/,
-                                      std::true_type /*in_place*/,
-                                      void* const   temporary_storage,
-                                      std::size_t&  storage_size,
-                                      const InputIt input,
-                                      const OutputIt /*output*/,
-                                      Args&&... args) const
-    {
-        return ::rocprim::adjacent_difference_right_inplace<Config>(temporary_storage,
-                                                                    storage_size,
-                                                                    input,
-                                                                    std::forward<Args>(args)...);
-    }
 
     void run(benchmark::State&   state,
              const std::size_t   bytes,
@@ -165,13 +104,13 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
                             input.size() * sizeof(input[0]),
                             hipMemcpyHostToDevice));
 
-        if(!InPlace)
+        if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
         {
             HIP_CHECK(hipMalloc(&d_output, size * sizeof(output_type)));
         }
 
-        static constexpr auto left_tag     = rocprim::detail::bool_constant<Left>{};
-        static constexpr auto in_place_tag = rocprim::detail::bool_constant<InPlace>{};
+        static constexpr auto left_tag  = rocprim::detail::bool_constant<Left>{};
+        static constexpr auto alias_tag = std::integral_constant<common::api_variant, Aliasing>{};
 
         // Allocate temporary storage
         std::size_t temp_storage_size;
@@ -179,16 +118,16 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
 
         const auto launch = [&]
         {
-            return dispatch_adjacent_difference(left_tag,
-                                                in_place_tag,
-                                                d_temp_storage,
-                                                temp_storage_size,
-                                                d_input,
-                                                d_output,
-                                                size,
-                                                rocprim::plus<>{},
-                                                stream,
-                                                debug_synchronous);
+            return common::dispatch_adjacent_difference(left_tag,
+                                                        alias_tag,
+                                                        d_temp_storage,
+                                                        temp_storage_size,
+                                                        d_input,
+                                                        d_output,
+                                                        size,
+                                                        rocprim::plus<>{},
+                                                        stream,
+                                                        debug_synchronous);
         };
         HIP_CHECK(launch());
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size));
@@ -233,7 +172,7 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
         HIP_CHECK(hipFree(d_input));
-        if(!InPlace)
+        if ROCPRIM_IF_CONSTEXPR(Aliasing == common::api_variant::no_alias)
         {
             HIP_CHECK(hipFree(d_output));
         }
@@ -241,7 +180,7 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
     }
 };
 
-template<typename T, unsigned int BlockSize, bool Left, bool InPlace>
+template<typename T, unsigned int BlockSize, bool Left, common::api_variant Aliasing>
 struct device_adjacent_difference_benchmark_generator
 {
     // Device Adjacent difference uses block_load/store_transpose to coalesce memory transaction to global memory
@@ -263,7 +202,7 @@ struct device_adjacent_difference_benchmark_generator
 
             storage.emplace_back(
                 std::make_unique<
-                    device_adjacent_difference_benchmark<T, Left, InPlace, generated_config>>());
+                    device_adjacent_difference_benchmark<T, Left, Aliasing, generated_config>>());
         }
 
         template<int ipt_num = primes[IptValueIndex]>

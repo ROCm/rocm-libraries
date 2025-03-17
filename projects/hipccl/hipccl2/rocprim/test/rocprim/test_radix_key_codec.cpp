@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,23 +22,27 @@
 
 #include "../common_test_header.hpp"
 
-#include <rocprim/detail/various.hpp>
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_data_generation.hpp"
+
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_custom_test_types.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_sort_comparator.hpp"
+
 #include <rocprim/device/detail/device_radix_sort.hpp>
-#include <rocprim/test_utils.hpp>
-#include <rocprim/test_utils_assertions.hpp>
-#include <rocprim/test_utils_custom_test_types.hpp>
-#include <rocprim/test_utils_data_generation.hpp>
-#include <rocprim/test_utils_sort_comparator.hpp>
 #include <rocprim/thread/radix_key_codec.hpp>
+#include <rocprim/types.hpp>
 #include <rocprim/types/tuple.hpp>
 
-#include <gtest/gtest-typed-test.h>
-#include <gtest/internal/gtest-type-util.h>
-
-#include <algorithm>
+#include <cstddef>
 #include <ios>
 #include <ostream>
 #include <sstream>
+#include <stdint.h>
+#include <vector>
 
 struct extract_digit_params
 {
@@ -135,7 +139,7 @@ TEST_P(RadixKeyCodecUnusedTest, ExtractDigitUnused)
 
 TEST(RadixKeyCodecTest, ExtractCustomTestType)
 {
-    using T       = test_utils::custom_test_type<int>;
+    using T       = common::custom_type<int, int, true>;
     using codec_t = rocprim::detail::radix_key_codec<T, true>;
 
     T value{12, 34};
@@ -296,7 +300,7 @@ struct TypedRadixKeyCodecTestParams
 template<class T>
 struct custom_test_type_decomposer
 {
-    auto operator()(test_utils::custom_test_type<T>& value) const
+    auto operator()(common::custom_type<T, T, true>& value) const
     {
         return ::rocprim::tuple<T&, T&>{value.x, value.y};
     }
@@ -411,7 +415,7 @@ TYPED_TEST(TypedRadixKeyCodecTest, EncodeDecodeExtract)
 {
     using params                      = typename TestFixture::params;
     using Key                         = typename params::Key;
-    using CustomKey                   = typename test_utils::custom_test_type<Key>;
+    using CustomKey                   = typename common::custom_type<Key, Key, true>;
     using CustomDecomposer            = custom_test_type_decomposer<Key>;
     constexpr unsigned int start_bit  = params::start_bit;
     constexpr unsigned int radix_bits = params::radix_bits;
@@ -426,10 +430,10 @@ TYPED_TEST(TypedRadixKeyCodecTest, EncodeDecodeExtract)
 
         const size_t     size = (1 << 20) + 123;
         std::vector<Key> input_keys
-            = test_utils::get_random_data<Key>(size,
-                                               test_utils::generate_limits<Key>::min(),
-                                               test_utils::generate_limits<Key>::max(),
-                                               seed_value);
+            = test_utils::get_random_data_wrapped<Key>(size,
+                                                       common::generate_limits<Key>::min(),
+                                                       common::generate_limits<Key>::max(),
+                                                       seed_value);
 
         for(size_t i = 0; i < size; ++i)
         {

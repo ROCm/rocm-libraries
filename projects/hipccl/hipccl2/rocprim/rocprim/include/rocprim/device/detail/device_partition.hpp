@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -911,103 +911,39 @@ public:
 template<select_method SelectMethod,
          bool          OnlySelected,
          class Config,
-         class KeyIterator,
-         class ValueIterator, // Can be rocprim::empty_type* if key only
-         class FlagIterator,
-         class OutputKeyIterator,
-         class OutputValueIterator,
-         class InequalityOp,
-         class OffsetLookbackScanState,
-         class... UnaryPredicates>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto partition_kernel_impl(KeyIterator,
-                                                               ValueIterator,
-                                                               FlagIterator,
-                                                               OutputKeyIterator,
-                                                               OutputValueIterator,
-                                                               size_t*,
-                                                               size_t*,
-                                                               size_t,
-                                                               const size_t,
-                                                               InequalityOp,
-                                                               OffsetLookbackScanState,
-                                                               const unsigned int,
-                                                               UnaryPredicates...)
-    -> std::enable_if_t<!is_lookback_kernel_runnable<OffsetLookbackScanState>()>
+         class Key,
+         class Value,
+         class FlagType,
+         class OffsetType>
+struct partition_kernel_impl_
 {
-    // No need to build the kernel with sleep on a device that does not require it
-}
 
-template<select_method SelectMethod,
-         bool          OnlySelected,
-         class Config,
-         class KeyIterator,
-         class ValueIterator, // Can be rocprim::empty_type* if key only
-         class FlagIterator,
-         class OutputKeyIterator,
-         class OutputValueIterator,
-         class InequalityOp,
-         class OffsetLookbackScanState,
-         class... UnaryPredicates>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
-    partition_kernel_impl(KeyIterator             keys_input,
-                          ValueIterator           values_input,
-                          FlagIterator            flags,
-                          OutputKeyIterator       keys_output,
-                          OutputValueIterator     values_output,
-                          size_t*                 selected_count,
-                          size_t*                 prev_selected_count,
-                          size_t                  prev_processed,
-                          const size_t            total_size,
-                          InequalityOp            inequality_op,
-                          OffsetLookbackScanState offset_scan_state,
-                          const unsigned int      number_of_blocks,
-                          UnaryPredicates... predicates)
-        -> std::enable_if_t<is_lookback_kernel_runnable<OffsetLookbackScanState>()>
-{
     static constexpr partition_config_params params = device_params<Config>();
 
-    constexpr auto         block_size       = params.kernel_config.block_size;
-    constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
-    constexpr unsigned int items_per_block  = block_size * items_per_thread;
-
-    using offset_type = typename OffsetLookbackScanState::value_type;
-    using key_type = typename std::iterator_traits<KeyIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValueIterator>::value_type;
-    using flag_type =
-        typename std::conditional<SelectMethod == select_method::predicated_flag,
-                                  typename std::iterator_traits<FlagIterator>::value_type,
-                                  bool>::type;
+    static constexpr auto         block_size       = params.kernel_config.block_size;
+    static constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
+    static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     // Block primitives
-    using block_load_key_type = ::rocprim::
-        block_load<key_type, block_size, items_per_thread, params.key_block_load_method>;
+    using block_load_key_type
+        = ::rocprim::block_load<Key, block_size, items_per_thread, params.key_block_load_method>;
     using block_load_value_type = ::rocprim::
-        block_load<value_type, block_size, items_per_thread, params.value_block_load_method>;
+        block_load<Value, block_size, items_per_thread, params.value_block_load_method>;
     using block_load_flag_type = ::rocprim::
-        block_load<flag_type, block_size, items_per_thread, params.flag_block_load_method>;
+        block_load<FlagType, block_size, items_per_thread, params.flag_block_load_method>;
     using block_scan_offset_type
-        = ::rocprim::block_scan<offset_type, block_size, params.block_scan_method>;
-    using block_discontinuity_key_type = ::rocprim::block_discontinuity<key_type, block_size>;
-
-    // Offset prefix operation type
-    using offset_scan_prefix_op_type = offset_lookback_scan_prefix_op<
-        offset_type, OffsetLookbackScanState
-    >;
+        = ::rocprim::block_scan<OffsetType, block_size, params.block_scan_method>;
+    using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;
 
     // Memory required for 2-phase scatter
-    using exchange_keys_storage_type   = key_type[items_per_block];
-    using exchange_values_storage_type = value_type[items_per_block];
+    using exchange_keys_storage_type   = Key[items_per_block];
+    using exchange_values_storage_type = Value[items_per_block];
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
     using raw_exchange_keys_storage_type = typename detail::raw_storage<exchange_keys_storage_type>;
     using raw_exchange_values_storage_type = typename detail::raw_storage<exchange_values_storage_type>;
     ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
 
-    using is_selected_type = std::conditional_t<
-        sizeof...(UnaryPredicates) == 1,
-        bool[items_per_thread],
-        bool[sizeof...(UnaryPredicates)][items_per_thread]>;
-
-    ROCPRIM_SHARED_MEMORY union
+    union storage_type
     {
         raw_exchange_keys_storage_type                      exchange_keys;
         raw_exchange_values_storage_type                    exchange_values;
@@ -1016,162 +952,217 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
         typename block_load_flag_type::storage_type         load_flags;
         typename block_discontinuity_key_type::storage_type discontinuity_values;
         typename block_scan_offset_type::storage_type       scan_offsets;
-    } storage;
+    };
 
-    size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
-    load_selected_count(prev_selected_count, prev_selected_count_values);
-
-    const auto         flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
-    const auto         flat_block_id        = ::rocprim::detail::block_id<0>();
-    const auto         block_offset         = flat_block_id * items_per_block;
-    const unsigned int valid_in_global_last_block
-        = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
-    const bool is_last_launch = total_size <= prev_processed + number_of_blocks * items_per_block;
-    const bool is_global_last_block = is_last_launch && flat_block_id == (number_of_blocks - 1);
-
-    key_type         keys[items_per_thread];
-    is_selected_type is_selected;
-    offset_type      output_indices[items_per_thread];
-
-    // Load input keys into keys
-    if(is_global_last_block)
+    template<
+         class KeyIterator,
+         class ValueIterator,
+         class FlagIterator,
+         class OutputKeyIterator,
+         class OutputValueIterator,
+         class InequalityOp,
+    class OffsetLookbackScanState,
+    class... UnaryPredicates>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+    partition(KeyIterator,
+              ValueIterator,
+              FlagIterator,
+              OutputKeyIterator,
+              OutputValueIterator,
+              size_t*,
+              size_t*,
+              size_t,
+              const size_t,
+              InequalityOp,
+              OffsetLookbackScanState,
+              const unsigned int,
+              storage_type&,
+              UnaryPredicates...)
+        -> std::enable_if_t<!is_lookback_kernel_runnable<OffsetLookbackScanState>()>
     {
-        block_load_key_type().load(keys_input + block_offset,
-                                   keys,
-                                   valid_in_global_last_block,
-                                   storage.load_keys);
+        // No need to build the kernel with sleep on a device that does not require it
     }
-    else
+
+    template<
+         class KeyIterator,
+         class ValueIterator,
+         class FlagIterator,
+         class OutputKeyIterator,
+         class OutputValueIterator,
+         class InequalityOp,
+    class OffsetLookbackScanState,
+    class... UnaryPredicates>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+    partition(KeyIterator             keys_input,
+              ValueIterator           values_input,
+              FlagIterator            flags,
+              OutputKeyIterator       keys_output,
+              OutputValueIterator     values_output,
+              size_t*                 selected_count,
+              size_t*                 prev_selected_count,
+              size_t                  prev_processed,
+              const size_t            total_size,
+              InequalityOp            inequality_op,
+              OffsetLookbackScanState offset_scan_state,
+              const unsigned int      number_of_blocks,
+              storage_type&           storage,
+              UnaryPredicates...      predicates)
+        -> std::enable_if_t<is_lookback_kernel_runnable<OffsetLookbackScanState>()>
     {
-        block_load_key_type()
-            .load(
-                keys_input + block_offset,
-                keys,
-                storage.load_keys
-            );
-    }
-    ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-    // Load values before other blocks modify them.
-    partition_values_helper<items_per_thread,
-                            OnlySelected,
-                            block_size,
-                            block_load_value_type,
-                            ValueIterator,
-                            value_type>
-        values_helper;
-    values_helper.load(values_input + block_offset,
-                       valid_in_global_last_block,
-                       is_global_last_block,
-                       storage.load_values);
+        using key_type   = typename std::iterator_traits<KeyIterator>::value_type;
+        using value_type = typename std::iterator_traits<ValueIterator>::value_type;
+        // Offset prefix operation type
+        using offset_scan_prefix_op_type
+            = offset_lookback_scan_prefix_op<OffsetType, OffsetLookbackScanState>;
+        using is_selected_type
+            = std::conditional_t<sizeof...(UnaryPredicates) == 1,
+                                 bool[items_per_thread],
+                                 bool[sizeof...(UnaryPredicates)][items_per_thread]>;
 
-    // Load selection flags into is_selected, generate them using
-    // input value and selection predicate, or generate them using
-    // block_discontinuity primitive
-    const bool is_first_block = flat_block_id == 0 && prev_processed == 0;
-    partition_block_load_flags<SelectMethod,
-                               block_size,
-                               block_load_flag_type,
-                               block_discontinuity_key_type>(keys_input + block_offset - 1,
-                                                             flags + block_offset,
-                                                             keys,
-                                                             is_selected,
-                                                             predicates...,
-                                                             inequality_op,
-                                                             storage,
-                                                             is_first_block,
-                                                             flat_block_thread_id,
-                                                             is_global_last_block,
-                                                             valid_in_global_last_block);
+        size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
+        load_selected_count(prev_selected_count, prev_selected_count_values);
 
-    // Convert true/false is_selected flags to 0s and 1s
-    convert_selected_to_indices(output_indices, is_selected);
+        const auto         flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+        const auto         flat_block_id        = ::rocprim::detail::block_id<0>();
+        const auto         block_offset         = flat_block_id * items_per_block;
+        const unsigned int valid_in_global_last_block
+            = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
+        const bool is_last_launch
+            = total_size <= prev_processed + number_of_blocks * items_per_block;
+        const bool is_global_last_block = is_last_launch && flat_block_id == (number_of_blocks - 1);
 
-    // Number of selected values in previous blocks
-    offset_type selected_prefix{};
-    // Number of selected values in this block
-    offset_type selected_in_block{};
+        key_type         keys[items_per_thread];
+        is_selected_type is_selected;
+        OffsetType       output_indices[items_per_thread];
 
-    // Calculate number of selected values in block and their indices
-    if(flat_block_id == 0)
-    {
-        block_scan_offset_type()
-            .exclusive_scan(
-                output_indices,
-                output_indices,
-                offset_type{}, /** initial value */
-                selected_in_block,
-                storage.scan_offsets,
-                ::rocprim::plus<offset_type>()
-            );
-        if(flat_block_thread_id == 0)
+        // Load input keys into keys
+        if(is_global_last_block)
         {
-            offset_scan_state.set_complete(flat_block_id, selected_in_block);
+            block_load_key_type().load(keys_input + block_offset,
+                                       keys,
+                                       valid_in_global_last_block,
+                                       storage.load_keys);
+        }
+        else
+        {
+            block_load_key_type().load(keys_input + block_offset, keys, storage.load_keys);
         }
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+        // Load values before other blocks modify them.
+        partition_values_helper<items_per_thread,
+                                OnlySelected,
+                                block_size,
+                                block_load_value_type,
+                                ValueIterator,
+                                value_type>
+            values_helper;
+        values_helper.load(values_input + block_offset,
+                           valid_in_global_last_block,
+                           is_global_last_block,
+                           storage.load_values);
+
+        // Load selection flags into is_selected, generate them using
+        // input value and selection predicate, or generate them using
+        // block_discontinuity primitive
+        const bool is_first_block = flat_block_id == 0 && prev_processed == 0;
+        partition_block_load_flags<SelectMethod,
+                                   block_size,
+                                   block_load_flag_type,
+                                   block_discontinuity_key_type>(keys_input + block_offset - 1,
+                                                                 flags + block_offset,
+                                                                 keys,
+                                                                 is_selected,
+                                                                 predicates...,
+                                                                 inequality_op,
+                                                                 storage,
+                                                                 is_first_block,
+                                                                 flat_block_thread_id,
+                                                                 is_global_last_block,
+                                                                 valid_in_global_last_block);
+
+        // Convert true/false is_selected flags to 0s and 1s
+        convert_selected_to_indices(output_indices, is_selected);
+
+        // Number of selected values in previous blocks
+        OffsetType selected_prefix{};
+        // Number of selected values in this block
+        OffsetType selected_in_block{};
+
+        // Calculate number of selected values in block and their indices
+        if(flat_block_id == 0)
+        {
+            block_scan_offset_type().exclusive_scan(output_indices,
+                                                    output_indices,
+                                                    OffsetType{}, /** initial value */
+                                                    selected_in_block,
+                                                    storage.scan_offsets,
+                                                    ::rocprim::plus<OffsetType>());
+            if(flat_block_thread_id == 0)
+            {
+                offset_scan_state.set_complete(flat_block_id, selected_in_block);
+            }
+            ::rocprim::syncthreads(); // sync threads to reuse shared memory
+        }
+        else
+        {
+            ROCPRIM_SHARED_MEMORY
+            typename offset_scan_prefix_op_type::storage_type storage_prefix_op;
+            auto                                              prefix_op
+                = offset_scan_prefix_op_type(flat_block_id, offset_scan_state, storage_prefix_op);
+            block_scan_offset_type().exclusive_scan(output_indices,
+                                                    output_indices,
+                                                    storage.scan_offsets,
+                                                    prefix_op,
+                                                    ::rocprim::plus<OffsetType>());
+            ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+            selected_in_block = prefix_op.get_reduction();
+            selected_prefix   = prefix_op.get_prefix();
+        }
+
+        // Scatter selected and rejected values
+        partition_scatter<OnlySelected, block_size>(keys,
+                                                    is_selected,
+                                                    output_indices,
+                                                    keys_output,
+                                                    total_size,
+                                                    selected_prefix,
+                                                    selected_in_block,
+                                                    storage.exchange_keys,
+                                                    flat_block_id,
+                                                    flat_block_thread_id,
+                                                    is_global_last_block,
+                                                    valid_in_global_last_block,
+                                                    prev_selected_count_values,
+                                                    prev_processed);
+
+        values_helper.store(is_selected,
+                            output_indices,
+                            values_output,
+                            total_size,
+                            selected_prefix,
+                            selected_in_block,
+                            storage.exchange_values,
+                            flat_block_id,
+                            flat_block_thread_id,
+                            is_global_last_block,
+                            valid_in_global_last_block,
+                            prev_selected_count_values,
+                            prev_processed);
+
+        // Last block in grid stores number of selected values
+        const bool is_last_block = flat_block_id == (number_of_blocks - 1);
+        if(is_last_block && flat_block_thread_id == 0)
+        {
+            store_selected_count(selected_count,
+                                 prev_selected_count_values,
+                                 selected_prefix,
+                                 selected_in_block);
+        }
     }
-    else
-    {
-        ROCPRIM_SHARED_MEMORY typename offset_scan_prefix_op_type::storage_type storage_prefix_op;
-        auto prefix_op = offset_scan_prefix_op_type(
-            flat_block_id,
-            offset_scan_state,
-            storage_prefix_op
-        );
-        block_scan_offset_type()
-            .exclusive_scan(
-                output_indices,
-                output_indices,
-                storage.scan_offsets,
-                prefix_op,
-                ::rocprim::plus<offset_type>()
-            );
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
-
-        selected_in_block = prefix_op.get_reduction();
-        selected_prefix   = prefix_op.get_prefix();
-    }
-
-    // Scatter selected and rejected values
-    partition_scatter<OnlySelected, block_size>(keys,
-                                                is_selected,
-                                                output_indices,
-                                                keys_output,
-                                                total_size,
-                                                selected_prefix,
-                                                selected_in_block,
-                                                storage.exchange_keys,
-                                                flat_block_id,
-                                                flat_block_thread_id,
-                                                is_global_last_block,
-                                                valid_in_global_last_block,
-                                                prev_selected_count_values,
-                                                prev_processed);
-
-    values_helper.store(is_selected,
-                        output_indices,
-                        values_output,
-                        total_size,
-                        selected_prefix,
-                        selected_in_block,
-                        storage.exchange_values,
-                        flat_block_id,
-                        flat_block_thread_id,
-                        is_global_last_block,
-                        valid_in_global_last_block,
-                        prev_selected_count_values,
-                        prev_processed);
-
-    // Last block in grid stores number of selected values
-    const bool is_last_block = flat_block_id == (number_of_blocks - 1);
-    if(is_last_block && flat_block_thread_id == 0)
-    {
-        store_selected_count(selected_count,
-                             prev_selected_count_values,
-                             selected_prefix,
-                             selected_in_block);
-    }
-}
+};
 
 } // end of detail namespace
 

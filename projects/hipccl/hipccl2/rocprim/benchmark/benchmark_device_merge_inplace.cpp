@@ -23,18 +23,24 @@
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
-#include <rocprim/device/device_merge.hpp>
-#include <rocprim/device/device_merge_inplace.hpp>
+#include "../common/utils_data_generation.hpp"
 
 #include <benchmark/benchmark.h>
 
 #include <hip/driver_types.h>
 #include <hip/hip_runtime.h>
 
+#include <rocprim/device/device_merge_inplace.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
+
 #include <cstddef>
-#include <cstdio>
-#include <cstdlib>
+#include <random>
+#include <sstream>
+#include <stdint.h>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #ifndef DEFAULT_BYTES
@@ -51,13 +57,14 @@ struct random_monotonic_iterator
     using value_type      = T;
 
     // not all integral types are valid for int distribution
-    using dist_value_type = std::conditional_t<rocprim::is_integral<T>::value
-                                                   && !is_valid_for_int_distribution<T>::value,
-                                               int,
-                                               T>;
+    using dist_value_type
+        = std::conditional_t<rocprim::is_integral<T>::value
+                                 && !common::is_valid_for_int_distribution<T>::value,
+                             int,
+                             T>;
 
     using dist_type = std::conditional_t<rocprim::is_integral<T>::value,
-                                         uniform_int_distribution<dist_value_type>,
+                                         common::uniform_int_distribution<dist_value_type>,
                                          std::uniform_real_distribution<T>>;
 
     std::mt19937 engine{seed};

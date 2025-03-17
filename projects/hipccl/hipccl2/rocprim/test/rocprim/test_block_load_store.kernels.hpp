@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +23,17 @@
 #ifndef TEST_BLOCK_LOAD_STORE_KERNELS_HPP_
 #define TEST_BLOCK_LOAD_STORE_KERNELS_HPP_
 
-#include "rocprim/block/block_load.hpp"
-#include "rocprim/block/block_store.hpp"
+#include "../../common/utils_custom_type.hpp"
+
 #include "test_utils_types.hpp"
 
-#include <hip/hip_vector_types.h>
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/types.hpp>
 
-#include <gtest/gtest.h>
-
-#include <rocprim/rocprim.hpp>
-#include <type_traits>
+#include <cstddef>
+#include <stdint.h>
 
 using ClassParamsFirstPart = ::testing::Types<
     // block_load_direct
@@ -108,22 +109,22 @@ using ClassParamsFirstPart = ::testing::Types<
                  512U,
                  2>,
 
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_direct,
                  rocprim::block_store_method::block_store_direct,
                  64U,
                  1>,
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_direct,
                  rocprim::block_store_method::block_store_direct,
                  64U,
                  5>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_direct,
                  rocprim::block_store_method::block_store_direct,
                  256U,
                  1>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_direct,
                  rocprim::block_store_method::block_store_direct,
                  256U,
@@ -199,22 +200,22 @@ using ClassParamsSecondPart = ::testing::Types<
                  512U,
                  2>,
 
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_vectorize,
                  rocprim::block_store_method::block_store_vectorize,
                  64U,
                  1>,
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_vectorize,
                  rocprim::block_store_method::block_store_vectorize,
                  64U,
                  4>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_vectorize,
                  rocprim::block_store_method::block_store_vectorize,
                  256U,
                  1>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_vectorize,
                  rocprim::block_store_method::block_store_vectorize,
                  256U,
@@ -288,22 +289,22 @@ using ClassParamsSecondPart = ::testing::Types<
                  512U,
                  3>,
 
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_transpose,
                  rocprim::block_store_method::block_store_transpose,
                  64U,
                  1>,
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_transpose,
                  rocprim::block_store_method::block_store_transpose,
                  64U,
                  5>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_transpose,
                  rocprim::block_store_method::block_store_transpose,
                  256U,
                  1>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_transpose,
                  rocprim::block_store_method::block_store_transpose,
                  256U,
@@ -385,22 +386,22 @@ using ClassParamsThirdPart = ::testing::Types<
                  512U,
                  2>,
 
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_striped,
                  rocprim::block_store_method::block_store_striped,
                  64U,
                  1>,
-    class_params<test_utils::custom_test_type<int>,
+    class_params<common::custom_type<int, int, true>,
                  rocprim::block_load_method::block_load_striped,
                  rocprim::block_store_method::block_store_striped,
                  64U,
                  5>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_striped,
                  rocprim::block_store_method::block_store_striped,
                  256U,
                  1>,
-    class_params<test_utils::custom_test_type<double>,
+    class_params<common::custom_type<double, double, true>,
                  rocprim::block_load_method::block_load_striped,
                  rocprim::block_store_method::block_store_striped,
                  256U,

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
-#include "test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 // required rocprim headers
 #include <rocprim/intrinsics/thread.hpp>
@@ -111,7 +112,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
         }
 
         // Preparing device
-        test_utils::device_ptr<Type> device_output(block_size);
+        common::device_ptr<Type> device_output(block_size);
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -178,7 +179,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
         }
 
         // Preparing device
-        test_utils::device_ptr<Type> device_output(block_size);
+        common::device_ptr<Type> device_output(block_size);
         // Running kernel
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(block_id_kernel<block_size_x, block_size_y, block_size_z>),

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,8 @@
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
+#include "../common/utils_custom_type.hpp"
+
 // gbench
 #include <benchmark/benchmark.h>
 
@@ -49,9 +51,9 @@
 #include <type_traits>
 #include <vector>
 
-using custom_int2            = custom_type<int>;
-using custom_double2         = custom_type<double>;
-using custom_longlong_double = custom_type<long long, double>;
+using custom_int2            = common::custom_type<int>;
+using custom_double2         = common::custom_type<double>;
+using custom_longlong_double = common::custom_type<long long, double>;
 
 namespace
 {

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,22 +22,31 @@
 
 // required test headers
 #include "../common_test_header.hpp"
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+
+#include "../../common/utils.hpp"
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
+#include "bounds_checking_iterator.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
 
 // required rocprim headers
+#include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_merge.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
-
-#include <gtest/gtest.h>
-
-#include <hip/hip_runtime.h>
+#include <rocprim/types.hpp>
 
 #include <algorithm>
-#include <fstream>
+#include <cstddef>
 #include <numeric>
+#include <stdint.h>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 using DefaultConfig = rocprim::default_config;
@@ -69,8 +78,8 @@ public:
     static constexpr bool use_graphs = Params::use_graphs;
 };
 
-using custom_int2 = test_utils::custom_test_type<int>;
-using custom_double2 = test_utils::custom_test_type<double>;
+using custom_int2    = common::custom_type<int, int, true>;
+using custom_double2 = common::custom_type<double, double, true>;
 
 using RocprimDeviceMergeTestsParams = ::testing::Types<
     DeviceMergeParams<int, double>,
@@ -129,7 +138,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
     for(auto sizes : get_sizes())
     {
-        if ((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
+        if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && common::use_hmm())
         {
             // hipMallocManaged() currently doesnt support zero byte allocation
             continue;
@@ -151,8 +160,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
             // Generate data
-            std::vector<key_type> keys_input1 = test_utils::get_random_data<key_type>(size1, 0, size1, seed_value);
-            std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size2, 0, size2, seed_value);
+            std::vector<key_type> keys_input1
+                = test_utils::get_random_data_wrapped<key_type>(size1, 0, size1, seed_value);
+            std::vector<key_type> keys_input2
+                = test_utils::get_random_data_wrapped<key_type>(size2, 0, size2, seed_value);
             std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
             std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
             std::vector<key_type> keys_output(size1 + size2, (key_type)0);
@@ -170,9 +181,9 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
-            test_utils::device_ptr<key_type> d_keys_input1(keys_input1);
-            test_utils::device_ptr<key_type> d_keys_input2(keys_input2);
-            test_utils::device_ptr<key_type> d_keys_output(keys_output.size());
+            common::device_ptr<key_type> d_keys_input1(keys_input1);
+            common::device_ptr<key_type> d_keys_input2(keys_input2);
+            common::device_ptr<key_type> d_keys_output(keys_output.size());
 
             test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
                 d_keys_output.get(),
@@ -196,7 +207,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -263,7 +274,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
     for(auto sizes : get_sizes())
     {
-        if ((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && test_common_utils::use_hmm())
+        if((std::get<0>(sizes) == 0 || std::get<1>(sizes) == 0) && common::use_hmm())
         {
             // hipMallocManaged() currently doesnt support zero byte allocation
             continue;
@@ -285,8 +296,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
             // Generate data
-            std::vector<key_type> keys_input1 = test_utils::get_random_data<key_type>(size1, 0, size1, seed_value);
-            std::vector<key_type> keys_input2 = test_utils::get_random_data<key_type>(size2, 0, size2, seed_value);
+            std::vector<key_type> keys_input1
+                = test_utils::get_random_data_wrapped<key_type>(size1, 0, size1, seed_value);
+            std::vector<key_type> keys_input2
+                = test_utils::get_random_data_wrapped<key_type>(size2, 0, size2, seed_value);
             std::sort(keys_input1.begin(), keys_input1.end(), compare_op);
             std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
             std::vector<value_type> values_input1(size1);
@@ -321,12 +334,12 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
 
             test_utils::out_of_bounds_flag out_of_bounds;
 
-            test_utils::device_ptr<key_type>   d_keys_input1(keys_input1);
-            test_utils::device_ptr<key_type>   d_keys_input2(keys_input2);
-            test_utils::device_ptr<key_type>   d_keys_output(keys_output.size());
-            test_utils::device_ptr<value_type> d_values_input1(values_input1);
-            test_utils::device_ptr<value_type> d_values_input2(values_input2);
-            test_utils::device_ptr<value_type> d_values_output(values_output.size());
+            common::device_ptr<key_type>   d_keys_input1(keys_input1);
+            common::device_ptr<key_type>   d_keys_input2(keys_input2);
+            common::device_ptr<key_type>   d_keys_output(keys_output.size());
+            common::device_ptr<value_type> d_values_input1(values_input1);
+            common::device_ptr<value_type> d_values_input2(values_input2);
+            common::device_ptr<value_type> d_values_output(values_output.size());
 
             test_utils::bounds_checking_iterator<key_type> d_keys_checking_output(
                 d_keys_output.get(),
@@ -357,7 +370,7 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -433,8 +446,8 @@ void testMergeMismatchedIteratorTypes()
     std::vector<int> expected_keys_output(2 * keys_input1.size());
     std::iota(expected_keys_output.begin(), expected_keys_output.end(), 0);
 
-    test_utils::device_ptr<int> d_keys_input1(keys_input1);
-    test_utils::device_ptr<int> d_keys_output(expected_keys_output.size());
+    common::device_ptr<int> d_keys_input1(keys_input1);
+    common::device_ptr<int> d_keys_output(expected_keys_output.size());
 
     const auto d_keys_input2
         = rocprim::make_transform_iterator(rocprim::make_counting_iterator(0),
@@ -463,7 +476,7 @@ void testMergeMismatchedIteratorTypes()
 
     ASSERT_GT(temp_storage_size_bytes, 0);
 
-    test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
     test_utils::GraphHelper gHelper;
     if(UseGraphs)

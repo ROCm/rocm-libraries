@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "../rocprim/test_utils_device_ptr.hpp"
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
 
 #include <rocprim/detail/temp_storage.hpp>
+#include <rocprim/detail/various.hpp>
 
-#include "test_utils_types.hpp"
+#include <algorithm>
+#include <cstddef>
 
 namespace rpts = rocprim::detail::temp_storage;
 
@@ -59,7 +63,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, Basic)
     ASSERT_EQ(result, hipSuccess);
     ASSERT_EQ(storage_size, size);
 
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     result = partition(temporary_storage.get(), storage_size);
     ASSERT_EQ(result, hipSuccess);
@@ -87,7 +91,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, ZeroSizePartition)
     ASSERT_EQ(result, hipSuccess);
     ASSERT_NE(storage_size, 0);
 
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     result = partition(temporary_storage.get(), storage_size);
     ASSERT_EQ(result, hipSuccess);
@@ -111,7 +115,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, ZeroSizePartitionInsufficientAllo
     ASSERT_EQ(result, hipSuccess);
     ASSERT_NE(storage_size, 0);
 
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     storage_size = 0;
     result       = partition(temporary_storage.get(), storage_size);
@@ -124,7 +128,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, Sequence)
     constexpr rpts::layout layout_b   = {10, 8};
     constexpr rpts::layout layout_c   = {100, 32};
     constexpr size_t       elements_e = 17;
-    using type_e                      = test_utils::custom_test_type<double>;
+    using type_e                      = common::custom_type<double, double, true>;
 
     hipError_t result;
 
@@ -159,7 +163,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, Sequence)
     const size_t expected_size = expected_offset_e + elements_e * sizeof(type_e);
     ASSERT_EQ(storage_size, expected_size);
 
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     result = partition(temporary_storage.get(), storage_size);
     ASSERT_EQ(result, hipSuccess);
@@ -184,7 +188,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, MutuallyExclusive)
 
     constexpr rpts::layout layout_b   = {50, 1};
     constexpr size_t       elements_c = 17;
-    using type_c                      = test_utils::custom_test_type<double>;
+    using type_c                      = common::custom_type<double, double, true>;
 
     hipError_t result;
 
@@ -216,7 +220,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, MutuallyExclusive)
         = expected_offset_bc + std::max(elements_c * sizeof(type_c), layout_b.size);
     ASSERT_EQ(storage_size, expected_size);
 
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     result = partition(temporary_storage.get(), storage_size);
     ASSERT_EQ(result, hipSuccess);
@@ -254,7 +258,7 @@ TEST(RocprimTemporaryStoragePartitioningTests, InsufficientAllocation)
     ASSERT_EQ(storage_size, size * 2);
 
     storage_size -= 1;
-    test_utils::device_ptr<void> temporary_storage(storage_size);
+    common::device_ptr<void> temporary_storage(storage_size);
 
     result = partition(temporary_storage.get(), storage_size);
     ASSERT_EQ(result, hipErrorInvalidValue);

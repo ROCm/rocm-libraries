@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,11 @@
 
 #ifndef ROCPRIM_BENCHMARK_UTILS_HPP_
 #define ROCPRIM_BENCHMARK_UTILS_HPP_
+
+#include "../common/utils.hpp"
+#include "../common/utils_custom_type.hpp"
+#include "../common/utils_data_generation.hpp"
+#include "../common/utils_half.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -51,17 +56,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#define HIP_CHECK(condition)                                                                \
-    {                                                                                       \
-        hipError_t error = condition;                                                       \
-        if(error != hipSuccess)                                                             \
-        {                                                                                   \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " file: " << __FILE__ \
-                      << " line: " << __LINE__ << std::endl;                                \
-            exit(error);                                                                    \
-        }                                                                                   \
-    }
 
 #define TUNING_SHARED_MEMORY_MAX 65536u
 // Support half operators on host side
@@ -109,18 +103,6 @@ private:
     bool                        is_random;
 };
 
-ROCPRIM_HOST
-inline rocprim::native_half half_to_native(const rocprim::half& x)
-{
-    return *reinterpret_cast<const rocprim::native_half*>(&x);
-}
-
-ROCPRIM_HOST
-inline rocprim::half native_to_half(const rocprim::native_half& x)
-{
-    return *reinterpret_cast<const rocprim::half*>(&x);
-}
-
 struct half_less
 {
     ROCPRIM_HOST_DEVICE
@@ -130,7 +112,7 @@ struct half_less
 #if __HIP_DEVICE_COMPILE__
         return a < b;
 #else
-        return half_to_native(a) < half_to_native(b);
+        return common::half_to_native(a) < common::half_to_native(b);
 #endif
     }
 };
@@ -144,7 +126,7 @@ struct half_plus
 #if __HIP_DEVICE_COMPILE__
         return a + b;
 #else
-        return native_to_half(half_to_native(a) + half_to_native(b));
+        return common::native_to_half(common::half_to_native(a) + common::half_to_native(b));
 #endif
     }
 };
@@ -158,123 +140,10 @@ struct half_equal_to
 #if __HIP_DEVICE_COMPILE__
         return a == b;
 #else
-        return half_to_native(a) == half_to_native(b);
+        return common::half_to_native(a) == common::half_to_native(b);
 #endif
     }
 };
-
-// std::uniform_int_distribution is undefined for anything other than:
-// short, int, long, long long, rocprim::int128_t, unsigned short, unsigned int, unsigned long, unsigned long long, or rocprim::uint128_t
-template<typename T>
-struct is_valid_for_int_distribution
-    : std::integral_constant<
-          bool,
-          std::is_same<short, T>::value || std::is_same<unsigned short, T>::value
-              || std::is_same<int, T>::value || std::is_same<unsigned int, T>::value
-              || std::is_same<long, T>::value || std::is_same<unsigned long, T>::value
-              || std::is_same<long long, T>::value || std::is_same<unsigned long long, T>::value
-              || std::is_same<rocprim::int128_t, T>::value
-              || std::is_same<rocprim::uint128_t, T>::value>
-{};
-
-// uniform_int_distribution is defined for supporting rocprim::int128_t and rocprim::uint128_t
-template<typename IntType, typename Enable = void>
-class uniform_int_distribution
-{
-public:
-    typedef IntType result_type;
-
-    uniform_int_distribution() : uniform_int_distribution(0) {}
-
-    explicit uniform_int_distribution(IntType _a,
-                                      IntType _b = rocprim::numeric_limits<IntType>::max())
-        : lower_bound{_a}, upper_bound{_b}
-    {}
-
-    void reset() {}
-
-    result_type a() const
-    {
-        return lower_bound;
-    }
-
-    result_type b() const
-    {
-        return upper_bound;
-    }
-
-    result_type min() const
-    {
-        return a();
-    }
-
-    result_type max() const
-    {
-        return b();
-    }
-
-    template<typename Generator>
-    result_type operator()(Generator& urng)
-    {
-        rocprim::uint128_t range  = upper_bound - lower_bound + 1;
-        auto               offset = helper(urng, range);
-        return offset + lower_bound;
-    }
-
-    friend bool operator==(const uniform_int_distribution& d1, const uniform_int_distribution& d2)
-    {
-        return d1.lower_bound == d2.lower_bound && d1.upper_bound == d2.upper_bound;
-    }
-
-    friend bool operator!=(const uniform_int_distribution& d1, const uniform_int_distribution& d2)
-    {
-        return !(d1 == d2);
-    }
-
-    // third constructor, param(), operator<< and operator>> are not defined
-
-private:
-    // Java approach in the reference below.
-    // Returns an unbiased random number from urng downscaled to [0, range)
-    template<typename Generator>
-    static rocprim::uint128_t helper(Generator& urng, const rocprim::uint128_t& range)
-    {
-        // reference: Fast Random Integer Geeneration in an Interval
-        // ACM Transactions on Modeling and Computer Simulation 29 (1), 2019
-        // https://arxiv.org/abs/1805.10941
-        static std::uniform_int_distribution<uint64_t> dists[2];
-        auto random_number = rocprim::uint128_t{dists[0](urng)} << 64 | dists[1](urng);
-        if(!range)
-        {
-            return random_number;
-        }
-        auto result    = random_number % range;
-        auto threshold = rocprim::numeric_limits<rocprim::uint128_t>::max() - range + 1;
-        while(random_number - result > threshold)
-        {
-            random_number = rocprim::uint128_t{dists[0](urng)} << 64 | dists[1](urng);
-            result        = random_number % range;
-        }
-        return result;
-    }
-
-    IntType lower_bound;
-    IntType upper_bound;
-};
-
-template<typename IntType>
-class uniform_int_distribution<
-    IntType,
-    std::enable_if_t<(!(std::is_same<rocprim::int128_t, IntType>::value
-                        || std::is_same<rocprim::uint128_t, IntType>::value))>>
-    : public std::uniform_int_distribution<IntType>
-{
-public:
-    using std::uniform_int_distribution<IntType>::uniform_int_distribution;
-};
-
-template<typename Iterator>
-using it_value_t = typename std::iterator_traits<Iterator>::value_type;
 
 using engine_type = std::minstd_rand;
 
@@ -283,15 +152,16 @@ using engine_type = std::minstd_rand;
 template<typename OutputIter, typename U, typename V, typename Generator>
 inline auto generate_random_data_n(
     OutputIter it, size_t size, U min, V max, Generator& gen, size_t max_random_size = 1024 * 1024)
-    -> typename std::enable_if_t<rocprim::is_integral<it_value_t<OutputIter>>::value, OutputIter>
+    -> typename std::enable_if_t<rocprim::is_integral<common::it_value_t<OutputIter>>::value,
+                                 OutputIter>
 {
-    using T = it_value_t<OutputIter>;
+    using T = common::it_value_t<OutputIter>;
 
     using dis_type = typename std::conditional<
-        is_valid_for_int_distribution<T>::value,
+        common::is_valid_for_int_distribution<T>::value,
         T,
         typename std::conditional<std::is_signed<T>::value, int, unsigned int>::type>::type;
-    ::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
+    common::uniform_int_distribution<dis_type> distribution((T)min, (T)max);
     std::generate_n(it, std::min(size, max_random_size), [&]() { return distribution(gen); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
@@ -307,7 +177,7 @@ inline auto generate_random_data_n(OutputIterator it,
                                    V              max,
                                    Generator&     gen,
                                    size_t         max_random_size = 1024 * 1024)
-    -> std::enable_if_t<rocprim::is_floating_point<it_value_t<OutputIterator>>::value,
+    -> std::enable_if_t<rocprim::is_floating_point<common::it_value_t<OutputIterator>>::value,
                         OutputIterator>
 {
     using T = typename std::iterator_traits<OutputIterator>::value_type;
@@ -343,60 +213,6 @@ inline std::vector<T>
     return data;
 }
 
-template<typename T, typename U = T>
-struct custom_type
-{
-    using first_type  = T;
-    using second_type = U;
-
-    T x;
-    U y;
-
-    ROCPRIM_HOST_DEVICE inline custom_type(T xx = 0, U yy = 0) : x(xx), y(yy) {}
-
-    ROCPRIM_HOST_DEVICE inline ~custom_type() = default;
-
-    ROCPRIM_HOST_DEVICE
-    inline custom_type
-        operator+(const custom_type& rhs) const
-    {
-        return custom_type(x + rhs.x, y + rhs.y);
-    }
-
-    ROCPRIM_HOST_DEVICE
-    inline bool
-        operator<(const custom_type& rhs) const
-    {
-        // intentionally suboptimal choice for short-circuting,
-        // required to generate more performant device code
-        return ((x == rhs.x && y < rhs.y) || x < rhs.x);
-    }
-
-    ROCPRIM_HOST_DEVICE
-    inline bool
-        operator==(const custom_type& rhs) const
-    {
-        return x == rhs.x && y == rhs.y;
-    }
-
-    ROCPRIM_HOST_DEVICE
-    custom_type&
-        operator+=(const custom_type& rhs)
-    {
-        this->x += rhs.x;
-        this->y += rhs.y;
-        return *this;
-    }
-};
-
-template<typename>
-struct is_custom_type : std::false_type
-{};
-
-template<typename T, typename U>
-struct is_custom_type<custom_type<T, U>> : std::true_type
-{};
-
 template<typename T, typename U>
 struct is_comparable
 {
@@ -416,9 +232,9 @@ public:
 };
 
 template<typename T, typename U, typename V>
-struct is_comparable<custom_type<U, V>, T>
+struct is_comparable<common::custom_type<U, V>, T>
     : std::conditional_t<rocprim::is_arithmetic<T>::value
-                             || !std::is_same<T, custom_type<U, V>>::value,
+                             || !std::is_same<T, common::custom_type<U, V>>::value,
                          std::false_type,
                          std::true_type>
 {};
@@ -426,8 +242,9 @@ struct is_comparable<custom_type<U, V>, T>
 template<typename CustomType>
 struct custom_type_decomposer
 {
-    static_assert(is_custom_type<CustomType>::value,
-                  "custom_type_decomposer can only be used with instantiations of custom_type");
+    static_assert(
+        common::is_custom_type<CustomType>::value,
+        "custom_type_decomposer can only be used with instantiations of common::custom_type");
 
     using T = typename CustomType::first_type;
     using U = typename CustomType::second_type;
@@ -440,24 +257,11 @@ struct custom_type_decomposer
     }
 };
 
-template<typename T, typename enable = void>
-struct generate_limits;
-
-template<typename T>
-struct generate_limits<T, std::enable_if_t<rocprim::is_integral<T>::value>>
+namespace common
 {
-    static inline T min()
-    {
-        return rocprim::numeric_limits<T>::min();
-    }
-    static inline T max()
-    {
-        return rocprim::numeric_limits<T>::max();
-    }
-};
 
 template<typename T>
-struct generate_limits<T, std::enable_if_t<is_custom_type<T>::value>>
+struct generate_limits<T, std::enable_if_t<common::is_custom_type<T>::value>>
 {
     using F = typename T::first_type;
     using S = typename T::second_type;
@@ -471,29 +275,19 @@ struct generate_limits<T, std::enable_if_t<is_custom_type<T>::value>>
     }
 };
 
-template<typename T>
-struct generate_limits<T, std::enable_if_t<rocprim::is_floating_point<T>::value>>
-{
-    static inline T min()
-    {
-        return T(-1000);
-    }
-    static inline T max()
-    {
-        return T(1000);
-    }
-};
+} // namespace common
 
 template<typename OutputIterator, typename Generator>
-inline auto generate_random_data_n(OutputIterator             it,
-                                   size_t                     size,
-                                   it_value_t<OutputIterator> min,
-                                   it_value_t<OutputIterator> max,
-                                   Generator&                 gen,
-                                   size_t                     max_random_size = 1024 * 1024)
-    -> std::enable_if_t<is_custom_type<it_value_t<OutputIterator>>::value, OutputIterator>
+inline auto generate_random_data_n(OutputIterator                     it,
+                                   size_t                             size,
+                                   common::it_value_t<OutputIterator> min,
+                                   common::it_value_t<OutputIterator> max,
+                                   Generator&                         gen,
+                                   size_t                             max_random_size = 1024 * 1024)
+    -> std::enable_if_t<common::is_custom_type<common::it_value_t<OutputIterator>>::value,
+                        OutputIterator>
 {
-    using T = it_value_t<OutputIterator>;
+    using T = common::it_value_t<OutputIterator>;
 
     using first_type  = typename T::first_type;
     using second_type = typename T::second_type;
@@ -511,17 +305,17 @@ inline auto generate_random_data_n(OutputIterator             it,
 }
 
 template<typename OutputIterator, typename Generator>
-inline auto generate_random_data_n(OutputIterator             it,
-                                   size_t                     size,
-                                   it_value_t<OutputIterator> min,
-                                   it_value_t<OutputIterator> max,
-                                   Generator&                 gen,
-                                   size_t                     max_random_size = 1024 * 1024)
-    -> std::enable_if_t<!is_custom_type<it_value_t<OutputIterator>>::value
+inline auto generate_random_data_n(OutputIterator                     it,
+                                   size_t                             size,
+                                   common::it_value_t<OutputIterator> min,
+                                   common::it_value_t<OutputIterator> max,
+                                   Generator&                         gen,
+                                   size_t                             max_random_size = 1024 * 1024)
+    -> std::enable_if_t<!common::is_custom_type<common::it_value_t<OutputIterator>>::value
                             && !std::is_same<decltype(max.x), void>::value,
                         OutputIterator>
 {
-    using T = it_value_t<OutputIterator>;
+    using T = common::it_value_t<OutputIterator>;
 
     using field_type = decltype(max.x);
     std::vector<field_type> field_data(size);
@@ -591,7 +385,7 @@ auto limit_cast(U value) -> T
 // This overload below is selected for non-standard float types, e.g. half, which cannot be compared with the limit types.
 template<typename T, typename U, typename V>
 inline auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<!is_custom_type<T>::value
+    -> std::enable_if_t<!common::is_custom_type<T>::value
                             && (!is_comparable<T, U>::value || !is_comparable<T, V>::value),
                         std::pair<T, T>>
 {
@@ -600,7 +394,8 @@ inline auto limit_random_range(U range_start, V range_end)
 
 template<typename T, typename U, typename V>
 auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<(is_custom_type<T>::value && is_comparable<typename T::first_type, U>::value
+    -> std::enable_if_t<(common::is_custom_type<T>::value
+                         && is_comparable<typename T::first_type, U>::value
                          && is_comparable<typename T::second_type, U>::value
                          && is_comparable<typename T::first_type, V>::value
                          && is_comparable<typename T::second_type, V>::value
@@ -620,7 +415,7 @@ auto limit_random_range(U range_start, V range_end)
 
 template<typename T, typename U, typename V>
 inline auto limit_random_range(U range_start, V range_end)
-    -> std::enable_if_t<!is_custom_type<T>::value && is_comparable<T, U>::value
+    -> std::enable_if_t<!common::is_custom_type<T>::value && is_comparable<T, U>::value
                             && is_comparable<T, V>::value,
                         std::pair<T, T>>
 {
@@ -646,10 +441,6 @@ inline bool is_warp_size_supported(const unsigned int required_warp_size, const 
     return warp_size >= required_warp_size;
 }
 
-template<unsigned int LogicalWarpSize>
-__device__ constexpr bool device_test_enabled_for_warp_size_v
-    = ::rocprim::device_warp_size() >= LogicalWarpSize;
-
 /// \brief Get segments of uniform random size in [1, max_segment_length] with random key.
 template<typename T>
 std::vector<T>
@@ -657,15 +448,15 @@ std::vector<T>
 {
     static_assert(rocprim::is_arithmetic<T>::value, "Key type must be arithmetic");
 
-    engine_type                           prng(seed);
-    ::uniform_int_distribution<size_t>    segment_length_distribution(
+    engine_type                              prng(seed);
+    common::uniform_int_distribution<size_t> segment_length_distribution(
         std::numeric_limits<size_t>::min(),
         max_segment_length);
     // std::uniform_real_distribution cannot handle rocprim::half, use float instead
     using dis_type =
         typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
     using key_distribution_type = std::conditional_t<rocprim::is_integral<T>::value,
-                                                     ::uniform_int_distribution<dis_type>,
+                                                     common::uniform_int_distribution<dis_type>,
                                                      std::uniform_real_distribution<dis_type>>;
     key_distribution_type key_distribution(rocprim::numeric_limits<T>::max());
     std::vector<T>        keys(size);
@@ -687,8 +478,8 @@ template<typename T>
 std::vector<T>
     get_random_segments_iota(const size_t size, const size_t max_segment_length, unsigned int seed)
 {
-    engine_type                           prng(seed);
-    ::uniform_int_distribution<size_t>    segment_length_distribution(1, max_segment_length);
+    engine_type                              prng(seed);
+    common::uniform_int_distribution<size_t> segment_length_distribution(1, max_segment_length);
 
     std::vector<T> keys(size);
 
@@ -717,7 +508,7 @@ inline auto get_random_value(U min, V max, size_t seed_value)
 
 template<typename T>
 inline auto get_random_value(T min, T max, size_t seed_value)
-    -> std::enable_if_t<is_custom_type<T>::value, T>
+    -> std::enable_if_t<common::is_custom_type<T>::value, T>
 {
     typename T::first_type  result_first;
     typename T::second_type result_second;
@@ -979,7 +770,7 @@ public:
     {
         format     format = get_format();
         std::regex r(
-            "([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
+            "([A-z0-9]*):\\s*((?:common::custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
         // First we perform some checks
         bool checks[4] = {false};
         for(std::sregex_iterator i = std::sregex_iterator(string.begin(), string.end(), r);
@@ -1122,49 +913,59 @@ inline const char* Traits<double>::name()
     return "double";
 }
 template<>
-inline const char* Traits<custom_type<int, int>>::name()
+inline const char* Traits<common::custom_type<int, int>>::name()
 {
-    return "custom_type<int,int>";
+    return "common::custom_type<int,int>";
 }
 template<>
-inline const char* Traits<custom_type<float, float>>::name()
+inline const char* Traits<common::custom_type<float, float>>::name()
 {
-    return "custom_type<float,float>";
+    return "common::custom_type<float,float>";
 }
 template<>
-inline const char* Traits<custom_type<double, double>>::name()
+inline const char* Traits<common::custom_huge_type<1024, float, float>>::name()
 {
-    return "custom_type<double,double>";
+    return "common::custom_type<1024,float,float>";
 }
 template<>
-inline const char* Traits<custom_type<int, double>>::name()
+inline const char* Traits<common::custom_huge_type<2048, float, float>>::name()
 {
-    return "custom_type<int,double>";
+    return "common::custom_type<2048,float,float>";
 }
 template<>
-inline const char* Traits<custom_type<char, double>>::name()
+inline const char* Traits<common::custom_type<double, double>>::name()
 {
-    return "custom_type<char,double>";
+    return "common::custom_type<double,double>";
 }
 template<>
-inline const char* Traits<custom_type<char, short>>::name()
+inline const char* Traits<common::custom_type<int, double>>::name()
 {
-    return "custom_type<char,short>";
+    return "common::custom_type<int,double>";
 }
 template<>
-inline const char* Traits<custom_type<long, double>>::name()
+inline const char* Traits<common::custom_type<char, double>>::name()
 {
-    return "custom_type<long,double>";
+    return "common::custom_type<char,double>";
 }
 template<>
-inline const char* Traits<custom_type<long long, double>>::name()
+inline const char* Traits<common::custom_type<char, short>>::name()
 {
-    return "custom_type<int64_t,double>";
+    return "common::custom_type<char,short>";
 }
 template<>
-inline const char* Traits<custom_type<float, int16_t>>::name()
+inline const char* Traits<common::custom_type<long, double>>::name()
 {
-    return "custom_type<float,int16_t>";
+    return "common::custom_type<long,double>";
+}
+template<>
+inline const char* Traits<common::custom_type<long long, double>>::name()
+{
+    return "common::custom_type<int64_t,double>";
+}
+template<>
+inline const char* Traits<common::custom_type<float, int16_t>>::name()
+{
+    return "common::custom_type<float,int16_t>";
 }
 template<>
 inline const char* Traits<rocprim::empty_type>::name()

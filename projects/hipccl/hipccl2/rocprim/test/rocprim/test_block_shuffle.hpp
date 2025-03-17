@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,18 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <vector>
 
 block_reduce_test_suite_type_def(suite_name, name_suffix)
 
@@ -42,11 +54,11 @@ typed_test_def(suite_name, name_suffix, BlockOffset)
                      << "with seed = " << seed_value << ", distance = " << distance);
         // Generate data
         std::vector<type> input_data
-            = test_utils::get_random_data<type>(size, -100, 100, seed_value);
+            = test_utils::get_random_data_wrapped<type>(size, -100, 100, seed_value);
 
         // Preparing device
-        test_utils::device_ptr<type> device_input(input_data);
-        test_utils::device_ptr<type> device_output(input_data.size());
+        common::device_ptr<type> device_input(input_data);
+        common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_offset_kernel<block_size, type>),
@@ -96,11 +108,11 @@ typed_test_def(suite_name, name_suffix, BlockRotate)
                      << "with seed = " << seed_value << ", distance = " << distance);
         // Generate data
         std::vector<type> input_data
-            = test_utils::get_random_data<type>(size, -100, 100, seed_value);
+            = test_utils::get_random_data_wrapped<type>(size, -100, 100, seed_value);
 
         // Preparing device
-        test_utils::device_ptr<type> device_input(input_data);
-        test_utils::device_ptr<type> device_output(input_data.size());
+        common::device_ptr<type> device_input(input_data);
+        common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_rotate_kernel<block_size, type>),
@@ -148,14 +160,17 @@ typed_test_def(suite_name, name_suffix, BlockUp)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
         // Generate data
         std::vector<type> input_data
-            = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);
+            = test_utils::get_random_data_wrapped<type>(ItemsPerThread * size,
+                                                        -100,
+                                                        100,
+                                                        seed_value);
 
         std::vector<type*>  arr_input(size);
         std::vector<type*> arr_output(size);
 
         // Preparing device
-        test_utils::device_ptr<type> device_input(input_data);
-        test_utils::device_ptr<type> device_output(input_data.size());
+        common::device_ptr<type> device_input(input_data);
+        common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_up_kernel<block_size, ItemsPerThread, type>),
@@ -207,14 +222,17 @@ typed_test_def(suite_name, name_suffix, BlockDown)
 
         // Generate data
         std::vector<type> input_data
-            = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);
+            = test_utils::get_random_data_wrapped<type>(ItemsPerThread * size,
+                                                        -100,
+                                                        100,
+                                                        seed_value);
 
         std::vector<type*>  arr_input(size);
         std::vector<type*> arr_output(size);
 
         // Preparing device
-        test_utils::device_ptr<type> device_input(input_data);
-        test_utils::device_ptr<type> device_output(input_data.size());
+        common::device_ptr<type> device_input(input_data);
+        common::device_ptr<type> device_output(input_data.size());
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(shuffle_down_kernel<block_size, ItemsPerThread, type>),

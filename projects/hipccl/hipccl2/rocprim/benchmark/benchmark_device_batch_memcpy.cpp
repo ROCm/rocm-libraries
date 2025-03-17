@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
+#include "../common/device_batch_memcpy.hpp"
+
 #include <benchmark/benchmark.h>
 #include <hip/hip_runtime.h>
 
@@ -34,6 +36,7 @@
 #include <rocprim/types.hpp>
 #ifdef BUILD_NAIVE_BENCHMARK
     #include <rocprim/block/block_load_func.hpp>
+    #include <rocprim/block/block_store_func.hpp>
     #include <rocprim/intrinsics/thread.hpp>
 #endif
 
@@ -49,100 +52,8 @@
 
 constexpr uint32_t warmup_size   = 5;
 constexpr int32_t  max_size      = 1024 * 1024;
-constexpr int32_t  wlev_min_size = rocprim::batch_memcpy_config<>::wlev_size_threshold;
-constexpr int32_t  blev_min_size = rocprim::batch_memcpy_config<>::blev_size_threshold;
-
-// Used for generating offsets. We generate a permutation map and then derive
-// offsets via a sum scan over the sizes in the order of the permutation. This
-// allows us to keep the order of buffers we pass to batch_memcpy, but still
-// have source and destinations mappings not be the identity function:
-//
-//  batch_memcpy(
-//    [&a0 , &b0 , &c0 , &d0 ], // from (note the order is still just a, b, c, d!)
-//    [&a0', &b0', &c0', &d0'], // to   (order is the same as above too!)
-//    [3   , 2   , 1   , 2   ]) // size
-//
-// ┌───┬───┬───┬───┬───┬───┬───┬───┐
-// │b0 │b1 │a0 │a1 │a2 │d0 │d1 │c0 │ buffer x contains buffers a, b, c, d
-// └───┴───┴───┴───┴───┴───┴───┴───┘ note that the order of buffers is shuffled!
-//  ───┬─── ─────┬───── ───┬─── ───
-//     └─────────┼─────────┼───┐
-//           ┌───┘     ┌───┘   │ what batch_memcpy does
-//           ▼         ▼       ▼
-//  ─── ─────────── ─────── ───────
-// ┌───┬───┬───┬───┬───┬───┬───┬───┐
-// │c0'│a0'│a1'│a2'│d0'│d1'│b0'│b1'│ buffer y contains buffers a', b', c', d'
-// └───┴───┴───┴───┴───┴───┴───┴───┘
-template<typename T, typename S, typename RandomGenerator>
-std::vector<T> shuffled_exclusive_scan(const std::vector<S>& input, RandomGenerator& rng)
-{
-    const auto n = input.size();
-    assert(n > 0);
-
-    std::vector<T> result(n);
-    std::vector<T> permute(n);
-
-    std::iota(permute.begin(), permute.end(), 0);
-    std::shuffle(permute.begin(), permute.end(), rng);
-
-    for(T i = 0, sum = 0; i < n; ++i)
-    {
-        result[permute[i]] = sum;
-        sum += input[permute[i]];
-    }
-
-    return result;
-}
 
 using offset_type = size_t;
-
-template<bool IsMemCpy,
-         typename ContainerMemCpy,
-         typename ContainerCopy,
-         typename std::enable_if<IsMemCpy, int>::type = 0>
-void init_input(ContainerMemCpy& h_input_for_memcpy,
-                ContainerCopy& /*h_input_for_copy*/,
-                std::mt19937_64& rng,
-                offset_type      total_num_bytes)
-{
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
-
-    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
-    h_input_for_memcpy    = std::vector<unsigned char>(num_ints * sizeof(uint64_t));
-
-    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
-    // uint64_t objects alive yet in the storage.
-    std::for_each(
-        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data()),
-        reinterpret_cast<uint64_t*>(h_input_for_memcpy.data() + num_ints * sizeof(uint64_t)),
-        [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
-}
-
-template<bool IsMemCpy,
-         typename ContainerMemCpy,
-         typename ContainerCopy,
-         typename byte_offset_type,
-         typename std::enable_if<!IsMemCpy, int>::type = 0>
-void init_input(ContainerMemCpy& /*h_input_for_memcpy*/,
-                ContainerCopy&   h_input_for_copy,
-                std::mt19937_64& rng,
-                byte_offset_type total_num_bytes)
-{
-    using value_type = typename ContainerCopy::value_type;
-
-    std::independent_bits_engine<std::mt19937_64, 64, uint64_t> bits_engine{rng};
-
-    const size_t num_ints = rocprim::detail::ceiling_div(total_num_bytes, sizeof(uint64_t));
-    const size_t num_of_elements
-        = rocprim::detail::ceiling_div(num_ints * sizeof(uint64_t), sizeof(value_type));
-    h_input_for_copy = std::vector<value_type>(num_of_elements);
-
-    // generate_n for uninitialized memory, pragmatically use placement-new, since there are no
-    // uint64_t objects alive yet in the storage.
-    std::for_each(reinterpret_cast<uint64_t*>(h_input_for_copy.data()),
-                  reinterpret_cast<uint64_t*>(h_input_for_copy.data()) + num_ints,
-                  [&bits_engine](uint64_t& elem) { ::new(&elem) uint64_t{bits_engine()}; });
-}
 
 template<bool IsMemCpy,
          typename InputBufferItType,
@@ -239,7 +150,8 @@ struct BatchMemcpyData
 };
 
 template<typename ValueType, typename BufferSizeType, bool IsMemCpy>
-BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed,
+BatchMemcpyData<ValueType, BufferSizeType> prepare_data(hipStream_t         stream,
+                                                        const managed_seed& seed,
                                                         const int32_t       num_tlev_buffers = 1024,
                                                         const int32_t       num_wlev_buffers = 1024,
                                                         const int32_t       num_blev_buffers = 1024)
@@ -247,12 +159,27 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed
     const bool shuffle_buffers = false;
 
     BatchMemcpyData<ValueType, BufferSizeType> result;
+
+    using config
+        = rocprim::detail::wrapped_batch_memcpy_config<rocprim::default_config, ValueType, true>;
+
+    rocprim::detail::target_arch target_arch;
+    hipError_t                   success = rocprim::detail::host_target_arch(stream, target_arch);
+    if(success != hipSuccess)
+    {
+        return result;
+    }
+
+    const rocprim::detail::batch_memcpy_config_params params
+        = rocprim::detail::dispatch_target_arch<config>(target_arch);
+
+    const int32_t wlev_min_size = params.wlev_size_threshold;
+    const int32_t blev_min_size = params.blev_size_threshold;
+
     const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
 
-    constexpr int32_t wlev_min_elems
-        = rocprim::detail::ceiling_div(wlev_min_size, sizeof(ValueType));
-    constexpr int32_t blev_min_elems
-        = rocprim::detail::ceiling_div(blev_min_size, sizeof(ValueType));
+    const int32_t wlev_min_elems = rocprim::detail::ceiling_div(wlev_min_size, sizeof(ValueType));
+    const int32_t blev_min_elems = rocprim::detail::ceiling_div(blev_min_size, sizeof(ValueType));
     constexpr int32_t max_elems = max_size / sizeof(ValueType);
 
     // Generate data
@@ -282,10 +209,10 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed
 
     std::vector<unsigned char> h_input_for_memcpy;
     std::vector<ValueType>     h_input_for_copy;
-    init_input<IsMemCpy>(h_input_for_memcpy,
-                         h_input_for_copy,
-                         rng,
-                         result.total_num_elements * sizeof(ValueType));
+    common::init_input<IsMemCpy>(h_input_for_memcpy,
+                                 h_input_for_copy,
+                                 rng,
+                                 result.total_num_elements * sizeof(ValueType));
 
     HIP_CHECK(hipMalloc(&result.d_input, result.total_num_bytes()));
     HIP_CHECK(hipMalloc(&result.d_output, result.total_num_bytes()));
@@ -300,8 +227,8 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(const managed_seed& seed
 
     if(shuffle_buffers)
     {
-        src_offsets = shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
-        dst_offsets = shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
+        src_offsets = common::shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
+        dst_offsets = common::shuffled_exclusive_scan<offset_type>(h_buffer_num_elements, rng);
     }
     else
     {
@@ -386,7 +313,8 @@ void run_benchmark(benchmark::State&   state,
     void* d_temp_storage = nullptr;
     HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
 
-    data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(seed,
+    data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(stream,
+                                                             seed,
                                                              num_tlev_buffers,
                                                              num_wlev_buffers,
                                                              num_blev_buffers);
@@ -488,7 +416,8 @@ void run_naive_benchmark(benchmark::State&   state,
 {
     const size_t num_buffers = num_tlev_buffers + num_wlev_buffers + num_blev_buffers;
 
-    const auto data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(seed,
+    const auto data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(stream,
+                                                                        seed,
                                                                         num_tlev_buffers,
                                                                         num_wlev_buffers,
                                                                         num_blev_buffers);

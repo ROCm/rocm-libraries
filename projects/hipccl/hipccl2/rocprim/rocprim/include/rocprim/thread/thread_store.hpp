@@ -34,6 +34,9 @@
 #include "../detail/various.hpp"
 #include "thread_copy.hpp"
 
+#include <stdint.h>
+#include <type_traits>
+
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \defgroup thread_store Thread Store Functions
@@ -45,13 +48,14 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief These enum values are used to specify caching behaviour on store
 enum cache_store_modifier
 {
-    store_default, ///< Default (no modifier)
-    store_wb, ///< Cache write-back all coherent levels
-    store_cg, ///< Cache at global level
-    store_nontemporal, ///< Cache streaming (likely not to be accessed again after storing)
-    store_wt, ///< Cache write-through (to system memory)
-    store_volatile, ///< Volatile (any memory space)
-    store_cs = store_nontemporal ///< Alias for store_nontemporal (will be deprecated in 7.0)
+    store_default     = 0, ///< Default (no modifier)
+    store_wb          = 1, ///< Cache write-back all coherent levels
+    store_cg          = 2, ///< Cache at global level
+    store_nontemporal = 3, ///< Cache streaming (likely not to be accessed again after storing)
+    store_wt          = 4, ///< Cache write-through (to system memory)
+    store_volatile    = 5, ///< Volatile (any memory space)
+    store_cs    = store_nontemporal, ///< Alias for store_nontemporal (will be deprecated in 7.0)
+    store_count = 7
 };
 
 /// @}

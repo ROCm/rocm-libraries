@@ -41,6 +41,8 @@ and performs well across a variety of input types and sizes. More specifically:
 - Tests and benchmarks must be instantiated with all supported data types.
   - If the algorithm uses multiple data types (for instance, if it uses different types for input and output), a selected and representative few combinations should be tested instead of the full combination matrix.
 
+Any utility needed by the tests **and** benchmarks must be added to the appropriate header within the `common` folder. Non-common utilities may be hosted in the corresponding headers from the `test` or `benchmark` folders. For a more detailed description of the cases to be considered for adding new utilities, please check [common](/common/README.md).
+
 We also employ automated testing and benchmarking via checks that are run when a pull request is created.
 These checks:
 - test all algorithms for correctness across a variety of input configurations (eg. types, sizes, etc.)

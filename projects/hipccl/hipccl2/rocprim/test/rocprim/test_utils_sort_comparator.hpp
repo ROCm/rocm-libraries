@@ -23,19 +23,26 @@
 #ifndef TEST_UTILS_SORT_COMPARATOR_HPP_
 #define TEST_UTILS_SORT_COMPARATOR_HPP_
 
-#include <rocprim/type_traits.hpp>
+#include "../../common/utils_custom_type.hpp"
 
-#include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
-#include "test_utils_half.hpp"
 
-#include <cstring>
+#include <rocprim/config.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
+#include <rocprim/types/tuple.hpp>
+
+#include <cstddef>
 #include <type_traits>
+#include <utility>
 
 namespace test_utils
 {
+
 namespace detail
 {
 
@@ -127,10 +134,10 @@ auto to_bits(const Key key) -> typename rocprim::get_unsigned_bits_type<Key>::un
 template<unsigned int StartBit,
          unsigned int EndBit,
          class Key,
-         std::enable_if_t<is_custom_test_type<Key>::value
+         std::enable_if_t<common::is_custom_type<Key>::value
                               // custom_float_type is used in testing a hacky way of
                               // radix sorting custom types. A part of this workaround
-                              // is to specialize rocprim::is_custom_test_type<custom_float_type>
+                              // is to specialize common::is_custom_type<custom_float_type>
                               // that we must counter here.
                               && !std::is_same<Key, custom_float_type>::value
                               && !std::is_same<Key, custom_float_traits_type>::value,
@@ -213,8 +220,9 @@ struct key_value_comparator
 template<class CustomTestType>
 struct custom_test_type_decomposer
 {
-    static_assert(is_custom_test_type<CustomTestType>::value,
-                  "custom_test_type_decomposer can only be used with custom_test_type<T>");
+    static_assert(
+        common::is_custom_type<CustomTestType>::value,
+        "custom_test_type_decomposer can only be used with common::custom_type<T, T, true>");
     using inner_t = typename inner_type<CustomTestType>::type;
 
     __host__ __device__
@@ -231,9 +239,9 @@ struct select_decomposer
 };
 
 template<class InnerType>
-struct select_decomposer<custom_test_type<InnerType>>
+struct select_decomposer<common::custom_type<InnerType, InnerType, true>>
 {
-    using type = custom_test_type_decomposer<custom_test_type<InnerType>>;
+    using type = custom_test_type_decomposer<common::custom_type<InnerType, InnerType, true>>;
 };
 
 template<class Key>

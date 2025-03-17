@@ -62,6 +62,10 @@
     END_ROCPRIM_INLINE_NAMESPACE \
     } /* namespace rocprim */
 
+#if __cplusplus == 201402L
+    #warning "rocPRIM C++14 will be deprecated in the next major release"
+#endif
+
 #if __cplusplus < 201402L
     #error "rocPRIM requires at least C++14"
 #endif

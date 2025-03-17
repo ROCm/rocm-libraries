@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -66,7 +66,8 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> input
+            = test_utils::get_random_data_wrapped<Type>(size, -100, 100, seed_value);
 
         // Calculate expected results on host
         std::vector<Type> expected(input.size(), (Type)0);
@@ -80,8 +81,8 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
         }
 
         // Preparing device
-        test_utils::device_ptr<Type> device_input(input);
-        test_utils::device_ptr<Type> device_output(size);
+        common::device_ptr<Type> device_input(input);
+        common::device_ptr<Type> device_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -144,7 +145,8 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> input
+            = test_utils::get_random_data_wrapped<Type>(size, -100, 100, seed_value);
         std::vector<Type> output(input.size(), (Type)0);
 
         // Calculate expected results on host
@@ -162,9 +164,9 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
         }
 
         // Preparing device
-        test_utils::device_ptr<Type> device_input(input);
+        common::device_ptr<Type> device_input(input);
         // Have to initialize output for unvalid data to make sure they are not changed
-        test_utils::device_ptr<Type> device_output(output);
+        common::device_ptr<Type> device_output(output);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_kernel<Type,
@@ -231,7 +233,8 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
+        std::vector<Type> input
+            = test_utils::get_random_data_wrapped<Type>(size, -100, 100, seed_value);
 
         // Calculate expected results on host
         std::vector<Type> expected(input.size(), _default);
@@ -248,8 +251,8 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
         }
 
         // Preparing device
-        test_utils::device_ptr<Type> device_input(input);
-        test_utils::device_ptr<Type> device_output(size);
+        common::device_ptr<Type> device_input(input);
+        common::device_ptr<Type> device_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(load_store_valid_default_kernel<Type,

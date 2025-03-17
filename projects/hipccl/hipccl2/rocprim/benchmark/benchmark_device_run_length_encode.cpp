@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_custom_type.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -56,8 +58,8 @@ void add_encode_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchma
                            const managed_seed&                           seed,
                            hipStream_t                                   stream)
 {
-    using custom_float2  = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
 
     // all tuned types
     CREATE_ENCODE_BENCHMARK(int8_t, MaxLength);

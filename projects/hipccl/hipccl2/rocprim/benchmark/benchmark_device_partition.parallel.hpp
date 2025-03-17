@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -143,10 +145,11 @@ struct device_partition_flag_benchmark : public config_autotune_interface
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
-        std::vector<DataType> input = get_random_data<DataType>(size,
-                                                                generate_limits<DataType>::min(),
-                                                                generate_limits<DataType>::max(),
-                                                                seed.get_0());
+        std::vector<DataType> input
+            = get_random_data<DataType>(size,
+                                        common::generate_limits<DataType>::min(),
+                                        common::generate_limits<DataType>::max(),
+                                        seed.get_0());
 
         std::vector<FlagType> flags_0;
         std::vector<FlagType> flags_1;
@@ -404,10 +407,11 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
-        std::vector<DataType> input = get_random_data<DataType>(size,
-                                                                generate_limits<DataType>::min(),
-                                                                generate_limits<DataType>::max(),
-                                                                seed.get_0());
+        std::vector<DataType> input
+            = get_random_data<DataType>(size,
+                                        common::generate_limits<DataType>::min(),
+                                        common::generate_limits<DataType>::max(),
+                                        seed.get_0());
 
         std::vector<FlagType> flags_0;
         std::vector<FlagType> flags_1;

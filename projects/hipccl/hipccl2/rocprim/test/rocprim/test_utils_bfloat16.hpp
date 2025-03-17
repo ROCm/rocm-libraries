@@ -1,4 +1,4 @@
-// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,10 +21,11 @@
 #ifndef ROCPRIM_TEST_UTILS_BFLOAT16_HPP
 #define ROCPRIM_TEST_UTILS_BFLOAT16_HPP
 
+#include <rocprim/config.hpp>
 #include <rocprim/types.hpp>
 
-namespace test_utils {
-using bfloat16 = rocprim::bfloat16;
+namespace test_utils
+{
 
 // Support bfloat16 operators on host side
 ROCPRIM_HOST inline
@@ -38,6 +39,7 @@ ROCPRIM_HOST inline
 {
     return rocprim::bfloat16(x);
 }
-}
+
+} // namespace test_utils
 
 #endif //ROCPRIM_TEST_UTILS_BFLOAT16_HPP

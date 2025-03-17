@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,9 @@
 #include <chrono>
 #include <thread>
 
-#include "../rocprim/test_utils_device_ptr.hpp"
 #include "common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 // required rocprim headers
 #include <rocprim/intrinsics/atomic.hpp>
 
@@ -50,7 +51,7 @@ void test_kernel(unsigned int* flags)
 __host__
 bool test_func(int block_count, int thread_count)
 {
-    test_utils::device_ptr<unsigned int> d_flags(block_count);
+    common::device_ptr<unsigned int> d_flags(block_count);
 
     test_kernel<<<block_count, thread_count>>>(d_flags.get());
 

@@ -22,8 +22,10 @@
 #include "rocprim/types.hpp"
 
 #include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+
 #include "test_utils.hpp"
-#include "test_utils_device_ptr.hpp"
 
 #include <cstdint>
 
@@ -118,9 +120,9 @@ void generic_atomic_test(F cbk)
     static constexpr uint32_t grid_size  = 1024;
     static constexpr uint32_t size       = block_size * grid_size;
 
-    test_utils::device_ptr<bool> d_error(1);
+    common::device_ptr<bool> d_error(1);
 
-    for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
@@ -137,7 +139,7 @@ void generic_atomic_test(F cbk)
         input[2] = 0;
 
         HIP_CHECK(hipMemset(d_error.get(), 0, sizeof(bool)));
-        test_utils::device_ptr<uint32_t> d_input(input);
+        common::device_ptr<uint32_t> d_input(input);
 
         cbk(block_size, grid_size, d_error.get(), d_input.get(), size);
         HIP_CHECK(hipGetLastError());
@@ -150,7 +152,7 @@ void generic_atomic_test(F cbk)
 
 TEST(RocprimAtomicTests, Global128Bits)
 {
-    test_utils::device_ptr<rocprim::uint128_t> d_ptr(1);
+    common::device_ptr<rocprim::uint128_t> d_ptr(1);
     generic_atomic_test(
         [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
         {
@@ -168,7 +170,7 @@ TEST(RocprimAtomicTests, Shared128Bits)
 
 TEST(RocprimAtomicTests, Flat128Bits)
 {
-    test_utils::device_ptr<rocprim::uint128_t> d_ptr(1);
+    common::device_ptr<rocprim::uint128_t> d_ptr(1);
     generic_atomic_test(
         [&](auto block_size, auto grid_size, auto* d_error, auto* d_input, auto size)
         {

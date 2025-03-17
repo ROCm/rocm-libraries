@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,23 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <rocprim/config.hpp>
+#include <rocprim/detail/various.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/functional.hpp>
+
+#include <cstddef>
+#include <vector>
 
 test_suite_type_def(suite_name, name_suffix)
 
@@ -77,7 +94,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output(input.size() / logical_warp_size, T(0));
 
         // Calculate expected results on host
@@ -93,8 +110,8 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
             expected[i] = static_cast<T>(value);
         }
 
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -183,7 +200,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output(input.size(), T(0));
 
         // Calculate expected results on host
@@ -203,8 +220,8 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
             }
         }
 
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -294,7 +311,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output(input.size() / logical_warp_size, T(0));
 
         // Calculate expected results on host
@@ -310,8 +327,8 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
             expected[i] = static_cast<T>(value);
         }
 
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -404,7 +421,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output(input.size(), T(0));
 
         // Calculate expected results on host
@@ -424,8 +441,8 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
             }
         }
 
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -471,7 +488,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
     HIP_CHECK(hipSetDevice(device_id));
 
     using base_type = typename TestFixture::params::type;
-    using T = test_utils::custom_test_type<base_type>;
+    using T         = common::custom_type<base_type, base_type, true>;
     using acc_type  = typename test_utils::select_plus_operator_host<base_type>::acc_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
@@ -517,8 +534,10 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
         // Generate data
         std::vector<T> input(size);
         {
-            auto random_values =
-                test_utils::get_random_data<base_type>(2 * input.size(), 2, 50, seed_value);
+            auto random_values = test_utils::get_random_data_wrapped<base_type>(2 * input.size(),
+                                                                                2,
+                                                                                50,
+                                                                                seed_value);
             for(size_t i = 0; i < input.size(); i++)
             {
                 input[i].x = random_values[i];
@@ -531,17 +550,18 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
         std::vector<T> expected(output.size());
         for(size_t i = 0; i < output.size(); i++)
         {
-            test_utils::custom_test_type<acc_type> value{(acc_type)0, (acc_type)0};
+            common::custom_type<acc_type, acc_type, true> value{(acc_type)0, (acc_type)0};
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = value + static_cast<test_utils::custom_test_type<acc_type>>(input[idx]);
+                value    = value
+                        + static_cast<common::custom_type<acc_type, acc_type, true>>(input[idx]);
             }
             expected[i] = static_cast<T>(value);
         }
 
-        test_utils::device_ptr<T> device_input(input);
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_input(input);
+        common::device_ptr<T> device_output(output.size());
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -634,7 +654,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 10, seed_value);
         std::vector<flag_type> flags = test_utils::get_random_data01<flag_type>(size, 0.25f, seed_value);
         for(size_t i = 0; i < flags.size(); i+= logical_warp_size)
         {
@@ -642,9 +662,9 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
         }
         std::vector<T> output(input.size());
 
-        test_utils::device_ptr<T>         device_input(input);
-        test_utils::device_ptr<flag_type> device_flags(flags);
-        test_utils::device_ptr<T>         device_output(output.size());
+        common::device_ptr<T>         device_input(input);
+        common::device_ptr<flag_type> device_flags(flags);
+        common::device_ptr<T>         device_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
@@ -774,7 +794,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 10, seed_value);
         std::vector<flag_type> flags = test_utils::get_random_data01<flag_type>(size, 0.25f, seed_value);
         for(size_t i = logical_warp_size - 1; i < flags.size(); i+= logical_warp_size)
         {
@@ -782,9 +802,9 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
         }
         std::vector<T> output(input.size());
 
-        test_utils::device_ptr<T>         device_input(input);
-        test_utils::device_ptr<flag_type> device_flags(flags);
-        test_utils::device_ptr<T>         device_output(output.size());
+        common::device_ptr<T>         device_input(input);
+        common::device_ptr<flag_type> device_flags(flags);
+        common::device_ptr<T>         device_output(output.size());
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
