@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,10 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include "../common/utils_custom_type.hpp"
+#endif
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
@@ -159,8 +163,9 @@ int main(int argc, char* argv[])
                                                         seed,
                                                         stream);
 #else
-    using custom_double2    = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
+    using custom_double2    = common::custom_type<double, double>;
+    using custom_int_double = common::custom_type<int, double>;
+    using huge_float2       = common::custom_huge_type<1024, float, float>;
 
     BENCHMARK_SELECT_FLAG_TYPE(int, unsigned char);
     BENCHMARK_SELECT_FLAG_TYPE(float, unsigned char);
@@ -171,6 +176,7 @@ int main(int argc, char* argv[])
     BENCHMARK_SELECT_FLAG_TYPE(custom_double2, unsigned char);
     BENCHMARK_SELECT_FLAG_TYPE(rocprim::int128_t, unsigned char);
     BENCHMARK_SELECT_FLAG_TYPE(rocprim::uint128_t, unsigned char);
+    BENCHMARK_SELECT_FLAG_TYPE(huge_float2, unsigned char);
 
     BENCHMARK_SELECT_PREDICATE_TYPE(int);
     BENCHMARK_SELECT_PREDICATE_TYPE(float);
@@ -181,6 +187,7 @@ int main(int argc, char* argv[])
     BENCHMARK_SELECT_PREDICATE_TYPE(custom_int_double);
     BENCHMARK_SELECT_PREDICATE_TYPE(rocprim::int128_t);
     BENCHMARK_SELECT_PREDICATE_TYPE(rocprim::uint128_t);
+    BENCHMARK_SELECT_PREDICATE_TYPE(huge_float2);
 
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(int, unsigned char);
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(float, unsigned char);
@@ -191,6 +198,7 @@ int main(int argc, char* argv[])
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(custom_double2, unsigned char);
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(rocprim::int128_t, unsigned char);
     BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(rocprim::uint128_t, unsigned char);
+    BENCHMARK_SELECT_PREDICATED_FLAG_TYPE(huge_float2, unsigned char);
 
     BENCHMARK_UNIQUE_TYPE(int);
     BENCHMARK_UNIQUE_TYPE(float);
@@ -201,6 +209,7 @@ int main(int argc, char* argv[])
     BENCHMARK_UNIQUE_TYPE(custom_int_double);
     BENCHMARK_UNIQUE_TYPE(rocprim::int128_t);
     BENCHMARK_UNIQUE_TYPE(rocprim::uint128_t);
+    BENCHMARK_UNIQUE_TYPE(huge_float2);
 
     BENCHMARK_UNIQUE_BY_KEY_TYPE(int, int);
     BENCHMARK_UNIQUE_BY_KEY_TYPE(float, double);
@@ -211,6 +220,7 @@ int main(int argc, char* argv[])
     BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_int_double, custom_int_double);
     BENCHMARK_UNIQUE_BY_KEY_TYPE(rocprim::int128_t, rocprim::int128_t);
     BENCHMARK_UNIQUE_BY_KEY_TYPE(rocprim::uint128_t, rocprim::int128_t);
+    BENCHMARK_UNIQUE_BY_KEY_TYPE(huge_float2, huge_float2);
 #endif
 
     // Use manual timing

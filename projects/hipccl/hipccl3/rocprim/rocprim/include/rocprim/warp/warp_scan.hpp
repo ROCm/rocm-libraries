@@ -849,7 +849,9 @@ public:
     template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto broadcast(T input, const unsigned int src_lane, storage_type& storage) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), T>::type
+        typename std::enable_if<(FunctionWarpSize <= device_warp_size()
+                                 && detail::is_power_of_two(FunctionWarpSize)),
+                                T>::type
     {
         return base_type::broadcast(input, src_lane, storage);
     }
@@ -865,6 +867,14 @@ public:
                                  "size. Aborting warp sort.");
         return T();
     }
+
+    /// \brief Broadcasts value from one thread to all threads in logical warp.
+    /// Invalid Warp Size
+    template<unsigned int FunctionWarpSize = WarpSize>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto broadcast(T, const unsigned int, storage_type&) ->
+        typename std::enable_if<(!detail::is_power_of_two(FunctionWarpSize)), T>::type
+        = delete;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 protected:

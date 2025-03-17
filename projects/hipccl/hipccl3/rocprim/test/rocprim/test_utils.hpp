@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,13 +21,12 @@
 #ifndef TEST_TEST_UTILS_HPP_
 #define TEST_TEST_UTILS_HPP_
 
-#include <rocprim/device/config_types.hpp>
-#include <rocprim/functional.hpp>
-#include <rocprim/intrinsics.hpp>
-#include <rocprim/type_traits.hpp>
-#include <rocprim/types.hpp>
-
 #include "../common_test_header.hpp"
+
+#include "../../common/utils.hpp"
+#include "../../common/utils_custom_type.hpp"
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_half.hpp"
 
 // Identity iterator
 #include "identity_iterator.hpp"
@@ -36,12 +35,28 @@
 // Seed values
 #include "test_seed.hpp"
 
-#include "test_utils_half.hpp"
+#include "test_utils_assertions.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_data_generation.hpp"
+#ifdef WITH_ROCRAND
+    #include "test_utils_data_generation_with_rocrand.hpp"
+#endif
 #include "test_utils_assertions.hpp"
+#include "test_utils_get_random_data.hpp"
 #include "test_utils_hipgraphs.hpp"
+
+#include <cstddef>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/intrinsics/thread.hpp>
+#include <rocprim/types.hpp>
+
+#include <cstdlib>
+#include <iostream>
+#include <iterator>
+#include <stdint.h>
+#include <type_traits>
 
 namespace test_utils
 {
@@ -70,7 +85,7 @@ template<class T>
 static constexpr float precision<const T> = precision<T>;
 
 template<class T>
-static constexpr float precision<custom_test_type<T>> = precision<T>;
+static constexpr float precision<common::custom_type<T, T, true>> = precision<T>;
 
 template<class T, int N>
 static constexpr float precision<custom_test_array_type<T, N>> = precision<T>;
@@ -144,39 +159,63 @@ struct select_plus_operator_host<::rocprim::bfloat16>
     using acc_type = double;
 };
 
-template<class InputIt, class T,
-    std::enable_if_t<std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::bfloat16>::value ||
-                     std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::half>::value ||
-                     std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value
-                     , bool> = true>
-constexpr T host_reduce(InputIt first, InputIt last, rocprim::plus<T>)
+template<
+    class InputIt,
+    class T,
+    std::enable_if_t<
+        std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::bfloat16>::value
+            || std::is_same<typename std::iterator_traits<InputIt>::value_type,
+                            rocprim::half>::value
+            || std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
+        bool>
+    = true>
+constexpr std::vector<T> host_reduce(InputIt first, InputIt last, rocprim::plus<T>)
 {
     using accumulator_type = double;
+    size_t         size    = std::distance(first, last);
+    std::vector<T> result(size);
+    if(size == 0)
+    {
+        return result;
+    }
     // Calculate expected results on host
     accumulator_type expected = accumulator_type(0);
     rocprim::plus<accumulator_type> bin_op;
-    for(InputIt it = first; it != last; it++)
+    for(int i = size - 1; i >= 0; --i)
     {
-        expected = bin_op(expected, static_cast<accumulator_type>(*it));
+        expected  = bin_op(expected, static_cast<accumulator_type>(*(first + i)));
+        result[i] = static_cast<T>(expected);
     }
-    return static_cast<T>(expected);
+    return result;
 }
 
-template<class InputIt, class T,
-          std::enable_if_t<!std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::bfloat16>::value &&
-                           !std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::half>::value &&
-                           !std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value
-                           , bool> = true>
-constexpr T host_reduce(InputIt first, InputIt last, rocprim::plus<T> op)
+template<
+    class InputIt,
+    class T,
+    std::enable_if_t<
+        !std::is_same<typename std::iterator_traits<InputIt>::value_type, rocprim::bfloat16>::value
+            && !std::is_same<typename std::iterator_traits<InputIt>::value_type,
+                             rocprim::half>::value
+            && !std::is_same<typename std::iterator_traits<InputIt>::value_type, float>::value,
+        bool>
+    = true>
+constexpr std::vector<T> host_reduce(InputIt first, InputIt last, rocprim::plus<T> op)
 {
     using acc_type = T;
+    size_t         size = std::distance(first, last);
+    std::vector<T> result(size);
+    if(size == 0)
+    {
+        return result;
+    }
     // Calculate expected results on host
     acc_type expected = acc_type(0);
-    for(InputIt it = first; it != last; it++)
+    for(int i = size - 1; i >= 0; --i)
     {
-        expected = op(expected, *it);
+        expected  = op(expected, *(first + i));
+        result[i] = expected;
     }
-    return expected;
+    return result;
 }
 
 template<class acc_type, class InputIt, class OutputIt, class FlagsIt, class BinaryOperation>
@@ -339,7 +378,6 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
     return host_exclusive_scan_by_key_impl(first, last, k_first, initial_value, d_first, rocprim::plus<acc_type>(), key_compare_op, acc_type{});
 }
 
-
 template<class InputIt, class KeyIt, class OutputIt, class BinaryOperation, class KeyCompare, class acc_type>
 OutputIt host_inclusive_scan_by_key_impl(InputIt first, InputIt last, KeyIt k_first,
                                          OutputIt d_first,
@@ -390,20 +428,13 @@ OutputIt host_inclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
 inline
 size_t get_max_block_size()
 {
-    hipDeviceProp_t device_properties;
-    hipError_t error = hipGetDeviceProperties(&device_properties, 0);
-    if(error != hipSuccess)
-    {
-        std::cout << "HIP error: " << error
-                  << " file: " << __FILE__
-                  << " line: " << __LINE__
-                  << std::endl;
-        std::exit(error);
-    }
-    return device_properties.maxThreadsPerBlock;
+
+    int max_threads_blocks{};
+    HIP_CHECK(hipDeviceGetAttribute(&max_threads_blocks, hipDeviceAttributeMaxThreadsPerBlock, 0));
+    return static_cast<size_t>(max_threads_blocks);
 }
 
-// std::iota causes problems with __half and bfloat16 and custom_test_type because of a missing ++increment operator
+// std::iota causes problems with __half and bfloat16 and common::custom_type because of a missing ++increment operator
 template<class ForwardIt, class T>
 void iota(ForwardIt first, ForwardIt last, T value)
 {
@@ -469,10 +500,6 @@ void iota_modulo(ForwardIt first, ForwardIt last, T lbound, const size_t ubound)
                          << " on a device with warp size " << host_warp_size;   \
         }                                                                       \
     }
-
-template<unsigned int LogicalWarpSize>
-__device__ constexpr bool device_test_enabled_for_warp_size_v
-    = ::rocprim::device_warp_size() >= LogicalWarpSize;
 
 template<bool MakeConst, typename T>
 inline auto wrap_in_const(T* ptr) -> typename std::enable_if_t<MakeConst, const T*>

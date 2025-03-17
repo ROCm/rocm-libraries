@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -357,7 +357,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         block_histogram[channel] = block_histogram_start + total_bins;
-        total_bins += bins[channel];
+        const unsigned int size  = bins[channel];
+        // Prevent LDS bank conflicts
+        total_bins += rocprim::detail::is_power_of_two(size) ? size + 1 : size;
     }
 
     // partial histogram to work with

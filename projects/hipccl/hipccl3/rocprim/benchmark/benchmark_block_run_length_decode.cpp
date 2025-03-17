@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,8 @@
 
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -115,10 +117,10 @@ void run_benchmark(benchmark::State&   state,
 
     engine_type prng(seed.get_0());
     using ItemDistribution = std::conditional_t<rocprim::is_integral<ItemT>::value,
-                                                uniform_int_distribution<ItemT>,
+                                                common::uniform_int_distribution<ItemT>,
                                                 std::uniform_real_distribution<ItemT>>;
-    ItemDistribution                  run_item_dist(0, 100);
-    uniform_int_distribution<OffsetT> run_length_dist(MinRunLength, MaxRunLength);
+    ItemDistribution                          run_item_dist(0, 100);
+    common::uniform_int_distribution<OffsetT> run_length_dist(MinRunLength, MaxRunLength);
 
     for(size_t i = 0; i < num_runs; ++i)
     {

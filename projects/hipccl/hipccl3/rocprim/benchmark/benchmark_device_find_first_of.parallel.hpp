@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_DEVICE_FIND_FIRST_OF_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -109,7 +111,7 @@ struct device_find_first_of_benchmark : public config_autotune_interface
         std::vector<key_type> key_input
             = get_random_data<key_type>(max_keys_size, 0, 100, seed.get_0());
         std::vector<type> input
-            = get_random_data<type>(size, 101, generate_limits<type>::max(), seed.get_0());
+            = get_random_data<type>(size, 101, common::generate_limits<type>::max(), seed.get_0());
 
         std::vector<type*> d_inputs(first_occurrences.size());
         for(size_t fi = 0; fi < first_occurrences.size(); ++fi)

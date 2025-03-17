@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_TEST_UTILS_CUSTOM_FLOAT_TRAITS_TYPE_HPP_
 #define ROCPRIM_TEST_UTILS_CUSTOM_FLOAT_TRAITS_TYPE_HPP_
 
+#include "../../common/utils_custom_type.hpp"
 #include "test_utils_custom_test_types.hpp"
 
 // For radix_key_codec
@@ -99,16 +100,19 @@ inline std::ostream& operator<<(std::ostream& stream, const custom_float_traits_
 }
 
 template<>
-struct is_custom_test_type<custom_float_traits_type> : std::true_type
-{};
-
-template<>
 struct inner_type<custom_float_traits_type>
 {
     using type = custom_float_traits_type::value_type;
 };
 
 } // namespace test_utils
+
+namespace common
+{
+template<>
+struct is_custom_type<test_utils::custom_float_traits_type> : std::true_type
+{};
+} // namespace common
 
 template<>
 struct ::rocprim::traits::define<test_utils::custom_float_traits_type>

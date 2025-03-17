@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,12 @@
 // SOFTWARE.
 
 #include "test_device_segmented_radix_sort.hpp"
+
+#include "../../common/utils_custom_type.hpp"
+
+#include "test_utils_custom_float_type.hpp"
+
+#include <rocprim/types.hpp>
 
 #define SUITE RocprimDeviceSegmentedRadixSort
 
@@ -59,7 +65,7 @@
     INSTANTIATE(params<signed char,         double,                             true,   0, 8,   0,      1000,  config_default>)
     INSTANTIATE(params<int,                 short,                              false,  0, 32,  0,      100,   config_semi_custom>)
     INSTANTIATE(params<short,               int,                                true,   0, 16,  0,      10000, config_semi_custom_warp_config>)
-    INSTANTIATE(params<long long,           test_utils::custom_test_type<char>, false,  0, 64,  4000,   8000,  config_custom>)
+    INSTANTIATE(params<long long,           common::custom_type<char, char, true>, false,  0, 64,  4000,   8000,  config_custom>)
     INSTANTIATE(params<double,              unsigned int,                       false,  0, 64,  2,      10>)
     INSTANTIATE(params<int8_t,              int8_t,                             true,   0, 8,   2000,   10000>)
     INSTANTIATE(params<int8_t,              int8_t,                             false,  0, 8,   0,      1000>)
@@ -85,5 +91,5 @@
     INSTANTIATE(params<unsigned int,        double,                                 true,   4, 21,  100,    100000>)
     INSTANTIATE(params<unsigned int,        short,                                  true,   0, 15,  100000, 200000>)
     INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20,  0,      1000>)
-    INSTANTIATE(params<unsigned short,      test_utils::custom_test_type<double>,   false,  8, 11,  50,     200>)
+    INSTANTIATE(params<unsigned short,      common::custom_type<double, double, true>,   false,  8, 11,  50,     200>)
 #endif

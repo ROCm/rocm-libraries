@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_data_generation.hpp"
+
 // gbench
 #include <benchmark/benchmark.h>
 
@@ -108,8 +110,8 @@ struct device_adjacent_find_benchmark : public config_autotune_interface
         else
         {
             input = get_random_data<input_type>(size,
-                                                generate_limits<input_type>::min(),
-                                                generate_limits<input_type>::max(),
+                                                common::generate_limits<input_type>::min(),
+                                                common::generate_limits<input_type>::max(),
                                                 seed.get_0());
             std::vector<std::size_t> iota(size);
             std::iota(iota.begin(), iota.end(), 0);
@@ -121,8 +123,8 @@ struct device_adjacent_find_benchmark : public config_autotune_interface
                                while(input[idx] == input[idx - 1])
                                {
                                    input[idx] = get_random_value<input_type>(
-                                       generate_limits<input_type>::min(),
-                                       generate_limits<input_type>::max(),
+                                       common::generate_limits<input_type>::min(),
+                                       common::generate_limits<input_type>::max(),
                                        seed.get_0());
                                }
                                return input[idx];

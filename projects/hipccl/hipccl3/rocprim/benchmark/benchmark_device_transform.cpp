@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,10 @@
 
 // CmdParser
 #include "cmdparser.hpp"
+
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include "../common/utils_custom_type.hpp"
+#endif
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -105,8 +109,8 @@ int main(int argc, char* argv[])
                                                         seed,
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING
-    using custom_float2  = custom_type<float, float>;
-    using custom_double2 = custom_type<double, double>;
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
     CREATE_BENCHMARK(int)
     CREATE_BENCHMARK(long long)
 

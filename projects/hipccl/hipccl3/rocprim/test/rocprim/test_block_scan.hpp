@@ -55,7 +55,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
 
         // Calculate expected results on host
@@ -72,7 +72,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output(output.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 0>::run(
             output,
@@ -145,7 +145,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanInitialValue)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output(output.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 6>::run(
             output,
@@ -198,7 +198,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
         std::vector<T> output_reductions(size / block_size);
 
@@ -218,8 +218,8 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 1>::run(
             output,
@@ -296,8 +296,8 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduceInitialValue)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 7>::run(
             output,
@@ -350,7 +350,7 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
         std::vector<T> output_block_prefixes(size / block_size);
         T block_prefix = test_utils::get_random_value<T>(0, 5, seed_value);
@@ -371,8 +371,8 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_bp(output_block_prefixes.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 2>::run(
             output,
@@ -426,7 +426,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
         const T init = test_utils::get_random_value<T>(0, 5, seed_value);
 
@@ -445,7 +445,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output(output.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 3>::run(
             output,
@@ -498,7 +498,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
         const T init = test_utils::get_random_value<T>(0, 5, seed_value);
 
@@ -529,8 +529,8 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 4>::run(
             output,
@@ -584,7 +584,7 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output  = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output2 = output;
         std::vector<T> output_block_prefixes(size / block_size);
         T block_prefix = test_utils::get_random_value<T>(0, 5, seed_value);
@@ -614,8 +614,8 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_bp(output_block_prefixes.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         static_run_algo<T, block_size, rocprim::block_scan_algorithm::using_warp_scan, 5>::run(
             output,

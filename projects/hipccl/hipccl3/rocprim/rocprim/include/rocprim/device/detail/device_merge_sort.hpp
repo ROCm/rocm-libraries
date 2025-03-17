@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -544,52 +544,6 @@ struct block_sort_impl<Key,
     }
 };
 #endif // DOXYGEN_SHOULD_SKIP_THIS
-
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetT,
-         class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void block_sort_kernel_impl(KeysInputIterator    keys_input,
-                            KeysOutputIterator   keys_output,
-                            ValuesInputIterator  values_input,
-                            ValuesOutputIterator values_output,
-                            const OffsetT        input_size,
-                            const unsigned int   num_blocks,
-                            BinaryFunction       compare_function)
-{
-    using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-
-    const unsigned int flat_block_id = ::rocprim::flat_block_id();
-    if(flat_block_id >= num_blocks)
-    {
-        return;
-    }
-
-    const OffsetT      block_offset        = static_cast<OffsetT>(flat_block_id) * items_per_block;
-    const unsigned int valid_in_last_block = input_size - block_offset;
-    const bool         is_incomplete_block = flat_block_id == (input_size / items_per_block);
-
-    using sort_impl = block_sort_impl<key_type, value_type, BlockSize, ItemsPerThread>;
-
-    ROCPRIM_SHARED_MEMORY typename sort_impl::storage_type storage;
-
-    sort_impl().sort(valid_in_last_block,
-                     is_incomplete_block,
-                     keys_input + block_offset,
-                     keys_output + block_offset,
-                     values_input + block_offset,
-                     values_output + block_offset,
-                     compare_function,
-                     storage);
-}
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,

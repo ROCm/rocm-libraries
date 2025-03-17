@@ -23,6 +23,20 @@
 #ifndef TEST_BLOCK_SCAN_KERNELS_HPP_
 #define TEST_BLOCK_SCAN_KERNELS_HPP_
 
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
+#include <rocprim/block/block_scan.hpp>
+#include <rocprim/functional.hpp>
+
+#include <cstddef>
+#include <type_traits>
+#include <vector>
+
 template<
     int Method,
     unsigned int BlockSize,
@@ -534,7 +548,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), T(0));
@@ -549,7 +563,7 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output(output);
 
         // Launching kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_array_kernel<block_size,
@@ -611,7 +625,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
 
         // Output reduce results
         std::vector<T> output_reductions(size / block_size, T(0));
@@ -631,8 +645,8 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
-        test_utils::device_ptr<T> device_output_reductions(output_reductions);
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions);
 
         // Launching kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(inclusive_scan_reduce_array_kernel<block_size,
@@ -697,7 +711,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
         std::vector<T> output_block_prefixes(size / items_per_block, T(0));
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
@@ -717,8 +731,8 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
-        test_utils::device_ptr<T> device_output_bp(output_block_prefixes);
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_bp(output_block_prefixes);
 
         // Launching kernel
         hipLaunchKernelGGL(
@@ -786,7 +800,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
         const T init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
@@ -803,7 +817,7 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output(output);
 
         // Launching kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_array_kernel<block_size,
@@ -866,7 +880,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
 
         // Output reduce results
         std::vector<T> output_reductions(size / items_per_block);
@@ -892,8 +906,8 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         // Launching kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(exclusive_scan_reduce_array_kernel<block_size,
@@ -959,7 +973,7 @@ auto test_block_scan_input_arrays()
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 100, seed_value);
         std::vector<T> output_block_prefixes(size / items_per_block);
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
@@ -984,8 +998,8 @@ auto test_block_scan_input_arrays()
         }
 
         // Writing to device memory
-        test_utils::device_ptr<T> device_output(output);
-        test_utils::device_ptr<T> device_output_bp(output_block_prefixes.size());
+        common::device_ptr<T> device_output(output);
+        common::device_ptr<T> device_output_bp(output_block_prefixes.size());
 
         // Launching kernel
         hipLaunchKernelGGL(

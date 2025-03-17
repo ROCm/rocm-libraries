@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,21 @@
 
 #include "../common_test_header.hpp"
 
+#include "../../common/utils_custom_type.hpp"
+
 // required rocprim headers
 #include <rocprim/block/block_load.hpp>
 #include <rocprim/block/block_radix_sort.hpp>
 #include <rocprim/block/block_store.hpp>
 
 // required test headers
-#include "test_utils_device_ptr.hpp"
 #include "test_utils_sort_comparator.hpp"
 #include "test_utils_types.hpp"
+
+// required common headers
+#include "../../common/utils_device_ptr.hpp"
+
+#include <stdint.h>
 
 // kernel definitions
 #include "test_block_radix_sort.kernels.hpp"
@@ -56,12 +62,17 @@ struct Floating;
 
 #elif ROCPRIM_TEST_SLICE == 2
 
+using __custom_int2 = common::custom_type<int, int, true>;
+using __custom_float2 = common::custom_type<float, float, true>;
+using __custom_uint8_t2 = common::custom_type<uint8_t, uint8_t, true>;
+using __custom_double2 = common::custom_type<double, double, true>;
+
 using BlockParamsCustom = ::testing::Types<
-    block_param_type(test_utils::custom_test_type<int>, int)
-    , block_param_type(test_utils::custom_test_type<float>, int8_t)
-    , block_param_type(test_utils::custom_test_type<uint8_t>, uint16_t)
+    block_param_type(__custom_int2, int)
+    , block_param_type(__custom_float2, int8_t)
+    , block_param_type(__custom_uint8_t2, uint16_t)
 #if ROCPRIM_HAS_INT128_SUPPORT
-    , block_param_type(test_utils::custom_test_type<double>, double)
+    , block_param_type(__custom_double2, double)
 #endif
 >;
 

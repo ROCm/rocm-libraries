@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,9 +24,9 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
+#include "../../common/utils_device_ptr.hpp"
 #include "../rocprim/test_seed.hpp"
 #include "../rocprim/test_utils.hpp"
-#include "../rocprim/test_utils_device_ptr.hpp"
 
 #include <rocprim/device/device_binary_search.hpp>
 #include <rocprim/device/device_merge_sort.hpp>
@@ -97,10 +97,10 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     SCOPED_TRACE(testing::Message() << "with search_needle_size = " << search_needle_size);
 
     // Allocate device buffers and copy data into them
-    test_utils::device_ptr<key_type> d_sort_input(sort_data_size);
-    test_utils::device_ptr<key_type> d_sort_output(sort_data_size); // also used as search_input
-    test_utils::device_ptr<key_type> d_search_output(search_needle_size);
-    test_utils::device_ptr<key_type> d_search_needles(search_needle_size);
+    common::device_ptr<key_type> d_sort_input(sort_data_size);
+    common::device_ptr<key_type> d_sort_output(sort_data_size); // also used as search_input
+    common::device_ptr<key_type> d_search_output(search_needle_size);
+    common::device_ptr<key_type> d_search_needles(search_needle_size);
 
     // Default stream does not support hipGraph stream capture, so create a non-blocking one
     hipStream_t stream = 0;
@@ -139,7 +139,7 @@ TEST(TestHipGraphAlgs, SortAndSearch)
     // temp_storage_size_bytes must be > 0
     ASSERT_GT(temp_storage_bytes, 0);
 
-    test_utils::device_ptr<void> d_temp_storage(temp_storage_bytes);
+    common::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
     // Begin graph capture
     test_utils::GraphHelper gHelper;

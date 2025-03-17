@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,10 @@
 #include "benchmark_device_adjacent_find.parallel.hpp"
 #include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
+
+#ifndef BENCHMARK_CONFIG_TUNING
+    #include "../common/utils_custom_type.hpp"
+#endif
 
 // gbench
 #include <benchmark/benchmark.h>
@@ -109,11 +113,11 @@ int main(int argc, char* argv[])
                                                         stream);
 #else // BENCHMARK_CONFIG_TUNING \
     // add_adjacent_find_benchmarks(benchmarks, size, seed, stream);
-    using custom_float2          = custom_type<float, float>;
-    using custom_double2         = custom_type<double, double>;
-    using custom_int2            = custom_type<int, int>;
-    using custom_char_double     = custom_type<char, double>;
-    using custom_longlong_double = custom_type<long long, double>;
+    using custom_float2          = common::custom_type<float, float>;
+    using custom_double2         = common::custom_type<double, double>;
+    using custom_int2            = common::custom_type<int, int>;
+    using custom_char_double     = common::custom_type<char, double>;
+    using custom_longlong_double = common::custom_type<long long, double>;
 
     // Tuned types
     CREATE_ADJACENT_FIND_BENCHMARKS(int8_t)

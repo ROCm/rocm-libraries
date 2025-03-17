@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_custom_type.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -271,12 +273,12 @@ int main(int argc, char* argv[])
     benchmark::AddCustomContext("bytes", std::to_string(bytes));
     benchmark::AddCustomContext("seed", seed_type);
 
-    using custom_double2    = custom_type<double, double>;
-    using custom_int_double = custom_type<int, double>;
+    using custom_double2    = common::custom_type<double, double>;
+    using custom_int_double = common::custom_type<int, double>;
 
-    using custom_int2            = custom_type<int, int>;
-    using custom_char_double     = custom_type<char, double>;
-    using custom_longlong_double = custom_type<long long, double>;
+    using custom_int2            = common::custom_type<int, int>;
+    using custom_char_double     = common::custom_type<char, double>;
+    using custom_longlong_double = common::custom_type<long long, double>;
 
     std::vector<benchmark::internal::Benchmark*> benchmarks
         = {BENCHMARK_TYPE(int),

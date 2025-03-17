@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,8 @@
 // SOFTWARE.
 
 #include "../../common_test_header.hpp"
-#include "../../rocprim/test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 #include "get_rocprim_version.hpp"
 
@@ -34,7 +35,7 @@ void get_version_kernel(unsigned int * version)
 
 unsigned int get_rocprim_version_on_device()
 {
-    test_utils::device_ptr<unsigned int> d_version(1);
+    common::device_ptr<unsigned int> d_version(1);
 
     hipLaunchKernelGGL(get_version_kernel, dim3(1), dim3(1), 0, 0, d_version.get());
     HIP_CHECK(hipGetLastError());

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,16 +21,27 @@
 // SOFTWARE.
 
 #include "../common_test_header.hpp"
-#include "test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
+
+// required test headers
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
+#include "test_utils_data_generation.hpp"
+
 // required rocprim headers
 #include <rocprim/device/device_reduce.hpp>
 #include <rocprim/device/device_transform.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
-#include <rocprim/iterator/zip_iterator.hpp>
 #include <rocprim/iterator/transform_iterator.hpp>
+#include <rocprim/iterator/zip_iterator.hpp>
+#include <rocprim/types/tuple.hpp>
 
-// required test headers
-#include "test_utils_types.hpp"
+#include <algorithm>
+#include <cstddef>
+#include <numeric>
+#include <type_traits>
+#include <vector>
 
 TEST(RocprimZipIteratorTests, Traits)
 {
@@ -169,15 +180,15 @@ TEST(RocprimZipIteratorTests, Transform)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
-        std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 100, seed_value);
-        std::vector<T3> input3 = test_utils::get_random_data<T3>(size, 1, 100, seed_value);
+        std::vector<T1> input1 = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+        std::vector<T2> input2 = test_utils::get_random_data_wrapped<T2>(size, 1, 100, seed_value);
+        std::vector<T3> input3 = test_utils::get_random_data_wrapped<T3>(size, 1, 100, seed_value);
         std::vector<U> output(input1.size());
 
-        test_utils::device_ptr<T1> d_input1(input1);
-        test_utils::device_ptr<T2> d_input2(input2);
-        test_utils::device_ptr<T3> d_input3(input3);
-        test_utils::device_ptr<U>  d_output(output.size());
+        common::device_ptr<T1> d_input1(input1);
+        common::device_ptr<T2> d_input2(input2);
+        common::device_ptr<T3> d_input3(input3);
+        common::device_ptr<U>  d_output(output.size());
 
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -267,17 +278,17 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
-        std::vector<T2> input2 = test_utils::get_random_data<T2>(size, 1, 50, seed_value);
-        std::vector<T3> input3 = test_utils::get_random_data<T3>(size, 1, 10, seed_value);
+        std::vector<T1> input1 = test_utils::get_random_data_wrapped<T1>(size, 1, 100, seed_value);
+        std::vector<T2> input2 = test_utils::get_random_data_wrapped<T2>(size, 1, 50, seed_value);
+        std::vector<T3> input3 = test_utils::get_random_data_wrapped<T3>(size, 1, 10, seed_value);
         std::vector<U1> output1(1, 0);
         std::vector<U2> output2(1, 0);
 
-        test_utils::device_ptr<T1> d_input1(input1);
-        test_utils::device_ptr<T2> d_input2(input2);
-        test_utils::device_ptr<T3> d_input3(input3);
-        test_utils::device_ptr<U1> d_output1(output1.size());
-        test_utils::device_ptr<U2> d_output2(output2.size());
+        common::device_ptr<T1> d_input1(input1);
+        common::device_ptr<T2> d_input2(input2);
+        common::device_ptr<T3> d_input3(input3);
+        common::device_ptr<U1> d_output1(output1.size());
+        common::device_ptr<U2> d_output2(output2.size());
 
         // Calculate expected results on host
         U1 expected1 = std::accumulate(input1.begin(), input1.end(), T1(0));
@@ -305,7 +316,7 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        test_utils::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         ASSERT_NE(d_temp_storage.get(), nullptr);
 
         // Run

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,21 +22,26 @@
 
 #include "../common_test_header.hpp"
 
-#include "indirect_iterator.hpp"
-#include "test_utils_custom_test_types.hpp"
-#include "test_utils_device_ptr.hpp"
-#include "test_utils_types.hpp"
+#include "../../common/utils_custom_type.hpp"
 
-#include <rocprim/detail/various.hpp>
+#include "../../common/utils_device_ptr.hpp"
+#include "identity_iterator.hpp"
+#include "test_seed.hpp"
+#include "test_utils_custom_test_types.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
+
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/detail/device_config_helper.hpp>
 #include <rocprim/device/device_adjacent_find.hpp>
-#include <rocprim/iterator/counting_iterator.hpp>
-#include <rocprim/iterator/discard_iterator.hpp>
-#include <rocprim/iterator/transform_iterator.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/type_traits.hpp>
 #include <rocprim/types.hpp>
 
 #include <algorithm>
-#include <cstdlib>
+#include <cstddef>
 #include <numeric>
+#include <stdint.h>
 #include <vector>
 
 // Params for tests
@@ -70,8 +75,8 @@ public:
 };
 
 // Custom types
-using custom_int2        = test_utils::custom_test_type<int>;
-using custom_double2     = test_utils::custom_test_type<double>;
+using custom_int2        = common::custom_type<int, int, true>;
+using custom_double2     = common::custom_type<double, double, true>;
 using custom_int64_array = test_utils::custom_test_array_type<std::int64_t, 4>;
 
 // Custom configs
@@ -149,7 +154,7 @@ TYPED_TEST(RocprimDeviceAdjacentFindTests, AdjacentFind)
                 first_adj_index
                     = std::min(test_utils::get_random_value<std::size_t>(
                                    0,
-                                   static_cast<size_t>(test_utils::numeric_limits<T>::max()),
+                                   static_cast<size_t>(rocprim::numeric_limits<T>::max()),
                                    seed_value),
                                size - 2);
             }
@@ -160,8 +165,8 @@ TYPED_TEST(RocprimDeviceAdjacentFindTests, AdjacentFind)
             std::iota(input.begin(), input.begin() + first_adj_index, 0);
             std::fill(input.begin(), input.end(), first_adj_index);
 
-            test_utils::device_ptr<T>           d_input(input);
-            test_utils::device_ptr<output_type> d_output(1);
+            common::device_ptr<T>           d_input(input);
+            common::device_ptr<output_type> d_output(1);
 
             const auto output_it
                 = test_utils::wrap_in_identity_iterator<use_indirect_iterator>(d_output.get());
@@ -177,7 +182,7 @@ TYPED_TEST(RocprimDeviceAdjacentFindTests, AdjacentFind)
                                                        stream,
                                                        debug_synchronous));
             ASSERT_GT(tmp_storage_size, 0);
-            test_utils::device_ptr<void> d_tmp_storage(tmp_storage_size);
+            common::device_ptr<void> d_tmp_storage(tmp_storage_size);
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)

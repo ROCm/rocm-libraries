@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,8 @@
 
 #include "../common_test_header.hpp"
 #include "test_utils.hpp"
-#include "test_utils_device_ptr.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 
 #include <rocprim/device/device_radix_sort.hpp>
 #include <rocprim/iterator/reverse_iterator.hpp>
@@ -55,13 +56,13 @@ TEST(RocprimReverseIteratorTests, DeviceVector)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    auto           input    = test_utils::get_random_data<T>(size, 0, 100, seed_value);
+    auto           input    = test_utils::get_random_data_wrapped<T>(size, 0, 100, seed_value);
     std::vector<T> expected = input;
     std::sort(expected.rbegin(), expected.rend());
     std::vector<T> output(size);
 
-    test_utils::device_ptr<T> d_input(input);
-    test_utils::device_ptr<T> d_output(size);
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(size);
 
     auto d_output_it = rocprim::make_reverse_iterator(d_output.get() + size);
 
@@ -70,7 +71,7 @@ TEST(RocprimReverseIteratorTests, DeviceVector)
     HIP_CHECK(
         rocprim::radix_sort_keys(nullptr, temp_storage_bytes, d_input.get(), d_output_it, size));
     ASSERT_NE(temp_storage_bytes, static_cast<size_t>(0));
-    test_utils::device_ptr<void> d_temp_storage(temp_storage_bytes);
+    common::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
     HIP_CHECK(rocprim::radix_sort_keys(d_temp_storage.get(),
                                        temp_storage_bytes,

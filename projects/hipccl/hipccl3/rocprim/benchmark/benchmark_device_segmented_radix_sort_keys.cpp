@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "benchmark_utils.hpp"
 // CmdParser
 #include "cmdparser.hpp"
+
+#include "../common/utils_data_generation.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -100,10 +102,11 @@ void run_sort_keys_benchmark(benchmark::State&   state,
     const size_t size           = offset;
     const size_t segments_count = offsets.size() - 1;
 
-    std::vector<key_type> keys_input = get_random_data<key_type>(size,
-                                                                 generate_limits<key_type>::min(),
-                                                                 generate_limits<key_type>::max(),
-                                                                 seed.get_0());
+    std::vector<key_type> keys_input
+        = get_random_data<key_type>(size,
+                                    common::generate_limits<key_type>::min(),
+                                    common::generate_limits<key_type>::max(),
+                                    seed.get_0());
 
     size_t batch_size = 1;
     if(size < target_size)

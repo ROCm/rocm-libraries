@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,8 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "../rocprim/test_utils_device_ptr.hpp"
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
+
+#include "../../common/utils.hpp"
+#include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <iterator>
+#include <random>
+#include <vector>
 
 namespace
 {
@@ -64,7 +73,7 @@ std::vector<size_t> get_sizes()
 {
     std::vector<size_t>
         sizes{1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 22) - 76543};
-    if(!test_common_utils::use_hmm())
+    if(!common::use_hmm())
     {
         sizes.insert(sizes.begin(), 0);
     }
@@ -95,14 +104,14 @@ protected:
     std::vector<size_t>                    sizes;
     std::vector<vector_type>               inputs;
     std::vector<vector_type>               expecteds;
-    std::vector<test_utils::device_ptr<T>> d_inputs;
+    std::vector<common::device_ptr<T>>     d_inputs;
     std::vector<vector_type>               outputs;
     std::vector<hipStream_t>               streams;
 
     void SetUp() override
     {
-        std::default_random_engine       prng(seed);
-        std::uniform_int_distribution<T> dist;
+        std::default_random_engine          prng(seed);
+        common::uniform_int_distribution<T> dist;
 
         sizes = get_sizes();
         inputs.resize(sizes.size());
@@ -226,9 +235,9 @@ TEST(HipAsyncCopyTestsExtra, StreamInStruct)
     static constexpr int          seed       = 543897;
     static constexpr unsigned int block_size = 1024;
 
-    const size_t                     size = get_sizes().back();
-    std::default_random_engine       prng(seed);
-    std::uniform_int_distribution<T> dist;
+    const size_t                        size = get_sizes().back();
+    std::default_random_engine          prng(seed);
+    common::uniform_int_distribution<T> dist;
 
     StreamWrapper stream_wrapper;
     HIP_CHECK(hipStreamCreateWithFlags(&stream_wrapper.stream, hipStreamNonBlocking));
@@ -240,7 +249,7 @@ TEST(HipAsyncCopyTestsExtra, StreamInStruct)
                    std::back_inserter(expected),
                    [](const auto& val) { return val + static_cast<T>(1); });
 
-    test_utils::device_ptr<T> d_input(input);
+    common::device_ptr<T>     d_input(input);
     const unsigned int        grid_size = (size + block_size - 1) / block_size;
     hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
                        dim3(grid_size),

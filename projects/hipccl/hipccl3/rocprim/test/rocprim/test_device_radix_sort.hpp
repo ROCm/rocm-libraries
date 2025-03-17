@@ -26,20 +26,39 @@
 #include "../common_test_header.hpp"
 
 // required rocprim headers
+#include <rocprim/detail/various.hpp>
+#include <rocprim/device/config_types.hpp>
+#include <rocprim/device/device_merge_sort_config.hpp>
 #include <rocprim/device/device_radix_sort.hpp>
+#include <rocprim/device/device_radix_sort_config.hpp>
+#include <rocprim/type_traits.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types/double_buffer.hpp>
+
+#include "../../common/utils_device_ptr.hpp"
 
 // required test headers
 #include "test_seed.hpp"
+#include "test_utils.hpp"
+#include "test_utils_assertions.hpp"
 #include "test_utils_custom_float_traits_type.hpp"
 #include "test_utils_custom_float_type.hpp"
 #include "test_utils_custom_test_types.hpp"
-#include "test_utils_device_ptr.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
-#include "test_utils_types.hpp"
 
+#include <algorithm>
+#include <cstddef>
+#include <iostream>
 #include <iterator>
+#include <memory>
+#include <numeric>
+#include <stdint.h>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 template<class Key,
          class Value,
@@ -90,16 +109,15 @@ auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine
     using key_type = typename std::iterator_traits<KeyIter>::value_type;
     test_utils::generate_random_data_n(keys_input,
                                        size,
-                                       test_utils::numeric_limits<key_type>::min(),
-                                       test_utils::numeric_limits<key_type>::max(),
+                                       rocprim::numeric_limits<key_type>::min(),
+                                       rocprim::numeric_limits<key_type>::max(),
                                        rng_engine);
 }
 
-// Working around custom_float_test_type, which is both a float and a custom_test_type
+// Working around custom_float_test_type, which is both a float and a common::custom_type
 template<class T>
 constexpr bool is_custom_not_float_test_type
-    = test_utils::is_custom_test_type<T>::value
-      && !std::is_same<test_utils::custom_float_type, T>::value
+    = common::is_custom_type<T>::value && !std::is_same<test_utils::custom_float_type, T>::value
       && !std::is_same<test_utils::custom_float_traits_type, T>::value;
 
 template<class Config, bool Descending, class Key>
@@ -275,9 +293,9 @@ void sort_keys()
             auto keys_input = std::make_unique<key_type[]>(size);
             generate_key_input(keys_input.get(), size, rng_engine);
 
-            test_utils::device_ptr<key_type>  d_keys_input(keys_input, size);
-            test_utils::device_ptr<key_type>  d_keys_output_alloc;
-            test_utils::device_ptr<key_type>& d_keys_output
+            common::device_ptr<key_type>  d_keys_input(keys_input, size);
+            common::device_ptr<key_type>  d_keys_output_alloc;
+            common::device_ptr<key_type>& d_keys_output
                 = in_place ? d_keys_input : d_keys_output_alloc;
             d_keys_output_alloc.resize(in_place ? 0 : size);
 
@@ -298,9 +316,9 @@ void sort_keys()
                                                             stream,
                                                             debug_synchronous)));
             ASSERT_GT(temporary_storage_bytes, 0);
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -577,15 +595,15 @@ void sort_pairs()
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            test_utils::device_ptr<key_type>  d_keys_input(keys_input, size);
-            test_utils::device_ptr<key_type>  d_keys_output_alloc;
-            test_utils::device_ptr<key_type>& d_keys_output
+            common::device_ptr<key_type>  d_keys_input(keys_input, size);
+            common::device_ptr<key_type>  d_keys_output_alloc;
+            common::device_ptr<key_type>& d_keys_output
                 = in_place ? d_keys_input : d_keys_output_alloc;
             d_keys_output_alloc.resize(in_place ? 0 : size);
 
-            test_utils::device_ptr<value_type>  d_values_input(values_input);
-            test_utils::device_ptr<value_type>  d_values_output_alloc;
-            test_utils::device_ptr<value_type>& d_values_output
+            common::device_ptr<value_type>  d_values_input(values_input);
+            common::device_ptr<value_type>  d_values_output_alloc;
+            common::device_ptr<value_type>& d_values_output
                 = in_place ? d_values_input : d_values_output_alloc;
             d_values_output_alloc.resize(in_place ? 0 : size);
 
@@ -619,8 +637,8 @@ void sort_pairs()
                                                     4>,
                 1024 * 512>;
 
-            test_utils::GraphHelper gHelper;;
-            
+            test_utils::GraphHelper gHelper;
+
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -645,7 +663,7 @@ void sort_pairs()
             }
 
             ASSERT_GT(temporary_storage_bytes, 0);
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
             if(TestFixture::params::use_graphs)
             {
@@ -827,7 +845,7 @@ void sort_keys_double_buffer()
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
-    
+
     const bool debug_synchronous = false;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
@@ -854,8 +872,8 @@ void sort_keys_double_buffer()
             auto keys_input = std::make_unique<key_type[]>(size);
             generate_key_input(keys_input.get(), size, rng_engine);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input, size);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input, size);
+            common::device_ptr<key_type> d_keys_output(size);
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
@@ -879,9 +897,9 @@ void sort_keys_double_buffer()
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -1071,7 +1089,7 @@ void sort_pairs_double_buffer()
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
-    
+
     const bool debug_synchronous = false;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
@@ -1101,11 +1119,11 @@ void sort_pairs_double_buffer()
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            test_utils::device_ptr<key_type> d_keys_input(keys_input, size);
-            test_utils::device_ptr<key_type> d_keys_output(size);
+            common::device_ptr<key_type> d_keys_input(keys_input, size);
+            common::device_ptr<key_type> d_keys_output(size);
 
-            test_utils::device_ptr<value_type> d_values_input(values_input);
-            test_utils::device_ptr<value_type> d_values_output(size);
+            common::device_ptr<value_type> d_values_input(values_input);
+            common::device_ptr<value_type> d_values_output(size);
 
             using key_value = std::pair<key_type, value_type>;
 
@@ -1145,9 +1163,9 @@ void sort_pairs_double_buffer()
                                                                         debug_synchronous)));
 
             ASSERT_GT(temporary_storage_bytes, 0);
-            test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+            common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-            test_utils::GraphHelper gHelper;;
+            test_utils::GraphHelper gHelper;
             if(TestFixture::params::use_graphs)
             {
                 gHelper.startStreamCapture(stream);
@@ -1208,7 +1226,7 @@ void sort_keys_over_4g()
 {
     using key_type                                 = uint8_t;
     constexpr unsigned int start_bit               = 0;
-    constexpr unsigned int end_bit                 = 8ull * sizeof(key_type);    
+    constexpr unsigned int end_bit                 = 8ull * sizeof(key_type);
     constexpr bool         debug_synchronous       = false;
     constexpr size_t       size                    = (1ull << 32) + 32;
     constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
@@ -1218,7 +1236,7 @@ void sort_keys_over_4g()
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
-    
+
     assert(std::is_unsigned<key_type>::value);
     std::vector<size_t> histogram(number_of_possible_keys, 0);
     const int           seed_value = rand();
@@ -1228,15 +1246,15 @@ void sort_keys_over_4g()
     HIP_CHECK(hipSetDevice(device_id));
 
     std::vector<key_type> keys_input
-        = test_utils::get_random_data<key_type>(size,
-                                                test_utils::numeric_limits<key_type>::min(),
-                                                test_utils::numeric_limits<key_type>::max(),
-                                                seed_value);
+        = test_utils::get_random_data_wrapped<key_type>(size,
+                                                        rocprim::numeric_limits<key_type>::min(),
+                                                        rocprim::numeric_limits<key_type>::max(),
+                                                        seed_value);
 
     //generate histogram of the randomly generated values
     std::for_each(keys_input.begin(), keys_input.end(), [&](const key_type& a) { histogram[a]++; });
 
-    test_utils::device_ptr<key_type> d_keys_input_output(keys_input);
+    common::device_ptr<key_type> d_keys_input_output(keys_input);
     size_t key_type_storage_bytes = size * sizeof(key_type);
 
     size_t temporary_storage_bytes;
@@ -1263,10 +1281,9 @@ void sort_keys_over_4g()
                     << " bytes). Skipping test";
    }
 
-   test_utils::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+   common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
    test_utils::GraphHelper gHelper;
-   ;
    if(UseGraphs)
    {
        gHelper.startStreamCapture(stream);
@@ -1290,7 +1307,7 @@ void sort_keys_over_4g()
    const auto output = d_keys_input_output.load();
 
    size_t counter = 0;
-   for(size_t i = 0; i <= test_utils::numeric_limits<key_type>::max(); ++i)
+   for(size_t i = 0; i <= rocprim::numeric_limits<key_type>::max(); ++i)
    {
        for(size_t j = 0; j < histogram[i]; ++j)
        {
@@ -1335,7 +1352,7 @@ inline void sort_keys_large_sizes()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        test_utils::device_ptr<key_type> d_keys;
+        common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
         {
             std::cout << "Out of memory. Skipping size = " << size << std::endl;
@@ -1358,7 +1375,7 @@ inline void sort_keys_large_sizes()
                                            stream));
 
         ASSERT_GT(temporary_storage_bytes, 0U);
-        test_utils::device_ptr<void> d_temporary_storage;
+        common::device_ptr<void> d_temporary_storage;
         if(!d_temporary_storage.resize_with_memory_check(temporary_storage_bytes))
         {
             std::cout << "Out of memory. Skipping size = " << size << std::endl;

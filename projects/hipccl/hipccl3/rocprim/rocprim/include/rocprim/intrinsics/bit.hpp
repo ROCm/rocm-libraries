@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,8 @@
 #define ROCPRIM_INTRINSICS_BIT_HPP_
 
 #include "../config.hpp"
+
+#include <hip/device_functions.h>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -69,6 +71,36 @@ ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned int x)
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned long long x)
 {
     return __builtin_ctzll(x);
+}
+
+/// \brief Count leading zeroes
+///
+/// Count the number of consecutive 0-bits, starting from the
+/// most significant bit.
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+int clz(unsigned int x)
+{
+    return __builtin_clz(x);
+}
+
+/// \brief Count leading zeroes
+///
+/// Count the number of consecutive 0-bits, starting from the
+/// most significant bit.
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+int clz(unsigned long x)
+{
+    return __builtin_clzl(x);
+}
+
+/// \brief Count leading zeroes
+///
+/// Count the number of consecutive 0-bits, starting from the
+/// most significant bit.
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+int clz(unsigned long long x)
+{
+    return __builtin_clzll(x);
 }
 
 /// @}

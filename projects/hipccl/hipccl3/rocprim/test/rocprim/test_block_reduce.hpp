@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,7 +56,8 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, T(2), T(50), seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data_wrapped<T>(size, T(2), T(50), seed_value);
         std::vector<T> output_reductions(grid_size);
 
         // Calculate expected results on host
@@ -73,8 +74,8 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T,
                         block_size,
@@ -135,7 +136,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, T(0.95), T(1.05), seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data_wrapped<T>(size, T(0.95), T(1.05), seed_value);
         std::vector<T> output_reductions(grid_size);
 
         // Calculate expected results on host
@@ -152,8 +154,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T,
                         block_size,
@@ -215,7 +217,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultipliesExact)
 
         // Generate data
         std::vector<T> output(size, T(1));
-        auto two_places = test_utils::get_random_data<unsigned int>(size/32, 0, size-1, seed_value);
+        auto           two_places
+            = test_utils::get_random_data_wrapped<unsigned int>(size / 32, 0, size - 1, seed_value);
         for(auto i : two_places)
         {
             output[i] = T(2);
@@ -237,8 +240,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultipliesExact)
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_algo<T,
                         block_size,
@@ -306,7 +309,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
         const size_t grid_size = size / block_size;
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 50, seed_value);
+        std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 2, 50, seed_value);
         std::vector<T> output_reductions(grid_size);
 
         // Calculate expected results on host
@@ -323,8 +326,8 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
         }
 
         // Preparing device
-        test_utils::device_ptr<T> device_output(output.size());
-        test_utils::device_ptr<T> device_output_reductions(output_reductions.size());
+        common::device_ptr<T> device_output(output.size());
+        common::device_ptr<T> device_output_reductions(output_reductions.size());
 
         static_run_valid<T,
                          block_size,

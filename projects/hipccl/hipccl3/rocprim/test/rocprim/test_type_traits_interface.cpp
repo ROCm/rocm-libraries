@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,14 +20,14 @@
 
 #include "../common_test_header.hpp"
 
-#include "test_utils_custom_test_types.hpp"
+#include "test_utils_custom_float_type.hpp"
 
-#include <rocprim/type_traits.hpp>
+#include <rocprim/config.hpp>
+#include <rocprim/type_traits_interface.hpp>
+#include <rocprim/types.hpp>
 
 #include <ostream>
-#include <type_traits>
-
-#include <cmath>
+#include <stdint.h>
 
 #define ROCPRIM_STATIC_ASSERT(cond) static_assert((cond), "Rocprim Traits Assertion failed!")
 #define ROCPRIM_STATIC_ASSERT_TRUE(cond) ROCPRIM_STATIC_ASSERT((cond))
@@ -39,66 +39,17 @@ namespace type_traits_test
 {
 // Custom type to model types like Eigen::half or Eigen::bfloat16, that wrap around floating point
 // types.
-struct custom_float_type
-{
-    float x;
-
-    // Constructor for the data generation utilities, simply ignore the second number
-    ROCPRIM_HOST_DEVICE custom_float_type(float val, float /*ignored*/) : x{val}
-    {}
-
-    ROCPRIM_HOST_DEVICE custom_float_type(float val) : x{val} {}
-
-    custom_float_type() = default;
-
-    ROCPRIM_HOST_DEVICE
-    custom_float_type
-        operator+(const custom_float_type& other) const
-    {
-        return custom_float_type(x + other.x);
-    }
-
-    ROCPRIM_HOST_DEVICE
-    custom_float_type
-        operator-(const custom_float_type& other) const
-    {
-        return custom_float_type(x - other.x);
-    }
-
-    ROCPRIM_HOST_DEVICE
-    bool operator<(const custom_float_type& other) const
-    {
-        return x < other.x;
-    }
-
-    ROCPRIM_HOST_DEVICE
-    bool operator>(const custom_float_type& other) const
-    {
-        return x > other.x;
-    }
-
-    ROCPRIM_HOST_DEVICE
-    bool operator==(const custom_float_type& other) const
-    {
-        return x == other.x;
-    }
-
-    ROCPRIM_HOST_DEVICE
-    bool operator!=(const custom_float_type& other) const
-    {
-        return !(*this == other);
-    }
-};
+struct custom_float_type : test_utils::custom_float_type
+{};
 
 inline bool signbit(const custom_float_type& val)
 {
-    return std::signbit(val.x);
+    return test_utils::signbit(val);
 }
 
 inline std::ostream& operator<<(std::ostream& stream, const custom_float_type& value)
 {
-    stream << "[" << value.x << "]";
-    return stream;
+    return test_utils::operator<<(stream, value);
 }
 
 struct float_bit_masked_type

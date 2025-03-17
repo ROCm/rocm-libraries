@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,10 @@
 #ifndef TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 #define TEST_BLOCK_ADJACENT_DIFFERENCE_KERNELS_HPP_
 
+#include "../common_test_header.hpp"
+
+#include "../../common/utils_device_ptr.hpp"
 #include "test_utils.hpp"
-#include "test_utils_device_ptr.hpp"
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>
@@ -404,7 +406,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
 
         // Calculate expected results on host
         std::vector<stored_flag_type> expected_heads(size);
@@ -432,8 +435,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 0>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<type>      device_input(input);
-        test_utils::device_ptr<long long> device_heads(size);
+        common::device_ptr<type>      device_input(input);
+        common::device_ptr<long long> device_heads(size);
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -503,7 +506,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
 
         // Calculate expected results on host
         std::vector<stored_flag_type> expected_tails(size);
@@ -533,8 +537,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 1>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<type>      device_input(input);
-        test_utils::device_ptr<long long> device_tails(size);
+        common::device_ptr<type>      device_input(input);
+        common::device_ptr<long long> device_tails(size);
 
         // Running kernel
         hipLaunchKernelGGL(
@@ -604,7 +608,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, 0, 10, seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data_wrapped<type>(size, 0, 10, seed_value);
 
         // Calculate expected results on host
         std::vector<stored_flag_type> expected_heads(size);
@@ -649,9 +654,9 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 2>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<type>      device_input(input);
-        test_utils::device_ptr<long long> device_heads(size);
-        test_utils::device_ptr<long long> device_tails(size);
+        common::device_ptr<type>      device_input(input);
+        common::device_ptr<long long> device_heads(size);
+        common::device_ptr<long long> device_tails(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(flag_heads_and_tails_kernel<type,
@@ -717,7 +722,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        const std::vector<T> input = test_utils::get_random_data<T>(size, 0, 10, seed_value);
+        const std::vector<T> input
+            = test_utils::get_random_data_wrapped<T>(size, 0, 10, seed_value);
 
         // Calculate expected results on host
         std::vector<stored_type> expected(size);
@@ -739,8 +745,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 3>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<T>           d_input(input);
-        test_utils::device_ptr<stored_type> d_output(size);
+        common::device_ptr<T>           d_input(input);
+        common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_kernel<T,
@@ -803,7 +809,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 4>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        const std::vector<T> input = test_utils::get_random_data<T>(size, 0, 10, seed_value);
+        const std::vector<T> input
+            = test_utils::get_random_data_wrapped<T>(size, 0, 10, seed_value);
 
         // Calculate expected results on host
         std::vector<stored_type> expected(size);
@@ -825,8 +832,8 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 4>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<T>           d_input(input);
-        test_utils::device_ptr<stored_type> d_output(size);
+        common::device_ptr<T>           d_input(input);
+        common::device_ptr<stored_type> d_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_kernel<T,
@@ -889,10 +896,14 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 5>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        const std::vector<T> input = test_utils::get_random_data<T>(size, 0, 10, seed_value);
+        const std::vector<T> input
+            = test_utils::get_random_data_wrapped<T>(size, 0, 10, seed_value);
 
         const std::vector<unsigned int> tile_sizes
-            = test_utils::get_random_data<unsigned int>(grid_size, 0, items_per_block, seed_value);
+            = test_utils::get_random_data_wrapped<unsigned int>(grid_size,
+                                                                0,
+                                                                items_per_block,
+                                                                seed_value);
 
         // Calculate expected results on host
         std::vector<stored_type> expected(size);
@@ -921,9 +932,9 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 5>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<T>            d_input(input);
-        test_utils::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
-        test_utils::device_ptr<stored_type>  d_output(size);
+        common::device_ptr<T>            d_input(input);
+        common::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
+        common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_left_partial_kernel<T,
@@ -987,10 +998,14 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 6>::t
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
-        const std::vector<T> input = test_utils::get_random_data<T>(size, 0, 10, seed_value);
+        const std::vector<T> input
+            = test_utils::get_random_data_wrapped<T>(size, 0, 10, seed_value);
 
         const std::vector<unsigned int> tile_sizes
-            = test_utils::get_random_data<unsigned int>(grid_size, 0, items_per_block, seed_value);
+            = test_utils::get_random_data_wrapped<unsigned int>(grid_size,
+                                                                0,
+                                                                items_per_block,
+                                                                seed_value);
 
         // Calculate expected results on host
         std::vector<stored_type> expected(size);
@@ -1019,9 +1034,9 @@ auto test_block_adjacent_difference() -> typename std::enable_if<Method == 6>::t
         }
 
         // Preparing Device
-        test_utils::device_ptr<T>            d_input(input);
-        test_utils::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
-        test_utils::device_ptr<stored_type>  d_output(size);
+        common::device_ptr<T>            d_input(input);
+        common::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
+        common::device_ptr<stored_type>  d_output(size);
 
         // Running kernel
         hipLaunchKernelGGL(HIP_KERNEL_NAME(subtract_right_partial_kernel<T,

@@ -277,6 +277,12 @@ public:
     T broadcast(T input, const unsigned int src_lane, storage_type& storage)
     {
         (void) storage;
+
+        if(WarpSize == device_warp_size())
+        {
+            return warp_readlane(input, warp_readfirstlane(src_lane));
+        }
+
         return warp_shuffle(input, src_lane, WarpSize);
     }
 
