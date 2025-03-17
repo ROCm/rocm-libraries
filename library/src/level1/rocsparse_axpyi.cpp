@@ -157,11 +157,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::axpyi_template(handle, nnz, alpha, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_daxpyi(rocsparse_handle     handle,
                                              rocsparse_int        nnz,
@@ -177,11 +179,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::axpyi_template(handle, nnz, alpha, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_caxpyi(rocsparse_handle               handle,
                                              rocsparse_int                  nnz,
@@ -197,11 +201,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::axpyi_template(handle, nnz, alpha, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zaxpyi(rocsparse_handle                handle,
                                              rocsparse_int                   nnz,
@@ -217,8 +223,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::axpyi_template(handle, nnz, alpha, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

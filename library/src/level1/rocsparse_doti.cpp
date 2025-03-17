@@ -185,11 +185,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::doti_template(handle, nnz, x_val, x_ind, y, result, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_ddoti(rocsparse_handle     handle,
                                             rocsparse_int        nnz,
@@ -205,11 +207,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::doti_template(handle, nnz, x_val, x_ind, y, result, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cdoti(rocsparse_handle               handle,
                                             rocsparse_int                  nnz,
@@ -225,11 +229,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::doti_template(handle, nnz, x_val, x_ind, y, result, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zdoti(rocsparse_handle                handle,
                                             rocsparse_int                   nnz,
@@ -245,8 +251,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::doti_template(handle, nnz, x_val, x_ind, y, result, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

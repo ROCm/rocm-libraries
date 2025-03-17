@@ -100,11 +100,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dgthrz(rocsparse_handle     handle,
                                              rocsparse_int        nnz,
@@ -118,11 +120,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cgthrz(rocsparse_handle         handle,
                                              rocsparse_int            nnz,
@@ -136,11 +140,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zgthrz(rocsparse_handle          handle,
                                              rocsparse_int             nnz,
@@ -154,8 +160,10 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthrz_template(handle, nnz, y, x_val, x_ind, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

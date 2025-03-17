@@ -172,9 +172,11 @@ try
         return rocsparse_status_success;
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

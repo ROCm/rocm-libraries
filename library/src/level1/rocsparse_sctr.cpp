@@ -100,11 +100,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dsctr(rocsparse_handle     handle,
                                             rocsparse_int        nnz,
@@ -118,11 +120,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csctr(rocsparse_handle               handle,
                                             rocsparse_int                  nnz,
@@ -136,11 +140,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zsctr(rocsparse_handle                handle,
                                             rocsparse_int                   nnz,
@@ -154,11 +160,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_isctr(rocsparse_handle     handle,
                                             rocsparse_int        nnz,
@@ -172,11 +180,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr_template(handle, nnz, x_val, x_ind, y, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #define INSTANTIATE(I, T)                                                           \
     template rocsparse_status rocsparse::sctr_template(rocsparse_handle     handle, \

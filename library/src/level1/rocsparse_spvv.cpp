@@ -66,7 +66,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     template <typename T, typename I, typename X, typename Y>
@@ -119,7 +121,9 @@ namespace rocsparse
             }
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -304,9 +308,11 @@ try
     }
 #undef PARAMS
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
