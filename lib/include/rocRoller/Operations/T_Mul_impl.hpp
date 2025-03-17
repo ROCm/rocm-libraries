@@ -28,6 +28,8 @@
 
 #include <rocRoller/Operations/T_Mul.hpp>
 
+#include <fmt/core.h>
+
 namespace rocRoller
 {
     namespace Operations
@@ -46,7 +48,7 @@ namespace rocRoller
 
         inline std::string T_Mul::toString() const
         {
-            return "T_Mul";
+            return fmt::format("T_Mul {} {}", a.value, b.value);
         }
 
         inline bool T_Mul::operator==(T_Mul const& rhs) const

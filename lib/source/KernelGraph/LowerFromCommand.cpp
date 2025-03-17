@@ -343,9 +343,13 @@ namespace rocRoller
             void operator()(Operations::T_Store_Tiled const& tstore)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Store_Tiled");
+                std::ostringstream msg;
+                for(auto const& [a, b] : m_op)
+                    msg << a << "->" << b << std::endl;
                 AssertFatal(m_op.count(tstore.getSrcTag()) > 0,
                             "Unknown command tag",
-                            ShowValue(tstore.getSrcTag()));
+                            ShowValue(tstore.getSrcTag()),
+                            msg.str());
 
                 auto tensor = m_command->getOperation<Operations::Tensor>(tstore.getDstTag());
 

@@ -45,19 +45,13 @@ namespace rocRoller
         {
         public:
             Transformer() = delete;
-            Transformer(std::shared_ptr<CoordinateGraph>,
-                        ContextPtr                       = nullptr,
-                        Expression::ExpressionTransducer = nullptr);
+            Transformer(CoordinateGraph const* graph);
+            Transformer(CoordinateGraph const* graph, Expression::ExpressionTransducer transducer);
 
             /**
              * Set expression transducer.
              */
             void setTransducer(Expression::ExpressionTransducer);
-
-            /**
-             * Get expression transducer.
-             */
-            Expression::ExpressionTransducer getTransducer() const;
 
             /**
              * Set the index expression for the dimension.
@@ -112,17 +106,21 @@ namespace rocRoller
             /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
              */
-            void fillExecutionCoordinates();
+            void fillExecutionCoordinates(ContextPtr context);
 
         private:
+            Expression::ExpressionPtr transduce(Expression::ExpressionPtr exp) const;
+            std::vector<Expression::ExpressionPtr>
+                transduce(std::vector<Expression::ExpressionPtr> exps) const;
+
             template <typename Visitor>
             std::vector<Expression::ExpressionPtr>
                 stride(std::vector<int> const&, bool forward, Visitor& visitor) const;
 
             std::map<int, Expression::ExpressionPtr> m_indexes;
-            std::shared_ptr<CoordinateGraph>         m_graph;
-            ContextPtr                               m_context;
-            Expression::ExpressionTransducer         m_transducer;
+
+            CoordinateGraph const*           m_graph;
+            Expression::ExpressionTransducer m_transducer;
         };
     }
 }

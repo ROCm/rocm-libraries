@@ -93,55 +93,7 @@ std::string TestContext::KernelName(Params const&... params)
  */
 inline std::string TestContext::EscapeKernelName(std::string name)
 {
-    char underscore = '_';
-    char replaced   = '*';
-
-    // Replace any character that isn't alphanumeric with underscore,
-    // or one of a few special cases.
-
-    std::map<char, char> specialCharacters = {{'+', 'p'}, {'-', 'm'}};
-    for(auto& c : name)
-    {
-        if(!isalnum(c) && c != underscore)
-        {
-            auto iter = specialCharacters.find(c);
-            if(iter != specialCharacters.end())
-                c = iter->second;
-            else
-                c = replaced;
-        }
-    }
-
-    // Delete any trailing '*'s.
-
-    while(!name.empty() && name.back() == replaced)
-        name.pop_back();
-
-    std::string rv;
-    rv.reserve(name.size());
-
-    // Delete any leading '*'s, as well as any duplicate '*'s.
-
-    for(auto const& c : name)
-    {
-        if(c != replaced || (!rv.empty() && rv.back() != replaced))
-        {
-            rv += c;
-        }
-    }
-
-    // If the name is now completely empty, return '_'.
-    if(rv.empty())
-        rv += replaced;
-
-    // Replace any '*' chars with '_'.
-    for(auto& c : rv)
-    {
-        if(c == replaced)
-            c = underscore;
-    }
-
-    return rv;
+    return rocRoller::escapeSymbolName(name);
 }
 
 inline rocRoller::ContextPtr TestContext::get()

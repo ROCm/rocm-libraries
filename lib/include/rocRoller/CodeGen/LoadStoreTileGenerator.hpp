@@ -121,22 +121,17 @@ namespace rocRoller
                                                    ControlGraph::ComputeIndex const& ci,
                                                    CoordinateGraph::Transformer      coords);
 
-        private:
-            std::map<int, int>               m_baseOffsets;
-            ContextPtr                       m_context;
-            KernelGraphPtr                   m_graph;
-            Expression::ExpressionTransducer m_fastArith;
-            unsigned int                     m_workgroupSizeTotal;
-
-            // Information needed in order to load or store a tile.
+            /**
+             * Information needed in order to load or store a tile.
+             */
             struct LoadStoreTileInfo
             {
-                MemoryInstructions::MemoryKind    kind;
-                uint64_t                          m;
-                uint64_t                          n;
-                uint32_t                          elementBits;
-                uint32_t                          packedAmount;
-                uint32_t                          ldsWriteStride;
+                MemoryInstructions::MemoryKind    kind = MemoryInstructions::MemoryKind::Count;
+                uint64_t                          m    = 0;
+                uint64_t                          n    = 0;
+                uint32_t                          elementBits    = 0;
+                uint32_t                          packedAmount   = 0;
+                uint32_t                          ldsWriteStride = 0;
                 Register::ValuePtr                data;
                 Register::ValuePtr                rowOffsetReg;
                 Register::ValuePtr                rowStrideReg;
@@ -148,6 +143,13 @@ namespace rocRoller
                 BufferInstructionOptions          bufOpts;
                 bool                              isTransposedTile;
             };
+
+        private:
+            std::map<int, int>               m_baseOffsets;
+            ContextPtr                       m_context;
+            KernelGraphPtr                   m_graph;
+            Expression::ExpressionTransducer m_fastArith;
+            unsigned int                     m_workgroupSizeTotal;
 
             inline Generator<Instruction> generate(auto&                     dest,
                                                    Expression::ExpressionPtr expr) const;
@@ -260,5 +262,8 @@ namespace rocRoller
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
         };
+
+        std::string toString(LoadStoreTileGenerator::LoadStoreTileInfo const& info);
+
     }
 }

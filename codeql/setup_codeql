@@ -29,5 +29,5 @@
 # Sets up a QLPack with dependencies for our check(s).
 mkdir -p codeql/build
 cd codeql/build
-unzip /opt/codeql/codeql-cli.zip
+unzip -q /opt/codeql/codeql-cli.zip
 mv codeql-codeql-cli-* codeql-cli

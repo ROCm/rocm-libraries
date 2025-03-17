@@ -111,7 +111,7 @@ namespace rocRoller
                         ShowValue(lanesPerWavefront),
                         ShowValue(K * N * BATCH / lanesPerWavefront),
                         ShowValue(B->valueCount()),
-                        ShowValue(packingA));
+                        ShowValue(packingB));
             AssertFatal(C->valueCount() == (size_t)M * N * BATCH / lanesPerWavefront,
                         "C matrix size mismatch",
                         ShowValue(M),

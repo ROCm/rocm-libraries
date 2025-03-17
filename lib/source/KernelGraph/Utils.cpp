@@ -565,6 +565,23 @@ namespace rocRoller
                 std::get<Operation>(elem));
         }
 
+        int getTransformTarget(int storageTarget, KernelGraph const& kgraph)
+        {
+            namespace CT     = rocRoller::KernelGraph::CoordinateGraph;
+            auto isDuplicate = CT::isEdge<Duplicate>;
+            auto outbound    = kgraph.coordinates.getOutputNodeIndices(storageTarget, isDuplicate)
+                                .to<std::vector>();
+
+            if(outbound.empty())
+                return storageTarget;
+
+            AssertFatal(outbound.size() == 1,
+                        "Only one outbound Duplicate edge is supported.",
+                        ShowValue(outbound));
+
+            return outbound[0];
+        }
+
         std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
             int target, Graph::Direction direction, KernelGraph const& kgraph)
         {
@@ -701,7 +718,8 @@ namespace rocRoller
         {
             std::unordered_set<int> required;
 
-            auto [target, direction]    = getOperationTarget(tag, graph);
+            auto [target, direction] = getOperationTarget(tag, graph);
+            Log::debug("{} target: {}", tag, target);
             auto [targetRequired, path] = findRequiredCoordinates(target, direction, graph);
 
             std::copy(targetRequired.cbegin(),
@@ -914,16 +932,8 @@ namespace rocRoller
 
         VariableType getVariableType(KernelGraph const& graph, int opTag)
         {
-            auto l = graph.control.get<LoadTiled>(opTag);
-            if(l)
-                return l->varType;
-            auto s = graph.control.get<StoreTiled>(opTag);
-            if(s)
-                return s->dataType;
-            auto ll = graph.control.get<LoadLDSTile>(opTag);
-            if(ll)
-                return ll->varType;
-            Throw<FatalError>("Invalid load/store operation.");
+            auto node = graph.control.getNode(opTag);
+            return getVariableType(node);
         }
 
         void orderMemoryNodes(KernelGraph&                         graph,

@@ -237,7 +237,7 @@ namespace rocRoller::KernelGraph
         std::set<int>    isForLoop, isUnroll;
         std::vector<int> ordered;
 
-        // If location is a ForLoop, it's coordinate is the slowest.
+        // If location is a ForLoop, its coordinate is the slowest.
         if(location != -1)
         {
             auto maybeForLoop = graph.control.get<ForLoopOp>(location);

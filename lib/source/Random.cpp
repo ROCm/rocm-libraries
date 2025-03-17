@@ -26,6 +26,8 @@
 
 #include <rocRoller/Utilities/Random.hpp>
 
+#include <rocRoller/Utilities/Settings.hpp>
+
 namespace rocRoller
 {
     RandomGenerator::RandomGenerator(int seedNumber)

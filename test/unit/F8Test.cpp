@@ -104,9 +104,9 @@ namespace rocRollerTest
                                                1,
                                                Register::AllocationOptions::FullyContiguous());
 
-            auto unsegmented = DataTypeInfo::Get(F8Type).unsegmentedVariableType();
-            AssertFatal(unsegmented, "packed data type not found");
-            DataType packedDataType = unsegmented->dataType;
+            auto packed = DataTypeInfo::Get(F8Type).packedVariableType();
+            AssertFatal(packed, "packed data type not found");
+            DataType packedDataType = packed->dataType;
 
             auto a_ptr
                 = Register::Value::Placeholder(context,

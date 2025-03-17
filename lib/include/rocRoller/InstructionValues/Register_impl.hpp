@@ -148,6 +148,11 @@ namespace rocRoller
                || (lhs == Type::Literal && rhs == Type::M0))
                 return Type::M0;
 
+            if(lhs == Type::Count || rhs == Type::Count)
+            {
+                return Type::Count;
+            }
+
             if((IsTTMP(lhs) && rhs == Type::Literal) || (lhs == Type::Literal && IsTTMP(rhs)))
                 return Type::Scalar;
 
@@ -704,7 +709,7 @@ namespace rocRoller
 
         inline std::string Value::description() const
         {
-            auto rv = concatenate(regType(), " ", variableType(), ": ");
+            auto rv = concatenate(regType(), " ", variableType(), " x ", valueCount(), ": ");
 
             if(allocationState() == AllocationState::Unallocated)
                 rv += "(unallocated)";
@@ -799,6 +804,24 @@ namespace rocRoller
             m_name = std::move(name);
         }
 
+        inline void Value::setReadOnly()
+        {
+            AssertFatal(m_allocation);
+
+            m_allocation->setReadOnly();
+        }
+
+        inline bool Value::readOnly() const
+        {
+            if(regType() == Type::Literal)
+                return true;
+
+            if(!m_allocation)
+                return false;
+
+            return m_allocation->readOnly();
+        }
+
         inline ValuePtr Value::negate() const
         {
             AssertFatal(IsRegister(m_regType) && hasContiguousIndices());
@@ -842,8 +865,19 @@ namespace rocRoller
 
             std::vector<int> coords;
             for(auto i : indices)
+            {
                 for(auto j = 0; j < registersPerElement; ++j)
-                    coords.push_back(m_allocationCoord.at(i * registersPerElement + j));
+                {
+                    auto idx = i * registersPerElement + j;
+                    AssertFatal(idx < m_allocationCoord.size(),
+                                ShowValue(i),
+                                ShowValue(j),
+                                ShowValue(registersPerElement),
+                                ShowValue(idx),
+                                ShowValue(m_allocationCoord.size()));
+                    coords.push_back(m_allocationCoord.at(idx));
+                }
+            }
             return std::make_shared<Value>(m_allocation, m_regType, m_varType, coords);
         }
 
@@ -1095,6 +1129,11 @@ namespace rocRoller
 
             msg << " (" << m_variableType << ")";
 
+            if(m_controlOp)
+            {
+                msg << " (op " << *m_controlOp << ")";
+            }
+
             auto iter = m_registerIndices.begin();
             if(iter != m_registerIndices.end())
             {
@@ -1108,6 +1147,16 @@ namespace rocRoller
             msg << std::endl;
 
             return msg.str();
+        }
+
+        inline void Allocation::setReadOnly()
+        {
+            m_readOnly = true;
+        }
+
+        inline bool Allocation::readOnly() const
+        {
+            return m_readOnly;
         }
 
         inline int Allocation::registerCount() const

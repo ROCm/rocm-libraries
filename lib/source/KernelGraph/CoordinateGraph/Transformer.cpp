@@ -39,23 +39,23 @@ namespace rocRoller
 {
     namespace KernelGraph::CoordinateGraph
     {
-        using namespace Expression;
-
-        Transformer::Transformer(std::shared_ptr<CoordinateGraph> graph,
-                                 ContextPtr                       context,
-                                 ExpressionTransducer             transducer)
-            : m_graph(graph)
-            , m_context(context)
-            , m_transducer(transducer)
+        Transformer::Transformer(CoordinateGraph const* graph)
+            : Transformer::Transformer(graph, Expression::simplify)
         {
-            if(m_context)
-                fillExecutionCoordinates();
         }
 
-        void Transformer::fillExecutionCoordinates()
+        Transformer::Transformer(CoordinateGraph const*           graph,
+                                 Expression::ExpressionTransducer transducer)
+            : m_graph(graph)
+            , m_transducer(transducer)
         {
-            auto const& kernelWorkgroupIndexes = m_context->kernel()->workgroupIndex();
-            auto const& kernelWorkitemIndexes  = m_context->kernel()->workitemIndex();
+            AssertFatal(graph != nullptr);
+        }
+
+        void Transformer::fillExecutionCoordinates(ContextPtr context)
+        {
+            auto const& kernelWorkgroupIndexes = context->kernel()->workgroupIndex();
+            auto const& kernelWorkitemIndexes  = context->kernel()->workitemIndex();
             for(auto const& tag : m_graph->getNodes())
             {
                 auto dimension = m_graph->getNode(tag);
@@ -71,7 +71,7 @@ namespace rocRoller
                                 ShowValue(kernelWorkgroupIndexes.size()));
                     auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
                     // TODO Remove this when Workgroup removed from RegisterTagManager
-                    m_context->registerTagManager()->addRegister(
+                    context->registerTagManager()->addRegister(
                         tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim));
                     setCoordinate(tag, expr);
                 }
@@ -90,17 +90,12 @@ namespace rocRoller
             }
         }
 
-        void Transformer::setTransducer(ExpressionTransducer transducer)
+        void Transformer::setTransducer(Expression::ExpressionTransducer transducer)
         {
             m_transducer = transducer;
         }
 
-        ExpressionTransducer Transformer::getTransducer() const
-        {
-            return m_transducer;
-        }
-
-        void Transformer::setCoordinate(int tag, ExpressionPtr index)
+        void Transformer::setCoordinate(int tag, Expression::ExpressionPtr index)
         {
             if(Log::getLogger()->should_log(LogLevel::Debug))
             {
@@ -116,7 +111,7 @@ namespace rocRoller
             m_indexes.insert_or_assign(tag, index);
         }
 
-        ExpressionPtr Transformer::getCoordinate(int tag) const
+        Expression::ExpressionPtr Transformer::getCoordinate(int tag) const
         {
             AssertFatal(m_indexes.contains(tag), "Coordinate not set.", ShowValue(tag));
             return m_indexes.at(tag);
@@ -144,37 +139,39 @@ namespace rocRoller
             return m_graph->hasPath<Graph::Direction::Upstream>(dsts, srcs);
         }
 
-        std::vector<ExpressionPtr> Transformer::forward(std::vector<int> const& dsts) const
+        std::vector<Expression::ExpressionPtr>
+            Transformer::forward(std::vector<int> const& dsts) const
         {
-            std::vector<ExpressionPtr> indexes;
-            std::vector<int>           srcs;
+            std::vector<Expression::ExpressionPtr> indexes;
+            std::vector<int>                       srcs;
             for(auto const& kv : m_indexes)
             {
                 srcs.push_back(kv.first);
                 indexes.push_back(kv.second);
             }
-            return m_graph->forward(indexes, srcs, dsts, m_transducer);
+            return transduce(m_graph->forward(indexes, srcs, dsts));
         }
 
-        std::vector<ExpressionPtr> Transformer::reverse(std::vector<int> const& dsts) const
+        std::vector<Expression::ExpressionPtr>
+            Transformer::reverse(std::vector<int> const& dsts) const
         {
-            std::vector<ExpressionPtr> indexes;
-            std::vector<int>           srcs;
+            std::vector<Expression::ExpressionPtr> indexes;
+            std::vector<int>                       srcs;
             for(auto const& kv : m_indexes)
             {
                 srcs.push_back(kv.first);
                 indexes.push_back(kv.second);
             }
-            return m_graph->reverse(indexes, dsts, srcs, m_transducer);
+            return transduce(m_graph->reverse(indexes, dsts, srcs));
         }
 
         template <typename Visitor>
-        std::vector<ExpressionPtr>
+        std::vector<Expression::ExpressionPtr>
             Transformer::stride(std::vector<int> const& dsts, bool forward, Visitor& visitor) const
 
         {
-            std::vector<ExpressionPtr> indexes;
-            std::vector<int>           srcs;
+            std::vector<Expression::ExpressionPtr> indexes;
+            std::vector<int>                       srcs;
             for(auto const& kv : m_indexes)
             {
                 srcs.push_back(kv.first);
@@ -183,35 +180,52 @@ namespace rocRoller
 
             // this call to traverse with EdgeDiffVisitor populates the deltas associated with dsts.
             if(forward)
-                m_graph->traverse<Graph::Direction::Downstream>(
-                    indexes, srcs, dsts, visitor, m_transducer);
+                m_graph->traverse<Graph::Direction::Downstream>(indexes, srcs, dsts, visitor);
             else
-                m_graph->traverse<Graph::Direction::Upstream>(
-                    indexes, dsts, srcs, visitor, m_transducer);
+                m_graph->traverse<Graph::Direction::Upstream>(indexes, dsts, srcs, visitor);
 
-            std::vector<ExpressionPtr> deltas;
+            std::vector<Expression::ExpressionPtr> deltas;
             for(auto const& dst : dsts)
             {
                 auto delta = visitor.deltas.at(dst);
-                deltas.push_back(m_transducer ? m_transducer(delta) : delta);
+                deltas.push_back(delta);
             }
-            return deltas;
+            return transduce(deltas);
         }
 
-        std::vector<ExpressionPtr>
-            Transformer::forwardStride(int x, ExpressionPtr dx, std::vector<int> const& dsts) const
+        std::vector<Expression::ExpressionPtr> Transformer::forwardStride(
+            int x, Expression::ExpressionPtr dx, std::vector<int> const& dsts) const
         {
             AssertFatal(dx);
             auto visitor = ForwardEdgeDiffVisitor(x, dx);
             return stride(dsts, true, visitor);
         }
 
-        std::vector<ExpressionPtr>
-            Transformer::reverseStride(int x, ExpressionPtr dx, std::vector<int> const& dsts) const
+        std::vector<Expression::ExpressionPtr> Transformer::reverseStride(
+            int x, Expression::ExpressionPtr dx, std::vector<int> const& dsts) const
         {
             AssertFatal(dx);
             auto visitor = ReverseEdgeDiffVisitor(x, dx);
             return stride(dsts, false, visitor);
+        }
+
+        Expression::ExpressionPtr Transformer::transduce(Expression::ExpressionPtr exp) const
+        {
+            if(!m_transducer)
+                return exp;
+
+            return m_transducer(exp);
+        }
+        std::vector<Expression::ExpressionPtr>
+            Transformer::transduce(std::vector<Expression::ExpressionPtr> exps) const
+        {
+            if(!m_transducer)
+                return exps;
+
+            for(auto& exp : exps)
+                exp = m_transducer(exp);
+
+            return exps;
         }
     }
 }

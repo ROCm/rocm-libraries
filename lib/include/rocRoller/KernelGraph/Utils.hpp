@@ -154,6 +154,15 @@ namespace rocRoller
         std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph);
 
         /**
+         * Returns the true coordinate that should be the target of a
+         * coordinate traversal, given a coordinate node used for storage.
+         *
+         * For now this will just follow any Duplicate edge leaving
+         * `storageTarget`.
+         */
+        int getTransformTarget(int storageTarget, KernelGraph const& kgraph);
+
+        /**
          * @brief Find all required coordintes needed to compute
          * indexes for the target dimension.
          *

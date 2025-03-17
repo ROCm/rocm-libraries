@@ -36,6 +36,16 @@
 
 namespace rocRoller
 {
+    inline std::string toString(RegisterExpressionAttributes t)
+    {
+        return concatenate("{\n",
+                           ShowValue(t.dataType),
+                           ShowValue(t.unitStride),
+                           ShowValue(t.elementBlockSize),
+                           ShowValue(t.elementBlockStride),
+                           ShowValue(t.trLoadPairStride),
+                           "}");
+    }
     inline RegisterTagManager::RegisterTagManager(ContextPtr context)
         : m_context(context)
     {
@@ -113,6 +123,19 @@ namespace rocRoller
     inline void RegisterTagManager::addRegister(int tag, Register::ValuePtr value)
     {
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
+        AssertFatal(!hasRegister(tag), "Tag ", tag, " already in RegisterTagManager.");
+        if(auto existingTag = findRegister(value))
+        {
+            AssertFatal(value->readOnly(),
+                        "Read/write Tag ",
+                        tag,
+                        ": ",
+                        value->toString(),
+                        " intersects with existing tag ",
+                        *existingTag,
+                        ": ",
+                        getRegister(*existingTag)->toString());
+        }
         m_registers.insert(std::pair<int, Register::ValuePtr>(tag, value));
     }
 
@@ -137,6 +160,17 @@ namespace rocRoller
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
         return m_registers.count(tag) > 0;
+    }
+
+    inline std::optional<int> RegisterTagManager::findRegister(Register::ValuePtr reg) const
+    {
+        for(auto const& [tag, existingReg] : m_registers)
+        {
+            if(existingReg->intersects(reg))
+                return tag;
+        }
+
+        return std::nullopt;
     }
 
     inline bool RegisterTagManager::hasExpression(int tag) const

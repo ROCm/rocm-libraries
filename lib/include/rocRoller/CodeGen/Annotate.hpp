@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,56 +26,58 @@
 
 #pragma once
 
-#include <cstdlib>
-#include <random>
-#include <vector>
-
-#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
-
-/*
- * Random vector generator.
- */
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Utilities/Generator.hpp>
 
 namespace rocRoller
 {
     /**
-     * Random vector generator.
+     * A functor that adds the specified comment to a given instruction.
+     * Intended for use with Generator<Instruction>::map(), e.g.:
      *
-     * A seed must be passed to the constructor.  If the environment
-     * variable specified by `ROCROLLER_RANDOM_SEED` is present, it
-     * supercedes the seed passed to the constructor.
+     * co_yield generate(destReg, expr, context).map(AddComment("foo"));
      *
-     * A seed may be set programmatically (at any time) by calling
-     * seed().
+     * This will add the comment "foo" to each instruction that's part of
+     * generating `expr`.
      */
-    class RandomGenerator
+    class AddComment
     {
     public:
-        explicit RandomGenerator(int seedNumber);
+        AddComment(std::string comment)
+            : m_comment(std::move(comment))
+        {
+        }
 
-        /**
-         * Set a new seed.
-         */
-        void seed(int seedNumber);
-
-        /**
-         * Generate a random vector of length `nx`, with values
-         * between `min` and `max`.
-         */
-        template <typename T, typename R>
-        std::vector<typename UnsegmentedTypeOf<T>::type> vector(uint nx, R min, R max);
-
-        template <std::integral T>
-        T next(T min, T max);
+        Instruction operator()(Instruction inst)
+        {
+            inst.addComment(m_comment);
+            return inst;
+        }
 
     private:
-        std::mt19937 m_gen;
+        std::string m_comment;
     };
 
-    inline uint32_t constexpr LFSRRandomNumberGenerator(uint32_t const seed)
+    /**
+     * A functor that adds the specified control op to a given instruction.
+     * Really intended for use only from LowerFromKernelGraph, so that every
+     * instruction is annotated with the control op that it came from.
+     */
+    class AddControlOp
     {
-        return ((seed << 1) ^ (((seed >> 31) & 1) ? 0xc5 : 0x00));
-    }
-}
+    public:
+        AddControlOp(int op)
+            : m_op(op)
+        {
+        }
 
-#include <rocRoller/Utilities/Random_impl.hpp>
+        Instruction operator()(Instruction inst)
+        {
+            inst.addControlOp(m_op);
+            return inst;
+        }
+
+    private:
+        int m_op;
+    };
+}

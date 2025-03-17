@@ -309,3 +309,18 @@ TEST_F(DataTypesTest, GetIntegerType)
               VariableType(DataType::Int32, PointerType::PointerLocal).getArithmeticType());
     EXPECT_EQ(DataType::Int32, VariableType(DataType::Int32).getArithmeticType());
 }
+
+TEST_F(DataTypesTest, PackedUnpacked)
+{
+    using namespace rocRoller;
+    EXPECT_EQ(DataType::Halfx2, DataTypeInfo::Get(DataType::Half).packedVariableType());
+    EXPECT_EQ(std::nullopt, DataTypeInfo::Get(DataType::Halfx2).packedVariableType());
+
+    EXPECT_EQ(DataType::BF8x4, DataTypeInfo::Get(DataType::BF8).packedVariableType());
+    EXPECT_EQ(std::nullopt, DataTypeInfo::Get(DataType::Halfx2).packedVariableType());
+
+    EXPECT_EQ(DataType::FP8x4, DataTypeInfo::Get(DataType::FP8).packedVariableType());
+    EXPECT_EQ(std::nullopt, DataTypeInfo::Get(DataType::FP8x4).packedVariableType());
+
+    EXPECT_EQ(std::nullopt, DataTypeInfo::Get(DataType::Halfx2).packedVariableType());
+}

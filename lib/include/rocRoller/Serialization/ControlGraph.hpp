@@ -365,7 +365,7 @@ namespace rocRoller
             using iot = IOTraits<IO>;
             static void mapping(IO& io, Op& op, Context&)
             {
-                iot::mapRequired(io, "dataType", op.dataType);
+                iot::mapRequired(io, "varType", op.varType);
                 if constexpr(std::same_as<Op, KernelGraph::ControlGraph::StoreSGPR>)
                 {
                     iot::mapRequired(io, "bufOpts", op.bufOpts);

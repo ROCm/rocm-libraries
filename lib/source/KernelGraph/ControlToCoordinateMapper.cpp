@@ -156,11 +156,22 @@ namespace rocRoller::KernelGraph
 
         for(auto key : keys)
         {
-            ss << "\"" << coord << m_map.at(key) << "\" -> \"" << cntrl << std::get<0>(key)
-               << "\" [style=dotted,weight=0,arrowsize=0";
-            if(addLabels)
-                ss << ",label=\"" << std::get<1>(key) << "\"";
-            ss << "]\n";
+            auto const& [ctrlNode, spec] = key;
+            auto coordNode               = m_map.at(key);
+
+            auto coordKey = concatenate(coord, coordNode);
+            auto ctrlKey  = concatenate(cntrl, ctrlNode);
+
+            auto coordTag = concatenate("to_", cntrl, "_", coordNode, "_", ctrlNode);
+            auto ctrlTag  = concatenate("to_", coord, "_", ctrlNode, "_", coordNode);
+
+            auto label = concatenate(ctrlNode, "->", coordNode, ": ", spec);
+
+            ss << '"' << coordKey << "\" -> \"" << coordTag << "\"" << std::endl;
+            ss << '"' << coordTag << '"' << "[label=\"" << label << "\", shape=cds]" << std::endl;
+
+            ss << '"' << ctrlKey << "\" -> \"" << ctrlTag << "\"" << std::endl;
+            ss << '"' << ctrlTag << '"' << "[label=\"" << label << "\", shape=cds]" << std::endl;
         }
         return ss.str();
     }
@@ -252,5 +263,13 @@ namespace rocRoller::KernelGraph
         {
             return stream << toString(cs);
         }
+    }
+
+    std::string toString(ControlToCoordinateMapper::Connection const& conn)
+    {
+        return fmt::format("{{control: {}, coord: {}, {}}}",
+                           conn.control,
+                           conn.coordinate,
+                           toString(conn.connection));
     }
 }

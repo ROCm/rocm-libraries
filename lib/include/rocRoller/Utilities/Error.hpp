@@ -31,6 +31,7 @@
 #include <stdexcept>
 #include <string.h>
 #include <string>
+#include <vector>
 
 #include <cassert>
 
@@ -46,6 +47,13 @@ namespace rocRoller
         Error(Ta const&, Tb const&, Ts const&...);
 
         static bool BreakOnThrow();
+
+        virtual const char* what() const noexcept override;
+
+        void annotate(std::string const& msg);
+
+    private:
+        std::string m_annotatedMessage;
     };
 
     struct FatalError : public Error

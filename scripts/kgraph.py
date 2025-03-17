@@ -206,7 +206,7 @@ if __name__ == "__main__":
             dots = diff_dots(dots)
         for i, dot in enumerate(dots):
             serial_str = f"_{i:04d}"
-            foutput_serial = pathlib.Path(str(foutput.stem) + serial_str)
+            foutput_serial = pathlib.Path(str(foutput) + serial_str)
             process_dot(
                 dot,
                 foutput_serial,

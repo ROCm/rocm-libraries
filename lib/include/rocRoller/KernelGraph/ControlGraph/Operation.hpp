@@ -335,6 +335,7 @@ namespace rocRoller
             bool         isTransposedTile;
 
             std::string name() const;
+            std::string toString() const;
         };
 
         struct LoadTileDirect2LDS
@@ -385,9 +386,9 @@ namespace rocRoller
         struct StoreTiled
         {
             StoreTiled();
-            StoreTiled(DataType const dtype);
+            StoreTiled(VariableType const dtype);
 
-            DataType                 dataType = DataType::Count;
+            VariableType             varType = DataType::Count;
             BufferInstructionOptions bufOpts;
 
             std::string name() const;
@@ -404,9 +405,9 @@ namespace rocRoller
         struct StoreSGPR
         {
             StoreSGPR();
-            StoreSGPR(DataType const dtype, BufferInstructionOptions const bio);
+            StoreSGPR(VariableType const varType, BufferInstructionOptions const bio);
 
-            DataType                 dataType = DataType::Count;
+            VariableType             varType;
             BufferInstructionOptions bufOpts;
 
             std::string name() const;
@@ -418,9 +419,9 @@ namespace rocRoller
         struct StoreLDSTile
         {
             StoreLDSTile();
-            StoreLDSTile(DataType const dtype);
+            StoreLDSTile(VariableType const varType);
 
-            DataType dataType = DataType::Count;
+            VariableType varType;
 
             std::string name() const;
         };
@@ -491,12 +492,15 @@ namespace rocRoller
          */
         std::string name(const Operation& x);
 
-        inline std::string toString(const Operation& x);
+        std::string toString(const Operation& x);
 
         /**
          * @brief Return the datatype associated with the Operation.
          */
-        inline DataType getDataType(const Operation& x);
+        DataType getDataType(const Operation& x);
+
+        VariableType getVariableType(Operation const& op);
+        void         setVariableType(Operation& op, VariableType varType);
     }
 }
 

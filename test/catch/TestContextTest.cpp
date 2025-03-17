@@ -27,9 +27,30 @@
 #include "TestContext.hpp"
 
 #include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+
+TEST_CASE("escapeSymbolName escapes bad characters", "[utils]")
+{
+    CHECK(rocRoller::escapeSymbolName("goodKernelName") == "goodKernelName");
+    CHECK(rocRoller::escapeSymbolName("good__kernel__name") == "good__kernel__name");
+
+    CHECK(rocRoller::escapeSymbolName("my bad kernel name") == "my_bad_kernel_name");
+
+    CHECK(rocRoller::escapeSymbolName("My Bad Kernel Name") == "My_Bad_Kernel_Name");
+
+    CHECK(rocRoller::escapeSymbolName("my bad kernel name: and more 'bad', (characters)")
+          == "my_bad_kernel_name_and_more_bad_characters");
+
+    CHECK(rocRoller::escapeSymbolName("my bad kernel name: xnack+") == "my_bad_kernel_name_xnackp");
+    CHECK(rocRoller::escapeSymbolName("my bad kernel name: xnack-") == "my_bad_kernel_name_xnackm");
+
+    CHECK(rocRoller::escapeSymbolName("my _bad_ kernel name_") == "my__bad__kernel_name_");
+
+    CHECK(rocRoller::escapeSymbolName("") == "_");
+}
 
 TEST_CASE("TestContext::EscapeKernelName escapes bad characters", "[meta-test][infrastructure]")
 {

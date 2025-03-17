@@ -115,23 +115,23 @@ namespace rocRollerTest
 
         EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({x, y, m}));
 
-        auto exprs = ct.forward({x_index, y_index}, {x, y}, {m}, nullptr);
+        auto exprs = ct.forward({x_index, y_index}, {x, y}, {m});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr, "{Flatten: Add(Multiply(5:U32, 64:U32)U32, 3:U32)U32}");
 
-        exprs = ct.forward({x_index, y_index}, {x, y}, {m}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.forward({x_index, y_index}, {x, y}, {m});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "323:U32");
 
         // Trivial
         auto zero = std::make_shared<Expression::Expression>(0u);
-        exprs     = ct.forward({zero, zero}, {x, y}, {m}, nullptr);
+        exprs     = ct.forward({zero, zero}, {x, y}, {m});
         EXPECT_EQ(1, exprs.size());
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr, "{Flatten: Add(Multiply(0:U32, 64:U32)U32, 0:U32)U32}");
-        exprs = ct.forward({zero, zero}, {x, y}, {m}, fastArith);
+        exprs = ct.forward({zero, zero}, {x, y}, {m});
         EXPECT_EQ(1, exprs.size());
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "0:U32");
         auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
         EXPECT_EQ(result, 0);
@@ -141,16 +141,15 @@ namespace rocRollerTest
                       .to<std::vector>());
 
         auto m_index = std::make_shared<Expression::Expression>(67u);
-        exprs        = ct.reverse({m_index}, {x}, {m},
-                           fastArith); // note 'y' isn't necessary in reverse
+        exprs        = ct.reverse({m_index}, {x}, {m}); // note 'y' isn't necessary in reverse
         result       = std::get<unsigned int>(Expression::evaluate(exprs[0]));
         EXPECT_EQ(result, 1);
 
-        exprs  = ct.reverse({m_index}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
+        exprs  = ct.reverse({m_index}, {y}, {m}); // note 'x' isn't necessary in reverse
         result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
         EXPECT_EQ(result, 3);
 
-        exprs = ct.reverse({zero}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
+        exprs = ct.reverse({zero}, {y}, {m}); // note 'x' isn't necessary in reverse
         EXPECT_EQ(1, exprs.size());
         result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
         EXPECT_EQ(result, 0);
@@ -184,15 +183,15 @@ namespace rocRollerTest
 
         auto flat = ct.addElement(Flatten(), {x, y, z}, {m});
 
-        auto exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m}, nullptr);
+        auto exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(1, exprs.size());
         EXPECT_EQ(sexpr,
                   "{Flatten: Add(Multiply(Add(Multiply(5:U32, 32:U32)U32, 3:U32)U32, 16:U32)U32, "
                   "7:U32)U32}");
 
-        exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(1, exprs.size());
         EXPECT_EQ(sexpr, "2615:U32");
 
@@ -201,7 +200,7 @@ namespace rocRollerTest
 
         {
             auto rev_index     = std::make_shared<Expression::Expression>(5);
-            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, nullptr);
+            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m});
             EXPECT_EQ(3, exprs_reverse.size());
 
             EXPECT_EQ(Expression::toString(exprs_reverse[2]),
@@ -215,7 +214,7 @@ namespace rocRollerTest
         {
             // Should be able to get back the individual coordinate values.
             auto rev_index     = std::make_shared<Expression::Expression>(result);
-            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, fastArith);
+            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m});
             EXPECT_EQ(3, exprs_reverse.size());
 
             EXPECT_EQ(x_index_value,
@@ -258,28 +257,26 @@ namespace rocRollerTest
         auto thread_index = Expression::literal(33);
 
         // given indexes for the workgroup and wavefront, compute "i"
-        auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, nullptr);
+        auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 64:U32)U32, 33:I)U32}, 2:U32)U32}");
 
-        exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "322:U32");
 
         auto thread_index_register = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
         thread_index_register->allocateNow();
 
-        exprs = ct.reverse(
-            {block_index, thread_index_register->expression()}, {u}, {wg, wf}, nullptr);
+        exprs = ct.reverse({block_index, thread_index_register->expression()}, {u}, {wg, wf});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 64:U32)U32, v0:I)U32}, 2:U32)U32}");
 
-        exprs = ct.reverse(
-            {block_index, thread_index_register->expression()}, {u}, {wg, wf}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse({block_index, thread_index_register->expression()}, {u}, {wg, wf});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "{TileSplit: AddShiftL(128:U32, v0:I, 1:U32)U32}");
 
         EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({u, i, wg, wf}));
@@ -325,7 +322,7 @@ namespace rocRollerTest
 
         // given indexes for the workgroup and wavefront, compute "u"
         {
-            auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
+            auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf});
             auto sexpr = Expression::toString(exprs[0]);
 
             auto uVal = std::get<int>(Expression::evaluate(exprs[0]));
@@ -335,7 +332,7 @@ namespace rocRollerTest
 
         // given indexes for the workgroup and wavefront, compute "i"
         {
-            auto exprs = ct.reverse({block_index, thread_index}, {i}, {wg, wf}, fastArith);
+            auto exprs = ct.reverse({block_index, thread_index}, {i}, {wg, wf});
             auto sexpr = Expression::toString(exprs[0]);
 
             auto iVal = std::get<int>(Expression::evaluate(exprs[0]));
@@ -345,7 +342,7 @@ namespace rocRollerTest
             auto iValExpr = std::make_shared<Expression::Expression>(iVal);
 
             // given "i", compute workgroup and wavefront
-            auto fwdExprs = ct.forward({iValExpr}, {i}, {wg, wf}, fastArith);
+            auto fwdExprs = ct.forward({iValExpr}, {i}, {wg, wf});
 
             EXPECT_EQ(2, fwdExprs.size());
             EXPECT_EQ(2, std::get<int>(evaluate(fwdExprs[0]))) << toString(fwdExprs[0]);
@@ -381,16 +378,14 @@ namespace rocRollerTest
         auto unroll_index = Expression::literal(2);
 
         // given indexes for the workgroup and wavefront, compute "i"
-        auto exprs
-            = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll}, nullptr);
+        auto exprs = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(Add(Multiply(2:I, 64:I)I, 33:I)I, "
                   "4:U32)U32, 2:I)U32}, 2:I)U32}");
 
-        exprs = ct.reverse(
-            {block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "1292:U32");
 
         auto thread_index_register = std::make_shared<Register::Value>(
@@ -399,8 +394,7 @@ namespace rocRollerTest
 
         exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
                            {u},
-                           {wg, wf, unroll},
-                           nullptr);
+                           {wg, wf, unroll});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(Add(Multiply(2:I, 64:I)I, v0:I)I, "
@@ -408,13 +402,11 @@ namespace rocRollerTest
 
         exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
                            {u},
-                           {wg, wf, unroll},
-                           fastArith);
+                           {wg, wf, unroll});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
-                  "{Split: ShiftL({Tile: Add(ShiftL(Convert(Add(128:I, "
-                  "v0:I)I)U32, 2:U32)U32, "
-                  "2:I)U32}, 1:U32)U32}");
+                  "{Split: Multiply({Tile: Add(Multiply(Add(Multiply(2:I, 64:I)I, v0:I)I, "
+                  "4:U32)U32, 2:I)U32}, 2:I)U32}");
     }
 
     TEST_F(CoordinateGraphTest, Basic1D03)
@@ -446,16 +438,15 @@ namespace rocRollerTest
         auto unroll_index = Expression::literal(2);
 
         // given indexes for the workgroup and wavefront, compute "i"
-        auto exprs = ct.reverse(
-            {block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll}, nullptr);
+        auto exprs
+            = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 256:I)I, {Tile: Add(Multiply(33:I, "
                   "4:U32)U32, 2:I)U32})U32}, 2:I)U32}");
 
-        exprs = ct.reverse(
-            {block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "1292:U32");
 
         auto thread_index_register = std::make_shared<Register::Value>(
@@ -464,8 +455,7 @@ namespace rocRollerTest
 
         exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
                            {u},
-                           {wg, thread, unroll},
-                           nullptr);
+                           {wg, thread, unroll});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 256:I)I, {Tile: Add(Multiply(v0:I, "
@@ -473,9 +463,8 @@ namespace rocRollerTest
 
         exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
                            {u},
-                           {wg, thread, unroll},
-                           fastArith);
-        sexpr = Expression::toString(exprs[0]);
+                           {wg, thread, unroll});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr,
                   "{Split: ShiftL({Tile: Add(ShiftL(Convert(v0:I)U32, 2:U32)U32, "
                   "514:I)U32}, 1:U32)U32}");
@@ -536,36 +525,31 @@ namespace rocRollerTest
         std::string                            sexpr;
 
         {
-            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {A}, {tile_x, i}, fastArith),
-                         FatalError);
-            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Aj}, {tile_x, i}, fastArith),
-                         FatalError);
-            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Ai, Aj}, {tile_x, i}, fastArith),
-                         FatalError);
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {A}, {tile_x, i}), FatalError);
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Aj}, {tile_x, i}), FatalError);
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Ai, Aj}, {tile_x, i}), FatalError);
         }
 
         exprs = ct.reverse(
-            {tile_x_index, tile_y_index, i_index, j_index}, {Ai}, {tile_x, tile_y, i, j}, nullptr);
+            {tile_x_index, tile_y_index, i_index, j_index}, {Ai}, {tile_x, tile_y, i, j});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr, "{Tile: Add(Multiply(4:I, 16:U32)U32, 33:I)U32}");
 
-        exprs = ct.reverse({tile_x_index, tile_y_index, i_index, j_index},
-                           {Ai},
-                           {tile_x, tile_y, i, j},
-                           fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse(
+            {tile_x_index, tile_y_index, i_index, j_index}, {Ai}, {tile_x, tile_y, i, j});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "97:U32");
 
         exprs = ct.reverse(
-            {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j}, nullptr);
+            {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Add(Multiply({Tile: Add(Multiply(4:I, 16:U32)U32, 33:I)U32}, 300:I)U32, "
                   "Multiply({Tile: Add(Multiply(5:I, 16:U32)U32, 2:I)U32}, 1:I)U32)U32}");
 
         exprs = ct.reverse(
-            {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+            {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "29182:U32");
     }
 
@@ -616,10 +600,9 @@ namespace rocRollerTest
         EXPECT_EQ(ct.getElements<CoordinateTransformEdge>().to<std::set>(),
                   std::set({sp0, join, t0, t1}));
 
-        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct));
+        auto coords = Transformer(&ct, Expression::identity);
 
-        auto identity_transducer = [&](auto expr) { return expr; };
-        auto transducer          = [&](auto expr) { return Expression::fastMultiplication(expr); };
+        auto transducer = [&](auto expr) { return Expression::fastMultiplication(expr); };
 
         std::vector<Expression::ExpressionPtr> exprs;
         std::string                            sexpr;
@@ -644,7 +627,7 @@ namespace rocRollerTest
             "Multiply({Tile: Add(Multiply(5:U32, 16:U32)U32, 2:U32)U32}, 1:I)U32)U32}");
 
         // check edge case where expression are unchanged
-        coords.setTransducer(identity_transducer);
+        coords.setTransducer(Expression::identity);
         exprs = coords.reverse({A});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(
@@ -654,13 +637,12 @@ namespace rocRollerTest
         coords.setTransducer(nullptr);
 
         // as above, with fast multiplication
-        coords.setTransducer(transducer);
+        coords.setTransducer(Expression::fastMultiplication);
         exprs = coords.reverse({A});
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(transducer(exprs[0]));
         EXPECT_EQ(sexpr,
                   "{Split: Add(Multiply({Tile: Add(ShiftL(4:U32, 4:U32)U32, 33:U32)U32}, "
                   "300:I)U32, {Tile: Add(ShiftL(5:U32, 4:U32)U32, 2:U32)U32})U32}");
-        coords.setTransducer(nullptr);
 
         // remove i, try again: should fail
         coords.removeCoordinate(i);
@@ -719,8 +701,7 @@ namespace rocRollerTest
         EXPECT_EQ(ct.getNodes().to<std::set>(),
                   std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y, D, Di, Dj}));
 
-        auto coords
-            = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::simplify);
+        auto coords = Transformer(&ct);
 
         coords.setCoordinate(tile_x, Expression::literal(4u));
         coords.setCoordinate(tile_y, Expression::literal(5u));
@@ -728,23 +709,23 @@ namespace rocRollerTest
         coords.setCoordinate(j, Expression::literal(2u));
 
         auto exprs = coords.reverseStride(tile_x, Expression::literal(1u), {A});
-        auto sexpr = Expression::toString(exprs[0]);
+        auto sexpr = Expression::toString(Expression::simplify(exprs[0]));
         EXPECT_EQ(sexpr, "76800:U32");
 
         exprs = coords.reverseStride(i, Expression::literal(2u), {A});
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(Expression::simplify(exprs[0]));
         EXPECT_EQ(sexpr, "9600:U32");
 
         exprs = coords.reverseStride(j, Expression::literal(1u), {A});
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(Expression::simplify(exprs[0]));
         EXPECT_EQ(sexpr, "1:U32");
 
         exprs = coords.reverseStride(tile_y, Expression::literal(2u), {A});
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(Expression::simplify(exprs[0]));
         EXPECT_EQ(sexpr, "32:U32");
 
         exprs = coords.forwardStride(tile_y, Expression::literal(2u), {D});
-        sexpr = Expression::toString(exprs[0]);
+        sexpr = Expression::toString(Expression::simplify(exprs[0]));
         EXPECT_EQ(sexpr, "32:U32");
     }
 
@@ -770,12 +751,11 @@ namespace rocRollerTest
         auto aVal = Expression::literal(8u);
         auto bVal = Expression::literal(3u);
 
-        auto exprX
-            = only(ct.reverse({aVal, bVal, zero}, {input}, {a, b, sw}, Expression::identity));
-        EXPECT_THROW(only(ct.reverse({aVal, bVal, one}, {input}, {a, b, sw}, Expression::identity)),
-                     FatalError);
+        EXPECT_THROW(only(ct.reverse({aVal, bVal, one}, {input}, {a, b, sw})), FatalError);
 
-        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
+        auto exprX = only(ct.reverse({aVal, bVal, zero}, {input}, {a, b, sw}));
+
+        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(exprX.value()));
     }
 
     TEST_F(CoordinateGraphTest, SunderBasicTwo)
@@ -809,19 +789,17 @@ namespace rocRollerTest
         auto cVal = Expression::literal(1u);
         auto dVal = Expression::literal(4u);
 
-        auto exprX = only(ct.reverse(
-            {aVal, bVal, nullptr, nullptr, zero}, {input}, {a, b, c, d, sw}, Expression::identity));
-        auto exprY = only(ct.reverse(
-            {nullptr, nullptr, cVal, dVal, one}, {input}, {a, b, c, d, sw}, Expression::identity));
-        EXPECT_THROW(only(ct.reverse({aVal, bVal, nullptr, nullptr, two},
-                                     {input},
-                                     {a, b, c, d, sw},
-                                     Expression::identity)),
-                     FatalError);
+        auto exprX
+            = only(ct.reverse({aVal, bVal, nullptr, nullptr, zero}, {input}, {a, b, c, d, sw}));
+        auto exprY
+            = only(ct.reverse({nullptr, nullptr, cVal, dVal, one}, {input}, {a, b, c, d, sw}));
+        EXPECT_THROW(
+            only(ct.reverse({aVal, bVal, nullptr, nullptr, two}, {input}, {a, b, c, d, sw})),
+            FatalError);
 
-        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
+        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(exprX.value()));
         EXPECT_EQ("{Sunder: Add({Tile: Add(Multiply(1:U32, 6:U32)U32, 4:U32)U32}, 100:U32)U32}",
-                  toString(*exprY));
+                  toString(exprY.value()));
     }
 
     TEST_F(CoordinateGraphTest, SunderBasicThree)
@@ -864,30 +842,23 @@ namespace rocRollerTest
         auto eVal = Expression::literal(0u);
         auto fVal = Expression::literal(19u);
 
-        auto exprX = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, zero},
-                                     {input},
-                                     {a, b, c, d, e, f, sw},
-                                     Expression::identity));
-        auto exprY = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, one},
-                                     {input},
-                                     {a, b, c, d, e, f, sw},
-                                     Expression::identity));
-        auto exprZ = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, two},
-                                     {input},
-                                     {a, b, c, d, e, f, sw},
-                                     Expression::identity));
+        auto exprX = only(ct.reverse(
+            {aVal, bVal, cVal, dVal, eVal, fVal, zero}, {input}, {a, b, c, d, e, f, sw}));
+        auto exprY = only(
+            ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, one}, {input}, {a, b, c, d, e, f, sw}));
+        auto exprZ = only(
+            ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, two}, {input}, {a, b, c, d, e, f, sw}));
         EXPECT_THROW(only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, three},
                                      {input},
-                                     {a, b, c, d, e, f, sw},
-                                     Expression::identity)),
+                                     {a, b, c, d, e, f, sw})),
                      FatalError);
 
-        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
+        EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(exprX.value()));
         EXPECT_EQ("{Sunder: Add({Tile: Add(Multiply(1:U32, 6:U32)U32, 4:U32)U32}, 100:U32)U32}",
-                  toString(*exprY));
+                  toString(exprY.value()));
         EXPECT_EQ("{Sunder: Add({Tile: Add(Multiply(0:U32, 9:U32)U32, 19:U32)U32}, Add(100:U32, "
                   "24:U32)U32)U32}",
-                  toString(*exprZ));
+                  toString(exprZ.value()));
     }
 
     TEST_F(CoordinateGraphTest, SunderBasicOneViaTransformer)
@@ -909,7 +880,7 @@ namespace rocRollerTest
 
         ct.addElement(Tile(), {linX}, {a, b});
 
-        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+        auto tf = Transformer(&ct, Expression::identity);
         tf.setCoordinate(a, Expression::literal(8u));
         tf.setCoordinate(b, Expression::literal(3u));
 
@@ -917,9 +888,9 @@ namespace rocRollerTest
         auto exprX = only(tf.reverse({input}));
         EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
         auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("2:U32", toString(*strideExprX));
+        EXPECT_EQ("2:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("20:U32", toString(*strideExprX));
+        EXPECT_EQ("20:U32", toString(strideExprX.value()));
 
         tf.setCoordinate(sw, one);
         EXPECT_THROW(tf.reverse({input}), FatalError);
@@ -953,7 +924,7 @@ namespace rocRollerTest
 
         ct.addElement(Tile(), {linY}, {c, d});
 
-        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+        auto tf = Transformer(&ct, Expression::identity);
 
         tf.setCoordinate(a, Expression::literal(8u));
         tf.setCoordinate(b, Expression::literal(3u));
@@ -964,26 +935,26 @@ namespace rocRollerTest
         auto exprX = only(tf.reverse({input}));
         EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
         auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("2:U32", toString(*strideExprX));
+        EXPECT_EQ("2:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("20:U32", toString(*strideExprX));
+        EXPECT_EQ("20:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(d, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(c, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
 
         tf.setCoordinate(sw, one);
         auto exprY = only(tf.reverse({input}));
         EXPECT_EQ("{Sunder: Add({Tile: Add(Multiply(1:U32, 6:U32)U32, 4:U32)U32}, 100:U32)U32}",
                   toString(*exprY));
         auto strideExprY = only(tf.reverseStride(d, Expression::literal(3u), {input}));
-        EXPECT_EQ("3:U32", toString(*strideExprY));
+        EXPECT_EQ("3:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(c, Expression::literal(3u), {input}));
-        EXPECT_EQ("18:U32", toString(*strideExprY));
+        EXPECT_EQ("18:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
 
         tf.setCoordinate(sw, two);
         EXPECT_THROW(tf.reverse({input}), FatalError);
@@ -1022,7 +993,7 @@ namespace rocRollerTest
 
         ct.addElement(Tile(), {linZ}, {e, f});
 
-        auto tf = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::identity);
+        auto tf = Transformer(&ct, nullptr);
 
         tf.setCoordinate(a, Expression::literal(8u));
         tf.setCoordinate(b, Expression::literal(3u));
@@ -1034,17 +1005,17 @@ namespace rocRollerTest
         auto exprX = only(tf.reverse({input}));
         EXPECT_EQ("{Sunder: Add(Multiply(8:U32, 10:U32)U32, 3:U32)U32}", toString(*exprX));
         auto strideExprX = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("2:U32", toString(*strideExprX));
+        EXPECT_EQ("2:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("20:U32", toString(*strideExprX));
+        EXPECT_EQ("20:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(d, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(c, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(e, Expression::literal(1u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
         strideExprX = only(tf.reverseStride(f, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprX));
+        EXPECT_EQ("0:U32", toString(strideExprX.value()));
 
         tf.setCoordinate(c, Expression::literal(1u));
         tf.setCoordinate(d, Expression::literal(4u));
@@ -1053,17 +1024,17 @@ namespace rocRollerTest
         EXPECT_EQ("{Sunder: Add({Tile: Add(Multiply(1:U32, 6:U32)U32, 4:U32)U32}, 100:U32)U32}",
                   toString(*exprY));
         auto strideExprY = only(tf.reverseStride(d, Expression::literal(3u), {input}));
-        EXPECT_EQ("3:U32", toString(*strideExprY));
+        EXPECT_EQ("3:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(c, Expression::literal(3u), {input}));
-        EXPECT_EQ("18:U32", toString(*strideExprY));
+        EXPECT_EQ("18:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(e, Expression::literal(1u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
         strideExprY = only(tf.reverseStride(f, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprY));
+        EXPECT_EQ("0:U32", toString(strideExprY.value()));
 
         tf.setCoordinate(e, Expression::literal(0u));
         tf.setCoordinate(f, Expression::literal(19u));
@@ -1073,17 +1044,17 @@ namespace rocRollerTest
                   "24:U32)U32)U32}",
                   toString(*exprZ));
         auto strideExprZ = only(tf.reverseStride(f, Expression::literal(1u), {input}));
-        EXPECT_EQ("1:U32", toString(*strideExprZ));
+        EXPECT_EQ("1:U32", toString(strideExprZ.value()));
         strideExprZ = only(tf.reverseStride(e, Expression::literal(3u), {input}));
-        EXPECT_EQ("27:U32", toString(*strideExprZ));
+        EXPECT_EQ("27:U32", toString(strideExprZ.value()));
         strideExprZ = only(tf.reverseStride(b, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprZ));
+        EXPECT_EQ("0:U32", toString(strideExprZ.value()));
         strideExprZ = only(tf.reverseStride(a, Expression::literal(2u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprZ));
+        EXPECT_EQ("0:U32", toString(strideExprZ.value()));
         strideExprZ = only(tf.reverseStride(d, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprZ));
+        EXPECT_EQ("0:U32", toString(strideExprZ.value()));
         strideExprZ = only(tf.reverseStride(c, Expression::literal(3u), {input}));
-        EXPECT_EQ("0:U32", toString(*strideExprZ));
+        EXPECT_EQ("0:U32", toString(strideExprZ.value()));
 
         tf.setCoordinate(sw, three);
         EXPECT_THROW(tf.reverse({input}), FatalError);
@@ -1148,7 +1119,7 @@ namespace rocRollerTest
         EXPECT_TRUE(ct.hasPath<Graph::Direction::Downstream>({i}, {wg, wf}));
         EXPECT_FALSE(ct.hasPath<Graph::Direction::Downstream>({wg, wf}, {j}));
 
-        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct));
+        auto coords = Transformer(&ct);
 
         coords.setCoordinate(wg, Expression::literal(0));
         coords.setCoordinate(wf, Expression::literal(1));
@@ -1205,7 +1176,8 @@ namespace rocRollerTest
         k->setKernelDimensions(2);
         m_context->schedule(k->preamble());
 
-        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct), m_context);
+        auto coords = Transformer(&ct, nullptr);
+        coords.fillExecutionCoordinates(m_context);
 
         coords.setCoordinate(i, Expression::literal(33u));
         coords.setCoordinate(j, Expression::literal(2u));

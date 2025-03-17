@@ -958,6 +958,9 @@ namespace rocRoller
                 auto evalTimes = evaluationTimes(expr);
                 if(evalTimes[EvaluationTime::Translate])
                 {
+                    AssertFatal(std::holds_alternative<Register::ValuePtr>(expr)
+                                    || std::holds_alternative<CommandArgumentValue>(expr),
+                                ShowValue(expr));
                     auto result = Register::Value::Literal(evaluate(expr));
 
                     if(dest == nullptr)

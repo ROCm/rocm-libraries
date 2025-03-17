@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,57 +25,31 @@
  *******************************************************************************/
 
 #pragma once
-
-#include <cstdlib>
-#include <random>
-#include <vector>
-
-#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
-
-/*
- * Random vector generator.
- */
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
 {
-    /**
-     * Random vector generator.
-     *
-     * A seed must be passed to the constructor.  If the environment
-     * variable specified by `ROCROLLER_RANDOM_SEED` is present, it
-     * supercedes the seed passed to the constructor.
-     *
-     * A seed may be set programmatically (at any time) by calling
-     * seed().
-     */
-    class RandomGenerator
+    namespace KernelGraph
     {
-    public:
-        explicit RandomGenerator(int seedNumber);
+        class LoadPacked : public GraphTransform
+        {
+        public:
+            LoadPacked(ContextPtr context);
 
-        /**
-         * Set a new seed.
-         */
-        void seed(int seedNumber);
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "LoadPacked";
+            }
 
-        /**
-         * Generate a random vector of length `nx`, with values
-         * between `min` and `max`.
-         */
-        template <typename T, typename R>
-        std::vector<typename UnsegmentedTypeOf<T>::type> vector(uint nx, R min, R max);
+            inline std::vector<GraphConstraint> preConstraints() const override
+            {
+                return {};
+            }
 
-        template <std::integral T>
-        T next(T min, T max);
-
-    private:
-        std::mt19937 m_gen;
-    };
-
-    inline uint32_t constexpr LFSRRandomNumberGenerator(uint32_t const seed)
-    {
-        return ((seed << 1) ^ (((seed >> 31) & 1) ? 0xc5 : 0x00));
+        private:
+            ContextPtr m_context;
+        };
     }
 }
-
-#include <rocRoller/Utilities/Random_impl.hpp>

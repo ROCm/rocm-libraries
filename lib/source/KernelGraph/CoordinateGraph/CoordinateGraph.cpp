@@ -40,23 +40,21 @@ namespace rocRoller
         std::vector<Expression::ExpressionPtr>
             CoordinateGraph::forward(std::vector<Expression::ExpressionPtr> sdims,
                                      std::vector<int> const&                srcs,
-                                     std::vector<int> const&                dsts,
-                                     Expression::ExpressionTransducer       transducer)
+                                     std::vector<int> const&                dsts) const
         {
             AssertFatal(sdims.size() == srcs.size(), ShowValue(sdims));
             auto visitor = ForwardEdgeVisitor();
-            return traverse<Graph::Direction::Downstream>(sdims, srcs, dsts, visitor, transducer);
+            return traverse<Graph::Direction::Downstream>(sdims, srcs, dsts, visitor);
         }
 
         std::vector<Expression::ExpressionPtr>
             CoordinateGraph::reverse(std::vector<Expression::ExpressionPtr> sdims,
                                      std::vector<int> const&                srcs,
-                                     std::vector<int> const&                dsts,
-                                     Expression::ExpressionTransducer       transducer)
+                                     std::vector<int> const&                dsts) const
         {
             AssertFatal(sdims.size() == dsts.size(), ShowValue(sdims));
             auto visitor = ReverseEdgeVisitor();
-            return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, visitor, transducer);
+            return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, visitor);
         }
 
     }

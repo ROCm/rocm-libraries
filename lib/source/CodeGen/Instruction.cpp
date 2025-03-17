@@ -66,4 +66,19 @@ namespace rocRoller
             os << "\n";
         }
     }
+
+    void Instruction::addControlOp(int id)
+    {
+        m_controlOps.push_back(id);
+    }
+
+    std::vector<int> const& Instruction::controlOps() const
+    {
+        return m_controlOps;
+    }
+
+    std::vector<std::string> const& Instruction::comments() const
+    {
+        return m_comments;
+    }
 }

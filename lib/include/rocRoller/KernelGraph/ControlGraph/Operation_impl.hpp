@@ -32,6 +32,14 @@ namespace rocRoller
 {
     namespace KernelGraph::ControlGraph
     {
+        template <typename T>
+        concept CHasVarTypeMember = requires(T const& op)
+        {
+            {
+                op.varType
+                } -> std::convertible_to<VariableType>;
+        };
+
         template <CConcreteOperation Op>
         inline std::string name(const Op& x)
         {
@@ -57,7 +65,14 @@ namespace rocRoller
             template <typename Op>
             requires(!CHasToStringMember<Op>) std::string operator()(Op const& op)
             {
-                return op.name();
+                auto rv = op.name();
+
+                if constexpr(CHasVarTypeMember<Op>)
+                {
+                    rv += " " + toString(op.varType);
+                }
+
+                return rv;
             }
         };
 
@@ -72,14 +87,6 @@ namespace rocRoller
             {
                 op.dataType
                 } -> std::convertible_to<DataType>;
-        };
-
-        template <typename T>
-        concept CHasVarTypeMember = requires(T const& op)
-        {
-            {
-                op.varType
-                } -> std::convertible_to<VariableType>;
         };
 
         struct OperationDataTypeVisitor
@@ -108,5 +115,6 @@ namespace rocRoller
         {
             return std::visit(OperationDataTypeVisitor(), x);
         }
+
     }
 }

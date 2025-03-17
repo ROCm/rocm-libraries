@@ -304,7 +304,7 @@ namespace rocRoller
             /**
              * @brief Remove duplicates from the graph.
              *
-             * The operation (either the original operation, or it's
+             * The operation (either the original operation, or its
              * top-most SetCoordinate) is replaced by a NOP.
              *
              * References to duplicate tiles are updated to the

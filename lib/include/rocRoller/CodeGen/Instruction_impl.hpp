@@ -83,14 +83,22 @@ namespace rocRoller
         std::copy(src.begin(), src.end(), m_src.begin());
         std::copy(modifiers.begin(), modifiers.end(), m_modifiers.begin());
 
+        addComment(comment);
+
         for(auto& dst : m_dst)
         {
             if(dst && dst->allocationState() == Register::AllocationState::Unallocated)
             {
                 dst->allocate(*this);
             }
+
+            if(dst && dst->readOnly())
+            {
+                addComment(fmt::format(
+                    "Read-only register cannot be the destination of an instruction: {}",
+                    dst->description()));
+            }
         }
-        addComment(comment);
     }
 
     inline Instruction Instruction::Allocate(Register::ValuePtr reg)
@@ -467,10 +475,16 @@ namespace rocRoller
 
         coreInstructionString(os);
 
-        if(level > LogLevel::Terse && !m_comments.empty())
+        if(level > LogLevel::Terse)
         {
+            std::string input;
+            if(!m_controlOps.empty())
+                input = fmt::format("(op {}) ", m_controlOps.front());
+            if(!m_comments.empty())
+                input += m_comments.front();
+
             // Only include the first comment in the functional string.
-            for(auto const& s : EscapeComment(m_comments[0], 1))
+            for(auto const& s : EscapeComment(input, 1))
             {
                 os << s;
             }
@@ -668,6 +682,9 @@ namespace rocRoller
         {
             if(a)
             {
+                if(!m_controlOps.empty())
+                    a->setControlOp(m_controlOps.front());
+
                 a->allocateNow();
             }
         }

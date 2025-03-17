@@ -301,7 +301,7 @@ namespace rocRoller
         {
             AssertFatal(!vt.isPointer(), "Convert to pointer type not supported.", ShowValue(vt));
 
-            return convert(vt, a);
+            return convert(vt.dataType, a);
         }
 
         template <DataType DATATYPE>

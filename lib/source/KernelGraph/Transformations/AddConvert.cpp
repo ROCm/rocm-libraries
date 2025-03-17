@@ -94,6 +94,10 @@ namespace rocRoller
                         m_loadMap[coord].insert(node);
                         m_storageDataType[graph.mapper.get<MacroTile>(node)]
                             = getDataType(graph.control.getNode(node));
+                        Log::debug("(node {}) m_storageDataType[{}] = {}",
+                                   node,
+                                   graph.mapper.get<MacroTile>(node),
+                                   toString(getDataType(graph.control.getNode(node))));
                     },
                     [&](auto op) {}};
 
@@ -102,11 +106,10 @@ namespace rocRoller
 
             for(auto& [storage, multiplies] : m_multiplyArgs)
             {
-                auto unsegmented
-                    = DataTypeInfo::Get(m_storageDataType[storage]).unsegmentedVariableType();
-                if(!unsegmented)
+                auto packed = DataTypeInfo::Get(m_storageDataType[storage]).packedVariableType();
+                if(!packed)
                     continue;
-                if(m_storageDataType[storage] == unsegmented->dataType)
+                if(m_storageDataType[storage] == packed->dataType)
                     continue;
 
                 m_locations.emplace_back(ConvertLocation{storage, m_loadMap[storage], multiplies});
@@ -124,16 +127,17 @@ namespace rocRoller
                 // Create new node for convert in control graph and storage in coordinate graph
                 auto newStorage = graph.coordinates.addElement(
                     graph.coordinates.getElement(location.storageCoord));
-                auto dataFlow    = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                auto dataFlow = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
                     location.storageCoord, Register::Type::Vector, DataType::None});
-                auto unsegmented = DataTypeInfo::Get(m_storageDataType[location.storageCoord])
-                                       .unsegmentedVariableType()
-                                       ->dataType;
+                auto packed   = DataTypeInfo::Get(m_storageDataType[location.storageCoord])
+                                  .packedVariableType()
+                                  ->dataType;
 
                 for(auto loadOp : location.loadOps)
                 {
-                    auto convertNode = graph.control.addElement(Assign{
-                        Register::Type::Vector, Expression::convert(unsegmented, dataFlow), 0});
+                    // ZZZ VALUE COUNT
+                    auto convertNode = graph.control.addElement(
+                        Assign{Register::Type::Vector, Expression::convert(packed, dataFlow), 0});
                     graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);
                     insertAfter(graph, loadOp, convertNode, convertNode);
                 }

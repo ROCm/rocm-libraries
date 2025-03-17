@@ -187,5 +187,15 @@ namespace rocRoller
 
             return false;
         }
+
+        std::optional<int> Allocation::controlOp() const
+        {
+            return m_controlOp;
+        }
+
+        void Allocation::setControlOp(int op)
+        {
+            m_controlOp = op;
+        }
     }
 }

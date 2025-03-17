@@ -34,10 +34,8 @@
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
 
-#include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/Operations/CommandArgument.hpp>
-#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Utilities/RTTI.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 

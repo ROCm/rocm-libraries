@@ -190,6 +190,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/IdentifyParallelDimensions.cpp
     source/KernelGraph/Transformations/InlineIncrements.cpp
     source/KernelGraph/Transformations/KernelGraph_loop.cpp
+    source/KernelGraph/Transformations/LoadPacked.cpp
     source/KernelGraph/Transformations/LoopOverTileNumbers.cpp
     source/KernelGraph/Transformations/LowerLinear.cpp
     source/KernelGraph/Transformations/LowerTensorContraction.cpp

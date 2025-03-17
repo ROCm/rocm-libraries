@@ -26,8 +26,42 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
+
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    VariableType getVariableType(Operation const& op)
+    {
+        auto visitor = [](auto const& op) -> VariableType {
+            using T = std::decay_t<decltype(op)>;
+            if constexpr(CHasVarTypeMember<T>)
+            {
+                return op.varType;
+            }
+
+            Throw<FatalError>(ShowValue(op), " has no varType member.");
+        };
+
+        return std::visit(visitor, op);
+    }
+
+    void setVariableType(Operation& op, VariableType varType)
+    {
+        auto visitor = [&varType](auto& op) {
+            using T = std::decay_t<decltype(op)>;
+            if constexpr(CHasVarTypeMember<T>)
+            {
+                op.varType = varType;
+            }
+            else
+            {
+                Throw<FatalError>(ShowValue(op), " has no varType member.");
+            }
+        };
+
+        std::visit(visitor, op);
+    }
+
     SetCoordinate::SetCoordinate() = default;
     SetCoordinate::SetCoordinate(Expression::ExpressionPtr value)
         : value(value)
@@ -125,22 +159,22 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     StoreTiled::StoreTiled() = default;
-    StoreTiled::StoreTiled(DataType const dtype)
-        : dataType(dtype)
+    StoreTiled::StoreTiled(VariableType const varType)
+        : varType(varType)
     {
     }
 
     StoreSGPR::StoreSGPR()
         : bufOpts{} {};
-    StoreSGPR::StoreSGPR(DataType const dtype, BufferInstructionOptions const bio)
-        : dataType(dtype)
+    StoreSGPR::StoreSGPR(VariableType const varType, BufferInstructionOptions const bio)
+        : varType(varType)
         , bufOpts(bio)
     {
     }
 
     StoreLDSTile::StoreLDSTile() = default;
-    StoreLDSTile::StoreLDSTile(DataType const dtype)
-        : dataType(dtype)
+    StoreLDSTile::StoreLDSTile(VariableType const varType)
+        : varType(varType)
     {
     }
 
@@ -174,6 +208,11 @@ namespace rocRoller::KernelGraph::ControlGraph
     Exchange::Exchange(rocRoller::VariableType const varType)
         : varType(varType)
     {
+    }
+
+    std::string LoadLDSTile::toString() const
+    {
+        return fmt::format("LoadLDSTile{{{}}}", rocRoller::toString(varType));
     }
 
     RR_CLASS_NAME_IMPL(SetCoordinate);

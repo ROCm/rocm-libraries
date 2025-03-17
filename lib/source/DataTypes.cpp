@@ -411,6 +411,9 @@ namespace rocRoller
         if(lhs == DataType::None || rhs == DataType::None)
             return DataType::None;
 
+        if(lhs == DataType::Count || rhs == DataType::Count)
+            return DataType::None;
+
         auto const& lhsInfo = DataTypeInfo::Get(lhs);
         auto const& rhsInfo = DataTypeInfo::Get(rhs);
 
@@ -610,7 +613,7 @@ namespace rocRoller
         return Get(iter->second);
     }
 
-    std::optional<VariableType> DataTypeInfo::unsegmentedVariableType() const
+    std::optional<VariableType> DataTypeInfo::packedVariableType() const
     {
         registerAllTypeInfoOnce();
 

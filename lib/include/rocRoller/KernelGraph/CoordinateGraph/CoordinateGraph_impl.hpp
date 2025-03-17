@@ -42,8 +42,7 @@ namespace rocRoller
             CoordinateGraph::traverse(std::vector<Expression::ExpressionPtr> sdims,
                                       std::vector<int> const&                srcs,
                                       std::vector<int> const&                dsts,
-                                      Visitor&                               visitor,
-                                      Expression::ExpressionTransducer       transducer)
+                                      Visitor&                               visitor) const
         {
             bool constexpr forward     = Dir == Graph::Direction::Downstream;
             auto constexpr OppositeDir = opposite(Dir);
@@ -133,9 +132,10 @@ namespace rocRoller
                                 "Path not found for ",
                                 Graph::variantToString(getElement(key)),
                                 ShowValue(key),
+                                ShowValue(Dir),
                                 msg.str());
                 }
-                results.push_back(transducer ? transducer(exprMap.at(key)) : exprMap.at(key));
+                results.push_back(exprMap.at(key));
             }
 
             return results;
@@ -143,7 +143,7 @@ namespace rocRoller
 
         template <Graph::Direction Dir>
         inline bool CoordinateGraph::hasPath(std::vector<int> const& srcs,
-                                             std::vector<int> const& dsts)
+                                             std::vector<int> const& dsts) const
         {
             bool constexpr forward = Dir == Graph::Direction::Downstream;
 

@@ -124,14 +124,12 @@ namespace rocRoller
             std::vector<Expression::ExpressionPtr>
                 forward(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,
-                        std::vector<int> const&                dsts,
-                        Expression::ExpressionTransducer       transducer);
+                        std::vector<int> const&                dsts) const;
 
             std::vector<Expression::ExpressionPtr>
                 reverse(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,
-                        std::vector<int> const&                dsts,
-                        Expression::ExpressionTransducer       transducer);
+                        std::vector<int> const&                dsts) const;
 
             EdgeType getEdgeType(int index) const;
 
@@ -140,11 +138,10 @@ namespace rocRoller
                 traverse(std::vector<Expression::ExpressionPtr> sdims,
                          std::vector<int> const&                srcs,
                          std::vector<int> const&                dsts,
-                         Visitor&                               visitor,
-                         Expression::ExpressionTransducer       transducer);
+                         Visitor&                               visitor) const;
 
             template <Graph::Direction Dir>
-            bool hasPath(std::vector<int> const& srcs, std::vector<int> const& dsts);
+            bool hasPath(std::vector<int> const& srcs, std::vector<int> const& dsts) const;
 
             /**
              * @brief Get a node/edge from the coordinate graph.

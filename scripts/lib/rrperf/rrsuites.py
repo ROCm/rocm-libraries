@@ -322,7 +322,8 @@ def hgemm():
             **fp16,
         )
 
-    yield from visualizer()
+    # TODO: Enable once visualizer is working
+    # yield from visualizer()
 
 
 def visualizer():

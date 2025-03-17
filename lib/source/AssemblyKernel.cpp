@@ -186,6 +186,27 @@ namespace rocRoller
             m_packedWorkitemIndex.reset();
             if(ctx->kernelOptions().preloadKernelArguments)
                 m_argumentPointer.reset();
+            else
+                m_argumentPointer->setReadOnly();
+        }
+
+        for(auto& reg : m_workgroupIndex)
+        {
+            if(reg)
+            {
+                co_yield Instruction::Comment(
+                    fmt::format("Marking {} as read-only", reg->description()));
+                reg->setReadOnly();
+            }
+        }
+        for(auto& reg : m_workitemIndex)
+        {
+            if(reg)
+            {
+                co_yield Instruction::Comment(
+                    fmt::format("Marking {} as read-only", reg->description()));
+                reg->setReadOnly();
+            }
         }
     }
 

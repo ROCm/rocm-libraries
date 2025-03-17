@@ -130,8 +130,12 @@ namespace AssertTest
                 }
                 EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc1"));
                 EXPECT_THAT(output(), testing::HasSubstr("AssertFailed"));
-                EXPECT_THAT(output(), testing::HasSubstr("// Lock for Assert Assert Test"));
-                EXPECT_THAT(output(), testing::HasSubstr("// Unlock for Assert Assert Test"));
+                EXPECT_THAT(output(),
+                            testing::HasSubstr(
+                                fmt::format("// (op {}) Lock for Assert Assert Test", assertOp)));
+                EXPECT_THAT(output(),
+                            testing::HasSubstr(
+                                fmt::format("// (op {}) Unlock for Assert Assert Test", assertOp)));
                 if(assertOpKind == AssertOpKind::STrap)
                 {
                     EXPECT_THAT(output(), testing::HasSubstr("s_trap 2"));

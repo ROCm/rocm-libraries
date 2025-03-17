@@ -29,6 +29,7 @@
 #include <set>
 #include <variant>
 
+#include <rocRoller/CodeGen/Annotate.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
@@ -77,11 +78,7 @@ namespace rocRoller
             {
                 m_kernel->startCodeGeneration();
 
-                auto coords = Transformer(
-                    std::make_shared<rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph>(
-                        m_graph->coordinates),
-                    m_context,
-                    m_fastArith);
+                auto coords = Transformer(&m_graph->coordinates, m_fastArith);
 
                 co_yield Instruction::Comment("CodeGeneratorVisitor::generate() begin");
                 auto candidates = m_graph->control.roots().to<std::set>();
@@ -257,8 +254,21 @@ namespace rocRoller
                             ShowValue(operation),
                             ShowValue(tag));
 
-                co_yield std::visit(
-                    *this, std::variant<int>(tag), operation, std::variant<Transformer>(coords));
+                try
+                {
+                    for(auto inst : std::visit(*this,
+                                               std::variant<int>(tag),
+                                               operation,
+                                               std::variant<Transformer>(coords))
+                                        .map(AddControlOp(tag)))
+                        co_yield inst;
+                }
+                catch(rocRoller::Error& exc)
+                {
+                    auto newMsg = fmt::format("(from node {})", tag, exc.what());
+                    exc.annotate(newMsg);
+                    throw;
+                }
 
                 co_yield Instruction::Comment(concatenate(opName, "(", tag, ") END"));
 
@@ -271,6 +281,8 @@ namespace rocRoller
                 m_context->setScopeManager(scope);
 
                 scope->pushNewScope();
+                coords.fillExecutionCoordinates(m_context);
+
                 auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
                 co_yield generate(init, coords);
                 auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
@@ -304,8 +316,10 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ConditionalOp const& op, Transformer coords)
             {
-                auto falseLabel = m_context->labelAllocator()->label("ConditionalFalse");
-                auto botLabel   = m_context->labelAllocator()->label("ConditionalBottom");
+                auto falseLabel = m_context->labelAllocator()->label(
+                    fmt::format("ConditionalFalse_{}_{}", op.conditionName, tag));
+                auto botLabel = m_context->labelAllocator()->label(
+                    fmt::format("ConditionalBottom_{}_{}", op.conditionName, tag));
 
                 co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock for Conditional");
 
@@ -354,7 +368,10 @@ namespace rocRoller
                     {
                         co_yield Instruction::Lock(Scheduling::Dependency::Branch,
                                                    concatenate("Lock for Assert ", op.assertName));
-                        auto passedLabel = m_context->labelAllocator()->label("AssertPassed");
+                        auto passedLabel = m_context->labelAllocator()->label(
+                            fmt::format("AssertPassed_{}_{}", op.assertName, tag));
+                        auto failedLabel = m_context->labelAllocator()->label(
+                            fmt::format("AssertFailed_{}_{}", op.assertName, tag));
 
                         auto expr            = m_fastArith(op.condition);
                         auto conditionResult = m_context->brancher()->resultRegister(expr);
@@ -369,7 +386,6 @@ namespace rocRoller
                                         ": Passed, jump to ",
                                         passedLabel->toString()));
 
-                        auto failedLabel = m_context->labelAllocator()->label("AssertFailed");
                         co_yield Instruction::Label(failedLabel,
                                                     concatenate("For ", op.assertName));
                         co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
@@ -384,7 +400,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, DoWhileOp const& op, Transformer coords)
             {
-                auto topLabel = m_context->labelAllocator()->label("DoWhileTop");
+                auto topLabel = m_context->labelAllocator()->label(
+                    fmt::format("DoWhileTop_{}_{}", op.loopName, tag));
 
                 co_yield Instruction::Comment("Initialize DoWhileLoop");
 
@@ -422,8 +439,10 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ForLoopOp const& op, Transformer coords)
             {
-                auto topLabel = m_context->labelAllocator()->label("ForLoopTop");
-                auto botLabel = m_context->labelAllocator()->label("ForLoopBottom");
+                auto topLabel = m_context->labelAllocator()->label(
+                    fmt::format("ForLoopTop_{}_{}", op.loopName, tag));
+                auto botLabel = m_context->labelAllocator()->label(
+                    fmt::format("ForLoopBottom_{}_{}", op.loopName, tag));
 
                 co_yield Instruction::Comment("Initialize For Loop");
                 auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
@@ -1114,10 +1133,9 @@ namespace rocRoller
 
                 auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 
-                auto unsegmentedVariableType
-                    = DataTypeInfo::Get(exchange.varType).unsegmentedVariableType();
+                auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
 
-                if(unsegmentedVariableType)
+                if(packedVariableType)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
                     auto temp         = Register::Value::Placeholder(

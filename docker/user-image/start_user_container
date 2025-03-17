@@ -155,6 +155,12 @@ def parseArgs():
         help="Whether to skip launching the container.",
     )
 
+    parser.add_argument("--amdgpu-url", help="amdgpu-install DEB URL")
+
+    parser.add_argument("--amdgpu-build-number", help="amdgpu-install build number")
+
+    parser.add_argument("--amdgpu-build-uri", help="amdgpu-install build uri")
+
     parser.add_argument(
         "--pull",
         dest="base_build_extra_args",
@@ -219,6 +225,34 @@ def get_run_args(args, image_name, container_name):
     return run_args
 
 
+def get_amdgpu_args(args):
+    build_args = []
+    for var in [
+        "ROCROLLER_AMDGPU_URL",
+        "ROCROLLER_AMDGPU_BUILD_NUMBER",
+        "ROCROLLER_AMDGPU_BUILD_URI",
+    ]:
+        prefix = "ROCROLLER_"
+        arg = var[len(prefix) :].lower()
+        if var in os.environ:
+            build_args.append(var + "=" + os.environ[var])
+        if hasattr(args, arg):
+            if var in os.environ:
+                raise RuntimeError(
+                    f"{var} should not be specified both via environment variable and command-line argument."
+                )
+            build_args.append(var + "=" + getattr(args, arg))
+
+    return build_args
+
+
+def make_build_args(build):
+    rv = []
+    for arg in build:
+        rv.extend(["--build-arg", arg])
+    return rv
+
+
 def main():
     final_output = ""
     args = parseArgs()
@@ -240,6 +274,9 @@ def main():
     if len(args.command) > 0:
         args.command = ["bash", "--login", "-c", " ".join(args.command)]
 
+    build_args = get_amdgpu_args(args)
+    print(build_args)
+
     for version in args.versions:
         base_image_name = "-".join([args.image_prefix, version])
         user_image_name = "-".join([base_image_name, "user"])
@@ -247,21 +284,6 @@ def main():
 
         if args.delete_existing_container:
             printAndRun(["docker", "rm", "-f", container_name])
-
-        build_args = []
-        for arg in [
-            "ROCROLLER_AMDGPU_URL",
-            "ROCROLLER_AMDGPU_BUILD_NUMBER",
-            "ROCROLLER_AMDGPU_BUILD_URI",
-        ]:
-            if arg in os.environ:
-                build_args.append(arg + "=" + os.environ[arg])
-
-        def make_build_args(args):
-            rv = []
-            for arg in args:
-                rv.extend(["--build-arg", arg])
-            return rv
 
         if not args.skip_base_build:
             buildImage(
@@ -273,7 +295,7 @@ def main():
                     arg
                     for extra_arg in args.base_build_extra_args
                     for arg in extra_arg.split()
-                ]
+                ],
             )
 
         if not args.skip_user_build:
@@ -286,7 +308,7 @@ def main():
                     arg
                     for extra_arg in args.user_build_extra_args
                     for arg in extra_arg.split()
-                ]
+                ],
             )
 
         if not args.skip_container_run:
@@ -303,6 +325,7 @@ def main():
 
 
 def printAndRun(run_args):
+    print(run_args)
     print(" ".join(run_args))
     subprocess.check_call(run_args)
 

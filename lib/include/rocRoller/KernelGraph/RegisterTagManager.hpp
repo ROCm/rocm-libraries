@@ -43,7 +43,7 @@ namespace rocRoller
      */
     struct RegisterExpressionAttributes
     {
-        DataType dataType; //< Desired result type of the expression
+        DataType dataType   = DataType::None; //< Desired result type of the expression
         bool     unitStride = false; //< Expression corresponds to a unitary (=1) element-stride.
         uint     elementBlockSize = 0; //< If non-zero, elements are loaded in blocks.
         Expression::ExpressionPtr
@@ -170,6 +170,8 @@ namespace rocRoller
          * @return false
          */
         bool hasRegister(int tag) const;
+
+        std::optional<int> findRegister(Register::ValuePtr reg) const;
 
         /**
          * @brief Returns whether or not an expression has already been added to the

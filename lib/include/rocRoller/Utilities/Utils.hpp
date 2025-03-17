@@ -36,6 +36,7 @@
 #include <set>
 #include <sstream>
 #include <type_traits>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -136,6 +137,16 @@ namespace rocRoller
 
     template <CHasToString T>
     inline std::ostream& operator<<(std::ostream& stream, std::set<T> const& x)
+    {
+        stream << "set{";
+        streamJoin(stream, x, ", ");
+        stream << "}";
+
+        return stream;
+    }
+
+    template <CHasToString T>
+    inline std::ostream& operator<<(std::ostream& stream, std::unordered_set<T> const& x)
     {
         stream << "set{";
         streamJoin(stream, x, ", ");
@@ -371,6 +382,8 @@ namespace rocRoller
         return name(obj);
     }
 
+    std::string escapeSymbolName(std::string name);
+
     std::vector<char> readFile(std::string const&);
 
     std::string readMetaDataFromCodeObject(std::string const& fileName);
@@ -399,6 +412,24 @@ namespace std
 
     template <typename T>
     inline std::ostream& operator<<(std::ostream& stream, std::set<T> const& array)
+    {
+        stream << "{";
+        rocRoller::streamJoin(stream, array, ", ");
+        stream << "}";
+        return stream;
+    }
+
+    template <typename T>
+    inline std::ostream& operator<<(std::ostream& stream, std::unordered_set<T> const& array)
+    {
+        stream << "{";
+        rocRoller::streamJoin(stream, array, ", ");
+        stream << "}";
+        return stream;
+    }
+
+    template <typename T>
+    inline std::ostream& operator<<(std::ostream& stream, std::vector<T> const& array)
     {
         stream << "{";
         rocRoller::streamJoin(stream, array, ", ");

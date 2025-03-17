@@ -33,13 +33,15 @@ namespace rocRoller
     class LabelAllocator
     {
     public:
-        LabelAllocator(std::string const& prefix);
+        LabelAllocator(std::string prefix);
 
-        Register::ValuePtr label(std::string const& name);
+        Register::ValuePtr label(std::string name);
 
     private:
-        std::string m_prefix;
-        int         m_count = 0;
+        std::string  m_prefix;
+        unsigned int m_count = 0;
+
+        std::set<std::string> m_generatedLabels;
     };
 }
 

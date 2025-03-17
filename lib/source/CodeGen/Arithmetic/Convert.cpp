@@ -184,8 +184,27 @@ namespace rocRoller
 
         switch(dataType)
         {
+        case DataType::Float:
+        {
+            AssertFatal(arg->valueCount() == 2,
+                        "Conversion to Halfx2 requires two elements (",
+                        arg->description(),
+                        ")");
+
+            auto temp = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Half, 1);
+
+            co_yield generateHalf(dest, arg->element({0}));
+            co_yield generateHalf(temp, arg->element({1}));
+
+            co_yield m_context->copier()->packHalf(dest, dest, temp);
+            break;
+        }
         case DataType::Half:
-            AssertFatal(arg->valueCount() == 2, "Conversion to Halfx2 requires two elements");
+            AssertFatal(arg->valueCount() == 2,
+                        "Conversion to Halfx2 requires two elements (",
+                        arg->description(),
+                        ")");
             co_yield m_context->copier()->packHalf(dest, arg->element({0}), arg->element({1}));
             break;
         default:
@@ -228,6 +247,22 @@ namespace rocRoller
 
         switch(dataType)
         {
+        case DataType::Float:
+        {
+            AssertFatal(arg->valueCount() == 2,
+                        "Conversion to Bfloat16x2 requires two elements (",
+                        arg->description(),
+                        ")");
+
+            auto temp = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::BFloat16, 1);
+
+            co_yield generateBFloat16(dest, arg->element({0}));
+            co_yield generateBFloat16(temp, arg->element({1}));
+
+            co_yield m_context->copier()->packHalf(dest, dest, temp);
+            break;
+        }
         case DataType::BFloat16:
             AssertFatal(arg->valueCount() == 2, "Conversion to Bfloat16x2 requires two elements");
             co_yield m_context->copier()->packHalf(dest, arg->element({0}), arg->element({1}));

@@ -270,6 +270,8 @@ namespace rocRoller::KernelGraph
         std::map<key_type, int> m_map;
     };
 
+    std::string toString(ControlToCoordinateMapper::Connection const& conn);
+
 }
 
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper_impl.hpp>

@@ -1187,9 +1187,9 @@ namespace rocRoller
             bool packed     = false;
             uint packFactor = bitsPerRegister / DataTypeInfo::Get(varType).elementBits;
 
-            if(auto unsegmentedVariableType = DataTypeInfo::Get(varType).unsegmentedVariableType())
+            if(auto packedVariableType = DataTypeInfo::Get(varType).packedVariableType())
             {
-                packFactor = DataTypeInfo::Get(*unsegmentedVariableType).packing;
+                packFactor = DataTypeInfo::Get(*packedVariableType).packing;
             }
 
             if(params->packMultipleElementsInto1VGPR && packFactor > 1

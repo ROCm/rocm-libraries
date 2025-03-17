@@ -128,6 +128,9 @@ namespace rocRoller
         Instruction lock(Scheduling::Dependency const& depedency, std::string comment);
         Instruction unlock(std::string comment);
 
+        void                    addControlOp(int id);
+        std::vector<int> const& controlOps() const;
+
         void addAllocation(std::shared_ptr<Register::Allocation> alloc);
         void addWaitCount(WaitCount const& wait);
         void addComment(std::string const& comment);
@@ -135,6 +138,8 @@ namespace rocRoller
         void addNop();
         void addNop(int count);
         void setNopMin(int count);
+
+        std::vector<std::string> const& comments() const;
 
         constexpr int nopCount() const;
 
@@ -191,6 +196,8 @@ namespace rocRoller
         std::vector<std::string> m_warnings;
 
         std::vector<std::string> m_comments;
+
+        std::vector<int> m_controlOps;
 
         std::string m_label;
 

@@ -390,7 +390,7 @@ namespace rocRoller
          * 1. If variableType == Half, this returns Halfx2.
          * 2. If variableType == Float, this returns {}.
          */
-        std::optional<VariableType> unsegmentedVariableType() const;
+        std::optional<VariableType> packedVariableType() const;
 
         VariableType variableType;
         VariableType segmentVariableType;

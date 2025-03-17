@@ -49,4 +49,23 @@ namespace rocRoller
         return Settings::getInstance()->get(Settings::BreakOnThrow);
     }
 
+    const char* Error::what() const noexcept
+    {
+        if(m_annotatedMessage.empty())
+            return std::runtime_error::what();
+
+        return m_annotatedMessage.c_str();
+    }
+
+    void Error::annotate(std::string const& msg)
+    {
+        if(m_annotatedMessage.empty())
+            m_annotatedMessage = fmt::format("{}\n{}", std::runtime_error::what(), msg);
+        else
+        {
+            m_annotatedMessage += "\n";
+            m_annotatedMessage += msg;
+        }
+    }
+
 }

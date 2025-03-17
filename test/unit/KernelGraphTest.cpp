@@ -184,9 +184,9 @@ namespace KernelGraphTest
                 }
                 subgraph clusterCF {label = "Control Graph";
                 "cntrl1"[label="Kernel(1)"];
-                "cntrl2"[label="LoadLinear(2)"];
+                "cntrl2"[label="LoadLinear Value: Int32(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
-                "cntrl4"[label="LoadLinear(4)"];
+                "cntrl4"[label="LoadLinear Value: Int32(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
                 "cntrl6"[label="Assign VGPR Add(DataFlowTag(5)NA, DataFlowTag(10)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
@@ -215,15 +215,42 @@ namespace KernelGraphTest
                 "cntrl13" -> "cntrl11"
                 "cntrl15" -> "cntrl14"
                 }
-                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord5" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-                "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-                "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-                "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
-                "coord21" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+                "coord1" -> "to_cntrl_1_2"
+                "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_1"
+                "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+                "coord5" -> "to_cntrl_5_2"
+                "to_cntrl_5_2"[label="2->5: Linear: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_5"
+                "to_coord_2_5"[label="2->5: Linear: (0)", shape=cds]
+                "coord2" -> "to_cntrl_2_4"
+                "to_cntrl_2_4"[label="4->2: User: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_2"
+                "to_coord_4_2"[label="4->2: User: (0)", shape=cds]
+                "coord10" -> "to_cntrl_10_4"
+                "to_cntrl_10_4"[label="4->10: Linear: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_10"
+                "to_coord_4_10"[label="4->10: Linear: (0)", shape=cds]
+                "coord13" -> "to_cntrl_13_6"
+                "to_cntrl_13_6"[label="6->13: DEST", shape=cds]
+                "cntrl6" -> "to_coord_6_13"
+                "to_coord_6_13"[label="6->13: DEST", shape=cds]
+                "coord15" -> "to_cntrl_15_9"
+                "to_cntrl_15_9"[label="9->15: DEST", shape=cds]
+                "cntrl9" -> "to_coord_9_15"
+                "to_coord_9_15"[label="9->15: DEST", shape=cds]
+                "coord17" -> "to_cntrl_17_11"
+                "to_cntrl_17_11"[label="11->17: DEST", shape=cds]
+                "cntrl11" -> "to_coord_11_17"
+                "to_coord_11_17"[label="11->17: DEST", shape=cds]
+                "coord17" -> "to_cntrl_17_14"
+                "to_cntrl_17_14"[label="14->17: Linear: (0)", shape=cds]
+                "cntrl14" -> "to_coord_14_17"
+                "to_coord_14_17"[label="14->17: Linear: (0)", shape=cds]
+                "coord21" -> "to_cntrl_21_14"
+                "to_cntrl_21_14"[label="14->21: User: (0)", shape=cds]
+                "cntrl14" -> "to_coord_14_21"
+                "to_coord_14_21"[label="14->21: User: (0)", shape=cds]
                 }).";
 
         EXPECT_EQ(NormalizedSource(expectedC), NormalizedSource(kgraphC.toDOT(true)));
@@ -291,9 +318,9 @@ namespace KernelGraphTest
                 }
                 subgraph clusterCF {label = "Control Graph";
                 "cntrl1"[label="Kernel(1)"];
-                "cntrl2"[label="LoadLinear(2)"];
+                "cntrl2"[label="LoadLinear Value: Int32(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
-                "cntrl4"[label="LoadLinear(4)"];
+                "cntrl4"[label="LoadLinear Value: Int32(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
                 "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)NA, DataFlowTag(10)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
@@ -322,15 +349,42 @@ namespace KernelGraphTest
                 "cntrl13" -> "cntrl11"
                 "cntrl15" -> "cntrl14"
                 }
-                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord7" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-                "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-                "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-                "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
-                "coord20" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+                "coord1" -> "to_cntrl_1_2"
+                "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_1"
+                "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+                "coord4" -> "to_cntrl_4_2"
+                "to_cntrl_4_2"[label="2->4: Linear: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_4"
+                "to_coord_2_4"[label="2->4: Linear: (0)", shape=cds]
+                "coord7" -> "to_cntrl_7_4"
+                "to_cntrl_7_4"[label="4->7: User: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_7"
+                "to_coord_4_7"[label="4->7: User: (0)", shape=cds]
+                "coord10" -> "to_cntrl_10_4"
+                "to_cntrl_10_4"[label="4->10: Linear: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_10"
+                "to_coord_4_10"[label="4->10: Linear: (0)", shape=cds]
+                "coord13" -> "to_cntrl_13_6"
+                "to_cntrl_13_6"[label="6->13: DEST", shape=cds]
+                "cntrl6" -> "to_coord_6_13"
+                "to_coord_6_13"[label="6->13: DEST", shape=cds]
+                "coord15" -> "to_cntrl_15_9"
+                "to_cntrl_15_9"[label="9->15: DEST", shape=cds]
+                "cntrl9" -> "to_coord_9_15"
+                "to_coord_9_15"[label="9->15: DEST", shape=cds]
+                "coord17" -> "to_cntrl_17_11"
+                "to_cntrl_17_11"[label="11->17: DEST", shape=cds]
+                "cntrl11" -> "to_coord_11_17"
+                "to_coord_11_17"[label="11->17: DEST", shape=cds]
+                "coord17" -> "to_cntrl_17_14"
+                "to_cntrl_17_14"[label="14->17: Linear: (0)", shape=cds]
+                "cntrl14" -> "to_coord_14_17"
+                "to_coord_14_17"[label="14->17: Linear: (0)", shape=cds]
+                "coord20" -> "to_cntrl_20_14"
+                "to_cntrl_20_14"[label="14->20: User: (0)", shape=cds]
+                "cntrl14" -> "to_coord_14_20"
+                "to_coord_14_20"[label="14->20: User: (0)", shape=cds]
          }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -461,9 +515,9 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadVGPR(2)"];
+        "cntrl2"[label="LoadVGPR Value: Int32(2)"];
         "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadVGPR(4)"];
+        "cntrl4"[label="LoadVGPR Value: Int32(4)"];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="Assign VGPR Add(DataFlowTag(16)NA, DataFlowTag(22)NA)NA(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
@@ -492,15 +546,42 @@ namespace KernelGraphTest
         "cntrl13" -> "cntrl11"
         "cntrl15" -> "cntrl14"
         }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord16" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord22" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord28" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord30" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-        "coord32" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-        "coord14" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
-        "coord32" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+        "coord1" -> "to_cntrl_1_2"
+        "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_1"
+        "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+        "coord16" -> "to_cntrl_16_2"
+        "to_cntrl_16_2"[label="2->16: VGPR: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_16"
+        "to_coord_2_16"[label="2->16: VGPR: (0)", shape=cds]
+        "coord2" -> "to_cntrl_2_4"
+        "to_cntrl_2_4"[label="4->2: User: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_2"
+        "to_coord_4_2"[label="4->2: User: (0)", shape=cds]
+        "coord22" -> "to_cntrl_22_4"
+        "to_cntrl_22_4"[label="4->22: VGPR: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_22"
+        "to_coord_4_22"[label="4->22: VGPR: (0)", shape=cds]
+        "coord28" -> "to_cntrl_28_6"
+        "to_cntrl_28_6"[label="6->28: DEST", shape=cds]
+        "cntrl6" -> "to_coord_6_28"
+        "to_coord_6_28"[label="6->28: DEST", shape=cds]
+        "coord30" -> "to_cntrl_30_9"
+        "to_cntrl_30_9"[label="9->30: DEST", shape=cds]
+        "cntrl9" -> "to_coord_9_30"
+        "to_coord_9_30"[label="9->30: DEST", shape=cds]
+        "coord32" -> "to_cntrl_32_11"
+        "to_cntrl_32_11"[label="11->32: DEST", shape=cds]
+        "cntrl11" -> "to_coord_11_32"
+        "to_coord_11_32"[label="11->32: DEST", shape=cds]
+        "coord14" -> "to_cntrl_14_14"
+        "to_cntrl_14_14"[label="14->14: User: (0)", shape=cds]
+        "cntrl14" -> "to_coord_14_14"
+        "to_coord_14_14"[label="14->14: User: (0)", shape=cds]
+        "coord32" -> "to_cntrl_32_14"
+        "to_cntrl_32_14"[label="14->32: VGPR: (0)", shape=cds]
+        "cntrl14" -> "to_coord_14_32"
+        "to_coord_14_32"[label="14->32: VGPR: (0)", shape=cds]
         }).";
 
         auto one = Expression::literal(1u);
@@ -663,9 +744,9 @@ namespace KernelGraphTest
         "cntrl5"[label="Initialize(5)",shape=box];
         "cntrl6"[label="Assign SGPR Add(DataFlowTag(10)I, 1:I)I(6)"];
         "cntrl7"[label="ForLoopIncrement(7)",shape=box];
-        "cntrl8"[label="LoadVGPR(8)"];
+        "cntrl8"[label="LoadVGPR Value: Int32(8)"];
         "cntrl9"[label="Body(9)",shape=box];
-        "cntrl10"[label="LoadVGPR(10)"];
+        "cntrl10"[label="LoadVGPR Value: Int32(10)"];
         "cntrl11"[label="Body(11)",shape=box];
         "cntrl12"[label="Assign VGPR Add(DataFlowTag(13)NA, DataFlowTag(25)NA)NA(12)"];
         "cntrl13"[label="Sequence(13)",shape=box];
@@ -700,18 +781,54 @@ namespace KernelGraphTest
         "cntrl19" -> "cntrl17"
         "cntrl21" -> "cntrl20"
         }
-        "coord10" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord10" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord1" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
-        "coord13" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
-        "coord2" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
-        "coord25" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
-        "coord28" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
-        "coord30" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-        "coord32" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-        "coord32" -> "cntrl20" [style=dotted,weight=0,arrowsize=0]
-        "coord43" -> "cntrl20" [style=dotted,weight=0,arrowsize=0]
+        "coord10" -> "to_cntrl_10_2"
+        "to_cntrl_10_2"[label="2->10: ForLoop: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_10"
+        "to_coord_2_10"[label="2->10: ForLoop: (0)", shape=cds]
+        "coord10" -> "to_cntrl_10_4"
+        "to_cntrl_10_4"[label="4->10: DEST", shape=cds]
+        "cntrl4" -> "to_coord_4_10"
+        "to_coord_4_10"[label="4->10: DEST", shape=cds]
+        "coord10" -> "to_cntrl_10_6"
+        "to_cntrl_10_6"[label="6->10: DEST", shape=cds]
+        "cntrl6" -> "to_coord_6_10"
+        "to_coord_6_10"[label="6->10: DEST", shape=cds]
+        "coord1" -> "to_cntrl_1_8"
+        "to_cntrl_1_8"[label="8->1: User: (0)", shape=cds]
+        "cntrl8" -> "to_coord_8_1"
+        "to_coord_8_1"[label="8->1: User: (0)", shape=cds]
+        "coord13" -> "to_cntrl_13_8"
+        "to_cntrl_13_8"[label="8->13: VGPR: (0)", shape=cds]
+        "cntrl8" -> "to_coord_8_13"
+        "to_coord_8_13"[label="8->13: VGPR: (0)", shape=cds]
+        "coord2" -> "to_cntrl_2_10"
+        "to_cntrl_2_10"[label="10->2: User: (0)", shape=cds]
+        "cntrl10" -> "to_coord_10_2"
+        "to_coord_10_2"[label="10->2: User: (0)", shape=cds]
+        "coord25" -> "to_cntrl_25_10"
+        "to_cntrl_25_10"[label="10->25: VGPR: (0)", shape=cds]
+        "cntrl10" -> "to_coord_10_25"
+        "to_coord_10_25"[label="10->25: VGPR: (0)", shape=cds]
+        "coord28" -> "to_cntrl_28_12"
+        "to_cntrl_28_12"[label="12->28: DEST", shape=cds]
+        "cntrl12" -> "to_coord_12_28"
+        "to_coord_12_28"[label="12->28: DEST", shape=cds]
+        "coord30" -> "to_cntrl_30_15"
+        "to_cntrl_30_15"[label="15->30: DEST", shape=cds]
+        "cntrl15" -> "to_coord_15_30"
+        "to_coord_15_30"[label="15->30: DEST", shape=cds]
+        "coord32" -> "to_cntrl_32_17"
+        "to_cntrl_32_17"[label="17->32: DEST", shape=cds]
+        "cntrl17" -> "to_coord_17_32"
+        "to_coord_17_32"[label="17->32: DEST", shape=cds]
+        "coord32" -> "to_cntrl_32_20"
+        "to_cntrl_32_20"[label="20->32: VGPR: (0)", shape=cds]
+        "cntrl20" -> "to_coord_20_32"
+        "to_coord_20_32"[label="20->32: VGPR: (0)", shape=cds]
+        "coord43" -> "to_cntrl_43_20"
+        "to_cntrl_43_20"[label="20->43: User: (0)", shape=cds]
+        "cntrl20" -> "to_coord_20_43"
+        "to_coord_20_43"[label="20->43: User: (0)", shape=cds]
         }).";
 
         int  loopSize     = 16;
@@ -773,9 +890,9 @@ namespace KernelGraphTest
                 }
                 subgraph clusterCF {label = "Control Graph";
                 "cntrl1"[label="Kernel(1)"];
-                "cntrl2"[label="LoadVGPR(2)"];
+                "cntrl2"[label="LoadVGPR Value: Int32(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
-                "cntrl4"[label="LoadVGPR(4)"];
+                "cntrl4"[label="LoadVGPR Value: Int32(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
                 "cntrl6"[label="Assign VGPR Add(DataFlowTag(2)NA, DataFlowTag(5)NA)NA(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
@@ -800,13 +917,34 @@ namespace KernelGraphTest
                 "cntrl12" -> "cntrl11"
                 "cntrl13" -> "cntrl11"
                 }
-                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord4" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord5" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord7" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-                "coord9" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-                "coord11" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+                "coord1" -> "to_cntrl_1_2"
+                "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_1"
+                "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+                "coord2" -> "to_cntrl_2_2"
+                "to_cntrl_2_2"[label="2->2: VGPR: (0)", shape=cds]
+                "cntrl2" -> "to_coord_2_2"
+                "to_coord_2_2"[label="2->2: VGPR: (0)", shape=cds]
+                "coord4" -> "to_cntrl_4_4"
+                "to_cntrl_4_4"[label="4->4: User: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_4"
+                "to_coord_4_4"[label="4->4: User: (0)", shape=cds]
+                "coord5" -> "to_cntrl_5_4"
+                "to_cntrl_5_4"[label="4->5: VGPR: (0)", shape=cds]
+                "cntrl4" -> "to_coord_4_5"
+                "to_coord_4_5"[label="4->5: VGPR: (0)", shape=cds]
+                "coord7" -> "to_cntrl_7_6"
+                "to_cntrl_7_6"[label="6->7: DEST", shape=cds]
+                "cntrl6" -> "to_coord_6_7"
+                "to_coord_6_7"[label="6->7: DEST", shape=cds]
+                "coord9" -> "to_cntrl_9_9"
+                "to_cntrl_9_9"[label="9->9: DEST", shape=cds]
+                "cntrl9" -> "to_coord_9_9"
+                "to_coord_9_9"[label="9->9: DEST", shape=cds]
+                "coord11" -> "to_cntrl_11_11"
+                "to_cntrl_11_11"[label="11->11: DEST", shape=cds]
+                "cntrl11" -> "to_coord_11_11"
+                "to_coord_11_11"[label="11->11: DEST", shape=cds]
              }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -919,14 +1057,14 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
+        "cntrl2"[label="LoadTiled Value: Int32(2)"];
         "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
+        "cntrl4"[label="LoadTiled Value: Int32(4)"];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="TensorContraction(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl9"[label="StoreTiled Value: Int32(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"
@@ -939,15 +1077,42 @@ namespace KernelGraphTest
         "cntrl8" -> "cntrl6"
         "cntrl10" -> "cntrl9"
         }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-        "coord19" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+        "coord1" -> "to_cntrl_1_2"
+        "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_1"
+        "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+        "coord4" -> "to_cntrl_4_2"
+        "to_cntrl_4_2"[label="2->4: MacroTile: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_4"
+        "to_coord_2_4"[label="2->4: MacroTile: (0)", shape=cds]
+        "coord8" -> "to_cntrl_8_4"
+        "to_cntrl_8_4"[label="4->8: User: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_8"
+        "to_coord_4_8"[label="4->8: User: (0)", shape=cds]
+        "coord11" -> "to_cntrl_11_4"
+        "to_cntrl_11_4"[label="4->11: MacroTile: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_11"
+        "to_coord_4_11"[label="4->11: MacroTile: (0)", shape=cds]
+        "coord4" -> "to_cntrl_4_6"
+        "to_cntrl_4_6"[label="6->4: LHS", shape=cds]
+        "cntrl6" -> "to_coord_6_4"
+        "to_coord_6_4"[label="6->4: LHS", shape=cds]
+        "coord11" -> "to_cntrl_11_6"
+        "to_cntrl_11_6"[label="6->11: RHS", shape=cds]
+        "cntrl6" -> "to_coord_6_11"
+        "to_coord_6_11"[label="6->11: RHS", shape=cds]
+        "coord15" -> "to_cntrl_15_6"
+        "to_cntrl_15_6"[label="6->15: DEST", shape=cds]
+        "cntrl6" -> "to_coord_6_15"
+        "to_coord_6_15"[label="6->15: DEST", shape=cds]
+        "coord15" -> "to_cntrl_15_9"
+        "to_cntrl_15_9"[label="9->15: MacroTile: (0)", shape=cds]
+        "cntrl9" -> "to_coord_9_15"
+        "to_coord_9_15"[label="9->15: MacroTile: (0)", shape=cds]
+        "coord19" -> "to_cntrl_19_9"
+        "to_cntrl_19_9"[label="9->19: User: (0)", shape=cds]
+        "cntrl9" -> "to_coord_9_19"
+        "to_coord_9_19"[label="9->19: User: (0)", shape=cds]
         }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -966,7 +1131,7 @@ namespace KernelGraphTest
         T_LOAD_TILED 1 Source 0
         Tensor.FP6.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
         T_LOAD_TILED 3 Source 2
-        T_Mul
+        T_Mul 1 3
         Tensor.Float.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
         T_STORE_TILED 6 Source 4 Dest 5
         ).";
@@ -1034,7 +1199,7 @@ namespace KernelGraphTest
         Tensor.UInt8.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
         T_LOAD_TILED 8 Source 7
         BlockScale(Separate, {32, 1}): Data: 6, Scale: 8
-        T_Mul
+        T_Mul 4 9
         Tensor.Float.d2 11, (base=&192, lim=&200, sizes={&208 &216 }, strides={&224 &232 })
         T_STORE_TILED 12 Source 10 Dest 11
         ).";
@@ -1326,9 +1491,9 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
+        "cntrl2"[label="LoadTiled Value: Int32(2)"];
         "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
+        "cntrl4"[label="LoadTiled Value: Int32(4)"];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="Assign VGPR Add(DataFlowTag(4)NA, DataFlowTag(4)NA)NA(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
@@ -1339,7 +1504,7 @@ namespace KernelGraphTest
         "cntrl12"[label="Assign VGPR Add(DataFlowTag(15)NA, DataFlowTag(17)NA)NA(12)"];
         "cntrl13"[label="Sequence(13)",shape=box];
         "cntrl14"[label="Sequence(14)",shape=box];
-        "cntrl15"[label="StoreTiled(15)"];
+        "cntrl15"[label="StoreTiled Value: Int32(15)"];
         "cntrl16"[label="Sequence(16)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"
@@ -1360,15 +1525,42 @@ namespace KernelGraphTest
         "cntrl14" -> "cntrl12"
         "cntrl16" -> "cntrl15"
         }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord17" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-        "coord19" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
-        "coord19" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-        "coord23" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+        "coord1" -> "to_cntrl_1_2"
+        "to_cntrl_1_2"[label="2->1: User: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_1"
+        "to_coord_2_1"[label="2->1: User: (0)", shape=cds]
+        "coord4" -> "to_cntrl_4_2"
+        "to_cntrl_4_2"[label="2->4: MacroTile: (0)", shape=cds]
+        "cntrl2" -> "to_coord_2_4"
+        "to_coord_2_4"[label="2->4: MacroTile: (0)", shape=cds]
+        "coord8" -> "to_cntrl_8_4"
+        "to_cntrl_8_4"[label="4->8: User: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_8"
+        "to_coord_4_8"[label="4->8: User: (0)", shape=cds]
+        "coord11" -> "to_cntrl_11_4"
+        "to_cntrl_11_4"[label="4->11: MacroTile: (0)", shape=cds]
+        "cntrl4" -> "to_coord_4_11"
+        "to_coord_4_11"[label="4->11: MacroTile: (0)", shape=cds]
+        "coord15" -> "to_cntrl_15_6"
+        "to_cntrl_15_6"[label="6->15: DEST", shape=cds]
+        "cntrl6" -> "to_coord_6_15"
+        "to_coord_6_15"[label="6->15: DEST", shape=cds]
+        "coord17" -> "to_cntrl_17_9"
+        "to_cntrl_17_9"[label="9->17: DEST", shape=cds]
+        "cntrl9" -> "to_coord_9_17"
+        "to_coord_9_17"[label="9->17: DEST", shape=cds]
+        "coord19" -> "to_cntrl_19_12"
+        "to_cntrl_19_12"[label="12->19: DEST", shape=cds]
+        "cntrl12" -> "to_coord_12_19"
+        "to_coord_12_19"[label="12->19: DEST", shape=cds]
+        "coord19" -> "to_cntrl_19_15"
+        "to_cntrl_19_15"[label="15->19: MacroTile: (0)", shape=cds]
+        "cntrl15" -> "to_coord_15_19"
+        "to_coord_15_19"[label="15->19: MacroTile: (0)", shape=cds]
+        "coord23" -> "to_cntrl_23_15"
+        "to_cntrl_23_15"[label="15->23: User: (0)", shape=cds]
+        "cntrl15" -> "to_coord_15_23"
+        "to_coord_15_23"[label="15->23: User: (0)", shape=cds]
         }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -1409,16 +1601,14 @@ namespace KernelGraphTest
         auto block_id  = Expression::literal(2);
         auto thread_id = Expression::literal(33);
 
-        auto exprs = kgraph1.coordinates.reverse(
-            {block_id, thread_id}, {user0}, {block0, thread0}, nullptr);
+        auto exprs = kgraph1.coordinates.reverse({block_id, thread_id}, {user0}, {block0, thread0});
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 64:U32)U32, 33:I)U32}, "
                   "CommandArgument(Tensor_0_stride_0)I64)I64}");
 
-        exprs = kgraph1.coordinates.reverse(
-            {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
-        sexpr = Expression::toString(exprs[0]);
+        exprs = kgraph1.coordinates.reverse({block_id, thread_id}, {user0}, {block0, thread0});
+        sexpr = Expression::toString(fastArith(exprs[0]));
         EXPECT_EQ(sexpr, "{Split: Multiply(161:U32, Tensor_0_stride_0_0:I64)I64}");
     }
 
@@ -1842,9 +2032,19 @@ namespace KernelGraphTest
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        double rnorm = relativeNormL2(r, example.referenceSolution(a));
+        auto   ref   = example.referenceSolution(a);
+        double rnorm = relativeNormL2(r, ref);
 
-        ASSERT_LT(rnorm, 1.e-12);
+        std::ostringstream msg;
+        for(int i = 0; i < r.size(); i++)
+        {
+            msg << i << " " << r[i] << " | " << ref[i];
+            if(r[i] != ref[i])
+                msg << " * ";
+            msg << std::endl;
+        }
+
+        ASSERT_LT(rnorm, 1.e-12) << msg.str();
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
@@ -2186,8 +2386,8 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadLinear(2)"];
-        "cntrl3"[label="LoadLinear(3)"];
+        "cntrl2"[label="LoadLinear Value: Float(2)"];
+        "cntrl3"[label="LoadLinear Value: Float(3)"];
         "cntrl4"[label="Body(4)",shape=box];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="Assign VGPR 5:I(6)"];
@@ -2332,14 +2532,14 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
+        "cntrl2"[label="LoadTiled Value: Float(2)"];
         "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
+        "cntrl4"[label="LoadTiled Value: Float(4)"];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="TensorContraction(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl9"[label="StoreTiled Value: Float(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"
@@ -2462,14 +2662,14 @@ namespace KernelGraphTest
         }
         subgraph clusterCF {label = "Control Graph";
         "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
+        "cntrl2"[label="LoadTiled Value: Float(2)"];
         "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
+        "cntrl4"[label="LoadTiled Value: Float(4)"];
         "cntrl5"[label="Body(5)",shape=box];
         "cntrl6"[label="TensorContraction(6)"];
         "cntrl7"[label="Sequence(7)",shape=box];
         "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl9"[label="StoreTiled Value: Float(9)"];
         "cntrl10"[label="Sequence(10)",shape=box];
         "cntrl1" -> "cntrl3"
         "cntrl1" -> "cntrl5"

@@ -40,10 +40,10 @@ namespace rocRoller
             , m_kgraph(kernel.getKernelGraph())
             , m_coords(std::make_shared<KernelGraph::CoordinateGraph::CoordinateGraph>(
                   m_kgraph.coordinates))
-            , m_tx(m_coords, kernel.getContext())
+            , m_tx(m_coords.get())
             , m_invocation(kernel.getKernelInvocation(runtimeArgs.runtimeArguments()))
         {
-            m_tx.fillExecutionCoordinates();
+            m_tx.fillExecutionCoordinates(kernel.getContext());
             assignLiteralSizesAndStrides();
         }
 

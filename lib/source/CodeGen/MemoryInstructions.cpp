@@ -78,7 +78,8 @@ namespace rocRoller
     uint bitsPerTransposeLoad(uint elementBits)
     {
         AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
-                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.");
+                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.",
+                    ShowValue(elementBits));
 
         if(elementBits == 6)
         {
@@ -129,7 +130,8 @@ namespace rocRoller
         AssertFatal(addr != nullptr);
 
         AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
-                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.");
+                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.",
+                    ShowValue(elementBits));
 
         AssertFatal(numBytes > 0 && (numBytes < m_wordSize || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
@@ -223,8 +225,8 @@ namespace rocRoller
                                                             Register::ValuePtr  toPack) const
     {
         auto valuesPerWord = m_wordSize / toPack->variableType().getElementSize();
-        auto unsegmented   = DataTypeInfo::Get(toPack->variableType()).unsegmentedVariableType();
-        if(!unsegmented)
+        auto packed        = DataTypeInfo::Get(toPack->variableType()).packedVariableType();
+        if(!packed)
         {
             Throw<FatalError>("Segmented variable type not found for ",
                               ShowValue(toPack->variableType()));
@@ -232,7 +234,7 @@ namespace rocRoller
 
         result = Register::Value::Placeholder(toPack->context(),
                                               toPack->regType(),
-                                              *unsegmented,
+                                              *packed,
                                               toPack->valueCount() / valuesPerWord,
                                               Register::AllocationOptions::FullyContiguous());
         for(int i = 0; i < result->registerCount(); i++)

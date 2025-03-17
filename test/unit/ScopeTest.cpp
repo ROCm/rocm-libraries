@@ -106,51 +106,51 @@ namespace ScopeTest
             // CodeGeneratorVisitor::generate() begin
             // generate({1})
             // Kernel(1) BEGIN
-            // generate({})
-            // end: generate({})
-            // generate({4})
-            // Assign VGPR 11:U32(4) BEGIN
-            // Assign dim(1) = 11:U32
-            // Generate 11:U32 into v**UNALLOCATED**
-            // Allocated DataFlowTag1: 1 VGPR (Value: UInt32): v0
-            v_mov_b32 v0, 11 // call()
-            // Assign VGPR 11:U32(4) END
-            // Scope(2) BEGIN
-            // Lock Scope 2
-            // generate({3})
-            // Scope(3) BEGIN
-            // Lock Scope 3
-            // generate({6})
-            // Assign VGPR 33:U32(6) BEGIN
-            // Assign dim(3) = 33:U32
-            // Generate 33:U32 into v**UNALLOCATED**
-            // Allocated DataFlowTag3: 1 VGPR (Value: UInt32): v1
-            v_mov_b32 v1, 33 // call()
-            // Assign VGPR 33:U32(6) END
-            // Assign VGPR 44:U32(7) BEGIN
-            // Assign dim(1) = 44:U32
-            // Generate 44:U32 into v0
-            v_mov_b32 v0, 44 // call()
-            // Assign VGPR 44:U32(7) END
-            // end: generate({6})
+            // (op 1) generate({})
+            // (op 1) end: generate({})
+            // (op 1) generate({4})
+            // (op 1) Assign VGPR 11:U32(4) BEGIN
+            // (op 4) Assign dim(1) = 11:U32
+            // (op 4) Generate 11:U32 into v**UNALLOCATED**
+            // Allocated DataFlowTag1: 1 VGPR (Value: UInt32) (op 4): v0
+            v_mov_b32 v0, 11 // (op 4) call()
+            // (op 1) Assign VGPR 11:U32(4) END
+            // (op 1) Scope(2) BEGIN
+            // (op 2) Lock Scope 2
+            // (op 2) generate({3})
+            // (op 2) Scope(3) BEGIN
+            // (op 3) Lock Scope 3
+            // (op 3) generate({6})
+            // (op 3) Assign VGPR 33:U32(6) BEGIN
+            // (op 6) Assign dim(3) = 33:U32
+            // (op 6) Generate 33:U32 into v**UNALLOCATED**
+            // Allocated DataFlowTag3: 1 VGPR (Value: UInt32) (op 6): v1
+            v_mov_b32 v1, 33 // (op 6) call()
+            // (op 3) Assign VGPR 33:U32(6) END
+            // (op 3) Assign VGPR 44:U32(7) BEGIN
+            // (op 7) Assign dim(1) = 44:U32
+            // (op 7) Generate 44:U32 into v0
+            v_mov_b32 v0, 44 // (op 7) call()
+            // (op 3) Assign VGPR 44:U32(7) END
+            // (op 3) end: generate({6})
             // Deleting tag 3
-            // Freeing DataFlowTag3: 1 VGPR (Value: UInt32): v1
-            // Unlock Scope 3
-            // Scope(3) END
-            // Assign VGPR 22:U32(5) BEGIN
-            // Assign dim(2) = 22:U32
-            // Generate 22:U32 into v**UNALLOCATED**
-            // Allocated DataFlowTag2: 1 VGPR (Value: UInt32): v1
-            v_mov_b32 v1, 22 // call()
-            // Assign VGPR 22:U32(5) END
-            // end: generate({3})
+            // Freeing DataFlowTag3: 1 VGPR (Value: UInt32) (op 6): v1
+            // (op 3) Unlock Scope 3
+            // (op 2) Scope(3) END
+            // (op 2) Assign VGPR 22:U32(5) BEGIN
+            // (op 5) Assign dim(2) = 22:U32
+            // (op 5) Generate 22:U32 into v**UNALLOCATED**
+            // Allocated DataFlowTag2: 1 VGPR (Value: UInt32) (op 5): v1
+            v_mov_b32 v1, 22 // (op 5) call()
+            // (op 2) Assign VGPR 22:U32(5) END
+            // (op 2) end: generate({3})
             // Deleting tag 2
-            // Freeing DataFlowTag2: 1 VGPR (Value: UInt32): v1
-            // Unlock Scope 2
-            // Scope(2) END
-            // end: generate({4})
+            // Freeing DataFlowTag2: 1 VGPR (Value: UInt32) (op 5): v1
+            // (op 2) Unlock Scope 2
+            // (op 1) Scope(2) END
+            // (op 1) end: generate({4})
             // Deleting tag 1
-            // Freeing DataFlowTag1: 1 VGPR (Value: UInt32): v0
+            // Freeing DataFlowTag1: 1 VGPR (Value: UInt32) (op 4): v0
             // Kernel(1) END
             // end: generate({1})
             // CodeGeneratorVisitor::generate() end
@@ -241,11 +241,26 @@ namespace ScopeTest
         EXPECT_NO_THROW(m_context->schedule(generate(kgraph, m_context->kernel())));
 
         auto expected = R"(
-           "coord1" -> "cntrl5" [style=dotted,weight=0,arrowsize=0,label="DEST"]
-           "coord2" -> "cntrl6" [style=dotted,weight=0,arrowsize=0,label="DEST"]
-           "coord3" -> "cntrl7" [style=dotted,weight=0,arrowsize=0,label="DEST"]
-           "coord1" -> "cntrl8" [style=dotted,weight=0,arrowsize=0,label="DEST"]
-           "coord4" -> "cntrl9" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+            "coord1" -> "to_cntrl_1_5"
+            "to_cntrl_1_5"[label="5->1: DEST", shape=cds]
+            "cntrl5" -> "to_coord_5_1"
+            "to_coord_5_1"[label="5->1: DEST", shape=cds]
+            "coord2" -> "to_cntrl_2_6"
+            "to_cntrl_2_6"[label="6->2: DEST", shape=cds]
+            "cntrl6" -> "to_coord_6_2"
+            "to_coord_6_2"[label="6->2: DEST", shape=cds]
+            "coord3" -> "to_cntrl_3_7"
+            "to_cntrl_3_7"[label="7->3: DEST", shape=cds]
+            "cntrl7" -> "to_coord_7_3"
+            "to_coord_7_3"[label="7->3: DEST", shape=cds]
+            "coord1" -> "to_cntrl_1_8"
+            "to_cntrl_1_8"[label="8->1: DEST", shape=cds]
+            "cntrl8" -> "to_coord_8_1"
+            "to_coord_8_1"[label="8->1: DEST", shape=cds]
+            "coord4" -> "to_cntrl_4_9"
+            "to_cntrl_4_9"[label="9->4: DEST", shape=cds]
+            "cntrl9" -> "to_coord_9_4"
+            "to_coord_9_4"[label="9->4: DEST", shape=cds]
         )";
 
         EXPECT_EQ(NormalizedSource(expected),

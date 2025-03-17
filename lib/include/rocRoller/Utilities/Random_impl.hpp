@@ -52,14 +52,18 @@ namespace rocRoller
         {
             using F6x16 = std::conditional_t<std::is_same_v<T, FP6>, FP6x16, BF6x16>;
             std::vector<F6x16> y(nx / 16);
-            packF6x16((uint32_t*)y.data(), (uint8_t const*)x.data(), nx);
+            packF6x16(reinterpret_cast<uint32_t*>(y.data()),
+                      reinterpret_cast<uint8_t const*>(x.data()),
+                      nx);
             return y;
         }
 
         if constexpr(std::is_same_v<T, FP4>)
         {
             std::vector<FP4x8> y(nx / 8);
-            packFP4x8((uint32_t*)y.data(), (uint8_t const*)x.data(), nx);
+            packFP4x8(reinterpret_cast<uint32_t*>(y.data()),
+                      reinterpret_cast<uint8_t const*>(x.data()),
+                      nx);
             return y;
         }
 

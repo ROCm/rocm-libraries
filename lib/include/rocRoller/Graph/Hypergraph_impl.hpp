@@ -51,9 +51,7 @@ namespace rocRoller
                 return "Node";
             case ElementType::Edge:
                 return "Edge";
-
             case ElementType::Count:
-            default:
                 break;
             }
             throw std::runtime_error("Invalid ElementType");
@@ -72,15 +70,10 @@ namespace rocRoller
                 return "Upstream";
             case Direction::Downstream:
                 return "Downstream";
-            default:
+            case Direction::Count:
                 break;
             }
             throw std::runtime_error("Invalid Direction");
-        }
-
-        inline std::ostream& operator<<(std::ostream& stream, Direction const& d)
-        {
-            return stream << toString(d);
         }
 
         constexpr inline Direction opposite(Direction d)
@@ -98,15 +91,11 @@ namespace rocRoller
                 return "AddElement";
             case GraphModification::SetElement:
                 return "SetElement";
-            default:
-                break;
+            case GraphModification::Count:
+                return "Count";
             }
-            throw std::runtime_error("Invalid GraphModification");
-        }
 
-        inline std::ostream& operator<<(std::ostream& stream, GraphModification const& g)
-        {
-            return stream << toString(g);
+            Throw<FatalError>("Invalid GraphModification ", static_cast<int>(g));
         }
 
         template <typename Node, typename Edge, bool Hyper>

@@ -55,8 +55,7 @@ namespace rocRoller
             Count
         };
 
-        std::ostream& operator<<(std::ostream&, ElementType const& e);
-        std::string   toString(ElementType e);
+        std::string toString(ElementType e);
 
         /**
          * @brief Returns the complementary type to `t`.
@@ -70,8 +69,8 @@ namespace rocRoller
             Count
         };
 
-        std::ostream& operator<<(std::ostream&, Direction const& d);
-        std::string   toString(Direction d);
+        std::string         toString(Direction d);
+        constexpr Direction opposite(Direction d);
 
         enum class GraphModification : int
         {
@@ -81,10 +80,7 @@ namespace rocRoller
             Count
         };
 
-        std::ostream& operator<<(std::ostream&, GraphModification const& g);
-        std::string   toString(GraphModification g);
-
-        constexpr Direction opposite(Direction);
+        std::string toString(GraphModification m);
 
         namespace mi = boost::multi_index;
 

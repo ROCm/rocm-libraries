@@ -248,6 +248,9 @@ namespace rocRoller
             std::string name() const;
             void        setName(std::string name);
 
+            void setReadOnly();
+            bool readOnly() const;
+
             /**
              * Return negated copy.
              */
@@ -486,14 +489,24 @@ namespace rocRoller
             std::string name() const;
             void        setName(std::string name);
 
+            std::optional<int> controlOp() const;
+            void               setControlOp(int op);
+
+            void setReadOnly();
+            bool readOnly() const;
+
         private:
             friend class Value;
             friend class Allocator;
+
+            bool m_readOnly = false;
 
             std::weak_ptr<Context> m_context;
 
             Type         m_regType;
             VariableType m_variableType;
+
+            std::optional<int> m_controlOp;
 
             AllocationOptions m_options;
 
