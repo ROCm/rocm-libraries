@@ -40,7 +40,7 @@ THE SOFTWARE.
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
 #include "../../commons.h"
-#include "../../../api/rocdecode.h"
+#include "../../../api/rocdecode/rocdecode.h"
 
 #define CHECK_HIP(call) {\
     hipError_t hip_status = call;\

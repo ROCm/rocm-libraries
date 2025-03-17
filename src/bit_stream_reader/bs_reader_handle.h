@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 #include <memory>
 #include <string>
-#include "roc_bitstream_reader.h"
+#include "rocdecode/roc_bitstream_reader.h"
 #include "es_reader.h"
 
 class RocBitstreamReaderHandle {

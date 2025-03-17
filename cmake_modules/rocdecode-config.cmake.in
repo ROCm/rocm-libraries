@@ -1,0 +1,22 @@
+# - Config file for the rocdecode package
+# It defines the following variables
+#  ROCDECODE_INCLUDE_DIR - include directory for rocdecode
+#  ROCDECODE_LIB_DIR     - library directory for rocdecode
+#  ROCDECODE_LIBRARY     - library to link against
+
+@PACKAGE_INIT@
+
+# Compute paths
+set_and_check(rocdecode_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCDECODE_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocDecode_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocdecode_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCDECODE_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(rocDecode_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(rocdecode_LIBRARY "@PACKAGE_LIB_INSTALL_DIR@/librocdecode.so")
+set_and_check(ROCDECODE_LIBRARY "@PACKAGE_LIB_INSTALL_DIR@/librocdecode.so")
+set_and_check(rocDecode_LIBRARY "@PACKAGE_LIB_INSTALL_DIR@/librocdecode.so")
+
+
+get_filename_component(ROCDECODE_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include("${ROCDECODE_CMAKE_DIR}/rocdecode-targets.cmake")

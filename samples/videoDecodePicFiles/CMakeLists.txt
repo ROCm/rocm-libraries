@@ -41,7 +41,7 @@ set(CMAKE_CXX_STANDARD 17)
 project(videodecodepicfiles)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/../../cmake)
-list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/hip ${ROCM_PATH})
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
 
 # rocDecode sample build type
 set(DEFAULT_BUILD_TYPE "Release")
@@ -61,10 +61,10 @@ else()
 endif()
 
 find_package(HIP QUIET)
-find_package(FFmpeg QUIET)
-find_package(rocDecode QUIET)
-find_package(Threads REQUIRED)
+find_package(ROCDECODE QUIET)
 find_package(rocprofiler-register QUIET)
+find_package(FFmpeg QUIET)
+find_package(Threads REQUIRED)
 
 if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     # HIP

@@ -37,8 +37,8 @@ THE SOFTWARE.
 #include <unordered_map>
 #include <chrono>
 #include <hip/hip_runtime.h>
-#include "rocdecode.h"
-#include "rocparser.h"
+#include "rocdecode/rocdecode.h"
+#include "rocdecode/rocparser.h"
 
 /*!
  * \file

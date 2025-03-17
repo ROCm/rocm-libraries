@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 #include <memory>
 #include <string>
-#include "rocparser.h"
+#include "rocdecode/rocparser.h"
 #include "roc_video_parser.h"
 #include "avc_parser.h"
 #include "av1_parser.h"

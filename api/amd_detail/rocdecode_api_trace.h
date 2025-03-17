@@ -21,9 +21,9 @@ THE SOFTWARE.
 */
 #pragma once
 
-#include "rocdecode.h"
-#include "rocparser.h"
-#include "roc_bitstream_reader.h"
+#include "rocdecode/rocdecode.h"
+#include "rocdecode/rocparser.h"
+#include "rocdecode/roc_bitstream_reader.h"
 
 // Define version macros for the rocDecode API dispatch table, specifying the MAJOR and STEP versions.
 //

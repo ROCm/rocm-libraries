@@ -37,7 +37,7 @@ THE SOFTWARE.
     #include <experimental/filesystem>
 #endif
 #include "video_demuxer.h"
-#include "roc_bitstream_reader.h"
+#include "rocdecode/roc_bitstream_reader.h"
 #include "roc_video_dec.h"
 #include "ffmpeg_video_dec.h"
 #include "common.h"

@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include "rocdecode.h"
+#include "rocdecode/rocdecode.h"
 
 #define BS_RING_SIZE (16 * 1024 * 1024)
 #define INIT_PIC_DATA_SIZE (2 * 1024 * 1024)

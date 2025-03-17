@@ -53,15 +53,25 @@ project(rocdecode-test)
 enable_testing()
 include(CTest)
 
-# add find modules
-list(APPEND CMAKE_MODULE_PATH ${ROCM_PATH}/share/rocdecode/cmake)
+# add ROCm find Config location
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
 
 # find rocDecode
-find_package(rocDecode QUIET)
+find_package(ROCDECODE QUIET)
 
-if(NOT ROCDECODE_FOUND)
-    message("-- ${Yellow}${PROJECT_NAME} requires rocDecode. Install rocDecode before running CTests")
-endif()
+if(ROCDECODE_FOUND)
+  message("-- ${White}${PROJECT_NAME}: rocDecode found with find_package(ROCDECODE QUIET)${ColourReset}")
+  message("-- \t${White}ROCDECODE_INCLUDE_DIR -- ${ROCDECODE_INCLUDE_DIR}${ColourReset}")
+  message("-- \t${White}ROCDECODE_LIB_DIR -- ${ROCDECODE_LIB_DIR}${ColourReset}")
+  message("-- \t${White}ROCDECODE_LIBRARY -- ${ROCDECODE_LIBRARY}${ColourReset}")
+  message("-- \t${White}ROCDECODE_FOUND -- ${ROCDECODE_FOUND}${ColourReset}")
+  message("-- \t${White}ROCDECODE_VERSION -- ${ROCDECODE_VERSION}${ColourReset}")
+  message("-- \t${White}ROCDECODE_VERSION_MAJOR -- ${ROCDECODE_VERSION_MAJOR}${ColourReset}")
+  message("-- \t${White}ROCDECODE_VERSION_MINOR -- ${ROCDECODE_VERSION_MINOR}${ColourReset}")
+  message("-- \t${White}ROCDECODE_VERSION_PATCH -- ${ROCDECODE_VERSION_PATCH}${ColourReset}")
+else()
+  message("-- ${Yellow}${PROJECT_NAME} requires rocDecode. Install rocDecode before running CTests")
+endif(ROCDECODE_FOUND)
 
 # 1 - videoDecode HEVC
 add_test(

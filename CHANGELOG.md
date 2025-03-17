@@ -2,7 +2,7 @@
 
 Full documentation for rocDecode is available at [https://rocm.docs.amd.com/projects/rocDecode/en/latest/](https://rocm.docs.amd.com/projects/rocDecode/en/latest/)
 
-## (Unreleased) rocDecode 0.11.1
+## rocDecode 0.12.0 for ROCm 6.5
 
 ### Added
 
@@ -10,6 +10,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * CTest for VP9 decode on bitstream reader.
 * HEVC stream syntax error handling.
 * HEVC stream bit depth change handling through decoder reconfiguration.
+* rocDecode now uses the Cmake CMAKE_PREFIX_PATH directive.
 
 ### Changed
 

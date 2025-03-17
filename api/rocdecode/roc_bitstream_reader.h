@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
-#include "rocdecode.h"
+#include "rocdecode/rocdecode.h"
 
 /*!
  * \file

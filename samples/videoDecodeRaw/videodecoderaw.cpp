@@ -37,7 +37,7 @@ THE SOFTWARE.
     #include <experimental/filesystem>
 #endif
  
-#include "roc_bitstream_reader.h"
+#include "rocdecode/roc_bitstream_reader.h"
 #include "roc_video_dec.h"
 
 typedef enum ReconfigFlushMode_enum {

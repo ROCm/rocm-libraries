@@ -31,7 +31,7 @@ extern "C" {
     #endif
 }
 
-#include "rocdecode.h"
+#include "rocdecode/rocdecode.h"
 
 /*!
  * \file

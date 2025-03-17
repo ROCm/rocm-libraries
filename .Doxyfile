@@ -944,8 +944,8 @@ WARN_LOGFILE           =
 # Note: If this tag is empty the current directory is searched.
 
 INPUT                  = README.md \
-                        api/rocDecode.h \
-                        api/rocparser.h \
+                        api/rocdecode/rocdecode.h \
+                        api/rocdecode/rocparser.h \
                         utils/rocvideodecode/roc_video_dec.h \
                         utils/video_demuxer.h
 

@@ -24,7 +24,7 @@ THE SOFTWARE.
 #include <memory>
 #include <string>
 #include <vector>
-#include "rocparser.h"
+#include "rocdecode/rocparser.h"
 #include "../commons.h"
 
 typedef enum ParserResult {

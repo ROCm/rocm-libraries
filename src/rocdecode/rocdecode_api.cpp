@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "dec_handle.h"
-#include "rocdecode.h"
+#include "rocdecode/rocdecode.h"
 #include "vaapi_videodecoder.h"
 #include "../commons.h"
 

@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <string.h>
 #include <map>
-#include "../api/rocdecode.h"
+#include "../api/rocdecode/rocdecode.h"
 #include <hip/hip_runtime.h>
 #include "vaapi/vaapi_videodecoder.h"
 
