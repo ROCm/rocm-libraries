@@ -118,14 +118,11 @@ inline const char* get_probability_name(partition_three_way_probability probabil
     return "invalid";
 }
 
-constexpr int warmup_iter = 5;
-constexpr int batch_size  = 10;
-
 template<typename DataType,
          typename Config                   = rocprim::default_config,
          typename FlagType                 = char,
          partition_probability Probability = partition_probability::tuning>
-struct device_partition_flag_benchmark : public config_autotune_interface
+struct device_partition_flag_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -137,11 +134,12 @@ struct device_partition_flag_benchmark : public config_autotune_interface
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             const hipStream_t   stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
@@ -224,36 +222,9 @@ struct device_partition_flag_benchmark : public config_autotune_interface
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; ++i)
-        {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         if(is_tuning)
@@ -273,7 +244,7 @@ struct device_partition_flag_benchmark : public config_autotune_interface
 template<typename DataType,
          typename Config                   = rocprim::default_config,
          partition_probability Probability = partition_probability::tuning>
-struct device_partition_predicate_benchmark : public config_autotune_interface
+struct device_partition_predicate_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -284,11 +255,12 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             const hipStream_t   stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
@@ -343,36 +315,9 @@ struct device_partition_predicate_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        for(int i = 0; i < warmup_iter; ++i)
-        {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -387,7 +332,7 @@ template<typename DataType,
          typename Config                   = rocprim::default_config,
          typename FlagType                 = char,
          partition_probability Probability = partition_probability::tuning>
-struct device_partition_two_way_flag_benchmark : public config_autotune_interface
+struct device_partition_two_way_flag_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -399,11 +344,12 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             const hipStream_t   stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
@@ -490,36 +436,9 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
         void* d_temp_storage = nullptr;
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; ++i)
-        {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         if(is_tuning)
@@ -540,7 +459,7 @@ struct device_partition_two_way_flag_benchmark : public config_autotune_interfac
 template<typename DataType,
          typename Config                   = rocprim::default_config,
          partition_probability Probability = partition_probability::tuning>
-struct device_partition_two_way_predicate_benchmark : public config_autotune_interface
+struct device_partition_two_way_predicate_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -551,11 +470,12 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             const hipStream_t   stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
@@ -613,36 +533,9 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; ++i)
-        {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output_selected));
@@ -657,7 +550,7 @@ struct device_partition_two_way_predicate_benchmark : public config_autotune_int
 template<typename DataType,
          typename Config                             = rocprim::default_config,
          partition_three_way_probability Probability = partition_three_way_probability::tuning>
-struct device_partition_three_way_benchmark : public config_autotune_interface
+struct device_partition_three_way_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -668,11 +561,12 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             const hipStream_t   stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(DataType);
 
@@ -752,36 +646,9 @@ struct device_partition_three_way_benchmark : public config_autotune_interface
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_iter; ++i)
-        {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(DataType));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output_first));
@@ -802,7 +669,7 @@ struct device_partition_benchmark_generator
     template<int ItemsPerThread>
     struct create_ipt
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             using config = rocprim::select_config<BlockSize, ItemsPerThread>;
             storage.emplace_back(
@@ -818,7 +685,7 @@ struct device_partition_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr int max_items_per_thread = std::min(64 / sizeof(DataType), size_t{32});
         static_for_each<make_index_range<int, 4, max_items_per_thread>, create_ipt>(storage);

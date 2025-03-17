@@ -70,9 +70,9 @@ inline std::string config_name<rocprim::default_config>()
 template<typename KeyType,
          typename ValueType,
          int  MaxSegmentLength,
-         bool Deterministic = false,
-         typename Config    = rocprim::default_config>
-struct device_reduce_by_key_benchmark : public config_autotune_interface
+         bool Deterministic,
+         typename Config = rocprim::default_config>
+struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -82,13 +82,12 @@ struct device_reduce_by_key_benchmark : public config_autotune_interface
             + std::to_string(MaxSegmentLength) + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
-        constexpr int                batch_size                 = 10;
-        constexpr int                warmup_size                = 5;
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         constexpr std::array<int, 2> tuning_max_segment_lengths = {10, 1000};
         constexpr int    num_input_arrays = is_tuning ? tuning_max_segment_lengths.size() : 1;
         constexpr size_t item_size        = sizeof(KeyType) + sizeof(ValueType);
@@ -190,36 +189,16 @@ struct device_reduce_by_key_benchmark : public config_autotune_interface
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        for(int i = 0; i < warmup_size; ++i)
+        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+
+#pragma pack(push, 1)
+        struct combined
         {
-            dispatch(d_temp_storage, temp_storage_size_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            HIP_CHECK(hipEventRecord(start, stream));
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temp_storage, temp_storage_size_bytes);
-            }
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * item_size);
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+            KeyType   a;
+            ValueType b;
+        };
+#pragma pack(pop)
+        state.set_items_processed_per_iteration<combined>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_temp_storage));
         for(int i = 0; i < num_input_arrays; ++i)
@@ -243,7 +222,7 @@ struct device_reduce_by_key_benchmark_generator
     template<unsigned int ItemsPerThread>
     struct create_ipt
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             using config
                 = rocprim::reduce_by_key_config<BlockSize,
@@ -258,7 +237,7 @@ struct device_reduce_by_key_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int max_items_per_thread = std::min(
             TUNING_SHARED_MEMORY_MAX / std::max(sizeof(KeyType), sizeof(ValueType)) / BlockSize - 1,
@@ -269,5 +248,60 @@ struct device_reduce_by_key_benchmark_generator
 };
 
 #endif // BENCHMARK_CONFIG_TUNING
+
+#define CREATE_BENCHMARK(KEY, VALUE, MAX_SEGMENT_LENGTH) \
+    executor.queue_instance(                             \
+        device_reduce_by_key_benchmark<KEY, VALUE, MAX_SEGMENT_LENGTH, Deterministic>());
+
+#define CREATE_BENCHMARK_TYPE(KEY, VALUE) \
+    CREATE_BENCHMARK(KEY, VALUE, 10)      \
+    CREATE_BENCHMARK(KEY, VALUE, 1000)
+
+// some of the tuned types
+#define CREATE_BENCHMARK_TYPES(KEY)                \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t)             \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half)      \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t)  \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::uint128_t) \
+    CREATE_BENCHMARK_TYPE(KEY, float)              \
+    CREATE_BENCHMARK_TYPE(KEY, double)
+
+// all of the tuned types
+#define CREATE_BENCHMARK_TYPE_TUNING(KEY)          \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t)             \
+    CREATE_BENCHMARK_TYPE(KEY, int16_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, int32_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, int64_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t)  \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::uint128_t) \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::half)      \
+    CREATE_BENCHMARK_TYPE(KEY, float)              \
+    CREATE_BENCHMARK_TYPE(KEY, double)
+
+template<bool Deterministic>
+void add_benchmarks(benchmark_utils::executor& executor)
+{
+    // tuned types
+    CREATE_BENCHMARK_TYPES(int8_t)
+    CREATE_BENCHMARK_TYPES(int16_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int32_t)
+    CREATE_BENCHMARK_TYPE_TUNING(int64_t)
+    CREATE_BENCHMARK_TYPES(rocprim::half)
+    CREATE_BENCHMARK_TYPES(float)
+    CREATE_BENCHMARK_TYPES(double)
+    CREATE_BENCHMARK_TYPES(rocprim::int128_t)
+    CREATE_BENCHMARK_TYPES(rocprim::uint128_t)
+
+    // custom types
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
+
+    CREATE_BENCHMARK_TYPE(int, custom_float2)
+    CREATE_BENCHMARK_TYPE(int, custom_double2)
+
+    CREATE_BENCHMARK_TYPE(long long, custom_float2)
+    CREATE_BENCHMARK_TYPE(long long, custom_double2)
+}
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_REDUCE_BY_KEY_PARALLEL_HPP_
