@@ -107,7 +107,7 @@ def runTestCommand (platform, project, settings)
     String checkNumericsEnv = "ROCBLAS_CHECK_NUMERICS=6" // report status 4 & log 2 on fail
     if (env.BRANCH_NAME ==~ /PR-\d+/)
     {
-        if (pullRequest.labels.contains("help wanted"))
+        if (pullRequest.labels.contains("helpWanted"))
         {
             gtestCommonEnv += " GTEST_LISTENER=PASS_LINE_IN_LOG"
         }
