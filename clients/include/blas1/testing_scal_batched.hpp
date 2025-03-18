@@ -234,13 +234,7 @@ void testing_scal_batched(const Arguments& arg)
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
-        for(int iter = 0; iter < total_calls; iter++)
-        {
-            if(iter == number_cold_calls)
-                gpu_time_used = get_time_us_sync(stream);
-
-            int flush_index = iter % flush_batch_count;
-
+        auto lambda_to_benchmark = [&](int flush_index) {
             DAPI_DISPATCH(rocblas_scal_batched_fn,
                           (handle,
                            N,
@@ -248,17 +242,21 @@ void testing_scal_batched(const Arguments& arg)
                            (dx.ptr_on_device() + (flush_index * batch_count)),
                            incx,
                            batch_count));
-        }
+        };
 
-        gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        Benchmark<decltype(lambda_to_benchmark)> benchmark_scal_batched(
+            lambda_to_benchmark, stream, arg, flush_batch_count);
 
-        ArgumentModel<e_N, e_alpha, e_incx, e_batch_count>{}.log_args<T>(rocblas_cout,
-                                                                         arg,
-                                                                         gpu_time_used,
-                                                                         scal_gflop_count<T, U>(N),
-                                                                         scal_gbyte_count<T>(N),
-                                                                         cpu_time_used,
-                                                                         rocblas_error_host,
-                                                                         rocblas_error_device);
+        benchmark_scal_batched.run_timer();
+
+        ArgumentModel<e_N, e_alpha, e_incx, e_batch_count>{}.log_args<T>(
+            rocblas_cout,
+            arg,
+            benchmark_scal_batched.get_hot_time(),
+            scal_gflop_count<T, U>(N),
+            scal_gbyte_count<T>(N),
+            cpu_time_used,
+            rocblas_error_host,
+            rocblas_error_device);
     }
 }
