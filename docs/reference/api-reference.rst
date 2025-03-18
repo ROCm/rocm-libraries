@@ -158,6 +158,8 @@ To use special data ordering for ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_O
 +=======+=======+=======+=======+======+=======+=============================+=============================+=====================+=====================+
 |  FP8  | FP8   |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R16 |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
+|  FP8  | FP8   |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R16 |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
++-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 |  FP16 | FP16  |  FP16 | FP16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
 +-------+-------+-------+-------+------+-------+-----------------------------+-----------------------------+---------------------+---------------------+
 |  BF16 | BF16  |  BF16 | BF16  |  T   |   N   |  HIPBLASLT_ORDER_COL16_4R8  |  HIPBLASLT_ORDER_COL        | HIPBLASLT_ORDER_COL | HIPBLASLT_ORDER_COL |
