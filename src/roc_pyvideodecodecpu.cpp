@@ -48,8 +48,7 @@ void PyRocVideoDecoderCpuInitializer(py::module& m) {
         .def("SetReconfigParams",&PyRocVideoDecoderCpu::PySetReconfigParams)
         .def("IsCodecSupported",&PyRocVideoDecoderCpu::PyCodecSupported)
         .def("GetBitDepth",&PyRocVideoDecoderCpu::PyGetBitDepth)
-// TODO: Change after merging with mainline #if ROCDECODE_CHECK_VERSION(0,6,0)
-#if OVERHEAD_SUPPORT
+#if ROCDECODE_CHECK_VERSION(0,6,0)
         .def("AddDecoderSessionOverHead",&PyRocVideoDecoderCpu::PyAddDecoderSessionOverHead)
         .def("GetDecoderSessionOverHead",&PyRocVideoDecoderCpu::PyGetDecoderSessionOverHead)
 #endif
@@ -395,11 +394,7 @@ py::int_ PyRocVideoDecoderCpu::PyGetStride() {
 
 // for python binding
 py::object PyRocVideoDecoderCpu::PyCodecSupported(int device_id, rocDecVideoCodec codec_id, uint32_t bit_depth) {
-#if CODEC_SUPPORTED_CHECK
     bool ret = CodecSupported(device_id, codec_id, bit_depth);
-#else
-    bool ret = true; // TODO: remove the whole #if CODEC_SUPPORTED_CHECK directive when ROCM 6.3 is public, only keep CodecSupported()
-#endif
     return py::cast(ret);
 }
 
@@ -407,8 +402,7 @@ uint32_t PyRocVideoDecoderCpu::PyGetBitDepth() {
     return GetBitDepth();
 }
 
-// TODO: Change after merging with mainline #if ROCDECODE_CHECK_VERSION(0,6,0)
-#if OVERHEAD_SUPPORT
+#if ROCDECODE_CHECK_VERSION(0,6,0)
 // for python binding, Session overhead refers to decoder initialization and deinitialization time
 py::object PyRocVideoDecoderCpu::PyAddDecoderSessionOverHead(int session_id, double duration) {
     AddDecoderSessionOverHead(static_cast<std::thread::id>(session_id), duration);

@@ -216,6 +216,7 @@ if(BUILD_ROCPYDECODE)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
     # rocDecode
     include_directories(${ROCDECODE_INCLUDE_DIR}
+        ${ROCM_PATH}/include/rocdecode
         ${ROCM_PATH}/share/rocdecode/utils
         ${ROCM_PATH}/share/rocdecode/utils/rocvideodecode)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCDECODE_LIBRARY})
@@ -298,19 +299,6 @@ if(BUILD_ROCPYDECODE)
                 target_link_libraries(${TARGET_NAME_VERSIONED} PRIVATE ${LINK_LIBRARY_LIST})
                 # include
                 target_include_directories(${TARGET_NAME_VERSIONED} PRIVATE ${pybind11_INCLUDE_DIRS} ${PYTHON_INCLUDE_DIR})
-
-                # TODO: remove after ROCDECODE_CHECK_VERSION macro is pushed to mainline
-                if(${ROCDECODE_VER_MAJOR} VERSION_GREATER_EQUAL "0" AND ${ROCDECODE_VER_MINOR} VERSION_GREATER_EQUAL "6" AND ${ROCDECODE_VER_MICRO} VERSION_GREATER_EQUAL "0")
-                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC OVERHEAD_SUPPORT=1)
-                else()
-                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC OVERHEAD_SUPPORT=0)
-                endif()
-                # TODO: remove after ROCDECODE_CHECK_VERSION macro is pushed to mainline
-                if(${ROCDECODE_VER_MAJOR} VERSION_GREATER_EQUAL "0" AND ${ROCDECODE_VER_MINOR} VERSION_GREATER_EQUAL "7" AND ${ROCDECODE_VER_MICRO} VERSION_GREATER_EQUAL "0")
-                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC CODEC_SUPPORTED_CHECK=1)
-                else()
-                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC CODEC_SUPPORTED_CHECK=0)
-                endif()
 
                 foreach (filename ${pyfiles})
                     get_filename_component(target "${filename}" REALPATH)

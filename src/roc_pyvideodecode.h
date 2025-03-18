@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include "roc_video_dec.h"
 #include "roc_pydecode.h"
 #include "video_post_process.h"
+#include "rocdecode_version.h"
 
 typedef enum ReconfigFlushMode_enum {
     RECONFIG_FLUSH_MODE_NONE = 0,               /**<  Just flush to get the frame count */
@@ -101,7 +102,7 @@ class PyRocVideoDecoder : public RocVideoDecoder {
 
         uint32_t PyGetBitDepth();
 
-#if OVERHEAD_SUPPORT
+#if ROCDECODE_CHECK_VERSION(0,6,0)
         // Session overhead refers to decoder initialization and deinitialization time
         py::object PyAddDecoderSessionOverHead(int session_id, double duration);
         py::object PyGetDecoderSessionOverHead(int session_id);

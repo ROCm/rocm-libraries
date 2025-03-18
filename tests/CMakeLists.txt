@@ -125,23 +125,19 @@ if(Python3_FOUND AND ROCPYDECODE_PYBIND_SCRIPTS)
   )
   set_property(TEST video_decode_perf_python_H264 PROPERTY ENVIRONMENT "PYTHONPATH=${ROCM_PATH}/lib:$PYTHONPATH")
   # 10 - video_decode_python_AV1 test
-  if(${ROCDECODE_VER_MAJOR} VERSION_GREATER_EQUAL "0" AND ${ROCDECODE_VER_MINOR} VERSION_GREATER_EQUAL "7" AND ${ROCDECODE_VER_MICRO} VERSION_GREATER_EQUAL "0")
-    add_test(NAME video_decode_python_AV1
-        COMMAND ${Python3_EXECUTABLE} ${ROCM_PATH}/lib/pyRocVideoDecode/samples/videodecode.py
-        -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    set_property(TEST video_decode_python_AV1 PROPERTY ENVIRONMENT "PYTHONPATH=${ROCM_PATH}/lib:$PYTHONPATH")
-  endif()
+  add_test(NAME video_decode_python_AV1
+      COMMAND ${Python3_EXECUTABLE} ${ROCM_PATH}/lib/pyRocVideoDecode/samples/videodecode.py
+      -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-AV1.mp4
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_property(TEST video_decode_python_AV1 PROPERTY ENVIRONMENT "PYTHONPATH=${ROCM_PATH}/lib:$PYTHONPATH")
   # 11 - video_decode_python_AV9 test
-  if(${ROCDECODE_VER_MAJOR} VERSION_GREATER_EQUAL "0" AND ${ROCDECODE_VER_MINOR} VERSION_GREATER_EQUAL "10" AND ${ROCDECODE_VER_MICRO} VERSION_GREATER_EQUAL "0")
-    add_test(NAME video_decode_python_AV9
-        COMMAND ${Python3_EXECUTABLE} ${ROCM_PATH}/lib/pyRocVideoDecode/samples/videodecode.py
-        -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    )
-    set_property(TEST video_decode_python_AV9 PROPERTY ENVIRONMENT "PYTHONPATH=${ROCM_PATH}/lib:$PYTHONPATH")
-  endif()
+  add_test(NAME video_decode_python_AV9
+      COMMAND ${Python3_EXECUTABLE} ${ROCM_PATH}/lib/pyRocVideoDecode/samples/videodecode.py
+      -i ${ROCM_PATH}/share/rocdecode/video/AMD_driving_virtual_20-VP9.ivf
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+  )
+  set_property(TEST video_decode_python_AV9 PROPERTY ENVIRONMENT "PYTHONPATH=${ROCM_PATH}/lib:$PYTHONPATH")
 else()
   if(NOT Python3_FOUND)
     message("-- NOTE: ${PROJECT_NAME} requires Python3 - NOT FOUND")
