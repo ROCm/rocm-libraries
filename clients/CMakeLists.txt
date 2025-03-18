@@ -53,8 +53,8 @@ set(CMAKE_CXX_STANDARD 17)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake )
 
-if( NOT ROCM_FOUND )
-  find_package( ROCM 0.7.3 REQUIRED )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  find_package( ROCmCMakeBuildTools REQUIRED )
 endif()
 
 include( ROCMInstallTargets )

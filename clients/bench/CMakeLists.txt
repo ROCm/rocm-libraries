@@ -56,8 +56,8 @@ if( NOT HIP_FOUND )
   find_package( hip REQUIRED )
 endif()
 
-if( NOT ROCM_FOUND )
-  find_package( ROCM 0.7.3 REQUIRED )
+if( NOT ROCmCMakeBuildTools_FOUND )
+  find_package( ROCmCMakeBuildTools REQUIRED )
 endif()
 
 if( USE_HIPRAND AND NOT hiprand_FOUND )
