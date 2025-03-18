@@ -1,6 +1,6 @@
 .. meta::
-   :description: A library that provides GEMM operations with flexible APIs and extends functionalities beyond the traditional BLAS library
-   :keywords: hipBLASLt, ROCm, library, API, tool
+   :description: hipBLASLt API reference
+   :keywords: hipBLASLt, ROCm, library, API, reference, data types
 
 .. _datatypes:
 

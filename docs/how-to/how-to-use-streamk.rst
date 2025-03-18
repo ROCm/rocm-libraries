@@ -13,7 +13,8 @@ It also provides more consistent performance, which might be better in some case
 Stream-K partitions an equal share of the aggregate inner-loop iterations among physical processing elements,
 which provides a near-perfect utilization of computing resources.
 For more information about Stream-K, see
-`Stream-K: Work-centric Parallel Decomposition for Dense Matrix-Matrix Multiplication on the GPU <https://arxiv.org/abs/2301.03598>`_.
+`Stream-K: Work-centric Parallel Decomposition for Dense Matrix-Matrix Multiplication on the GPU <https://arxiv.org/abs/2301.03598>`_
+on the arXiv website.
 
 Configuring the kernel selection strategy
 =========================================

@@ -1,6 +1,6 @@
 .. meta::
-   :description: A library that provides GEMM operations with flexible APIs and extends functionalities beyond the traditional BLAS library
-   :keywords: hipBLASLt, ROCm, library, API, tool
+   :description: hipBLASLtExt API reference
+   :keywords: hipBLASLt, ROCm, library, API, reference
 
 .. _ext-reference:
 
@@ -8,11 +8,11 @@
 hipBLASLtExt API reference
 ********************************
 
-hipBLASLt has extension APIs with namespace ``hipblaslt_ext``. It is only C++ compatible. The extensions support:
+hipBLASLt contains extension APIs with the namespace ``hipblaslt_ext``. They are only C++ compatible. The extensions support the following:
 
-1. :ref:`Gemm <gemm>`
+1. :ref:`GEMM <gemm>`
 
-2. :ref:`Grouped gemm <grouped-gemm>`
+2. :ref:`Grouped GEMM <grouped-gemm>`
 
 3. :ref:`Get all algorithms <get-all-algo>`
 
@@ -65,8 +65,8 @@ GemmInputsV2
     :protected-members:
     :private-members:
 
-hipBLASLtExt Gemm Class Reference
-================================
+hipBLASLtExt GEMM class reference
+=================================
 
 GemmPreference
 -------------------------------------
@@ -103,7 +103,7 @@ GroupedGemm
     :protected-members:
     :private-members:
 
-hipBLASLtExt API Reference
+hipBLASLtExt API reference
 ================================
 
 getAllAlgos()
@@ -125,16 +125,14 @@ matmulIsAlgoSupported()
 hipblasLtExt usage
 ================================
 
-Here are the three use-cases supported by the hipBLASLtExt APIs.
+Here are the three use cases supported by the hipBLASLtExt APIs.
 
 .. _Gemm:
 
-Gemm
+GEMM
 --------------
 
-hipblasLt has its own instance.
-
-You must assign the problem type when constructing or importing the problem from hipBLAS API.
+hipblasLt has its own instance. You must assign the problem type when constructing or importing the problem from the hipBLAS API.
 
 .. code-block:: c++
 
@@ -161,60 +159,72 @@ You must assign the problem type when constructing or importing the problem from
                                    hipblasLtMatrixLayout_t matD);
 
 After the instance is created, you can set the problem using the API.
-The API may require the following structures:
+The API might require the following structures:
 
-``GemmProblemType`` allows you to change the problem type after the instance is initialized. (Deprecated, use GemmProblemTypeV2 instead)
+*  ``GemmProblemType``: This lets you to change the problem type after the instance is initialized.
 
-.. code-block:: c++
+   .. note::
 
-    struct GemmProblemType
-    {
-        hipblasOperation_t     op_a;
-        hipblasOperation_t     op_b;
-        hipDataType      type_a;
-        hipDataType      type_b;
-        hipDataType      type_c;
-        hipDataType      type_d;
-        hipblasComputeType_t type_compute;
-    };
+      This structure is deprecated. Use ``GemmProblemTypeV2`` instead.
 
-``GemmEpilogue`` allows the user to control the epilogue of the problem. (Deprecated, use GemmEpilogueV2 instead)
+   .. code-block:: c++
 
-.. code-block:: c++
+      struct GemmProblemType
+      {
+         hipblasOperation_t     op_a;
+         hipblasOperation_t     op_b;
+         hipDataType      type_a;
+         hipDataType      type_b;
+         hipDataType      type_c;
+         hipDataType      type_d;
+         hipblasComputeType_t type_compute;
+      };
 
-    struct GemmEpilogue
-    {
-        hipblasLtEpilogue_t mode = HIPBLASLT_EPILOGUE_DEFAULT;
-        hipDataType   bias_data_type;
-        int                 aux_ld;
-        int                 aux_stride;
-    };
+*  ``GemmEpilogue``: This lets you control the epilogue of the problem.
 
-``GemmInputs`` specifies the problem inputs. (Deprecated, use GemmInputsV2 instead)
+   .. note::
+  
+      This structure is deprecated. Use ``GemmEpilogueV2`` instead.
 
-.. code-block:: c++
+   .. code-block:: c++
 
-    struct GemmInputs
-    {
-        void* a = nullptr;
-        void* b = nullptr;
-        void* c = nullptr;
-        void* d = nullptr;
-        void* alpha = nullptr;
-        void* beta = nullptr;
-        // Epilogue inputs
-        void* bias = nullptr;
-        void* aux = nullptr;
-    };
+      struct GemmEpilogue
+      {
+         hipblasLtEpilogue_t mode = HIPBLASLT_EPILOGUE_DEFAULT;
+         hipDataType   bias_data_type;
+         int                 aux_ld;
+         int                 aux_stride;
+      };
 
-``setProblem`` APIs:
+*  ``GemmInputs``: This specifies the problem inputs.
 
-.. code-block:: c++
+   .. note::
+  
+      This structure is deprecated. Use ``GemmInputsV2`` instead.
 
-    HIPBLASLT_EXPORT hipblasStatus_t setProblem(
-        int64_t m, int64_t n, int64_t k, int64_t batch_count, GemmEpilogueV2& epilogue, GemmInputsV2& inputs);
+   .. code-block:: c++
 
-You can also set the leading dimensions and strides, and reassign the data type with the following API:
+      struct GemmInputs
+      {
+         void* a = nullptr;
+         void* b = nullptr;
+         void* c = nullptr;
+         void* d = nullptr;
+         void* alpha = nullptr;
+         void* beta = nullptr;
+         // Epilogue inputs
+         void* bias = nullptr;
+         void* aux = nullptr;
+      };
+
+*  ``setProblem`` APIs:
+
+   .. code-block:: c++
+
+      HIPBLASLT_EXPORT hipblasStatus_t setProblem(
+         int64_t m, int64_t n, int64_t k, int64_t batch_count, GemmEpilogueV2& epilogue, GemmInputsV2& inputs);
+
+You can set the leading dimensions and strides and reassign the data type using the following API:
 
 .. code-block:: c++
 
@@ -234,7 +244,11 @@ You can also set the leading dimensions and strides, and reassign the data type 
                                                 GemmInputsV2&      inputs,
                                                 GemmProblemTypeV2& problemtype);
 
-You can also import problems from hipblasLt APIs after the instance is created. Note that this may overwrite the problem type of the instance.
+You can import problems from the hipblasLt APIs after the instance is created.
+
+.. note::
+
+   This can overwrite the problem type of the instance.     
 
 .. code-block:: c++
 
@@ -250,7 +264,8 @@ You can also import problems from hipblasLt APIs after the instance is created. 
                                                 void*                   D,
                                                 hipblasLtMatrixLayout_t matD);
 
-You can get heuristics and make kernel arguments with the instance. If the properties of the gemm and the inputs don't change, you can call the run API to launch the kernel directly.
+You can retrieve heuristics and set kernel arguments with the instance. If the properties of the GEMM and the inputs don't change,
+you can call the run API to launch the kernel directly.
 
 .. code-block:: c++
 
@@ -286,12 +301,12 @@ You can get heuristics and make kernel arguments with the instance. If the prope
 
 .. _grouped-gemm:
 
-Grouped gemm
+Grouped GEMM
 --------------
 
-``hipblasLtExt`` supports grouped gemm. It shares the same class with normal gemm.
+``hipblasLtExt`` supports grouped GEMM. It shares the same class with normal GEMM.
 
-After the problem is set, you can check the problem type with function ``getGemmType()``.
+After the problem is set, you can check the problem type using the function ``getGemmType()``.
 
 .. code-block:: c++
 
@@ -301,7 +316,7 @@ After the problem is set, you can check the problem type with function ``getGemm
         HIPBLASLT_GROUPED_GEMM     = 2
     };
 
-The grouped gemm class also has the ``setProblem`` APIs.
+The grouped GEMM class also includes the ``setProblem`` APIs.
 
 .. code-block:: c++
 
@@ -343,7 +358,8 @@ The grouped gemm class also has the ``setProblem`` APIs.
                                                 std::vector<void*>&                   D,
                                                 std::vector<hipblasLtMatrixLayout_t>& matD);
 
-For the following API, the argument "epilogue" supports broadcasting. They are broadcasted to the length of the problem size by duplicating the last element.
+For the following API, the ``epilogue`` argument supports broadcasting to the length of the problem size
+by duplicating the last element.
 
 .. code-block:: c++
 
@@ -363,7 +379,9 @@ For the following API, the argument "epilogue" supports broadcasting. They are b
                                                 std::vector<GemmInputsV2>&   inputs,
                                                 GemmProblemTypeV2&           problemtype);
 
-Note that currently only ``problemtype`` size equal to 1 (Only one ``GemmProblemTypeV2`` for all problems) is supported.
+.. note::
+
+   Only a ``problemtype`` size equal to 1 is currently supported. (This means only one ``GemmProblemTypeV2`` for all problems.)
 
 .. code-block:: c++
 
@@ -378,10 +396,12 @@ Note that currently only ``problemtype`` size equal to 1 (Only one ``GemmProblem
     problemtypes.push_back(problemtype);
     groupedgemm.setProblem(m, n, k, batch_count, lda, ldb, ldc, ldd, strideA, strideB, strideC, strideD, epilogue, inputs, problemtypes);
 
-UserArguments
-^^^^^^^^^^^^^^^^^^
+The UserArguments structure
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Grouped gemm supports the use of external device memory to run the kernel. This is helpful if some of the arguments are from the output of the pervious kernel. To change the size (m, n, k, batch) related arguments, refer to :ref:`Fixed MK <fixed-mk>`.
+Grouped GEMM supports the use of external device memory to run the kernel.
+This is helpful if some of the arguments are from the output of the pervious kernel.
+To change the size-related arguments ``m``, ``n``, ``k``, and ``batch``, see :ref:`Fixed MK <fixed-mk>`.
 
 .. code-block:: c++
 
@@ -417,7 +437,9 @@ Grouped gemm supports the use of external device memory to run the kernel. This 
         int      activationType; //!< The activation type.  Only works if mode is set to activation related epilogues.
     } __attribute__((packed));
 
-We add the two functions for UserArguments related API. The first API is a helper function that helps the user to initialize the structure "UserArguments" from the saved problems inside the grouped gemm object. The second API is an overload function with an additional UserArguments device pointer input.
+hipBLASLt adds two functions to the ``UserArguments``-related API. The first API is a helper function that helps you initialize
+the ``UserArguments`` structure from the saved problems inside the grouped GEMM object.
+The second API is an overload function with an additional ``UserArguments`` device pointer input.
 
 .. code-block:: c++
 
@@ -425,7 +447,7 @@ We add the two functions for UserArguments related API. The first API is a helpe
 
     HIPBLASLT_EXPORT hipblasStatus_t run(void* deviceUserArgs, hipStream_t stream);
 
-The following is a simple example of how this API works.
+Here is a simple example that shows how this API works.
 
 .. code-block:: c++
 
@@ -486,7 +508,7 @@ The following is a simple example of how this API works.
     // Once you get the default value here, you can make several copies and change the values
     // from the host
 
-    // Next Copy them to the device memory
+    // Next copy them to the device memory
     hipblaslt_ext::UserArguments* d_dUAFloat = nullptr;
     hipMalloc(&d_dUAFloat, sizeof(hipblaslt_ext::UserArguments) * gemm_count);
     hipMemcpy(d_dUAFloat, dUAFloat, sizeof(hipblaslt_ext::UserArguments) * gemm_count, hipMemcpyHostToDevice);
@@ -519,7 +541,7 @@ This is the base class for ``Gemm`` and ``GroupedGemm``.
 
 .. code-block:: c++
 
-    // Gets huesristic from the instance.
+    // Gets heuristic from the instance.
     HIPBLASLT_EXPORT hipblasStatus_t algoGetHeuristic(const int                                      requestedAlgoCount,
                                                       const GemmPreferenceV2&                        pref,
                                                       std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
@@ -538,7 +560,8 @@ This is the base class for ``Gemm`` and ``GroupedGemm``.
 Get all algorithms
 ------------------
 
-Get all algorithms allows you to get all the algorithms for a specific problem type. It requires the transpose of A, B, data type of the inputs, and the compute type.
+Get all algorithms allows you to get all the algorithms for a specific problem type.
+It requires the transpose of A, B, the data type of the inputs, and the compute type.
 
 .. code-block:: c++
 
@@ -554,14 +577,15 @@ Get all algorithms allows you to get all the algorithms for a specific problem t
                                                hipblasComputeType_t                         typeCompute,
                                                std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
 
-This API doesn't require any problem size or epilogue as input, but uses another API ``isAlgoSupported`` to check if the algorithm supports a problem.
+This API doesn't require a problem size or epilogue as input. It uses another API named ``isAlgoSupported`` to check
+if the algorithm supports a problem.
 
 .. code-block:: c++
 
     hipblaslt_ext::matmulIsAlgoSupported()
     gemm.isAlgoSupported()
 
-The API returns the required workspace size in bytes on successful completion.
+The API returns the required workspace size in bytes upon successful completion.
 
 .. code-block:: c++
 
@@ -605,14 +629,14 @@ The API returns the required workspace size in bytes on successful completion.
 Algorithm index
 -----------------
 
-This extension API allows you to get the algorithm index using ``hipblasLtMatmulAlgo_t``.
+This extension API lets you to get the algorithm index using ``hipblasLtMatmulAlgo_t``.
 
 .. code-block:: c++
 
     HIPBLASLT_EXPORT int getIndexFromAlgo(hipblasLtMatmulAlgo_t& algo);
 
 
-It also supports you to get the heuristic results by giving an index vector.
+You can use an index vector to retrieve the heuristic results.
 
 .. code-block:: c++
 
@@ -622,12 +646,12 @@ It also supports you to get the heuristic results by giving an index vector.
                           std::vector<int>&                              algoIndex,
                           std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
 
-Sample codes
+Sample code
 =================
 
-Here are the sample codes demonstrating use cases of the extension APIs.
+This section contains some code samples that demonstrate the use cases of the extension APIs.
 
-Gemm
+GEMM
 ---------
 
 .. code-block:: c++
@@ -694,7 +718,7 @@ Gemm
         }
     }
 
-Grouped gemm
+Grouped GEMM
 --------------
 
 .. code-block:: c++
@@ -793,11 +817,13 @@ Algorithm index
 [Grouped Gemm] Fixed MK
 ------------------------
 
-hipBLASLt extension supports changing the sizes (m, n, k, batch) from the device memory ``UserArguments``, but the setup is a bit different from the normal routing.
+The hipBLASLt extension supports changing the sizes (``m``, ``n``, ``k``, and ``batch``) from the device memory ``UserArguments``.
+However, the setup is a bit different from the normal routing.
 
-**Sum of n:**
+Sum of N
+^^^^^^^^^
 
-A sum of N needs to be used as an input for the grouped gemm instance.
+A sum of N needs to be used as an input for the grouped GEMM instance.
 
 .. code-block:: c++
 
@@ -807,7 +833,8 @@ A sum of N needs to be used as an input for the grouped gemm instance.
     {256, 256, 1, 1}; // This is a valid configuration cause 256 + 256 + 1 + 1 < 1000
     {512, 512, 1, 1}; // This is NOT a valid configuration cause 512 + 512 + 1 + 1 > 1000
 
-For example, we have a grouped gemm with gemm_count = 4. The sum of N must not exceed the "sum of N" set in setProblem API. In this mode, the first element is the "sum of n" in the array of Ns.
+For example, consider a grouped GEMM with ``gemm_count = 4``. The sum of N must not exceed the "sum of N" set in the ``setProblem`` API.
+In this mode, the first element is the "sum of N" in the array of Ns.
 
 .. code-block:: c++
 

@@ -1,6 +1,6 @@
 .. meta::
-   :description: A library that provides GEMM operations with flexible APIs and extends functionalities beyond the traditional BLAS library
-   :keywords: hipBLASLt, ROCm, library, API, tool
+   :description: hipBLASLt API reference
+   :keywords: hipBLASLt, ROCm, library, API, reference
 
 .. _api-reference:
 
@@ -76,12 +76,13 @@ hipblasLtMatmul()
 ------------------------------------------
 .. doxygenfunction:: hipblasLtMatmul
 
-Datatypes Supported:
+Supported data types
+------------------------------------------
 
-hipblasLtMatmul supports the following computeType, scaleType, Atype/Btype, Ctype/Dtype and Bias Type:
+``hipblasLtMatmul`` supports the following computeType, scaleType, Bias type, Atype/Btype, and Ctype/Dtype:
 
 ============================= =================== =============== ===============
-computeType                   scaleType/Bias Type Atype/Btype     Ctype/Dtype
+computeType                   scaleType/Bias type Atype/Btype     Ctype/Dtype
 ============================= =================== =============== ===============
 HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_32F       HIP_R_32F
 HIPBLAS_COMPUTE_32F_FAST_TF32 HIP_R_32F           HIP_R_32F       HIP_R_32F
@@ -90,24 +91,24 @@ HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16F       HIP_R_32F
 HIPBLAS_COMPUTE_32F           HIP_R_32F           HIP_R_16BF      HIP_R_16BF
 ============================= =================== =============== ===============
 
-For FP8 type Matmul, hipBLASLt supports the type combinations shown in the following table:
+For ``FP8`` type Matmul, hipBLASLt supports the type combinations shown in the following table:
 
 * This table uses simpler abbrieviations:
 
-  + **FP16** means **HIP_R_16F**
-  + **BF16** means **HIP_R_16BF**
-  + **FP32** means **HIP_R_32F**
-  + **FP8** means **HIP_R_8F_E4M3**
-  + **BF8** means **HIP_R_8F_E5M2**
-  + **FP8_FNUZ** means **HIP_R_8F_E4M3_FNUZ** and
-  + **BF8_FNUZ** means **HIP_R_8F_E5M2_FNUZ**
+  *  **FP16** means **HIP_R_16F**
+  *  **BF16** means **HIP_R_16BF**
+  *  **FP32** means **HIP_R_32F**
+  *  **FP8** means **HIP_R_8F_E4M3**
+  *  **BF8** means **HIP_R_8F_E5M2**
+  *  **FP8_FNUZ** means **HIP_R_8F_E4M3_FNUZ** and
+  *  **BF8_FNUZ** means **HIP_R_8F_E5M2_FNUZ**
 
-* This table applies to all tranpose types (NN/NT/TT/TN)
-* **Default Bias Type** means the type when users don't explicitly specify the bias type
+*  The table applies to all transpose types (NN/NT/TT/TN).
+*  **Default bias type** indicates the type when the bias type is not explicitly specified.
 
 +-------+-------+-------+-------+-------------+----------+----------+------------+-----------+
-| Atype | Btype | Ctype | Dtype | computeType | scaleA,B | scaleC,D | Bias Type  | Default   |
-|       |       |       |       |             |          |          |            | Bias Type |
+| Atype | Btype | Ctype | Dtype | computeType | scaleA,B | scaleC,D | Bias type  | Default   |
+|       |       |       |       |             |          |          |            | bias type |
 +=======+=======+=======+=======+=============+==========+==========+======+=====+===========+
 | FP8   | FP8   | FP16  | FP16  | FP32        | Yes      | No       | FP32, FP16 | FP16      |
 |       |       +-------+-------+             +          +          +------------+-----------+
@@ -182,7 +183,7 @@ hipblasLtMatrixTransform()
 ------------------------------------------
 .. doxygenfunction:: hipblasLtMatrixTransform
 
-hipblasLtMatrixTransform supports the following Atype/Btype/Ctype and scaleType:
+``hipblasLtMatrixTransform`` supports the following Atype/Btype/Ctype and scaleType:
 
 ======================= ===================
 Atype/Btype/Ctype       scaleType
