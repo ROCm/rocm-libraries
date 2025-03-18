@@ -23,6 +23,11 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_vector_types.h>
 
+#if defined(__HIPCC_RTC__) || defined(__CUDACC_RTC__)
+typedef signed int   int32_t;
+typedef unsigned int uint32_t;
+#endif
+
 #ifdef WIN32
 #define ROCFFT_DEVICE_EXPORT __declspec(dllexport)
 #else
