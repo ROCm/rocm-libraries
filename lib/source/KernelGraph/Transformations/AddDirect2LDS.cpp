@@ -178,9 +178,6 @@ namespace rocRoller
                 AssertFatal(
                     m_context->targetArchitecture().HasCapability(GPUCapability::HasDirectToLds),
                     "Not have DirectToLds capability");
-
-                // TODO: remove it after fixing the wait count observer for Direct-to-LDS
-                m_context->setWaitZeroBeforeBarrier(true);
             }
 
             for(auto loadAndStore : candidates)

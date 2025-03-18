@@ -111,12 +111,23 @@ namespace rocRoller
 
             bool m_includeExplanation;
             bool m_displayState;
+            bool m_needsWaitDirect2LDS = false;
 
             // This member tracks, for every label, what the waitcnt state was when that label was encountered.
             std::unordered_map<std::string, WaitcntState> m_labelStates;
 
             // This member tracks, for every label, what the waitcnt state is everywhere a branch instruction targets that label.
             std::unordered_map<std::string, std::vector<WaitcntState>> m_branchStates;
+
+            /**
+             * This function checks if the instruction loads data direct to LDS.
+             **/
+            bool isDirect2LDS(Instruction const& inst);
+
+            /**
+             * This function set the flag that if needs WaitDirect2LDS before the barrier.
+             **/
+            void observeWaitDirect2LDS(Instruction const& inst);
 
             /**
              * This function updates the given wait queue by applying the given waitcnt.

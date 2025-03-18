@@ -1646,7 +1646,6 @@ namespace MemoryInstructionsTest
     TEST_P(BufferLoad2LDSTest, CodeGen)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
-        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
         int N = std::get<1>(GetParam());
         genbufferLoad2LDSTest(m_context, N);
         std::vector<char> assembledKernel = m_context->instructions()->assemble();
@@ -1657,7 +1656,6 @@ namespace MemoryInstructionsTest
     TEST_P(GPU_BufferLoad2LDSTest, Execute)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasDirectToLds);
-        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
         int N = std::get<1>(GetParam());
         exeBufferLoad2LDS(m_context, N);
     }

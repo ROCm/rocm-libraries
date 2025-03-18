@@ -739,7 +739,6 @@ namespace rocRoller
         AssertFatal(buffOpts.lds);
 
         auto ctx = m_context.lock();
-        AssertFatal(ctx->kernelOptions().alwaysWaitZeroBeforeBarrier);
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
         {

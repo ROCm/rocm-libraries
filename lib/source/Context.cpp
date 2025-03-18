@@ -88,12 +88,6 @@ namespace rocRoller
         m_random = std::make_shared<RandomGenerator>(seed);
     }
 
-    // TODO: this is a temporary workaround for direct-to-LDS. Remove it after fixing the wait count observer.
-    void Context::setWaitZeroBeforeBarrier(bool always)
-    {
-        m_kernelOptions = {.alwaysWaitZeroBeforeBarrier = true};
-    }
-
     ContextPtr Context::Create(int                    deviceIdx,
                                GPUArchitecture const& arch,
                                std::string const&     kernelName,

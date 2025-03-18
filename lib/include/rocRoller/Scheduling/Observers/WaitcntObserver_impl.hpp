@@ -157,6 +157,19 @@ namespace rocRoller
                     return WaitCount::Zero(architecture);
                 }
 
+                if(m_needsWaitDirect2LDS)
+                {
+                    if(explanation != nullptr)
+                    {
+                        *explanation += "WaitCnt Needed: vmcnt(0) before an s_barrier for "
+                                        "direct-to-LDS.";
+                    }
+                    auto dldscnt = WaitCount::KMCnt(architecture, 0);
+                    dldscnt.combine(WaitCount::DSCnt(architecture, 0));
+                    dldscnt.combine(WaitCount::LoadCnt(architecture, 0));
+                    return dldscnt;
+                }
+
                 if(!m_instructionQueues.at(GPUWaitQueue::KMQueue).empty()
                    || !m_instructionQueues.at(GPUWaitQueue::DSQueue).empty())
                 {
@@ -248,6 +261,29 @@ namespace rocRoller
                     }
                 }
             }
+        }
+
+        inline bool WaitcntObserver::isDirect2LDS(Instruction const& inst)
+        {
+            if(inst.getOpCode().rfind("buffer_load_", 0) == 0)
+            {
+                for(auto const& mod : inst.getModifiers())
+                {
+                    if(mod.rfind("lds", 0) == 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        inline void WaitcntObserver::observeWaitDirect2LDS(Instruction const& inst)
+        {
+            if(isDirect2LDS(inst) && !m_needsWaitDirect2LDS)
+                m_needsWaitDirect2LDS = true;
+            if((inst.getOpCode().rfind("s_barrier", 0) == 0) && m_needsWaitDirect2LDS)
+                m_needsWaitDirect2LDS = false;
         }
     };
 

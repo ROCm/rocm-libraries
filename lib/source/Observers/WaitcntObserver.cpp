@@ -181,6 +181,8 @@ namespace rocRoller
                 }
             }
 
+            observeWaitDirect2LDS(inst);
+
             auto instWaitQueues = info.getWaitQueues();
 
             WaitCount waiting = inst.getWaitCount();
@@ -271,6 +273,5 @@ namespace rocRoller
             }
             return retval.str();
         }
-
     }
 }

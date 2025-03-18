@@ -316,11 +316,6 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
-        // FIXME: this is a workaround as currrently the wait count observer
-        //        only emits lgckmcnt(0), while loadToLDS additionally
-        //        requires vmcnt(0).
-        setKernelOptions({.alwaysWaitZeroBeforeBarrier = 1});
-
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
