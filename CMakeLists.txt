@@ -196,7 +196,7 @@ endif()
 set( VERSION_STRING "1.0.19" )
 set( hipfft_SOVERSION 0.1 )
 
-if( ROCM_FOUND )
+if( ROCmCMakeBuildTools_FOUND )
   rocm_setup_version( VERSION ${VERSION_STRING} )
 endif()
 
@@ -267,7 +267,7 @@ if(WIN32)
   set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 endif()
 
-if( ROCM_FOUND )
+if( ROCmCMakeBuildTools_FOUND )
   # Package specific CPACK vars
   if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
     rocm_package_add_dependencies(DEPENDS "rocfft >= 1.0.21")

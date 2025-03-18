@@ -65,9 +65,9 @@ else()
 endif()
 
 # ROCm
-find_package( ROCM 0.7.3 CONFIG PATHS /opt/rocm )
-if(NOT ROCM_FOUND)
-  set( rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download" )
+find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
+if(NOT ROCmCMakeBuildTools_FOUND)
+  set( rocm_cmake_tag "develop" CACHE STRING "rocm-cmake tag to download" )
   set( PROJECT_EXTERN_DIR "${CMAKE_CURRENT_BINARY_DIR}/extern" )
   file( DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
       ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
@@ -92,10 +92,10 @@ if(NOT ROCM_FOUND)
     execute_process( COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
       WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
 
-    find_package( ROCM 0.7.3 CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+    find_package( ROCmCMakeBuildTools CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
   endif()
 endif()
-if( ROCM_FOUND )
+if( ROCmCMakeBuildTools_FOUND )
   message(STATUS "Found ROCm")
   include(ROCMSetupVersion)
   include(ROCMCreatePackage)

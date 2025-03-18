@@ -157,7 +157,7 @@ if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   )
 endif( )
 
-if( ROCM_FOUND )
+if( ROCmCMakeBuildTools_FOUND )
 
   rocm_install_targets( TARGETS hipfft
     INCLUDE
