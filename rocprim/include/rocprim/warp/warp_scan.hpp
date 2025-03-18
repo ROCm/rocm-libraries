@@ -868,7 +868,8 @@ public:
     template<unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto broadcast(T, const unsigned int, storage_type&) ->
-        typename std::enable_if<(!detail::is_power_of_two(FunctionWarpSize)), T>::type = delete;
+        typename std::enable_if<(!detail::is_power_of_two(FunctionWarpSize)), T>::type
+        = delete;
 };
 
 END_ROCPRIM_NAMESPACE

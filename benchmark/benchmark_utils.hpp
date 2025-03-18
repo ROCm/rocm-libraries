@@ -1451,7 +1451,7 @@ private:
         size_t batch_iterations  = parser.get<size_t>("batch_iterations");
         size_t warmup_iterations = parser.get<size_t>("warmup_iterations");
 
-        bool cold = !parser.get<bool>("hot");
+        bool cold            = !parser.get<bool>("hot");
         bool record_as_whole = parser.get<bool>("record_as_whole");
 
         m_state = state(hipStreamDefault,
