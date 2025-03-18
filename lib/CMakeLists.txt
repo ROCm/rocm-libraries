@@ -204,6 +204,7 @@ set(rocroller_src
 
     source/Observers/ACCVGPRReadWrite.cpp
     source/Observers/ACCVGPRWriteWrite.cpp
+    source/Observers/BufferStoreDwordXXRead.cpp
     source/Observers/CMPXWriteExec.cpp
     source/Observers/DGEMM16x16x4Write.cpp
     source/Observers/DGEMM4x4x4Write.cpp

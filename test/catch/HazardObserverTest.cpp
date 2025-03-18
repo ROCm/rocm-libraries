@@ -90,7 +90,7 @@ namespace HazardObserverTest
         return regs;
     }
 
-    TEST_CASE("VALUWriteVCC", "[observer][VALUWriteVCC]")
+    TEST_CASE("VALUWriteVCC", "[observer]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -232,7 +232,7 @@ namespace HazardObserverTest
         }
     }
 
-    TEST_CASE("VALUTrans94X", "[observer][VALUTrans94X]")
+    TEST_CASE("VALUTrans94X", "[observer]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -324,7 +324,7 @@ namespace HazardObserverTest
         }
     }
 
-    TEST_CASE("VALUWriteReadlane94X", "[observer][VALUWriteReadlane94X]")
+    TEST_CASE("VALUWriteReadlane94X", "[observer]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -431,7 +431,7 @@ namespace HazardObserverTest
         }
     }
 
-    TEST_CASE("VCMPX_EXEC94X", "[observer][VCMPX_EXEC94X]")
+    TEST_CASE("VCMPX_EXEC94X", "[observer]")
     {
 
         SUPPORTED_ARCH_SECTION(arch)
@@ -540,7 +540,7 @@ namespace HazardObserverTest
         }
     }
 
-    TEST_CASE("OPSELxSDWA94X", "[observer][OPSELxSDWA94X]")
+    TEST_CASE("OPSELxSDWA94X", "[observer]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -576,7 +576,7 @@ namespace HazardObserverTest
         }
     }
 
-    TEST_CASE("VALUWriteSGPRVMEM", "[observer][VALUWriteSGPRVMEM]")
+    TEST_CASE("VALUWriteSGPRVMEM", "[observer]")
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
@@ -599,6 +599,78 @@ namespace HazardObserverTest
             peekAndSchedule(context, insts[1], 5);
 
             CHECK_THAT(context.output(), ContainsSubstring("s_nop 4"));
+        }
+    }
+
+    TEST_CASE("BufferStoreWrite", "[observer]")
+    {
+        SUPPORTED_ARCH_SECTION(arch)
+        {
+            if(arch.isRDNAGPU())
+            {
+                SKIP("RDNA not supported yet");
+            }
+
+            SECTION("NOPs added for buffer_store_dwordx4 followed by VALU")
+            {
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
+                auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
+                auto a    = createRegisters(
+                    context, Register::Type::Accumulator, DataType::Float, 1, 4)[0];
+                auto s = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 4)[0];
+
+                std::vector<Instruction> insts
+                    = {Instruction("buffer_store_dwordx4",
+                                   {},
+                                   {v, addr, s, Register::Value::Literal(0)},
+                                   {"offen"},
+                                   ""),
+                       Instruction("v_accvgpr_read", {v->subset({0})}, {a->subset({0})}, {}, ""),
+                       Instruction("v_accvgpr_read", {v->subset({1})}, {a->subset({1})}, {}, ""),
+                       Instruction("v_accvgpr_read", {v->subset({2})}, {a->subset({2})}, {}, ""),
+                       Instruction("v_accvgpr_read", {v->subset({3})}, {a->subset({3})}, {}, ""),
+                       Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(
+                    context, insts[1], (arch.isCDNA1GPU() || arch.isCDNA2GPU()) ? 1 : 2);
+                peekAndSchedule(context, insts[2]);
+                peekAndSchedule(context, insts[3]);
+                peekAndSchedule(context, insts[4]);
+                peekAndSchedule(context, insts[5]);
+
+                CHECK_THAT(context.output(), ContainsSubstring("s_nop"));
+            }
+
+            SECTION("No NOPs when soffset is an SGPR")
+            {
+                auto context = TestContext::ForTarget(arch);
+                auto v = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
+                auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
+                auto a    = createRegisters(
+                    context, Register::Type::Accumulator, DataType::Float, 1, 4)[0];
+                auto s = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 4)[0];
+                auto soffset
+                    = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 1)[0];
+
+                std::vector<Instruction> insts = {
+                    Instruction("buffer_store_dwordx4", {}, {v, addr, s, soffset}, {"offen"}, ""),
+                    Instruction("v_accvgpr_read", {v->subset({0})}, {a->subset({0})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v->subset({1})}, {a->subset({1})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v->subset({2})}, {a->subset({2})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v->subset({3})}, {a->subset({3})}, {}, ""),
+                    Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[2]);
+                peekAndSchedule(context, insts[3]);
+                peekAndSchedule(context, insts[4]);
+                peekAndSchedule(context, insts[5]);
+
+                CHECK_THAT(context.output(), !ContainsSubstring("s_nop"));
+            }
         }
     }
 

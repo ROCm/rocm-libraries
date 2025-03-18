@@ -47,6 +47,8 @@
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite908.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite90a.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/MFMA/XDLWrite94x.hpp>
+
+#include <rocRoller/Scheduling/Observers/WaitState/BufferStoreDwordXXRead.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/OPSEL94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUTransWrite94x.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/VALUWriteReadlane94x.hpp>
@@ -71,6 +73,7 @@ namespace rocRoller
                 // Hazard Observers
                 ACCVGPRReadWrite,
                 ACCVGPRWriteWrite,
+                BufferStoreDwordXXRead,
                 CMPXWriteExec,
                 DGEMM4x4x4Write,
                 DGEMM16x16x4Write,
