@@ -163,8 +163,8 @@ find_package(pybind11 QUIET)
 find_package(dlpack QUIET)
 find_package(FFmpeg QUIET)
 
-# Search for all installed Python versions on the system
-execute_process(COMMAND bash -c "compgen -c | grep -E '^python3\.[0-9]+$' | sort -Vru" OUTPUT_VARIABLE PYTHON_EXECUTABLES OUTPUT_STRIP_TRAILING_WHITESPACE)
+# Search for all installed Python versions - exclude Python versions lower than 3.9
+execute_process(COMMAND bash -c "compgen -c | grep -E '^python3\.[0-9]+$' | awk -F. '$2 >= 9' | sort -Vru" OUTPUT_VARIABLE PYTHON_EXECUTABLES OUTPUT_STRIP_TRAILING_WHITESPACE)
 # Convert space-separated list to CMake list
 string(REPLACE "\n" ";" PYTHON_EXECUTABLES_LIST "${PYTHON_EXECUTABLES}")
 # Merge the user defined python folder if passed here
