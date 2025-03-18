@@ -762,15 +762,15 @@ ROCSOLVER_KERNEL void copy_mat(copymat_direction direction,
     An optional mask can be provided to limit the copy to selected matricies in the batch
     If uplo = rocblas_fill_upper, only the upper triangular part is copied
     If uplo = rocblas_fill_lower, only the lower triangular part is copied **/
-template <typename T1, typename T2, typename Mask = no_mask>
+template <typename T1, typename T2, typename U1, typename U2, typename Mask = no_mask>
 ROCSOLVER_KERNEL void copy_trans_mat(const rocblas_operation trans,
                                      const rocblas_int m,
                                      const rocblas_int n,
-                                     T1* A,
+                                     U1 A,
                                      const rocblas_int shiftA,
                                      const rocblas_int lda,
                                      const rocblas_stride strideA,
-                                     T2* B,
+                                     U2 B,
                                      const rocblas_int shiftB,
                                      const rocblas_int ldb,
                                      const rocblas_stride strideB,

@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -116,7 +116,7 @@ void rocsolver_syev_heev_getMemorySize(const rocblas_evect evect,
 
     // requirements for tridiagonalization (sytrd/hetrd)
     rocsolver_sytrd_hetrd_getMemorySize<BATCHED, T>(n, batch_count, size_scalars, &w1, &a1, &t1,
-                                                    size_workArr);
+                                                    size_workArr, false);
 
     if(evect == rocblas_evect_original)
     {
@@ -231,7 +231,7 @@ rocblas_status rocsolver_syev_heev_template(rocblas_handle handle,
     // reduce A to tridiagonal form
     rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
                                             strideE, tau, n, batch_count, scalars, (T*)work_stack,
-                                            Abyx_norms_tmptr, tmptau_trfact, workArr);
+                                            Abyx_norms_tmptr, tmptau_trfact, workArr, false);
 
     if(evect != rocblas_evect_original)
     {

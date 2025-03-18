@@ -1,5 +1,5 @@
 /************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -105,7 +105,7 @@ void rocsolver_syevdj_heevdj_getMemorySize(const rocblas_evect evect,
 
     // requirements for tridiagonalization (sytrd/hetrd)
     rocsolver_sytrd_hetrd_getMemorySize<BATCHED, T>(n, batch_count, size_scalars, &w11, &w21, &w31,
-                                                    &unused);
+                                                    &unused, false);
 
     // extra requirements for computing eigenvalues and vectors (stedcj)
     rocsolver_stedcj_getMemorySize<BATCHED, T, S>(rocblas_evect_tridiagonal, n, batch_count, &w12,
@@ -235,7 +235,7 @@ rocblas_status rocsolver_syevdj_heevdj_template(rocblas_handle handle,
         // it is expected that the algorithm converges in fewer sweeps)
         rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D,
                                                 strideD, workE, n, workTau, n, batch_count, scalars,
-                                                (T*)work1, (T*)work2, (T*)work3, (T**)workArr);
+                                                (T*)work1, (T*)work2, (T*)work3, (T**)workArr, false);
 
         constexpr bool ISBATCHED = BATCHED || STRIDED;
         const rocblas_int ldv = n;

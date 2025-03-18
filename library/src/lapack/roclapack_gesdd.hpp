@@ -455,7 +455,7 @@ rocblas_status rocsolver_gesdd_template(rocblas_handle handle,
         if(rightv)
         {
             rocblas_int blocks_n = (n - 1) / BS2 + 1;
-            ROCSOLVER_LAUNCH_KERNEL(copy_trans_mat<T>, dim3(blocks_n, blocks_n, batch_count),
+            ROCSOLVER_LAUNCH_KERNEL((copy_trans_mat<T, T>), dim3(blocks_n, blocks_n, batch_count),
                                     dim3(BS2, BS2, 1), 0, stream,
                                     rocblas_operation_conjugate_transpose, n, n, V_gemm, 0,
                                     ldv_gemm, strideV_gemm, V, 0, ldv, strideV);

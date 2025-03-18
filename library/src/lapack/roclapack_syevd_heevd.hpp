@@ -1,4 +1,4 @@
-/************************************************************************
+/************************************************************************ 
  * Derived from the BSD3-licensed
  * LAPACK routine (version 3.7.0) --
  *     Univ. of Tennessee, Univ. of California Berkeley,
@@ -85,7 +85,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
 
     // requirements for tridiagonalization (sytrd/hetrd)
     rocsolver_sytrd_hetrd_getMemorySize<BATCHED, T>(n, batch_count, size_scalars, &w11, &w21, &t1,
-                                                    &unused);
+                                                    &unused, false);
 
     if(alg_mode != rocsolver_alg_mode_hybrid || evect == rocblas_evect_original)
     {
@@ -187,7 +187,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // reduce A to tridiagonal form
     rocsolver_sytrd_hetrd_template<BATCHED>(handle, uplo, n, A, shiftA, lda, strideA, D, strideD, E,
                                             strideE, tau, n, batch_count, scalars, (T*)work1,
-                                            (T*)work2, tmptau_W, workArr);
+                                            (T*)work2, tmptau_W, workArr, false);
 
     if(sterf_mode == rocsolver_alg_mode_hybrid && evect != rocblas_evect_original)
     {

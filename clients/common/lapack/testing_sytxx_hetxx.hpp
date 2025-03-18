@@ -1,5 +1,5 @@
-/* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+/* ************************************************************************** 
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -553,7 +553,7 @@ void testing_sytxx_hetxx(Arguments& argus)
                                                     &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytxx_hetxx_getPerfData<STRIDED, SYTRD, T>(
                 handle, uplo, n, dA, lda, stA, dD, stD, dE, stE, dTau, stP, bc, hA, hD, hE, hTau,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
@@ -589,7 +589,7 @@ void testing_sytxx_hetxx(Arguments& argus)
                                                     &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             sytxx_hetxx_getPerfData<STRIDED, SYTRD, T>(
                 handle, uplo, n, dA, lda, stA, dD, stD, dE, stE, dTau, stP, bc, hA, hD, hE, hTau,
                 &gpu_time_used, &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,

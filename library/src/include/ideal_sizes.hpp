@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -222,7 +222,7 @@
     when using the blocked algorithm (SYTRD/HETRD). It also applies to the
     corresponding batched and strided-batched routines.*/
 #ifndef xxTRD_BLOCKSIZE
-#define xxTRD_BLOCKSIZE 32
+#define xxTRD_BLOCKSIZE 64
 #endif
 
 /*! \brief Determines the size at which rocSOLVER switches from
@@ -233,7 +233,7 @@
     the rest of the matrix has no more than xxTRD_xxTD2_SWITCHSIZE rows or columns; at this point the last block,
     if any, will be reduced with the unblocked algorithm (SYTD2/HETD2).*/
 #ifndef xxTRD_xxTD2_SWITCHSIZE
-#define xxTRD_xxTD2_SWITCHSIZE 64
+#define xxTRD_xxTD2_SWITCHSIZE 256
 #endif
 
 /***************** sygs2/sygst and hegs2/hegst ********************************

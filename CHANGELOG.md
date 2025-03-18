@@ -16,6 +16,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Optimized
 
 * Reduced the device memory requirements for STEDC, SYEVD/HEEVD, and SYGVD/HEGVD
+* Improved the performance of STEDC and divide and conquer Eigensolvers
 
 ### Resolved issues
 ### Known issues
