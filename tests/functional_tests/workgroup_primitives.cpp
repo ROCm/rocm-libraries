@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "extended_primitives.hpp"
+#include "workgroup_primitives.hpp"
 
 #include <rocshmem/rocshmem.hpp>
 
@@ -31,51 +31,51 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void ExtendedPrimitiveTest(int loop, int skip,
+__global__ void WorkGroupPrimitiveTest(int loop, int skip,
                                       long long int *start_time,
-                                      long long int *end_time, char *s_buf,
-                                      char *r_buf, int size, TestType type,
+                                      long long int *end_time, char *source,
+                                      char *dest, int size, TestType type,
                                       ShmemContextType ctx_type) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   rocshmem_wg_init();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
-  /**
-   * Calculate start index for each work group for tiled version
-   * If the number of work groups is greater than 1, this kernel performs a
-   * tiled functional test
-  */
-  uint64_t idx = size * get_flat_grid_id();
-  s_buf += idx;
-  r_buf += idx;
+  // Calculate start index for each work group
+  uint64_t offset = size * wg_id;
+  source += offset;
+  dest += offset;
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
+      // Ensures all RMA calls from the skip loops are completed
+      if (is_thread_zero_in_block()) {
+        rocshmem_ctx_quiet(ctx);
+      }
+      __syncthreads();
       start_time[wg_id] = wall_clock64();
     }
 
     switch (type) {
       case WGGetTestType:
-        rocshmem_ctx_getmem_wg(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_getmem_wg(ctx, dest, source, size, 1);
         break;
       case WGGetNBITestType:
-        rocshmem_ctx_getmem_nbi_wg(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_getmem_nbi_wg(ctx, dest, source, size, 1);
         break;
       case WGPutTestType:
-        rocshmem_ctx_putmem_wg(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_putmem_wg(ctx, dest, source, size, 1);
         break;
       case WGPutNBITestType:
-        rocshmem_ctx_putmem_nbi_wg(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_putmem_nbi_wg(ctx, dest, source, size, 1);
         break;
       default:
         break;
     }
   }
 
-  rocshmem_ctx_quiet(ctx);
-
-  if (hipThreadIdx_x == 0) {
+  if (is_thread_zero_in_block()) {
+    rocshmem_ctx_quiet(ctx);
     end_time[wg_id] = wall_clock64();
   }
 
@@ -86,45 +86,63 @@ __global__ void ExtendedPrimitiveTest(int loop, int skip,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-ExtendedPrimitiveTester::ExtendedPrimitiveTester(TesterArguments args)
+WorkGroupPrimitiveTester::WorkGroupPrimitiveTester(TesterArguments args)
     : Tester(args) {
-  s_buf = static_cast<int*>(rocshmem_malloc(args.max_msg_size * args.num_wgs));
-  r_buf = static_cast<int*>(rocshmem_malloc(args.max_msg_size * args.num_wgs));
+  size_t buff_size = args.max_msg_size * args.num_wgs;
+  source = (char *)rocshmem_malloc(buff_size);
+  dest = (char *)rocshmem_malloc(buff_size);
+
+  if (source == nullptr || dest == nullptr) {
+    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
+    if (source) {
+      rocshmem_free(source);
+    }
+    if (dest) {
+      rocshmem_free(dest);
+    }
+    rocshmem_global_exit(1);
+  }
+
+  for(size_t i = 0; i < buff_size; i++) {
+    source[i] = static_cast<char>('a' + i % 26);
+  }
 }
 
-ExtendedPrimitiveTester::~ExtendedPrimitiveTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+WorkGroupPrimitiveTester::~WorkGroupPrimitiveTester() {
+  rocshmem_free(source);
+  rocshmem_free(dest);
 }
 
-void ExtendedPrimitiveTester::resetBuffers(uint64_t size) {
-  num_elems = (size * args.num_wgs) / sizeof(int);
-  std::iota(s_buf, s_buf + num_elems, 0);
-  memset(r_buf, 0, size * args.num_wgs);
+void WorkGroupPrimitiveTester::resetBuffers(uint64_t size) {
+  size_t buff_size = size * args.num_wgs;
+  memset(dest, '1', buff_size);
 }
 
-void ExtendedPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
+void WorkGroupPrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, uint64_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(ExtendedPrimitiveTest, gridSize, blockSize, shared_bytes,
+  hipLaunchKernelGGL(WorkGroupPrimitiveTest, gridSize, blockSize, shared_bytes,
                      stream, loop, args.skip, start_time, end_time,
-                     (char*)s_buf, (char*)r_buf, size, _type, _shmem_context);
+                     source, dest, size, _type, _shmem_context);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
-void ExtendedPrimitiveTester::verifyResults(uint64_t size) {
+void WorkGroupPrimitiveTester::verifyResults(uint64_t size) {
   int check_id = (_type == WGGetTestType || _type == WGGetNBITestType)
                      ? 0
                      : 1;
 
   if (args.myid == check_id) {
-    for (int i = 0; i < num_elems; i++) {
-      if (r_buf[i] != i) {
-        fprintf(stderr, "Data validation error at idx %d\n", i);
-        fprintf(stderr, "Got %d, Expected %d \n", r_buf[i], i);
+    size_t buff_size = size * args.num_wgs;
+    for (size_t i = 0; i < buff_size; i++) {
+      if (dest[i] != source[i]) {
+        std::cerr << "Data validation error at idx " << i << std::endl;
+        std::cerr << " Got " << dest[i] << ", Expected "
+                  << source[i] << std::endl;
         exit(-1);
       }
     }

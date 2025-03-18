@@ -35,7 +35,6 @@
 #include "amo_standard_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "empty_tester.hpp"
-#include "extended_primitives.hpp"
 #include "ping_all_tester.hpp"
 #include "ping_pong_tester.hpp"
 #include "primitive_mr_tester.hpp"
@@ -43,7 +42,6 @@
 #include "random_access_tester.hpp"
 #include "shmem_ptr_tester.hpp"
 #include "signaling_operations_tester.hpp"
-#include "swarm_tester.hpp"
 #include "sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
 #include "team_broadcast_tester.hpp"
@@ -51,7 +49,8 @@
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
 #include "team_reduction_tester.hpp"
-#include "wave_level_primitives.hpp"
+#include "wavefront_primitives.hpp"
+#include "workgroup_primitives.hpp"
 
 Tester::Tester(TesterArguments args) : args(args) {
   _type = (TestType)args.algorithm;
@@ -66,6 +65,16 @@ Tester::Tester(TesterArguments args) : args(args) {
   CHECK_HIP(hipDeviceGetAttribute(&wall_clk_rate,
     hipDeviceAttributeWallClockRate, device_id));
   num_timers = args.num_wgs;
+  switch (_type) {
+    case WAVEGetTestType:
+    case WAVEGetNBITestType:
+    case WAVEPutTestType:
+    case WAVEPutNBITestType:
+      num_timers = args.num_wgs * num_warps;
+      break;
+    default:
+      break;
+  }
   CHECK_HIP(hipMalloc((void**)&timer, sizeof(long long int) * num_timers));
   CHECK_HIP(hipMalloc((void**)&start_time, sizeof(long long int) * num_timers));
   CHECK_HIP(hipMalloc((void**)&end_time, sizeof(long long int) * num_timers));
@@ -136,10 +145,6 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case GTestType:
       if (rank == 0) std::cout << "G Test ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
-      return testers;
-    case GetSwarmTestType:
-      if (rank == 0) std::cout << "Get Swarm ###" << std::endl;
-      testers.push_back(new GetSwarmTester(args));
       return testers;
     case TeamReductionTestType:
       if (rank == 0)
@@ -309,22 +314,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case WGGetTestType:
       if (rank == 0)
         std::cout << "Blocking WG level Gets ###" << std::endl;
-      testers.push_back(new ExtendedPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       return testers;
     case WGGetNBITestType:
       if (rank == 0)
         std::cout << "Non-Blocking WG level Gets ###" << std::endl;
-      testers.push_back(new ExtendedPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       return testers;
     case WGPutTestType:
       if (rank == 0)
         std::cout << "Blocking WG level Puts ###" << std::endl;
-      testers.push_back(new ExtendedPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       return testers;
     case WGPutNBITestType:
       if (rank == 0)
         std::cout << "Non-Blocking WG level Puts ###" << std::endl;
-      testers.push_back(new ExtendedPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       return testers;
     case PutNBIMRTestType:
       if (rank == 0)
@@ -334,22 +339,22 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case WAVEGetTestType:
       if (rank == 0)
         std::cout << "Blocking WAVE level Gets ###" << std::endl;
-      testers.push_back(new WaveLevelPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       return testers;
     case WAVEGetNBITestType:
       if (rank == 0)
         std::cout << "Non-Blocking WAVE level Gets ###" << std::endl;
-      testers.push_back(new WaveLevelPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       return testers;
     case WAVEPutTestType:
       if (rank == 0)
         std::cout << "Blocking WAVE level Puts ###" << std::endl;
-      testers.push_back(new WaveLevelPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       return testers;
     case WAVEPutNBITestType:
       if (rank == 0)
         std::cout << "Non-Blocking WAVE level Puts ###" << std::endl;
-      testers.push_back(new WaveLevelPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       return testers;
     case PutSignalTestType:
       if (rank == 0) std::cout << "Putmem Signal ###" << std::endl;
@@ -495,17 +500,20 @@ void Tester::print(uint64_t size) {
    */
   uint64_t total_size = size * num_timed_msgs;
   double timer_avg = timerAvgInMicroseconds();
-  double latency_avg = timer_avg / num_timed_msgs;
-  double avg_msg_rate = num_timed_msgs / (timer_avg / 1e6);
+
+  double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
+  double time_s = time_us / 1e6;
+
+  double latency_avg = time_us / num_timed_msgs;
+
+  double avg_msg_rate = num_timed_msgs / time_s;
+
+  double bandwidth_avg_gbs =
+      static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
 
   float total_kern_time_ms;
   CHECK_HIP(hipEventElapsedTime(&total_kern_time_ms, start_event, stop_event));
   float total_kern_time_s = total_kern_time_ms / 1000;
-
-  double time_us = gpuCyclesToMicroseconds(max_end_time - min_start_time);
-  double time_s = time_us / 1e6;
-  double bandwidth_avg_gbs =
-      static_cast<double>(total_size * bw_factor) / time_s / pow(2, 30);
 
   int field_width = 20;
   int float_precision = 2;

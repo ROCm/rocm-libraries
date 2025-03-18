@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <rocshmem/rocshmem.hpp>
 #include <string>
+#include <iostream>
 
 class TesterArguments {
  public:

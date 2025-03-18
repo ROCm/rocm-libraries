@@ -45,8 +45,8 @@ class TeamCtxPrimitiveTester : public Tester {
 
   virtual void verifyResults(uint64_t size) override;
 
-  char *s_buf = nullptr;
-  char *r_buf = nullptr;
+  char *source = nullptr;
+  char *dest = nullptr;
 };
 
 #endif

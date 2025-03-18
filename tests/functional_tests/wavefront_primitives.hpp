@@ -24,15 +24,14 @@
 #define _WAVE_LEVEL_PRIMITIVE_TEST_HPP_
 
 #include "tester.hpp"
-#include "../src/util.hpp"
 
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
-class WaveLevelPrimitiveTester : public Tester {
+class WaveFrontPrimitiveTester : public Tester {
  public:
-  explicit WaveLevelPrimitiveTester(TesterArguments args);
-  virtual ~WaveLevelPrimitiveTester();
+  explicit WaveFrontPrimitiveTester(TesterArguments args);
+  virtual ~WaveFrontPrimitiveTester();
 
  protected:
   virtual void resetBuffers(uint64_t size) override;
@@ -42,9 +41,8 @@ class WaveLevelPrimitiveTester : public Tester {
 
   virtual void verifyResults(uint64_t size) override;
 
-  int *s_buf = nullptr;
-  int *r_buf = nullptr;
-  int num_elems = 0;
+  char *source = nullptr;
+  char *dest = nullptr;
 };
 
 #endif

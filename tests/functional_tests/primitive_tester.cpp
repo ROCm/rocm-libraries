@@ -30,43 +30,65 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
-                              long long int *end_time, char *s_buf,
-                              char *r_buf, int size, TestType type,
-                              ShmemContextType ctx_type) {
+                              long long int *end_time, char *source,
+                              char *dest, int size, TestType type,
+                              ShmemContextType ctx_type, int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
+  int t_id  = get_flat_block_id();
+  int wf_id = t_id / wf_size;
   rocshmem_wg_init();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
+  /**
+   * Shared array to capture the start time for each wavefront
+   * Max threads per block = 1024, wavefront size = 64 (in most GPUs)
+   * Maximum array size required = 1024/64 = 16
+   */
+  __shared__ long long int wf_start_time[16];
+
+  /**
+   * Calculate start index for each thread within the grid
+   */
+  uint64_t offset = size * get_flat_id();
+  source += offset;
+  dest += offset;
+
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
-        __syncthreads();
-        start_time[wg_id] = wall_clock64();
+      __syncthreads();
+      // Ensures all RMA calls from the skip loops are completed
+      if(is_thread_zero_in_block()) {
+        rocshmem_ctx_quiet(ctx);
+      }
+      __syncthreads();
+      // Capture the start time of each wavefront to identify the earliest one
+      wf_start_time[wf_id] = wall_clock64();
     }
 
     switch (type) {
       case GetTestType:
-        rocshmem_ctx_getmem(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_getmem(ctx, dest, source, size, 1);
         break;
       case GetNBITestType:
-        rocshmem_ctx_getmem_nbi(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_getmem_nbi(ctx, dest, source, size, 1);
         break;
       case PutTestType:
-        rocshmem_ctx_putmem(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_putmem(ctx, dest, source, size, 1);
         break;
       case PutNBITestType:
-        rocshmem_ctx_putmem_nbi(ctx, r_buf, s_buf, size, 1);
+        rocshmem_ctx_putmem_nbi(ctx, dest, source, size, 1);
         break;
       case PTestType:
         for (int s = 0; s < size; s++) {
-          char val = s_buf[s];
-          rocshmem_ctx_char_p(ctx, &r_buf[s], val, 1);
+          char val = source[s];
+          rocshmem_ctx_char_p(ctx, &dest[s], val, 1);
         }
         break;
       case GTestType:
         for (int s = 0; s < size; s++) {
-          char ret = rocshmem_ctx_char_g(ctx, &s_buf[s], 1);
-          r_buf[s] = ret;
+          char ret = rocshmem_ctx_char_g(ctx, &source[s], 1);
+          dest[s] = ret;
         }
         break;
       default:
@@ -74,12 +96,28 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
     }
   }
 
-  rocshmem_ctx_quiet(ctx);
+  __syncthreads();
+  if(is_thread_zero_in_block()) {
+    rocshmem_ctx_quiet(ctx);
+  }
 
+  /**
+   * End time of the last wavefront is recorded by overwriting
+   * the value previously set by earlier wavefronts.
+   */
+  end_time[wg_id] = wall_clock64();
+
+  // Find the earliest start time
+  int num_wfs = (get_flat_block_size() - 1 ) / wf_size + 1;
+  for (int i = num_wfs / 2; i > 0; i >>= 1 ) {
+    if(t_id < i) {
+      wf_start_time[t_id] = min(wf_start_time[t_id], wf_start_time[t_id + i]);
+    }
+  }
   __syncthreads();
 
-  if (hipThreadIdx_x == 0) {
-    end_time[wg_id] = wall_clock64();
+  if (t_id == 0) {
+    start_time[wg_id] = wf_start_time[0];
   }
 
   rocshmem_wg_ctx_destroy(&ctx);
@@ -90,18 +128,35 @@ __global__ void PrimitiveTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
-  s_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
-  r_buf = (char *)rocshmem_malloc(args.max_msg_size * args.wg_size);
+  size_t buff_size = args.max_msg_size * args.wg_size * args.num_wgs;
+  source = (char *)rocshmem_malloc(buff_size);
+  dest = (char *)rocshmem_malloc(buff_size);
+
+  if (source == nullptr || dest == nullptr) {
+    std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+    std::cerr << "source: " << source << ", dest: " << dest << std::endl;
+    if (source) {
+      rocshmem_free(source);
+    }
+    if (dest) {
+      rocshmem_free(dest);
+    }
+    rocshmem_global_exit(1);
+  }
+
+  for(size_t i = 0; i < buff_size; i++) {
+    source[i] = static_cast<char>('a' + i % 26);
+  }
 }
 
 PrimitiveTester::~PrimitiveTester() {
-  rocshmem_free(s_buf);
-  rocshmem_free(r_buf);
+  rocshmem_free(source);
+  rocshmem_free(dest);
 }
 
 void PrimitiveTester::resetBuffers(uint64_t size) {
-  memset(s_buf, '0', args.max_msg_size * args.wg_size);
-  memset(r_buf, '1', args.max_msg_size * args.wg_size);
+  size_t buff_size = size * args.wg_size * args.num_wgs;
+  memset(dest, '1', buff_size);
 }
 
 void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -109,11 +164,11 @@ void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(PrimitiveTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, s_buf, r_buf,
-                     size, _type, _shmem_context);
+                     loop, args.skip, start_time, end_time, source, dest,
+                     size, _type, _shmem_context, wf_size);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
-  num_timed_msgs = loop;
+  num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
+  num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
 void PrimitiveTester::verifyResults(uint64_t size) {
@@ -123,10 +178,12 @@ void PrimitiveTester::verifyResults(uint64_t size) {
           : 1;
 
   if (args.myid == check_id) {
-    for (uint64_t i = 0; i < size; i++) {
-      if (r_buf[i] != '0') {
-        fprintf(stderr, "Data validation error at idx %lu\n", i);
-        fprintf(stderr, "Got %c, Expected %c\n", r_buf[i], '0');
+    size_t buff_size = size * args.wg_size * args.num_wgs;
+    for (uint64_t i = 0; i < buff_size; i++) {
+      if (dest[i] != source[i]) {
+        std::cerr << "Data validation error at idx " << i << std::endl;
+        std::cerr << " Got " << dest[i] << ", Expected "
+                  << source[i] << std::endl;
         exit(-1);
       }
     }

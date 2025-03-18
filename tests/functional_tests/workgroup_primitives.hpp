@@ -24,15 +24,14 @@
 #define _EXTENDED_PRIMITIVES_HPP_
 
 #include "tester.hpp"
-#include "../src/util.hpp"
 
 /******************************************************************************
  * HOST TESTER CLASS
  *****************************************************************************/
-class ExtendedPrimitiveTester : public Tester {
+class WorkGroupPrimitiveTester : public Tester {
  public:
-  explicit ExtendedPrimitiveTester(TesterArguments args);
-  virtual ~ExtendedPrimitiveTester();
+  explicit WorkGroupPrimitiveTester(TesterArguments args);
+  virtual ~WorkGroupPrimitiveTester();
 
  protected:
   virtual void resetBuffers(uint64_t size) override;
@@ -42,9 +41,8 @@ class ExtendedPrimitiveTester : public Tester {
 
   virtual void verifyResults(uint64_t size) override;
 
-  int *s_buf = nullptr;
-  int *r_buf = nullptr;
-  int num_elems = 0;
+  char *source = nullptr;
+  char *dest = nullptr;
 };
 
 #endif

@@ -109,16 +109,6 @@ TesterArguments::TesterArguments(int argc, char *argv[]) {
     case PutNBIMRTestType:
       min_msg_size = max_msg_size;
       break;
-    case WAVEGetTestType:
-    case WAVEGetNBITestType:
-    case WAVEPutTestType:
-    case WAVEPutNBITestType:
-    case WGGetTestType:
-    case WGGetNBITestType:
-    case WGPutTestType:
-    case WGPutNBITestType:
-      min_msg_size = 4;
-      break;
     default:
       break;
   }

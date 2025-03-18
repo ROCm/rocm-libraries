@@ -26,61 +26,60 @@ declare -A TEST_NUMBERS=(
   ["getnbi"]="1"
   ["put"]="2"
   ["putnbi"]="3"
-  ["getswarm"]="4"
-  ["amo_fadd"]="5"
-  ["amo_finc"]="6"
-  ["amo_fetch"]="7"
-  ["amo_fcswap"]="8"
-  ["amo_add"]="9"
-  ["amo_inc"]="10"
-  ["amo_cswap"]="11"
-  ["init"]="12"
-  ["pingpong"]="13"
-  ["randomaccess"]="14"
-  ["barrierall"]="15"
-  ["syncall"]="16"
-  ["sync"]="17"
-  ["collect"]="18"
-  ["fcollect"]="19"
-  ["alltoall"]="20"
-  ["alltoalls"]="21"
-  ["shmemptr"]="22"
-  ["p"]="23"
-  ["g"]="24"
-  ["wgget"]="25"
-  ["wggetnbi"]="26"
-  ["wgput"]="27"
-  ["wgputnbi"]="28"
-  ["waveget"]="29"
-  ["wavegetnbi"]="30"
-  ["waveput"]="31"
-  ["waveputnbi"]="32"
-  ["teambroadcast"]="33"
-  ["teamreduction"]="34"
-  ["teamctxget"]="35"
-  ["teamctxgetnbi"]="36"
-  ["teamctxput"]="37"
-  ["teamctxputnbi"]="38"
-  ["teamctxinfra"]="39"
-  ["putnbimr"]="40"
-  ["amo_set"]="41"
-  ["amo_swap"]="42"
-  ["amo_fetchand"]="43"
-  ["amo_fetchor"]="44"
-  ["amo_fetchxor"]="45"
-  ["amo_and"]="46"
-  ["amo_or"]="47"
-  ["amo_xor"]="48"
-  ["pingall"]="49"
-  ["putsignal"]="50"
-  ["wgputsignal"]="51"
-  ["waveputsignal"]="52"
-  ["putsignalnbi"]="53"
-  ["wgputsignalnbi"]="54"
-  ["waveputsignalnbi"]="55"
-  ["signalfetch"]="56"
-  ["wgsignalfetch"]="57"
-  ["wavesignalfetch"]="58"
+  ["amo_fadd"]="4"
+  ["amo_finc"]="5"
+  ["amo_fetch"]="6"
+  ["amo_fcswap"]="7"
+  ["amo_add"]="8"
+  ["amo_inc"]="9"
+  ["amo_cswap"]="10"
+  ["init"]="11"
+  ["pingpong"]="12"
+  ["randomaccess"]="13"
+  ["barrierall"]="14"
+  ["syncall"]="15"
+  ["sync"]="16"
+  ["collect"]="17"
+  ["fcollect"]="18"
+  ["alltoall"]="19"
+  ["alltoalls"]="20"
+  ["shmemptr"]="21"
+  ["p"]="22"
+  ["g"]="23"
+  ["wgget"]="24"
+  ["wggetnbi"]="25"
+  ["wgput"]="26"
+  ["wgputnbi"]="27"
+  ["waveget"]="28"
+  ["wavegetnbi"]="29"
+  ["waveput"]="30"
+  ["waveputnbi"]="31"
+  ["teambroadcast"]="32"
+  ["teamreduction"]="33"
+  ["teamctxget"]="34"
+  ["teamctxgetnbi"]="35"
+  ["teamctxput"]="36"
+  ["teamctxputnbi"]="37"
+  ["teamctxinfra"]="38"
+  ["putnbimr"]="39"
+  ["amo_set"]="40"
+  ["amo_swap"]="41"
+  ["amo_fetchand"]="42"
+  ["amo_fetchor"]="43"
+  ["amo_fetchxor"]="44"
+  ["amo_and"]="45"
+  ["amo_or"]="46"
+  ["amo_xor"]="47"
+  ["pingall"]="48"
+  ["putsignal"]="49"
+  ["wgputsignal"]="50"
+  ["waveputsignal"]="51"
+  ["putsignalnbi"]="52"
+  ["wgputsignalnbi"]="53"
+  ["waveputsignalnbi"]="54"
+  ["signalfetch"]="55"
+  ["wgsignalfetch"]="56"
+  ["wavesignalfetch"]="57"
 )
 
 ExecTest() {
@@ -159,7 +158,8 @@ TestRMA() {
   ExecTest  "waveput"          2       2            128       1048576
   ExecTest  "waveput"          2       16           128       8
 
-  ExecTest  "teamctxput"       2       1            1         1048576
+  ExecTest  "teamctxput"       2       4            128       1024
+  ExecTest  "teamctxput"       2       16           256       1024
 
   ExecTest  "get"              2       1            1         1048576
   ExecTest  "get"              2       1            1024      512
@@ -177,7 +177,8 @@ TestRMA() {
   ExecTest  "waveget"          2       2            128       1048576
   ExecTest  "waveget"          2       16           128       8
 
-  ExecTest  "teamctxget"       2       1            1         1048576
+  ExecTest  "teamctxget"       2       4            128       1024
+  ExecTest  "teamctxget"       2       16           256       1024
 
   ExecTest  "g"                2       1            1         1048576
   ExecTest  "g"                2       1            1024      512
@@ -211,7 +212,8 @@ TestRMA() {
   ExecTest  "waveputnbi"       2       2            128       1048576
   ExecTest  "waveputnbi"       2       16           128       8
 
-  ExecTest  "teamctxputnbi"    2       1            1         1048576
+  ExecTest  "teamctxputnbi"    2       4            128       1024
+  ExecTest  "teamctxputnbi"    2       16           256       1024
 
   ExecTest  "getnbi"           2       1            1         1048576
   ExecTest  "getnbi"           2       1            1024      512
@@ -229,7 +231,8 @@ TestRMA() {
   ExecTest  "wavegetnbi"       2       2            128       1048576
   ExecTest  "wavegetnbi"       2       16           128       8
 
-  ExecTest  "teamctxgetnbi"    2       1            1         1048576
+  ExecTest  "teamctxgetnbi"    2       4            128       1024
+  ExecTest  "teamctxgetnbi"    2       16           256       1024
 }
 
 TestAMO() {
