@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -352,24 +352,23 @@ static void test_csric0_matrix(rocsparse_local_handle&    handle,
 
         if(need_display)
         {
-
-            display_timing_info("M",
+            display_timing_info(display_key_t::M,
                                 M,
-                                "nnz",
+                                display_key_t::nnz_A,
                                 nnz,
-                                "pivot",
+                                display_key_t::pivot,
                                 pivot,
-                                "singular pivot",
+                                display_key_t::singular_pivot,
                                 singular_pivot,
-                                "analysis policy",
+                                display_key_t::analysis_policy,
                                 rocsparse_analysis2string(apol),
-                                "solve policy",
+                                display_key_t::solve_policy,
                                 rocsparse_solve2string(spol),
-                                s_timing_info_bandwidth,
+                                display_key_t::bandwidth,
                                 gpu_gbyte,
-                                "analysis msec",
+                                display_key_t::analysis_time_ms,
                                 get_gpu_time_msec(gpu_analysis_time_used),
-                                s_timing_info_time,
+                                display_key_t::time_ms,
                                 get_gpu_time_msec(gpu_solve_time_used));
         }
     }

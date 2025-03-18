@@ -36,6 +36,10 @@
 #include <sstream>
 #include <vector>
 
+static constexpr const char* s_timing_info_perf      = "GFlop/s";
+static constexpr const char* s_timing_info_bandwidth = "GB/s";
+static constexpr const char* s_timing_info_time      = "msec";
+
 struct display_key_t
 {
     //
@@ -98,7 +102,6 @@ struct display_key_t
         cbdim_A,
         rbdim_C,
         cbdim_C,
-        analysis_ms,
         order,
         diag_type,
         fill_mode,
@@ -111,6 +114,7 @@ struct display_key_t
         threshold,
         percentage,
         pivot,
+        singular_pivot,
 
         min_nnz_per_row,
         max_nnz_per_row,
@@ -184,9 +188,9 @@ struct display_key_t
             return "pivot";
         }
 
-        case analysis_ms:
+        case singular_pivot:
         {
-            return "analysis";
+            return "singular_pivot";
         }
 
         case fill_mode:
@@ -337,7 +341,7 @@ struct display_key_t
 
         case analysis_time_ms:
         {
-            return s_analysis_timing_info_time;
+            return "analysis_msec";
         }
 
         case alpha:

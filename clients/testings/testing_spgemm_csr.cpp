@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -671,7 +671,7 @@ void testing_spgemm_csr(const Arguments& arg)
                             gpu_gflops,
                             display_key_t::bandwidth,
                             gpu_gbyte,
-                            display_key_t::analysis_ms,
+                            display_key_t::analysis_time_ms,
                             get_gpu_time_msec(gpu_analysis_time_used),
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_solve_time_used));
