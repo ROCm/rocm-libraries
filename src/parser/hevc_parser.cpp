@@ -1551,7 +1551,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     if (m_active_sps_id_ != pps_ptr->pps_seq_parameter_set_id) {
         m_active_sps_id_ = pps_ptr->pps_seq_parameter_set_id;
         sps_ptr = &sps_list_[m_active_sps_id_];
-        new_seq_activated_ = true;  // Note: clear this flag after the actions are taken.
+        new_seq_activated_ = true;
     }
 
     sps_ptr = &sps_list_[m_active_sps_id_];
@@ -1570,7 +1570,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
         pic_width_ = sps_ptr->pic_width_in_luma_samples;
         pic_height_ = sps_ptr->pic_height_in_luma_samples;
         // Take care of the case where a new SPS replaces the old SPS with the same id but with different dimensions
-        new_seq_activated_ = true;  // Note: clear this flag after the actions are taken.
+        new_seq_activated_ = true;
     }
     // Check DPB buffer size change
     uint32_t max_dec_pic_buffering = sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1] + 1;
@@ -1578,6 +1578,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
         dpb_buffer_.dpb_size = max_dec_pic_buffering;
         dpb_buffer_.dpb_size = dpb_buffer_.dpb_size > HEVC_MAX_DPB_FRAMES ? HEVC_MAX_DPB_FRAMES : dpb_buffer_.dpb_size;
         CheckAndAdjustDecBufPoolSize(dpb_buffer_.dpb_size);
+        new_seq_activated_ = true;
     }
     // Check bit depth change
     if (bit_depth_luma_minus8_ != sps_ptr->bit_depth_luma_minus8 || bit_depth_chroma_minus8_ != sps_ptr->bit_depth_chroma_minus8) {

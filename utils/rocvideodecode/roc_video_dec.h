@@ -505,6 +505,7 @@ class RocVideoDecoder {
         uint32_t target_height_ = 0;
         int max_width_ = 0, max_height_ = 0;
         uint32_t chroma_height_ = 0, chroma_width_ = 0;
+        uint32_t num_decode_surfaces_ = 0;
         uint32_t num_chroma_planes_ = 0;
         uint32_t num_components_ = 0;
         uint32_t surface_stride_ = 0;

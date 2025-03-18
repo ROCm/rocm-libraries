@@ -94,6 +94,7 @@ void RocVideoParser::InitDecBufPool() {
 
 void RocVideoParser::CheckAndAdjustDecBufPoolSize(int dpb_size) {
     int min_dec_buf_pool_size = dpb_size + (parser_params_.max_display_delay > DECODE_BUF_POOL_EXTENSION ? parser_params_.max_display_delay : DECODE_BUF_POOL_EXTENSION);
+    // If DPB size decreases, we keep the existing pool and skip reconfiguration.
     if ( dec_buf_pool_size_ < min_dec_buf_pool_size) {
         dec_buf_pool_size_ = min_dec_buf_pool_size;
         decode_buffer_pool_.resize(dec_buf_pool_size_, {0});

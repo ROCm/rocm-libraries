@@ -93,6 +93,9 @@ rocDecStatus RocDecoder::ReconfigureDecoder(RocdecReconfigureDecoderInfo *reconf
             return rocdec_status;
         }
     }
+    if (hip_interop_.size() != reconfig_params->num_decode_surfaces) {
+        hip_interop_.resize(reconfig_params->num_decode_surfaces);
+    }
     rocdec_status = va_video_decoder_.ReconfigureDecoder(reconfig_params);
     if (rocdec_status != ROCDEC_SUCCESS) {
         ERR("Reconfiguration of the decoder failed.");
