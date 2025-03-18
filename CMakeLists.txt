@@ -300,6 +300,13 @@ if(BUILD_ROCPYDECODE)
                 # include
                 target_include_directories(${TARGET_NAME_VERSIONED} PRIVATE ${pybind11_INCLUDE_DIRS} ${PYTHON_INCLUDE_DIR})
 
+                # FFMPEG multi-version support
+                if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)
+                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=0)
+                else()
+                    target_compile_definitions(${TARGET_NAME_VERSIONED} PUBLIC USE_AVCODEC_GREATER_THAN_58_134=1)
+                endif()
+
                 foreach (filename ${pyfiles})
                     get_filename_component(target "${filename}" REALPATH)
                     #to maintain folder structure
