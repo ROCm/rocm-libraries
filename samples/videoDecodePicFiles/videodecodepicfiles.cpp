@@ -283,6 +283,7 @@ int main(int argc, char **argv) {
 
         for (int i = 0; i < num_iterations; i++) {
             int num_frames_decoded_in_loop = 0;
+            pkg_flags = 0;
             for ( const char* file_name : file_names) {
                 std::ifstream in_file(file_name, std::ios::binary);
                 if (!in_file) {
@@ -333,8 +334,8 @@ int main(int argc, char **argv) {
                     break;
                 }
             }
-            n_frame += viddec->GetNumOfFlushedFrames();
         }
+        n_frame += viddec->GetNumOfFlushedFrames();
 
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;
