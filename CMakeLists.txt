@@ -112,15 +112,6 @@ rocm_setup_version(VERSION 2.0.0)
 project(rocshmem VERSION 2.0.0 LANGUAGES CXX)
 
 ###############################################################################
-# TEST SUBDIRECTORIES
-###############################################################################
-add_subdirectory(tests)
-
-if (BUILD_EXAMPLES)
-  add_subdirectory(examples)
-endif()
-
-###############################################################################
 # CREATE ROCSHMEM LIBRARY
 ###############################################################################
 if (NOT BUILD_TESTS_ONLY)
@@ -211,7 +202,18 @@ if (NOT BUILD_TESTS_ONLY)
         ${IBVERBS_LIBRARIES}
     )
   endif()
+endif()
 
+###############################################################################
+# TEST SUBDIRECTORIES
+###############################################################################
+add_subdirectory(tests)
+
+if (BUILD_EXAMPLES)
+  add_subdirectory(examples)
+endif()
+
+if (NOT BUILD_TESTS_ONLY)
   #############################################################################
   # INSTALL
   #############################################################################
