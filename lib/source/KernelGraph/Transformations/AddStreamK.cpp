@@ -314,6 +314,7 @@ namespace rocRoller
                 Join(), storeSubDimensions, std::vector<int>{globalScratchTag});
 
             {
+                // We may be able to save a few instructions by removing nMacY
                 auto [nMacX, iMacX, nMacY, iMacY]
                     = addStoreMacroTileCT(graph, storeConnections, macTileTag, storeSubDimensions);
 
@@ -356,6 +357,7 @@ namespace rocRoller
                 Split(), std::vector<int>{globalScratchTag}, loadSubDimensions);
 
             {
+                // We may be able to save a few instructions by removing nMacY
                 auto [nMacX, iMacX, nMacY, iMacY]
                     = addLoadMacroTileCT(graph, loadConnections, macTileTag, loadSubDimensions);
 

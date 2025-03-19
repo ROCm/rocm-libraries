@@ -210,7 +210,7 @@ def runPerformanceCommand (platform, project)
 
     withSSH(platform){
         sshBlock ->
-        def rrperfSuite = platform.jenkinsLabel.contains('gfx942') ? "all_gfx942" : "all"
+        def rrperfSuite = "all"
 
 
         if (env.CHANGE_ID)

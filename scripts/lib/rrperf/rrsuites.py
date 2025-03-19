@@ -474,18 +474,6 @@ def streamk():
             streamK=True,
             streamKTwoTile=twoTile,
         )
-        yield mkGEMM(
-            HGEMM_7680x8448x8192,
-            mac_m=128,
-            mac_n=256,
-            mac_k=16,
-            trans_A="N",
-            trans_B="T",
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            streamK=True,
-            streamKTwoTile=twoTile,
-            numWGs=220,
-        )
 
 
 def scalar_is_zero():
@@ -1279,20 +1267,7 @@ def all():
     yield from sgemm()
     yield from hgemm()
     yield from hgemm_no_store_LDS()
-    # TODO: fix tensile benchmarks with newer Tensile version
-    # yield from tensile_benchmarks()
-    # yield from streamk() # FIXME
-    yield from scalar_is_zero()
-    yield from codegen()
-
-
-def all_gfx942():
-    yield from sgemm()
-    yield from hgemm()
-    yield from hgemm_no_store_LDS()
-    # TODO: fix tensile benchmarks with newer Tensile version
-    # yield from tensile_benchmarks()
-    # yield from streamk() # FIXME
+    yield from streamk()
     yield from scalar_is_zero()
     yield from codegen()
 

@@ -393,12 +393,16 @@ namespace rocRoller::Client::GEMMClient
 
         auto runtimeArgs = commandArgs.runtimeArguments();
 
-        auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(runtimeArgs);
-        if(scratchSpaceRequired > 0)
+        // Note: the lifetime of deviceScratch needs to exceed kernel executions
+        std::shared_ptr<uint8_t> deviceScratch;
         {
-            auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
-            commandArgs.setArgument(
-                gemm->getScratchTag(), ArgumentType::Value, deviceScratch.get());
+            auto scratchSpaceRequired = commandKernel->scratchSpaceRequired(runtimeArgs);
+            if(scratchSpaceRequired > 0)
+            {
+                deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+                commandArgs.setArgument(
+                    gemm->getScratchTag(), ArgumentType::Value, deviceScratch.get());
+            }
         }
 
         if(runParams.visualize)
