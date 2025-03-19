@@ -590,8 +590,14 @@ namespace rocRoller
                                                        Register::ValuePtr readOffset,
                                                        Register::ValuePtr readAddr)
         {
-            AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
+            //TODO: enable to load 12 bytes
+            if(m_context->targetArchitecture().HasCapability(GPUCapability::HasWiderDirectToLds))
+                AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4 || numBytes == 16,
+                            ShowValue(numBytes));
+            else
+                AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
+            AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes);
             if(setM0)
             {
                 auto tmp = Register::Value::Placeholder(

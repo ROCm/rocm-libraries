@@ -639,7 +639,8 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess)
+                                 bool                               useSwappedAccess,
+                                 bool                               isDirect2LDS)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto thrTile = ThreadTile(macTile);
@@ -719,11 +720,17 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, nThrX, iThrX});
+                if(useSwappedAccess && isDirect2LDS)
+                    graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, iThrX, nThrX});
+                else
+                    graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, nThrX, iThrX});
             }
             else
             {
-                graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+                if(useSwappedAccess && isDirect2LDS)
+                    graph.coordinates.addElement(Tile(), {iMacX}, {iThrX, nThrX});
+                else
+                    graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
             }
 
             if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
@@ -731,11 +738,29 @@ namespace rocRoller
                 auto jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
-                graph.coordinates.addElement(Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
+                if(isDirect2LDS)
+                {
+                    if(useSwappedAccess)
+                        graph.coordinates.addElement(
+                            Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
+                    else
+                        graph.coordinates.addElement(
+                            Tile(), {iMacY}, {jammedWavetileY, iThrY, nThrY});
+                }
+                else
+                    graph.coordinates.addElement(Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
             }
             else
             {
-                graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+                if(isDirect2LDS)
+                {
+                    if(useSwappedAccess)
+                        graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+                    else
+                        graph.coordinates.addElement(Tile(), {iMacY}, {iThrY, nThrY});
+                }
+                else
+                    graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
             }
         }
 
@@ -1027,7 +1052,8 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess)
+                                  bool                               useSwappedAccess,
+                                  bool                               isDirect2LDS)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -1111,11 +1137,19 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                graph.coordinates.addElement(Flatten(), {jammedWavetileX, nThrX, iThrX}, {iMacX});
+                if(useSwappedAccess && isDirect2LDS)
+                    graph.coordinates.addElement(
+                        Flatten(), {jammedWavetileX, iThrX, nThrX}, {iMacX});
+                else
+                    graph.coordinates.addElement(
+                        Flatten(), {jammedWavetileX, nThrX, iThrX}, {iMacX});
             }
             else
             {
-                graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+                if(useSwappedAccess && isDirect2LDS)
+                    graph.coordinates.addElement(Flatten(), {iThrX, nThrX}, {iMacX});
+                else
+                    graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
             }
 
             if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
@@ -1123,11 +1157,30 @@ namespace rocRoller
                 auto jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
-                graph.coordinates.addElement(Flatten(), {jammedWavetileY, nThrY, iThrY}, {iMacY});
+                if(isDirect2LDS)
+                {
+                    if(useSwappedAccess)
+                        graph.coordinates.addElement(
+                            Flatten(), {jammedWavetileY, nThrY, iThrY}, {iMacY});
+                    else
+                        graph.coordinates.addElement(
+                            Flatten(), {jammedWavetileY, iThrY, nThrY}, {iMacY});
+                }
+                else
+                    graph.coordinates.addElement(
+                        Flatten(), {jammedWavetileY, nThrY, iThrY}, {iMacY});
             }
             else
             {
-                graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+                if(isDirect2LDS)
+                {
+                    if(useSwappedAccess)
+                        graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+                    else
+                        graph.coordinates.addElement(Flatten(), {iThrY, nThrY}, {iMacY});
+                }
+                else
+                    graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
             }
         }
 
@@ -1200,9 +1253,14 @@ namespace rocRoller
                 packed   = true;
             }
 
+            auto direct2LDS         = macTile.memoryType == MemoryType::WAVE_Direct2LDS;
+            auto useWiderDirect2LDS = direct2LDS
+                                      && context->targetArchitecture().HasCapability(
+                                          GPUCapability::HasWiderDirectToLds);
+
             // Enable the use of longer word instructions if possible
             if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
-               && (macTile.memoryType != MemoryType::WAVE_Direct2LDS))
+               && (!direct2LDS || useWiderDirect2LDS))
             {
                 auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
                                          context->kernelOptions().loadLocalWidth);
@@ -1226,7 +1284,6 @@ namespace rocRoller
                 internalTile.memoryType = MemoryType::WAVE_SPLIT;
 
             auto internalTileTag = graph.coordinates.addElement(internalTile);
-
             Log::debug("  createInternalTile({}): {}x{} {} {}; subTileSizes {}x{}; packed {} ({})",
                        internalTileTag,
                        sizes[0],
@@ -1252,7 +1309,8 @@ namespace rocRoller
                                 std::vector<int> const&          sdim,
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
-                                ContextPtr                       context)
+                                ContextPtr                       context,
+                                bool                             isDirect2LDS)
         {
             auto workgroupSizes = context->kernel()->workgroupSize();
 
@@ -1269,7 +1327,8 @@ namespace rocRoller
                                 iMacY,
                                 workgroupSizes,
                                 jammedTiles,
-                                useSwappedAccess);
+                                useSwappedAccess,
+                                isDirect2LDS);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
         }
@@ -1586,6 +1645,8 @@ namespace rocRoller
 
                 auto originalUserTag = original.mapper.get<User>(tag);
                 auto originalTileTag = original.mapper.get<MacroTile>(tag);
+                auto LDSTileTag      = original.mapper.get<LDS>(tag);
+                auto isDirect2LDS    = (LDSTileTag != -1);
                 auto userTag         = reindexer.coordinates.at(originalUserTag);
                 auto tileTag         = reindexer.coordinates.at(originalTileTag);
 
@@ -1609,12 +1670,18 @@ namespace rocRoller
                 auto loadTag               = reindexer.control.at(tag);
                 auto varType               = getVariableType(graph, loadTag);
                 auto wavetilesPerWavefront = m_params->getWaveTilesPerWavefront();
-
                 switch(tile.memoryType)
                 {
                 case MemoryType::VGPR:
-                    loadMacroTile_VGPR(
-                        graph, connections, userTag, tileTag, sdims, {1, 1}, m_params, m_context);
+                    loadMacroTile_VGPR(graph,
+                                       connections,
+                                       userTag,
+                                       tileTag,
+                                       sdims,
+                                       {1, 1},
+                                       m_params,
+                                       m_context,
+                                       isDirect2LDS);
                     break;
                 case MemoryType::WAVE:
                     loadMacroTile_WAVE(graph,
@@ -1836,10 +1903,11 @@ namespace rocRoller
 
                 copyOperation(graph, original, reindexer, tag);
 
-                auto ldsTag  = reindexer.coordinates.at(originalLDSTag);
-                auto tileTag = reindexer.coordinates.at(originalTileTag);
-                auto tile    = graph.coordinates.getNode<MacroTile>(tileTag);
-
+                auto ldsTag       = reindexer.coordinates.at(originalLDSTag);
+                auto tileTag      = reindexer.coordinates.at(originalTileTag);
+                auto tile         = graph.coordinates.getNode<MacroTile>(tileTag);
+                auto ldsTile      = graph.coordinates.getNode<LDS>(ldsTag);
+                auto isDirect2LDS = ldsTile.isDirect2LDS;
                 AssertFatal(tile.rank == 2, "Rank /= 2 not implemented yet.");
 
                 auto workgroupSizes        = m_context->kernel()->workgroupSize();
@@ -1848,7 +1916,6 @@ namespace rocRoller
                 auto useWaveAccess         = tile.memoryType == MemoryType::WAVE
                                      || tile.memoryType == MemoryType::WAVE_LDS;
                 bool useSwappedAccess = m_params->transposeMemoryAccess[tile.layoutType];
-
                 // XXX debug
                 logger->debug("  LDS({}), MacroTile({}), MacroTile size: {}x{}, SubTile size: "
                               "{}x{}, MemoryType {}, LayoutType {}, useSwappedAccess {}",
@@ -1878,7 +1945,8 @@ namespace rocRoller
                                          iMacY,
                                          workgroupSizes,
                                          jammedTiles,
-                                         useSwappedAccess);
+                                         useSwappedAccess,
+                                         isDirect2LDS);
                 }
                 else
                 {

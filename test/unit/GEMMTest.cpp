@@ -2349,8 +2349,7 @@ namespace GEMMDriverTest
     TEST_P(GEMMTestGPU, GPU_LargerLDSGEMMFP8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
-        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
-
+        auto gemm             = setup_GEMMF8F6F4(32, 32, 64);
         gemm.macM             = 128;
         gemm.macN             = 128;
         gemm.macK             = 256;
@@ -2359,6 +2358,227 @@ namespace GEMMDriverTest
         gemm.prefetchInFlight = 2;
 
         basicGEMM<FP8, FP8, float>(gemm);
+    }
+
+    void checkNumDwordx4(std::string generatedCode,
+                         const int   numBitsPerElementAB,
+                         const int   macM,
+                         const int   macN,
+                         const int   macK,
+                         const int   workgroupSizeTotal)
+    {
+        auto const numBitsPerDwordx4   = 4 * 4 * 8;
+        auto const numBitsPerElementC  = 32;
+        auto const numBufferLoadsForAB = ((macM * macK + macN * macK) * numBitsPerElementAB)
+                                         / workgroupSizeTotal / numBitsPerDwordx4;
+        auto const numBufferLoadsForC
+            = ((macM * macN) * numBitsPerElementC) / workgroupSizeTotal / numBitsPerDwordx4;
+
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx4"),
+                  numBufferLoadsForAB + numBufferLoadsForC);
+    }
+
+    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.scaleAMode = Operations::ScaleMode::Separate;
+        problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.direct2LDSA = true;
+        problem.direct2LDSB = true;
+        problem.storeLDSD   = false;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        auto const numBitsPerElementAB = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            GTEST_SKIP() << "Test not yet supported for FP6" << std::endl;
+            break;
+        case DataType::BF6:
+            GTEST_SKIP() << "Test not yet supported for BF6" << std::endl;
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        checkNumDwordx4(generatedCode,
+                        numBitsPerElementAB,
+                        problem.macM,
+                        problem.macN,
+                        problem.macK,
+                        problem.workgroupSizeX * problem.workgroupSizeY);
+    }
+
+    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMF8F6F4_Direct2LDS)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto problem = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(problem.transA, problem.transB) = transOp;
+
+        problem.direct2LDSA = true;
+        problem.direct2LDSB = true;
+        problem.storeLDSD   = false;
+
+        std::string modifiers{"cbsz:0b000 blgp:0b000"};
+
+        auto const numBitsPerElementAB = DataTypeInfo::Get(typeAB).elementBits;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(problem);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(problem);
+            modifiers = "cbsz:0b001 blgp:0b001";
+            break;
+        case DataType::FP6:
+            GTEST_SKIP() << "Test not yet supported for FP6" << std::endl;
+            break;
+        case DataType::BF6:
+            GTEST_SKIP() << "Test not yet supported for BF6" << std::endl;
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(problem);
+            modifiers = "cbsz:0b100 blgp:0b100";
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        checkNumDwordx4(generatedCode,
+                        numBitsPerElementAB,
+                        problem.macM,
+                        problem.macN,
+                        problem.macK,
+                        problem.workgroupSizeX * problem.workgroupSizeY);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_GEMM_FP8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m           = 512;
+        gemm.n           = 256;
+        gemm.k           = 512;
+        gemm.macM        = 256;
+        gemm.macN        = 256;
+        gemm.macK        = 128;
+        gemm.direct2LDSA = true;
+        gemm.direct2LDSB = true;
+        gemm.storeLDSD   = false;
+        gemm.transA      = "T";
+        gemm.transB      = "N";
+
+        basicGEMM<FP8, FP8, float>(gemm);
+
+        auto const  numBitsPerElementAB = 8;
+        std::string generatedCode       = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        checkNumDwordx4(generatedCode,
+                        numBitsPerElementAB,
+                        gemm.macM,
+                        gemm.macN,
+                        gemm.macK,
+                        gemm.workgroupSizeX * gemm.workgroupSizeY);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_GEMM_BF8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m           = 512;
+        gemm.n           = 256;
+        gemm.k           = 512;
+        gemm.macM        = 256;
+        gemm.macN        = 256;
+        gemm.macK        = 128;
+        gemm.direct2LDSA = true;
+        gemm.direct2LDSB = true;
+        gemm.storeLDSD   = false;
+        gemm.transA      = "T";
+        gemm.transB      = "N";
+
+        basicGEMM<BF8, BF8, float>(gemm);
+
+        auto const  numBitsPerElementAB = 8;
+        std::string generatedCode       = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        checkNumDwordx4(generatedCode,
+                        numBitsPerElementAB,
+                        gemm.macM,
+                        gemm.macN,
+                        gemm.macK,
+                        gemm.workgroupSizeX * gemm.workgroupSizeY);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_GEMM_FP4_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
+        gemm.m           = 512;
+        gemm.n           = 256;
+        gemm.k           = 512;
+        gemm.macM        = 256;
+        gemm.macN        = 256;
+        gemm.macK        = 128;
+        gemm.direct2LDSA = true;
+        gemm.direct2LDSB = true;
+        gemm.storeLDSD   = false;
+        gemm.transA      = "T";
+        gemm.transB      = "N";
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        auto const  numBitsPerElementAB = 4;
+        std::string generatedCode       = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        checkNumDwordx4(generatedCode,
+                        numBitsPerElementAB,
+                        gemm.macM,
+                        gemm.macN,
+                        gemm.macK,
+                        gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
     TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)

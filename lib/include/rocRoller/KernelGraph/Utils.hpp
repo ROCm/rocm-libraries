@@ -396,7 +396,8 @@ namespace rocRoller
                                 std::vector<int> const&          sdim,
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
-                                ContextPtr                       context);
+                                ContextPtr                       context,
+                                bool                             isDirect2LDS = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -408,7 +409,8 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess);
+                                  bool                               useSwappedAccess,
+                                  bool                               isDirect2LDS = false);
 
         /**
          * @brief Store version of addLoadMacroTileCT.
@@ -470,7 +472,8 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess);
+                                 bool                               useSwappedAccess,
+                                 bool                               isDirect2LDS = false);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.

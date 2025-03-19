@@ -593,6 +593,9 @@ namespace rocRoller
                 k.mapper.connect<User>(loadLDSOp, userTag); // For F6 Padding
                 k.mapper.connect<LDS>(loadLDSOp, ldsTag);
 
+                if(isDirect2LDS)
+                    k.mapper.connect<LDS>(opTag, ldsTag);
+
                 if(isLoad)
                 {
                     insertAfter(k, opTag, storeLDSOp, loadLDSOp);

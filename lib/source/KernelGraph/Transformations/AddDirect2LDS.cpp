@@ -63,31 +63,23 @@ namespace rocRoller
                 auto internalMacroTile = kgraph.mapper.get<MacroTile>(loadGlobal);
                 auto macTile           = kgraph.coordinates.getNode<MacroTile>(internalMacroTile);
 
+                auto maybeDirect2LDS = kgraph.mapper.get<LDS>(loadGlobal);
+                if(maybeDirect2LDS == -1)
+                    continue;
+
                 for(auto storeLDS : storeLDSTileNodes)
                 {
 
                     bool sameMacroTile
                         = (kgraph.mapper.get<MacroTile>(storeLDS) == internalMacroTile);
-                    auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
-                    auto ldsWriteStride   = useSwappedAccess
-                                                ? (macTile.sizes[1] / macTile.subTileSizes[1])
-                                                : (macTile.sizes[0] / macTile.subTileSizes[0]);
-
                     auto LDSTileTag = kgraph.mapper.get<LDS>(storeLDS);
                     auto LDSTile    = kgraph.coordinates.getNode<LDS>(LDSTileTag);
+
                     if(!LDSTile.isDirect2LDS)
-                    {
-                        Log::debug("  LDSTile {} is not Direct2LDS.", LDSTileTag);
                         continue;
-                    }
 
                     if(sameMacroTile)
-                    {
-                        auto const lanesPerWavefront = context->targetArchitecture().GetCapability(
-                            GPUCapability::DefaultWavefrontSize);
-                        AssertFatal(ldsWriteStride % lanesPerWavefront == 0);
                         result.push_back({loadGlobal, storeLDS});
-                    }
                 }
             }
             return result;
