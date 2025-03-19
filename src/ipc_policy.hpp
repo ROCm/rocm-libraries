@@ -125,6 +125,8 @@ class IpcOffImpl {
 
   char **ipc_bases{nullptr};
 
+  int *pes_with_ipc_avail{nullptr};
+
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm) {}
 
