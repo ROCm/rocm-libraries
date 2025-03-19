@@ -427,25 +427,64 @@ namespace rocwmma
                                              TBlockX,
                                              TBlockY>;
 
-            // Global reads for A/B are single fragment of macro tile size
-            // Global R/W for C/D are MFMA sized fragments
-            using GRFragA = fragment<matrix_a,
-                                     TBlockX / Constants::AMDGCN_WAVE_SIZE * BlocksX * BlockM,
-                                     BlockN,
-                                     BlockK,
-                                     InputT,
-                                     LayoutA>;
-            using GRFragB
-                = fragment<matrix_b, BlockM, TBlockY * BlocksY * BlockN, BlockK, InputT, LayoutB>;
-            using GRFragC = typename Base::MfmaFragC;
-            using GWFragD = typename Base::MfmaFragD;
 
-            // Global reads for A/B will have one fragment sized buffer
-            // Global R/W for C/D will use MFMA sized multiple fragment buffer
+            static constexpr uint32_t WaveTileM = BlocksX * BlockM;
+            static constexpr uint32_t WaveTileN = BlocksY * BlockN;
+            static constexpr uint32_t WaveTileK = BlockK;
+
+            static constexpr uint32_t MacroTileM = TBlockX / Constants::AMDGCN_WAVE_SIZE * WaveTileM;
+            static constexpr uint32_t MacroTileN = TBlockY * WaveTileN;
+            static constexpr uint32_t MacroTileK = BlockK;
+
+            // Wave-tiles
+            using WaveTileA   = fragment<matrix_a, WaveTileM, WaveTileN, WaveTileK, InputT, LayoutA>;
+            using WaveTileB   = fragment<matrix_b, WaveTileM, WaveTileN, WaveTileK, InputT, LayoutB>;
+            using WaveTileC   = fragment<accumulator, WaveTileM, WaveTileN, WaveTileK, OutputT, LayoutC>;
+            using WaveTileD   = fragment<accumulator, WaveTileM, WaveTileN, WaveTileK, OutputT, LayoutD>;
+            using WaveTileAcc = fragment<accumulator, WaveTileM, WaveTileN, WaveTileK, ComputeT>;
+
+            // We can guess layouts are interleaved by testing A's MatrixLayout.
+            static constexpr bool IsInterleaved = layout_traits<typename GetIOConfig_t<WaveTileA>::IOLayout::MatrixLayout>::is_interleaved;
+
+            // Macro-tiles
+            using MacroTileA   = fragment<matrix_a, MacroTileM, MacroTileN, MacroTileK, InputT, LayoutA>;
+            using MacroTileB   = fragment<matrix_b, MacroTileM, MacroTileN, MacroTileK, InputT, LayoutB>;
+
+            // Mma operations
+            // Interleaved layouts use wave tile mma inputs
+            // Non-interleaved layouts use block tile mma inputs
+            using MfmaFragA   = conditional_t<IsInterleaved, WaveTileA, typename Base::MfmaFragA>;
+            using MfmaFragB   = conditional_t<IsInterleaved, WaveTileB, typename Base::MfmaFragB>;
+            using MfmaFragC   = conditional_t<IsInterleaved, WaveTileC, typename Base::MfmaFragC>;
+            using MfmaFragD   = conditional_t<IsInterleaved, WaveTileD, typename Base::MfmaFragD>;
+            using MfmaFragAcc = conditional_t<IsInterleaved, WaveTileAcc, typename Base::MfmaFragAcc>;
+
+            // Mfma fragment buffers required for the gemm driver.
+            // Interleaved layouts mma inputs are buffered in single wave tile
+            // Non-interleaved layouts mma inputs are buffered in array of block tiles
+            using MfmaBuffA   = conditional_t<IsInterleaved, MfmaFragA, typename Base::MfmaBuffA>;
+            using MfmaBuffB   = conditional_t<IsInterleaved, MfmaFragB, typename Base::MfmaBuffB>;
+            using MfmaBuffC   = conditional_t<IsInterleaved, MfmaFragC, typename Base::MfmaBuffC>;
+            using MfmaBuffD   = conditional_t<IsInterleaved, MfmaFragD, typename Base::MfmaBuffD>;
+            using MfmaBuffAcc = conditional_t<IsInterleaved, MfmaFragAcc, typename Base::MfmaBuffAcc>;
+
+            // Global reads for A/B are macro tiles
+            // Global C/D:
+            // Interleaved layouts wave tile
+            // Non-interleaved layouts block tile
+            using GRFragA = fragment<matrix_a, MacroTileM, MacroTileN, MacroTileK, InputT, LayoutA>;
+            using GRFragB = fragment<matrix_b, MacroTileM, MacroTileN, MacroTileK, InputT, LayoutB>;
+            using GRFragC = conditional_t<IsInterleaved, WaveTileC, typename Base::MfmaFragC>;
+            using GWFragD = conditional_t<IsInterleaved, WaveTileD, typename Base::MfmaFragD>;
+
+            // Global reads for A/B will have one macro tile buffer
+            // Global R/W:
+            // Interleaved layouts buffer will be wave-tile
+            // Non-interleaved layouts buffer will be array of block tiles
             using GRBuffA = GRFragA;
             using GRBuffB = GRFragB;
-            using GRBuffC = typename Base::MfmaBuffC;
-            using GWBuffD = typename Base::MfmaBuffD;
+            using GRBuffC = conditional_t<IsInterleaved, GRFragC, typename Base::MfmaBuffC>;
+            using GWBuffD = conditional_t<IsInterleaved, GWFragD, typename Base::MfmaBuffD>;
 
             // A/B global reads will collaborate on macro tile
             __device__ constexpr static inline auto readCoordA()

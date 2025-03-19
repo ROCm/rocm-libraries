@@ -246,13 +246,15 @@ namespace rocwmma
                 GemmDriver::localWriteCoopA(ldsPtrHi + ldsWriteOffsetA, grBuffA, ldlds);
                 GemmDriver::localWriteCoopB(ldsPtrHi + ldsWriteOffsetB, grBuffB, ldlds);
 
-                // Make sure that all waves have finished reading / writing to lds.
-                GemmDriver::syncWorkgroup();
-
                 // Swap Lds buffers
                 auto* tmp = ldsPtrLo;
                 ldsPtrLo  = ldsPtrHi;
                 ldsPtrHi  = tmp;
+
+                GemmDriver::scheduleKLoop();
+
+                // Make sure that all waves have finished reading / writing to lds.
+                GemmDriver::syncWorkgroup();
             }
 
             ///
@@ -272,6 +274,7 @@ namespace rocwmma
             GemmDriver::localReadA(fragsA, ldsPtrLo + ldsReadOffsetA, ldlds);
             GemmDriver::localReadB(fragsB, ldsPtrLo + ldsReadOffsetB, ldlds);
             GemmDriver::mfma(fragsAcc, fragsA, fragsB, fragsAcc);
+            GemmDriver::scheduleKLoop();
 
             ///
             /// D = alpha * accum + beta * C

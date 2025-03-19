@@ -41,12 +41,24 @@ namespace rocwmma
         };
 
         // Fine tune scheduler behavior
-        template <int32_t mask = 0>
+        template <int32_t ScheduleMask = 0>
         struct amdgcn_sched_barrier
         {
             ROCWMMA_DEVICE static inline auto exec()
             {
-                return __builtin_amdgcn_sched_barrier(mask);
+                return __builtin_amdgcn_sched_barrier(ScheduleMask);
+            }
+        };
+
+        // GroupId: the instruction group to schedule
+        // Count: the number of instructions in the group to schedule
+        // SyncId: synchronize with other barriers with the same Id
+        template<uint32_t ScheduleMask, uint32_t Size = 256u, uint32_t SyncId = 0u>
+        struct amdgcn_sched_group_barrier
+        {
+            ROCWMMA_DEVICE static inline auto exec()
+            {
+                __builtin_amdgcn_sched_group_barrier(ScheduleMask, Size, SyncId);
             }
         };
 
@@ -100,6 +112,22 @@ namespace rocwmma
 
     } // namespace detail
 
+    enum struct ScheduleMask : uint32_t
+    {
+        NO_INSTR = 0x0000, // No instructions may be scheduled across sched_barrier
+        ALL_ALU = 0x0001,  // All, non-memory, non-side-effect producing instructions i.e. allow ALU instructions to pass
+        VALU = 0x0002, // VALU instructions
+        SALU = 0x0004, // SALU instructions
+        MMA = 0x0008, // MFMA/WMMA instructions
+        ALL_VMEM = 0x0010, // All VMEM instructions
+        VMEM_READ = 0x0020, // VMEM read instructions
+        VMEM_WRITE = 0x0040, // VMEM write instructions
+        ALL_DS = 0x0080, // All DS instructions
+        DS_READ = 0x0100, // All DS read instructions
+        DS_WRITE = 0x0200, // All DS write instructions
+        TRANS = 0x0400, // All Transcendental (e.g. V_EXP) instructions
+    };
+
     using Barrier = detail::amdgcn_barrier;
 
     template <int32_t mask>
@@ -116,6 +144,12 @@ namespace rocwmma
 
     template <int32_t lgkmcnt>
     using WaitLgkmcnt = detail::amdgcn_s_lgkmcnt<lgkmcnt>;
+
+    using SchedBarrierVmemRead = detail::amdgcn_sched_group_barrier<(uint32_t)ScheduleMask::VMEM_READ>;
+    using SchedBarrierVmemWrite = detail::amdgcn_sched_group_barrier<(uint32_t)ScheduleMask::VMEM_WRITE>;
+    using SchedBarrierDsRead = detail::amdgcn_sched_group_barrier<(uint32_t)ScheduleMask::DS_READ>;
+    using SchedBarrierDsWrite = detail::amdgcn_sched_group_barrier<(uint32_t)ScheduleMask::DS_WRITE>;
+    using SchedBarrierMma = detail::amdgcn_sched_group_barrier<(uint32_t)ScheduleMask::MMA>;
 
 } // namespace rocwmma
 

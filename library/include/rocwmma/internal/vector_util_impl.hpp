@@ -509,7 +509,7 @@ namespace rocwmma
         template <typename IdT>
         constexpr static inline auto exec(IdT&& Idx)
         {
-            return IdXForm::exec(rocwmma::forward<IdT>(Idx));
+            return IdXForm::exec(forward<IdT>(Idx));
         }
     };
 

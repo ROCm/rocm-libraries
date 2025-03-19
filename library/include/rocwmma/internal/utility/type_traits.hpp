@@ -178,7 +178,7 @@ namespace rocwmma
 
     // Short-form integral constant
     template <uint32_t N>
-    using I = integral_constant<uint32_t, N>;
+    using I = detail::integral_constant<uint32_t, N>;
 
 } // namespace rocwmma
 

@@ -238,6 +238,8 @@ namespace rocwmma
 
             template <int32_t lgkmcnt = 0>
             __device__ static inline void lds_mem_barrier();
+
+            __device__ static inline void scheduleKLoop();
         };
 
     } // namespace CooperativeGemm
