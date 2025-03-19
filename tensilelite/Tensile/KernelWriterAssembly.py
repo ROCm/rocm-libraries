@@ -11485,7 +11485,7 @@ class KernelWriterAssembly(KernelWriter):
           dst = None if lds else vgpr(destVgpr, rpv//2)
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
-          mubuf2 = MUBUFModifiers(offen=True, offset12=offset+bpl/2, glc=glc, slc=slc, nt=nt, lds=lds)
+          mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds)
           if isinstance(destVgpr, str):
             dst2 = destVgpr + "+" + str(int(rpv//2))
           elif isinstance(destVgpr, int):
@@ -11494,6 +11494,33 @@ class KernelWriterAssembly(KernelWriter):
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf2, comment=comment))
           return rv
+        elif bpl==64 and not lds:
+          rv = Module("emulated _buffer_load_b512")
+          # +0.25
+          dst = vgpr(destVgpr, rpv//4)
+          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf, comment=comment))
+          
+          mubuf2 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
+          dst2 = destVgpr + "+" + str(int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//4))
+
+          dst = vgpr(dst2, rpv//4)
+          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf2, comment=comment))
+          #+0.5
+          mubuf3 = MUBUFModifiers(offen=True, offset12=int(offset + bpl/2), glc=glc, slc=slc, nt=nt, lds=lds)
+          dst3 = destVgpr + "+" + str(int(rpv//2)) if isinstance(destVgpr, str) else int(destVgpr + int(rpv//2))
+          
+          dst = vgpr(dst3, rpv//4)
+          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf3, comment=comment))
+          #+0.75
+          mubuf4 = MUBUFModifiers(offen=True, offset12= int(offset + 3*bpl/4), glc=glc, slc=slc, nt=nt, lds=lds)
+          dst4 = destVgpr + "+" + str(3*int(rpv//4)) if isinstance(destVgpr, str) else int(destVgpr + 3*int(rpv//4))
+          
+          dst = vgpr(dst4, rpv//4)
+          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf4, comment=comment))
         else:
           assert 0, "%s\nchooseGlobalRead: bad bpl %u"%(self.states.kernelName,bpl)
 
