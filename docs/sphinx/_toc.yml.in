@@ -35,6 +35,7 @@ subtrees:
 
 - caption: API Reference
   entries:
+  - file: reference/data-type-support.rst
   - file: reference/API_Reference-Guide.rst
     title: API Reference
     subtrees:
