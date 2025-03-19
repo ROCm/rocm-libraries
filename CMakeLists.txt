@@ -194,11 +194,10 @@ if(HIP_FOUND AND Libva_FOUND)
 
   #Generate BUILD_INFO
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocjpeg_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_version.h @ONLY )
-  install(TARGETS ${PROJECT_NAME} EXPORT rocjpeg-targets DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
 
   # install rocJPEG libs -- {ROCM_PATH}/lib
   install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY)
+  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY)
   install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
   # install rocJPEG include files -- {ROCM_PATH}/include/rocJPEG
   install(FILES api/rocjpeg/rocjpeg.h
@@ -264,7 +263,7 @@ if(HIP_FOUND AND Libva_FOUND)
   )
 
   ## Install the export set for use with the install-tree
-  install(EXPORT rocjpeg-targets DESTINATION
+  install(EXPORT ${PROJECT_NAME}-targets DESTINATION
     "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}" COMPONENT dev
   )
 
