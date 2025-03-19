@@ -657,7 +657,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
         CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, jpeg_stream_params->picture_parameter_buffer.picture_width, jpeg_stream_params->picture_parameter_buffer.picture_height, mem_pool_entry.va_surface_ids.data(), 1, surface_attribs.data(), surface_attribs.size()));
         mem_pool_entry.image_width = jpeg_stream_params->picture_parameter_buffer.picture_width;
         mem_pool_entry.image_height = jpeg_stream_params->picture_parameter_buffer.picture_height;
-        mem_pool_entry.hip_interops.resize(1);
+        mem_pool_entry.hip_interops.resize(1, HipInteropDeviceMem());
         surface_id = mem_pool_entry.va_surface_ids[0];
         mem_pool_entry.entry_status = kBusy;
         CHECK_ROCJPEG(vaapi_mem_pool_->AddPoolEntry(surface_pixel_format, mem_pool_entry));
@@ -791,7 +791,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
             for (int i = 0; i < mem_pool_entry.va_surface_ids.size(); i++) {
                 surface_ids[indices[i]] = mem_pool_entry.va_surface_ids[i];
             }
-            mem_pool_entry.hip_interops.resize(indices.size());
+            mem_pool_entry.hip_interops.resize(indices.size(), HipInteropDeviceMem());
             mem_pool_entry.entry_status = kBusy;
             CHECK_ROCJPEG(vaapi_mem_pool_->AddPoolEntry(key.pixel_format, mem_pool_entry));
         } else {

@@ -3,7 +3,7 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## rocJPEG 0.11.0 for ROCm 6.5
+## rocJPEG 0.11.1 for ROCm 6.5
 
 ## Added
 * cmake config files
@@ -18,6 +18,7 @@ Documentation for rocJPEG is available at
 
 ### Resolved issues
 * Fixed a bug that prevented copying the decoded image into the output buffer when the output buffer is larger than the input image.
+* Resolved an issue with resizing the internal memory pool by utilizing the explicit constructor of the vector's type during the resizing process.
 
 ## rocJPEG 0.8.0 for ROCm 6.4
 
