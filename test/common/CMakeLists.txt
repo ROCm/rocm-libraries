@@ -34,6 +34,7 @@ add_library(
         CommonGraphs.cpp
         mxDataGen.cpp
         Utilities.cpp
+        WidenAddrExprTo64bit.cpp
 )
 
 target_compile_options(

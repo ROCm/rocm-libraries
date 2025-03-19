@@ -213,6 +213,7 @@ set(
     catch/UnrollLoopsTest.cpp
     catch/UtilsTest.cpp
     catch/mxDataGeneratorTest.cpp
+    catch/WidenAddrExprTo64bitTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})
