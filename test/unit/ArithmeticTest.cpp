@@ -278,6 +278,14 @@ namespace ArithmeticTest
                     c, a, Register::Value::Literal(static_cast<T>(LITERAL_TEST)));
                 co_yield store(23);
 
+                co_yield generateOp<Expression::BitwiseAnd>(
+                    c, Register::Value::Literal(LITERAL_TEST), b);
+                co_yield store(24);
+
+                co_yield generateOp<Expression::BitwiseAnd>(
+                    c, a, Register::Value::Literal(LITERAL_TEST));
+                co_yield store(25);
+
                 //
                 // Logical / boolean
                 //
@@ -349,7 +357,7 @@ namespace ArithmeticTest
                 commandKernel.setContext(m_context);
                 commandKernel.generateKernel();
 
-                size_t const resultSize           = 24;
+                size_t const resultSize           = 26;
                 size_t const comparisonResultSize = 10;
 
                 auto d_result = make_shared_device<T>(resultSize);

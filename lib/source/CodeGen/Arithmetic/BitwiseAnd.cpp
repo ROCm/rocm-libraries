@@ -52,9 +52,11 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        auto elementBits = std::max({DataTypeInfo::Get(dest->variableType()).elementBits,
-                                     DataTypeInfo::Get(lhs->variableType()).elementBits,
-                                     DataTypeInfo::Get(rhs->variableType()).elementBits});
+        auto destNumBits = DataTypeInfo::Get(dest->variableType()).elementBits;
+        auto lhsNumBits  = DataTypeInfo::Get(lhs->variableType()).elementBits;
+        auto rhsNumBits  = DataTypeInfo::Get(rhs->variableType()).elementBits;
+
+        auto elementBits = std::max({destNumBits, lhsNumBits, rhsNumBits});
 
         if(dest->regType() == Register::Type::Scalar)
         {
@@ -82,31 +84,19 @@ namespace rocRoller
             }
             else if(elementBits == 64u)
             {
-                if(lhs->regType() == Register::Type::Literal)
+                Register::ValuePtr l0, l1, r0, r1;
+                if(lhs->regType() == Register::Type::Scalar)
                 {
-                    Register::ValuePtr lsb;
-                    Register::ValuePtr msb;
-                    Arithmetic::get2LiteralDwords(lsb, msb, lhs);
-
-                    // subset() is not applicable to NoAllocation Literal type.
-                    co_yield_(Instruction(
-                        "v_and_b32", {dest->subset({0})}, {lsb, rhs->subset({0})}, {}, ""));
-                    co_yield_(Instruction(
-                        "v_and_b32", {dest->subset({1})}, {msb, rhs->subset({1})}, {}, ""));
+                    co_yield get2DwordsScalar(l0, l1, lhs);
                 }
                 else
                 {
-                    co_yield_(Instruction("v_and_b32",
-                                          {dest->subset({0})},
-                                          {lhs->subset({0}), rhs->subset({0})},
-                                          {},
-                                          ""));
-                    co_yield_(Instruction("v_and_b32",
-                                          {dest->subset({1})},
-                                          {lhs->subset({1}), rhs->subset({1})},
-                                          {},
-                                          ""));
+                    co_yield get2DwordsVector(l0, l1, lhs);
                 }
+                co_yield get2DwordsVector(r0, r1, rhs);
+
+                co_yield_(Instruction("v_and_b32", {dest->subset({0})}, {l0, r0}, {}, ""));
+                co_yield_(Instruction("v_and_b32", {dest->subset({1})}, {l1, r1}, {}, ""));
             }
             else
             {
