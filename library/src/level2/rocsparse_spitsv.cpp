@@ -48,7 +48,9 @@ namespace rocsparse
 
         if(mat->format != rocsparse_format_csr)
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            // LCOV_EXCL_STOP
         }
 
         switch(stage)
@@ -113,8 +115,9 @@ namespace rocsparse
         }
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        return rocsparse_status_success;
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -191,7 +194,9 @@ namespace rocsparse
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_f16_r:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            // LCOV_EXCL_STOP
         }
         }
         // LCOV_EXCL_START
@@ -278,7 +283,9 @@ try
        compute_type != x->data_type || //
        compute_type != y->data_type)
     {
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spitsv_dynamic_dispatch(mat->row_type,
@@ -298,8 +305,10 @@ try
                                                                  buffer_size,
                                                                  temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

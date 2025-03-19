@@ -88,7 +88,9 @@ rocsparse_status rocsparse::csrmv_analysis_template(rocsparse_handle          ha
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 template <typename T, typename I, typename J, typename A, typename X, typename Y>
@@ -157,7 +159,9 @@ rocsparse_status rocsparse::csrmv_template(rocsparse_handle          handle,
         //
         if((csr_row_ptr_begin + 1) != csr_row_ptr_end)
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+            // LCOV_EXCL_STOP
         }
 
         switch(alg)
@@ -653,8 +657,10 @@ try
     info->csrmv_info = nullptr;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

@@ -132,8 +132,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_bsrmv_clear(handle, info));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

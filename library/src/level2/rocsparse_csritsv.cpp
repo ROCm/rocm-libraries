@@ -115,11 +115,13 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csritsv_clear(rocsparse_handle          handle,
                                                     const rocsparse_mat_descr descr,
@@ -141,8 +143,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_csritsv_info(info->csritsv_info));
     info->csritsv_info = nullptr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

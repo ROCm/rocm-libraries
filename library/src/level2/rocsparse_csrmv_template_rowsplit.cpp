@@ -179,7 +179,9 @@ rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle   
 
     if(descr->type == rocsparse_matrix_type_hermitian)
     {
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     // Average nnz per row

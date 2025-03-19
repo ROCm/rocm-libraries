@@ -26,6 +26,7 @@
 #include "internal/generic/rocsparse_spmv.h"
 #include "utility.h"
 
+// LCOV_EXCL_START
 extern "C" rocsparse_status rocsparse_spmv_ex(rocsparse_handle            handle,
                                               rocsparse_operation         trans,
                                               const void*                 alpha,
@@ -66,3 +67,4 @@ catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

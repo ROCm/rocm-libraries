@@ -673,7 +673,9 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
     }
     else
     {
-        return rocsparse_status_not_implemented;
+        // LCOV_EXCL_START
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     return rocsparse_status_success;

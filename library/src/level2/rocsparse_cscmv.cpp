@@ -78,7 +78,9 @@ rocsparse_status rocsparse::cscmv_analysis_template(rocsparse_handle          ha
     }
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    // LCOV_EXCL_START
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 template <typename T, typename I, typename J, typename A, typename X, typename Y>
@@ -167,7 +169,9 @@ rocsparse_status rocsparse::cscmv_template(rocsparse_handle          handle,
     }
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    // LCOV_EXCL_START
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 #define INSTANTIATE(TTYPE, ITYPE, JTYPE)                                                            \

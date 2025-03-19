@@ -265,7 +265,9 @@ namespace rocsparse
         case rocsparse_matrix_type_symmetric:
         case rocsparse_matrix_type_hermitian:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            // LCOV_EXCL_STOP
         }
         }
 

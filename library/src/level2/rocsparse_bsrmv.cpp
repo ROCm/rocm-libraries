@@ -368,7 +368,9 @@ rocsparse_status rocsparse::bsrmv_adaptive_template_dispatch(rocsparse_handle   
 
     if(trans != rocsparse_operation_none)
     {
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     if(descr->storage_mode != rocsparse_storage_mode_sorted)
@@ -816,8 +818,10 @@ try
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_csrmv_clear(handle, info));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

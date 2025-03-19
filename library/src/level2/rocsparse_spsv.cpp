@@ -84,7 +84,9 @@ namespace rocsparse
             }
             else
             {
+                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                // LCOV_EXCL_STOP
             }
         }
 
@@ -127,7 +129,9 @@ namespace rocsparse
                 }
                 else
                 {
+                    // LCOV_EXCL_START
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                    // LCOV_EXCL_STOP
                 }
 
                 mat->analysed = true;
@@ -180,11 +184,15 @@ namespace rocsparse
             }
             else
             {
+                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+                // LCOV_EXCL_STOP
             }
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -264,7 +272,9 @@ namespace rocsparse
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_f16_r:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            // LCOV_EXCL_STOP
         }
 
 #undef DATATYPE_CASE
@@ -355,8 +365,10 @@ try
                                                                buffer_size,
                                                                temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
