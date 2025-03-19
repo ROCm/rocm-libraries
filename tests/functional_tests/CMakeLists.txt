@@ -91,6 +91,7 @@ if (BUILD_TESTS_ONLY)
     PRIVATE
       ${MPI_mpi_LIBRARY}
       ${MPI_mpicxx_LIBRARY}
+      ${flags_str}
       -L${ROCSHMEM_HOME}/lib
       -lamdhip64
       -lhsa-runtime64
