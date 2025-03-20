@@ -8249,6 +8249,16 @@ typedef enum
 MIOPEN_EXPORT miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle,
                                                    miopenTuningPolicy_t newValue);
 
+/*! @ingroup handle
+ * @brief Get tuning policy from a handle.
+ *
+ * @param [in] handle              MIOpen Handle to fetch value from
+ * @param [in] value               Would be set to the current tuning policy value. Must not be null
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle,
+                                                   miopenTuningPolicy_t* value);
+
 #ifdef __cplusplus
 }
 #endif

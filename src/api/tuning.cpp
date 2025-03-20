@@ -40,3 +40,14 @@ miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t
         handle_deref.tuning_policy = newValue;
     });
 }
+
+miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t* value)
+{
+    return miopen::try_([&] {
+        if(value == nullptr)
+            MIOPEN_THROW(miopenStatusBadParm, "miopenGetTuningPolicy called with null");
+
+        const auto& handle_deref = miopen::deref(handle);
+        *value                   = handle_deref.tuning_policy;
+    });
+}
