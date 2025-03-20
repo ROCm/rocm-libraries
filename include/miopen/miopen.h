@@ -8226,6 +8226,29 @@ MIOPEN_EXPORT miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
 // CLOSEOUT LossFunction DOXYGEN GROUP
 #endif // MIOPEN_BETA_API
 
+/*! @ingroup handle
+ * @enum miopenTuningPolicy_t
+ * Tuning policy for MIOpen Find-related calls.
+ */
+typedef enum
+{
+    miopenTuningPolicyNone     = 1, /* do not enforce anything */
+    miopenTuningPolicyDbUpdate = 2, /* do not load existing entry, do not tune  */
+    miopenTuningPolicySearch   = 3, /* do not load existing entry, tune */
+    miopenTuningPolicyDbClean  = 5, /* remove existing entry, do not tune */
+} miopenTuningPolicy_t;
+
+/*! @ingroup handle
+ * @brief Update tuning policy for a specific handle. API alternative for MIOPEN_FIND_ENFORCE
+ * environment variable.
+ *
+ * @param [in] handle              MIOpen Handle to update
+ * @param [in] newValue            New tuning policy value. Default value is miopenTuningPolicyNone
+ * @return                         miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle,
+                                                   miopenTuningPolicy_t newValue);
+
 #ifdef __cplusplus
 }
 #endif

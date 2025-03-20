@@ -84,6 +84,8 @@ using hipblasLt_handle_ptr = MIOPEN_MANAGE_PTR(hipblasLtHandle_t, hipblasLtDestr
 
 struct MIOPEN_EXPORT Handle : miopenHandle
 {
+    miopenTuningPolicy_t tuning_policy;
+
     friend struct TargetProperties;
 
     Handle();

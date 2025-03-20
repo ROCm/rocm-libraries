@@ -63,8 +63,15 @@ auto FindSolutionImpl(rank<1>,
     static_assert(std::is_invocable_v<Db>,
                   "db is meant to be a functor returning a reference to perfdb");
 
-    const FindEnforce enforce =
-        options && options->find_enforce ? *options->find_enforce : FindEnforce{};
+    const auto enforce = [&]() {
+        if(options && options->find_enforce)
+            return *options->find_enforce;
+        const auto& handle = context.GetStream();
+        if(handle.tuning_policy != miopenTuningPolicyNone)
+            return FindEnforce{static_cast<FindEnforceAction>(handle.tuning_policy)};
+        return FindEnforce{};
+    }();
+
     if(context.disable_perfdb_access)
     {
         MIOPEN_LOG_I(s.SolverDbId() << " (db access disabled)");
