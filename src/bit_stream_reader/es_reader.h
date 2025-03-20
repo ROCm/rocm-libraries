@@ -182,11 +182,6 @@ class RocVideoESParser {
          */
         bool CopyObuFromRing();
 
-        /*! \brief Function to check the 32 byte stream for IVF file header identity
-         * \return true if IVF file header is identified; false: otherwise
-         */
-        bool CheckIvfFileHeader(uint8_t *stream);
-
         /*! \brief Function to probe the bitstream file and try to find if it is one of types supported.
          * \return Elementary stream file type
          */

@@ -56,8 +56,7 @@ public:
 
 private:
     rocDecStatus FreeVideoFrame(int pic_idx);
-    int num_devices_;
-    RocDecoderCreateInfo decoder_create_info_;
     VaapiVideoDecoder va_video_decoder_;
+    RocDecoderCreateInfo decoder_create_info_;
     std::vector<HipInteropDeviceMem> hip_interop_;
 };

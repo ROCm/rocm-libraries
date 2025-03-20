@@ -84,10 +84,6 @@ template <> struct dispatch_table_info<TYPE> { \
     static constexpr auto import_func = &ROCPROFILER_REGISTER_IMPORT_FUNC(NAME); \
 };
 
-constexpr auto ComputeTableSize(size_t num_funcs) {
-    return (num_funcs * sizeof(void*)) + sizeof(uint64_t);
-}
-
 ROCDECODE_DEFINE_DISPATCH_TABLE_INFO(RocDecodeDispatchTable, rocdecode)
 #endif
 
@@ -95,7 +91,7 @@ template <typename Tp> void ToolInit(Tp* table) {
 #if ROCDECODE_ROCPROFILER_REGISTER > 0
     auto table_array = std::array<void*, 1>{static_cast<void*>(table)};
     auto lib_id = rocprofiler_register_library_indentifier_t{};
-    auto rocp_reg_status = rocprofiler_register_library_api_table(
+    rocprofiler_register_library_api_table(
         dispatch_table_info<Tp>::name, dispatch_table_info<Tp>::import_func,
         dispatch_table_info<Tp>::version, table_array.data(), table_array.size(), &lib_id);
 #else

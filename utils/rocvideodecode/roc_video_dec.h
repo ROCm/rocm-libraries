@@ -217,8 +217,8 @@ class RocVideoDecoder {
         RocVideoDecoder(int device_id,  OutputSurfaceMemoryType out_mem_type, rocDecVideoCodec codec, bool force_zero_latency = false,
                           const Rect *p_crop_rect = nullptr, bool extract_user_SEI_Message = false, uint32_t disp_delay = 0, int max_width = 0, int max_height = 0,
                           uint32_t clk_rate = 1000);
-        ~RocVideoDecoder();
-        
+        virtual ~RocVideoDecoder();
+
         rocDecVideoCodec GetCodecId() { return codec_id_; }
 
         /**

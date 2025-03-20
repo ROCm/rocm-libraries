@@ -425,44 +425,6 @@ int RocVideoESParser::GetPicDataAv1(uint8_t **p_pic_data, int *pic_size) {
     return 0;
 }
 
-bool RocVideoESParser::CheckIvfFileHeader(uint8_t *stream) {
-    static const char *IVF_SIGNATURE = "DKIF";
-    uint8_t *ptr = stream;
-
-    // bytes 0-3: signature
-    if (memcmp(IVF_SIGNATURE, ptr, 4) == 0) {
-        ptr += 4;
-        // bytes 4-5: version (should be 0). Little Endian.
-        int ivf_version = ptr[0] | (ptr[1] << 8);
-        if (ivf_version != 0) {
-            ERR("Stream file error: Incorrect IVF version (" + TOSTR(ivf_version) + "). Should be 0.");
-        }
-        // bytes 6-7: length of header in bytes
-        ptr += 4;
-        // bytes 8-11: codec FourCC (e.g., 'AV01')
-        uint32_t codec_fourcc = ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
-        ptr += 4;
-        // bytes 12-13: width in pixels
-        uint32_t width = ptr[0] | (ptr[1] << 8);
-        ptr += 2;
-        // bytes 14-15: height in pixels
-        uint32_t height = ptr[0] | (ptr[1] << 8);
-        ptr += 2;
-        // bytes 16-23: time base denominator
-        uint32_t denominator = ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
-        ptr += 4;
-        // bytes 20-23: time base numerator
-        uint32_t numerator = ptr[0] | (ptr[1] << 8) | (ptr[2] << 16) | (ptr[3] << 24);
-        ptr += 4;
-        // bytes 24-27: number of frames in file
-        uint32_t num_frames = ptr[0] | (ptr[1] << 8);
-        // bytes 28-31: unused
-        return true;
-    } else {
-        return false;
-    }
-}
-
 int RocVideoESParser::GetPicDataIvf(uint8_t **p_pic_data, int *pic_size) {
     uint8_t frame_header[12];
     pic_data_size_ = 0;
@@ -1165,7 +1127,6 @@ int RocVideoESParser::CheckIvfAv1Stream(uint8_t *p_stream, int stream_size) {
 
 int RocVideoESParser::CheckVp9EStream(uint8_t *p_stream, int stream_size) {
     int score = 0;
-    int curr_offset = 0; // byte offset
     size_t offset = 0; // bit offset
     Vp9UncompressedHeader uncomp_header;
 

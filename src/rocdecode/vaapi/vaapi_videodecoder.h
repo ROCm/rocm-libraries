@@ -103,9 +103,9 @@ private:
     RocDecoderCreateInfo decoder_create_info_;
     int drm_fd_;
     VADisplay va_display_;
-    VAProfile va_profile_;
     VAConfigAttrib va_config_attrib_;
     VAConfigID va_config_id_;
+    VAProfile va_profile_;
     VAContextID va_context_id_;
     std::vector<VASurfaceID> va_surface_ids_;
     bool supports_modifiers_;
@@ -115,7 +115,6 @@ private:
     std::vector<VABufferID> slice_params_buf_id_ = std::vector<VABufferID>(INIT_SLICE_PARAM_LIST_NUM, 0);
     uint32_t num_slices_;
     VABufferID slice_data_buf_id_;
-    uint32_t slice_data_buf_size_;
 
     bool IsCodecConfigSupported(int device_id, rocDecVideoCodec codec_type, rocDecVideoChromaFormat chroma_format, uint32_t bit_depth_minus8, rocDecVideoSurfaceFormat output_format);
     rocDecStatus CreateDecoderConfig();

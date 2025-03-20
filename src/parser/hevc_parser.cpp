@@ -27,7 +27,7 @@ HevcVideoParser::HevcVideoParser() {
     m_active_vps_id_ = -1; 
     m_active_sps_id_ = -1;
     m_active_pps_id_ = -1;
-    slice_info_list_.assign(INIT_SLICE_LIST_NUM, {0});
+    slice_info_list_.assign(INIT_SLICE_LIST_NUM, {{0}});
     slice_param_list_.assign(INIT_SLICE_LIST_NUM, {0});
     memset(&curr_pic_info_, 0, sizeof(HevcPicInfo));
     for (int i = 0; i < MAX_VPS_COUNT; i++) {
@@ -593,7 +593,7 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
 
                     // Resize slice info list if needed
                     if ((num_slices_ + 1) > slice_info_list_.size()) {
-                        slice_info_list_.resize(num_slices_ + 1, {0});
+                        slice_info_list_.resize(num_slices_ + 1, {{0}});
                     }
 
                     slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
@@ -2107,7 +2107,7 @@ void HevcVideoParser::DecodeRps() {
 void HevcVideoParser::ConstructRefPicLists(HevcSliceInfo *p_slice_info) {
     HevcSliceSegHeader *p_slice_header = &p_slice_info->slice_header;
     uint32_t num_rps_curr_temp_list; // NumRpsCurrTempList0 or NumRpsCurrTempList1;
-    int i, j;
+    int i;
     int rIdx;
     uint32_t ref_pic_list_temp[HEVC_MAX_NUM_REF_PICS] = {0};  // RefPicListTemp0 or RefPicListTemp1
 
@@ -2276,7 +2276,7 @@ ParserResult HevcVideoParser::FindFreeInDecBufPool() {
 }
 
 ParserResult HevcVideoParser::FindFreeInDpbAndMark() {
-    int i, j;
+    int i;
 
     // Look for an empty buffer in DPB with longest decode history (lowest decode count)
     uint32_t min_decode_order_count = 0xFFFFFFFF;

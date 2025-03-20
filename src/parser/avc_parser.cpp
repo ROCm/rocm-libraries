@@ -39,7 +39,7 @@ AvcVideoParser::AvcVideoParser() {
     curr_ref_pic_bottom_field_ = 0;
     max_long_term_frame_idx_ = NO_LONG_TERM_FRAME_INDICES;
 
-    slice_info_list_.assign(INIT_SLICE_LIST_NUM, {0});
+    slice_info_list_.assign(INIT_SLICE_LIST_NUM, {{0}});
     slice_param_list_.assign(INIT_SLICE_LIST_NUM, {0});
     memset(&curr_pic_, 0, sizeof(AvcPicture));
     field_pic_count_ = 0;
@@ -183,7 +183,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
                     // Resize slice info list if needed
                     if ((num_slices_ + 1) > slice_info_list_.size()) {
-                        slice_info_list_.resize(num_slices_ + 1, {0});
+                        slice_info_list_.resize(num_slices_ + 1, {{0}});
                     }
 
                     slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
@@ -988,28 +988,6 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
         // Note: VCN supports High Profile only (num_slice_groups_minus1 = 0)
         ERR("Multiple slice groups are not supported");
         return PARSER_NOT_SUPPORTED;
-
-        p_pps->slice_group_map_type = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        if (p_pps->slice_group_map_type == 0) {
-            for (int i_group = 0; i_group <= p_pps->num_slice_groups_minus1; i_group++) {
-                p_pps->run_length_minus1[i_group] = Parser::ExpGolomb::ReadUe(p_stream, offset);
-            }
-        } else if (p_pps->slice_group_map_type == 2) {
-            for (int i_group = 0; i_group < p_pps->num_slice_groups_minus1; i_group++ ) {
-                p_pps->top_left[i_group] = Parser::ExpGolomb::ReadUe(p_stream, offset);
-                p_pps->bottom_right[i_group] = Parser::ExpGolomb::ReadUe(p_stream, offset);
-            }
-        } else if (p_pps->slice_group_map_type == 3 || p_pps->slice_group_map_type == 4 || p_pps->slice_group_map_type == 5) {
-            p_pps->slice_group_change_direction_flag = Parser::GetBit(p_stream, offset);
-            p_pps->slice_group_change_rate_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        } else if (p_pps->slice_group_map_type == 6) {
-            p_pps->pic_size_in_map_units_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
-            int slice_group_id_size = ceil(log2(p_pps->num_slice_groups_minus1 + 1));
-            for (int i = 0; i <= p_pps->pic_size_in_map_units_minus1; i++) {
-                int temp = Parser::ReadBits(p_stream, offset, slice_group_id_size);
-                ERR("AVC PPS parsing: slice_group_id memory not allocaed!");
-            }
-        }
     }
 
     p_pps->num_ref_idx_l0_default_active_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
@@ -1812,7 +1790,6 @@ ParserResult AvcVideoParser::DecodeFrameNumGaps() {
             non_existing_pic.pic_output_flag = 0;
 
             // Calculate POC
-            int max_pic_order_cnt_lsb = 1 << (p_sps->log2_max_pic_order_cnt_lsb_minus4 + 4); // MaxPicOrderCntLsb
             int frame_num_offset; // FrameNumOffset
             if (p_sps->pic_order_cnt_type == 0) {
                 // -1 is to try to avoid generating POC for the non-existing reference frames the same value as the existing ref.
@@ -2157,7 +2134,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             }
         } else { // 8.2.4.2.2 Initialisation process for the reference picture list for P and SP slices in fields
             // Construct and sort refFrameList0ShortTerm
-            AvcPicture ref_frame_list0_short_term[AVC_MAX_REF_FRAME_NUM] = {0};
+            AvcPicture ref_frame_list0_short_term[AVC_MAX_REF_FRAME_NUM] = {{0}};
             int index = 0;
             for (i = 0; i < dpb_buffer_.dpb_size; i++) {
                 if (dpb_buffer_.field_pic_list[i * 2].is_reference == kUsedForShortTerm || dpb_buffer_.field_pic_list[i * 2 + 1].is_reference == kUsedForShortTerm) {
@@ -2173,7 +2150,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             FillFieldRefList(ref_frame_list0_short_term, index, kUsedForShortTerm, curr_pic_.pic_structure, p_slice_info->ref_list_0_, &dpb_buffer_.num_short_term_ref_fields);
 
             // Construct and sort refFrameList0LongTerm
-            AvcPicture ref_frame_list0_long_term[AVC_MAX_REF_FRAME_NUM] = {0};
+            AvcPicture ref_frame_list0_long_term[AVC_MAX_REF_FRAME_NUM] = {{0}};
             index = 0;
             for (i = 0; i < dpb_buffer_.dpb_size; i++) {
                 if (dpb_buffer_.field_pic_list[i * 2].is_reference == kUsedForLongTerm || dpb_buffer_.field_pic_list[i * 2 + 1].is_reference == kUsedForLongTerm) {
@@ -2290,7 +2267,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             // RefPicList0
             // ===========
             // Construct and sort refFrameList0ShortTerm
-            AvcPicture ref_frame_list0_short_term[AVC_MAX_REF_FRAME_NUM] = {0};
+            AvcPicture ref_frame_list0_short_term[AVC_MAX_REF_FRAME_NUM] = {{0}};
             int num_short_term_smaller = 0;
             int num_short_term_greater = 0;
             int index = 0;
@@ -2322,7 +2299,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             FillFieldRefList(ref_frame_list0_short_term, num_short_term_smaller + num_short_term_greater, kUsedForShortTerm, curr_pic_.pic_structure, p_slice_info->ref_list_0_, &dpb_buffer_.num_short_term_ref_fields);
 
             // Construct and sort refFrameListLongTerm
-            AvcPicture ref_frame_list_long_term[AVC_MAX_REF_FRAME_NUM] = {0};
+            AvcPicture ref_frame_list_long_term[AVC_MAX_REF_FRAME_NUM] = {{0}};
             int num_long_term = 0;
             index = 0;
             for (i = 0; i < dpb_buffer_.dpb_size; i++) {
@@ -2344,7 +2321,7 @@ ParserResult AvcVideoParser::SetupReflist(AvcSliceInfo *p_slice_info) {
             // RefPicList1
             // ===========
             // Construct and sort refFrameList1ShortTerm
-            AvcPicture ref_frame_list1_short_term[AVC_MAX_REF_FRAME_NUM] = {0};
+            AvcPicture ref_frame_list1_short_term[AVC_MAX_REF_FRAME_NUM] = {{0}};
             num_short_term_smaller = 0;
             num_short_term_greater = 0;
             index = 0;
