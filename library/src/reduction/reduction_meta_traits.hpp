@@ -71,14 +71,14 @@ namespace hiptensor
          * When registering the solution, MetaTraits will returen hip_bfloat16 to create key.
          */
         using TensorInDataType       = std::conditional_t<std::is_same_v<InDataType, ck::bhalf_t>,
-                                                    hiptensor::bfloat16_t,
-                                                    InDataType>;
+                                                          hiptensor::bfloat16_t,
+                                                          InDataType>;
         using TensorAccDataType      = std::conditional_t<std::is_same_v<AccDataType, ck::bhalf_t>,
-                                                     hiptensor::bfloat16_t,
-                                                     AccDataType>;
+                                                          hiptensor::bfloat16_t,
+                                                          AccDataType>;
         using TensorOutDataType      = std::conditional_t<std::is_same_v<OutDataType, ck::bhalf_t>,
-                                                     hiptensor::bfloat16_t,
-                                                     OutDataType>;
+                                                          hiptensor::bfloat16_t,
+                                                          OutDataType>;
         using TensorReduceOperation  = ReduceOperation;
         using TensorInElementwiseOp  = InElementwiseOp;
         using TensorAccElementwiseOp = AccElementwiseOp;

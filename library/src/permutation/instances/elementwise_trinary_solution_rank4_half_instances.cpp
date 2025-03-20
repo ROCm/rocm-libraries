@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,41 +24,23 @@
  *
  *******************************************************************************/
 
-#ifndef HIPTENSOR_PERMUTATION_SOLUTION_PARAMS_HPP
-#define HIPTENSOR_PERMUTATION_SOLUTION_PARAMS_HPP
+#include "../permutation_solution.hpp"
+#include "../permutation_solution_instances.hpp"
 
-#include <memory>
-#include <unordered_map>
-#include <vector>
-
-#include "data_types.hpp"
-#include "permutation_types.hpp"
-#include "singleton.hpp"
+// Ensure access to
+#include "../device/hiptensor_ck_types.hpp"
+#include "../device/hiptensor_permutation_scale_instances.hpp"
 
 namespace hiptensor
 {
-    struct PermutationSolutionParams
+    void PermutationSolutionInstances::ElementwiseTrinarySolution4DHalfInstances()
     {
-        PermutationSolutionParams()                                            = default;
-        virtual ~PermutationSolutionParams()                                   = default;
-        PermutationSolutionParams(PermutationSolutionParams const&)            = default;
-        PermutationSolutionParams(PermutationSolutionParams&&)                 = default;
-        PermutationSolutionParams& operator=(PermutationSolutionParams const&) = default;
-        PermutationSolutionParams& operator=(PermutationSolutionParams&&)      = default;
-
-        // Map tensor dimension
-        virtual int32_t dim() const = 0;
-
-        // Map to hipDataType
-        virtual hipDataType typeIn() const  = 0;
-        virtual hipDataType typeOut() const = 0;
-
-        // Map to operators
-        virtual PermutationOpId_t opScale() const = 0;
-    };
-
+        // Register all the solutions exactly once
+        // 4d ElementwiseTrinary
+        registerSolutions(
+            enumeratePermutationSolutions<ck::Tuple<ck::half_t, ck::half_t, ck::half_t>,
+                                          ck::Tuple<ck::half_t>,
+                                          CkTrinaryWithUnaryCombinedOp,
+                                          4>());
+    }
 } // namespace hiptensor
-
-#include "permutation_solution_params_impl.hpp"
-
-#endif // HIPTENSOR_PERMUTATION_SOLUTION_PARAMS_HPP

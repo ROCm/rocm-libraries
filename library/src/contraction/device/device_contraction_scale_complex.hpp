@@ -308,7 +308,7 @@ namespace ck
 
                     Argument(Argument&& other)
                         : mScaleArgs(
-                            {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
+                              {std::move(other.mScaleArgs[0]), std::move(other.mScaleArgs[1])})
                         , mBilinearArgs({std::move(other.mBilinearArgs[0]),
                                          std::move(other.mBilinearArgs[1])})
                     {

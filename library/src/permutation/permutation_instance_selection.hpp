@@ -32,11 +32,11 @@
 
 namespace hiptensor
 {
-    InstanceHyperParams selectInstanceParams(std::vector<Uid> const&     lengths,
-                                             std::vector<int32_t> const& outputMode,
-                                             hipDataType                 typeIn,
-                                             hipDataType                 typeOut,
-                                             ck::index_t                 numDim);
+    InstanceHyperParams selectInstanceParams(std::vector<Uid> const&         lengths,
+                                             std::vector<int32_t> const&     outputMode,
+                                             std::vector<hipDataType> const& typeIn,
+                                             std::vector<hipDataType> const& typeOut,
+                                             ck::index_t                     numDim);
 } // namespace hiptensor
 
 #endif // PERMUTATION_INSTANCE_SELECTION_HPP

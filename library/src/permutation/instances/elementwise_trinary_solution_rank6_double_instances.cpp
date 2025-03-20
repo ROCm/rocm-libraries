@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,30 +24,22 @@
  *
  *******************************************************************************/
 
-#ifndef HIPTENSOR_PERMUTATION_TYPES_IMPL_HPP
-#define HIPTENSOR_PERMUTATION_TYPES_IMPL_HPP
+#include "../permutation_solution.hpp"
+#include "../permutation_solution_instances.hpp"
 
-// CK includes
-#include <combined_element_wise_operation.hpp>
-
-#include "permutation_types.hpp"
-#include <hiptensor/hiptensor_types.hpp>
+// Ensure access to
+#include "../device/hiptensor_ck_types.hpp"
+#include "../device/hiptensor_permutation_scale_instances.hpp"
 
 namespace hiptensor
 {
-    // Specialize overrides for runtime PermutationOperatorType
-    template <>
-    struct PermutationOperatorType<ck::tensor_operation::element_wise::Scale>
+    void PermutationSolutionInstances::ElementwiseTrinarySolution6DDoubleInstances()
     {
-        static constexpr auto value = PermutationOpId_t::SCALE;
-    };
-
-    template <>
-    struct PermutationOperatorType<ck::tensor_operation::element_wise::PassThrough>
-    {
-        static constexpr auto value = PermutationOpId_t::PASS_THROUGH;
-    };
-
+        // Register all the solutions exactly once
+        // 6d ElementwiseTrinary
+        registerSolutions(enumeratePermutationSolutions<ck::Tuple<double, double, double>,
+                                                        ck::Tuple<double>,
+                                                        CkTrinaryWithUnaryCombinedOp,
+                                                        6>());
+    }
 } // namespace hiptensor
-
-#endif // HIPTENSOR_PERMUTATION_TYPES_IMPL_HPP

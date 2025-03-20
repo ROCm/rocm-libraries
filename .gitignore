@@ -10,7 +10,7 @@ hiptensor-version.hpp
 
 # Generated source file
 test/*/configs/*.hpp
-test/*/configs/*/*.hpp
+test/*/configs/**/*.hpp
 
 # Precompiled Headers
 *.gch

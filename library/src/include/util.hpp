@@ -27,6 +27,8 @@
 #ifndef HIPTENSOR_SRC_UTIL_HPP
 #define HIPTENSOR_SRC_UTIL_HPP
 
+#include <hiptensor/hiptensor.hpp>
+#include <logger.hpp>
 #include <type_traits>
 #include <vector>
 
@@ -105,6 +107,46 @@ namespace hiptensor
         }
         return indices;
     }
+
+    inline void printErrorMessage(hiptensor::Logger& logger,
+                                  hiptensorStatus_t  errorCode,
+                                  const std::string& paramName)
+    {
+        char msg[512];
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : %s = nullptr (%s)",
+                 paramName.c_str(),
+                 hiptensorGetErrorString(errorCode));
+        logger.logError("hiptensorPermutation", msg);
+    };
+
+    // static_for
+    template <size_t N, typename Func, size_t... I>
+    constexpr void static_for_impl(Func&& func, std::index_sequence<I...>)
+    {
+        (func(std::integral_constant<size_t, I>{}), ...);
+    }
+
+    template <size_t N, typename Func>
+    constexpr void static_for(Func&& func)
+    {
+        static_for_impl<N>(std::forward<Func>(func), std::make_index_sequence<N>{});
+    }
+
+    template <typename T, typename U, size_t N>
+    void convertVectorToCkArray(std::vector<T> const& v, std::array<U, N>& a)
+    {
+        std::copy_n(v.begin(), N, a.begin());
+    }
+
+// define a macro since it can convert `paramName` to a string
+#define CheckApiParams(logger, errorCode, paramName)      \
+    if(!paramName)                                        \
+    {                                                     \
+        printErrorMessage(logger, errorCode, #paramName); \
+    }
+
 } // namespace hiptensor
 
 #endif // HIPTENSOR_SRC_UTIL_HPP

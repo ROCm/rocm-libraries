@@ -76,12 +76,13 @@ namespace hiptensor
 //     };
 // }
 
-// Make custom types for Alpha and Beta types.
+// Make custom types for Alpha, Beta and Gamma types.
 // We want to differentiate their treatment
 // when vectorized. Under the hood they are
 // doubles.
 LLVM_YAML_STRONG_TYPEDEF(double, AlphaT);
 LLVM_YAML_STRONG_TYPEDEF(double, BetaT);
+LLVM_YAML_STRONG_TYPEDEF(double, GammaT);
 
 // Treatment of types as vector elements
 // Flow sequence vector is inline comma-separated values [val0, val1, ...]
@@ -104,6 +105,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(std::vector<std::vector<std::vector<int32_t>>>)
 LLVM_YAML_IS_SEQUENCE_VECTOR(std::vector<double>)
 LLVM_YAML_IS_SEQUENCE_VECTOR(AlphaT)
 LLVM_YAML_IS_SEQUENCE_VECTOR(BetaT)
+LLVM_YAML_IS_SEQUENCE_VECTOR(GammaT)
 
 namespace llvm
 {
@@ -250,6 +252,22 @@ namespace llvm
             }
         };
 
+        template <>
+        struct ScalarTraits<GammaT> : public ScalarTraits<double>
+        {
+            using Base = ScalarTraits<double>;
+
+            static void output(const GammaT& value, void* v, llvm::raw_ostream& out)
+            {
+                Base::output(value, v, out);
+            }
+
+            static StringRef input(StringRef scalar, void* v, GammaT& value)
+            {
+                return Base::input(scalar, v, (double&)(value));
+            }
+        };
+
         ///
         // Mapping of the test param elements of ContractionTestParams for reading / writing.
         ///
@@ -351,6 +369,12 @@ namespace llvm
                 // Sequences of combinatorial fields
                 io.mapRequired("Tensor Data Types", doc.dataTypes());
                 io.mapRequired("Alphas", (std::vector<AlphaT>&)(doc.alphas()));
+                io.mapOptional("Betas",
+                               (std::vector<BetaT>&)(doc.betas()),
+                               std::vector<BetaT>(doc.alphas().size()));
+                io.mapOptional("Gammas",
+                               (std::vector<GammaT>&)(doc.gammas()),
+                               std::vector<GammaT>(doc.alphas().size()));
                 io.mapRequired("Lengths", doc.problemLengths());
                 io.mapRequired("Permuted Dims", doc.permutedDims());
                 io.mapRequired("Operators", (doc.operators()));
@@ -368,6 +392,16 @@ namespace llvm
                 if(doc.alphas().size() == 0)
                 {
                     return "Error: Empty Alphas";
+                }
+
+                if(doc.betas().size() == 0)
+                {
+                    return "Error: Empty Betas";
+                }
+
+                if(doc.gammas().size() == 0)
+                {
+                    return "Error: Empty Betas";
                 }
 
                 if(doc.permutedDims().size() == 0)

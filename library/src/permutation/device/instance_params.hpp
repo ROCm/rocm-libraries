@@ -30,39 +30,135 @@
 #include "data_types.hpp"
 #include "hash.hpp"
 
+namespace std
+{
+    template <typename T>
+    struct hash<std::vector<T>>
+    {
+        constexpr std::size_t operator()(const std::vector<T>& vec) const
+        {
+            std::size_t seed = 0;
+            for(const auto& elem : vec)
+            {
+                // Combine the hash of each element into the overall hash
+                seed ^= std::hash<T>{}(elem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            }
+            return seed;
+        }
+    };
+}
+
 namespace ck::tensor_operation::device::instance
 {
-    template <typename InDataTypeTuple,
-              typename OutDataTypeTuple,
-              typename Scale,
-              index_t NumDim,
-              index_t BlockSize                  = 0,
-              index_t M0PerBlock                 = 0,
-              index_t M1PerBlock                 = 0,
-              index_t M0PerThread                = 0,
-              index_t M1PerThread                = 0,
-              typename ThreadClusterArrangeOrder = ck::Sequence<0, 0>,
-              typename InScalarPerVectorSeq      = ck::Sequence<0>,
-              typename OutScalarPerVectorSeq     = ck::Sequence<0>>
-    struct DeviceElementwiseParams
+    template <typename DataTypeTuple>
+    inline auto convertTypeTupleToHipDataTypeVector()
     {
-        static hiptensor::Uid hashCode()
+        std::vector<hipDataType> hipDataTypeVector;
+        ck::static_for<0, DataTypeTuple::Size(), 1>{}([&hipDataTypeVector](auto i) {
+            hipDataTypeVector.push_back(
+                hiptensor::HipDataType_v<typename ck::tuple_element_t<i, DataTypeTuple>>);
+        });
+        return hipDataTypeVector;
+    }
+
+    class DeviceElementwiseParams
+    {
+    public:
+        constexpr static hiptensor::Uid hashCode(DeviceElementwiseParams const& params)
         {
-            return hiptensor::Hash{}(
-                hiptensor::HipDataType_v<typename ck::tuple_element_t<0, InDataTypeTuple>>,
-                hiptensor::HipDataType_v<typename ck::tuple_element_t<0, OutDataTypeTuple>>,
-                hiptensor::PermutationOperatorType_v<Scale>,
-                NumDim,
-                BlockSize,
-                M0PerBlock,
-                M1PerBlock,
-                M0PerThread,
-                M1PerThread,
-                ThreadClusterArrangeOrder::At(0),
-                ThreadClusterArrangeOrder::At(1),
-                InScalarPerVectorSeq::At(0),
-                OutScalarPerVectorSeq::At(0));
+            return hiptensor::Hash{}(params.mInDataTypes,
+                                     params.mOutDataTypes,
+                                     params.mScale,
+                                     params.mNumDim,
+                                     params.mInstanceHyperParams.mBlockSize,
+                                     params.mInstanceHyperParams.mM0PerBlock,
+                                     params.mInstanceHyperParams.mM1PerBlock,
+                                     params.mInstanceHyperParams.mM0PerThread,
+                                     params.mInstanceHyperParams.mM1PerThread,
+                                     params.mInstanceHyperParams.mThreadClusterArrangeOrder,
+                                     params.mInstanceHyperParams.mInScalarPerVectorSeq,
+                                     params.mInstanceHyperParams.mOutScalarPerVectorSeq);
         }
+
+        template <typename InDataTypeTuple,
+                  typename OutDataTypeTuple,
+                  hiptensor::PermutationOpId_t Scale,
+                  index_t                      NumDim,
+                  index_t                      BlockSize,
+                  index_t                      M0PerBlock,
+                  index_t                      M1PerBlock,
+                  index_t                      M0PerThread,
+                  index_t                      M1PerThread,
+                  typename ThreadClusterArrangeOrder,
+                  typename InScalarPerVectorSeq,
+                  typename OutScalarPerVectorSeq>
+        static auto Gen()
+        {
+            DeviceElementwiseParams params;
+            params.mInDataTypes  = convertTypeTupleToHipDataTypeVector<InDataTypeTuple>();
+            params.mOutDataTypes = convertTypeTupleToHipDataTypeVector<OutDataTypeTuple>();
+            params.mScale        = Scale;
+            params.mNumDim       = NumDim;
+            params.mInstanceHyperParams.mBlockSize   = BlockSize;
+            params.mInstanceHyperParams.mM0PerBlock  = M0PerBlock;
+            params.mInstanceHyperParams.mM1PerBlock  = M1PerBlock;
+            params.mInstanceHyperParams.mM0PerThread = M0PerThread;
+            params.mInstanceHyperParams.mM1PerThread = M1PerThread;
+            params.mInstanceHyperParams.mThreadClusterArrangeOrder
+                = {ThreadClusterArrangeOrder::At(0), ThreadClusterArrangeOrder::At(1)};
+            ck::static_for<0, InScalarPerVectorSeq::Size(), 1>{}([&params](auto i) {
+                params.mInstanceHyperParams.mInScalarPerVectorSeq.push_back(
+                    InScalarPerVectorSeq::At(i));
+            });
+            params.mInstanceHyperParams.mOutScalarPerVectorSeq = {OutScalarPerVectorSeq::At(0)};
+            return params;
+        }
+        template <typename InDataTypeTuple,
+                  typename OutDataTypeTuple,
+                  hiptensor::PermutationOpId_t Scale,
+                  index_t                      NumDim>
+        static auto Gen()
+        {
+            DeviceElementwiseParams params;
+            params.mInDataTypes  = convertTypeTupleToHipDataTypeVector<InDataTypeTuple>();
+            params.mOutDataTypes = convertTypeTupleToHipDataTypeVector<OutDataTypeTuple>();
+            params.mScale        = Scale;
+            params.mNumDim       = NumDim;
+
+            // This function is only used for reference instance.
+            // Referenece instances are not affected by member variables below. So set them to
+            // default values.
+            //
+            // Important: Need to use `InstanceHyperParams{}`, the default value of InstanceHyperParams,
+            // to query a reference instance since `InstanceHyperParams{}` matches InstanceHyperParams value
+            // return from this function.
+            params.mInstanceHyperParams = {};
+            return params;
+        }
+        static auto Gen(std::vector<hipDataType> const&       inDataTypes,
+                        std::vector<hipDataType> const&       outDataTypes,
+                        hiptensor::PermutationOpId_t          scale,
+                        index_t                               numDim,
+                        hiptensor::InstanceHyperParams const& instanceHyperParams)
+        {
+            DeviceElementwiseParams params;
+            params.mInDataTypes         = inDataTypes;
+            params.mOutDataTypes        = outDataTypes;
+            params.mScale               = scale;
+            params.mNumDim              = numDim;
+            params.mInstanceHyperParams = instanceHyperParams;
+            return params;
+        }
+
+    private:
+        DeviceElementwiseParams() = default;
+
+        std::vector<hipDataType>     mInDataTypes;
+        std::vector<hipDataType>     mOutDataTypes;
+        hiptensor::PermutationOpId_t mScale;
+        index_t                      mNumDim;
+
+        hiptensor::InstanceHyperParams mInstanceHyperParams;
     };
 
     // `getHashCodeOfBestPerfInstances` generates a hash code based on the arguments. This hash code represents
@@ -75,11 +171,25 @@ namespace ck::tensor_operation::device::instance
 
     // The caller should test the returned hash code in order since earlier instances have better perf.
     std::vector<hiptensor::Uid>
-        getHashCodeOfBestPerfInstances(hipDataType                           typeIn,
-                                       hipDataType                           typeOut,
+        getHashCodeOfBestPerfInstances(std::vector<hipDataType> const&       typeIn,
+                                       std::vector<hipDataType> const&       typeOut,
                                        hiptensor::PermutationOpId_t          scale,
                                        index_t                               numDim,
                                        hiptensor::InstanceHyperParams const& hyperParams);
 
+}
+
+namespace std
+{
+    template <>
+    struct hash<ck::tensor_operation::device::instance::DeviceElementwiseParams>
+    {
+        constexpr std::size_t operator()(
+            ck::tensor_operation::device::instance::DeviceElementwiseParams const& params) const
+        {
+            return ck::tensor_operation::device::instance::DeviceElementwiseParams::hashCode(
+                params);
+        }
+    };
 }
 #endif //  INSTANCE_PARAMS_HPP

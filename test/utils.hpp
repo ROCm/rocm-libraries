@@ -456,18 +456,18 @@ namespace hiptensor
     std::ostream& printContainerInCsv(Container const& container, std::ostream& outStream)
     {
         outStream << "[";
-        for(const auto& element : container)
+        for(int i = 0; i < container.size(); i++)
         {
             if constexpr(is_container<typename Container::value_type>::value)
             {
-                printContainerInCsv(element, outStream);
+                printContainerInCsv(container[i], outStream);
             }
             else
             {
-                outStream << element;
-                if(element != container.back())
+                outStream << container[i];
+                if(i != container.size() - 1)
                 {
-                    outStream << " ";
+                    outStream << ' ';
                 }
             }
         }

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@
 #include "hip_resource.hpp"
 #include "singleton.hpp"
 
-// PermutationResource class is intended to manage a shared pool of resources for
+// ElementwiseResource class is intended to manage a shared pool of resources for
 // testing hiptensor permutation kernels on the GPU.
 //
 // It minimizes the memory handling overhead for launching thousands of GPU
@@ -48,10 +48,16 @@
 namespace hiptensor
 {
 
-    struct PermutationResource : public HipResource, public LazySingleton<PermutationResource>
+    struct ElementwiseResource : public HipResource, public LazySingleton<ElementwiseResource>
     {
+        enum class ElementwiseOp
+        {
+            PERMUTATION,
+            BINARY_OP,
+            TRINARY_OP,
+        };
         // For static initialization
-        friend std::unique_ptr<PermutationResource> std::make_unique<PermutationResource>();
+        friend std::unique_ptr<ElementwiseResource> std::make_unique<ElementwiseResource>();
 
         using Base = HipResource;
 
@@ -59,43 +65,59 @@ namespace hiptensor
         using DevicePtrT = Base::DevicePtrT;
         using HostPtrT   = Base::HostPtrT;
 
-        // N, C, W, H
         using ProblemDims = std::vector<std::size_t>;
 
     private: // No public instantiation except make_unique.
              // No copy
-        PermutationResource();
-        PermutationResource(const PermutationResource&)            = delete;
-        PermutationResource& operator=(const PermutationResource&) = delete;
+        ElementwiseResource();
+        ElementwiseResource(const ElementwiseResource&)            = delete;
+        ElementwiseResource& operator=(const ElementwiseResource&) = delete;
 
-    public:
-        PermutationResource(PermutationResource&&);
-        virtual ~PermutationResource() = default;
-
-        void setupStorage(ProblemDims const& dimSizes, hipDataType dataType);
-        void fillRandToA();
-        void copyBToHost();
-        void copyReferenceToDevice();
-
-        HostPtrT& hostA();
-        HostPtrT& hostB();
-        HostPtrT& hostReference();
-
-        DevicePtrT& deviceA();
-        DevicePtrT& deviceB();
-        DevicePtrT& deviceReference();
-
-        size_t getCurrentMatrixElement() const;
+        void   fillRandToInput(HostPtrT& hostPtr, DevicePtrT& devicePtr);
+        void   fillRandToInput1();
+        void   fillRandToInput2();
+        void   fillRandToInput3();
         size_t getCurrentMatrixMemorySize() const;
         void   reset() final;
 
-    protected:
-        DevicePtrT mDeviceA, mDeviceB, mDeviceReference;
-        HostPtrT   mHostA, mHostB, mHostReference;
+    public:
+        ElementwiseResource(ElementwiseResource&&);
+        virtual ~ElementwiseResource() = default;
 
-        size_t mCurrentMatrixElement; /**< Element count of A/B */
+        void setupStorage(ProblemDims const& dimSizes, hipDataType dataType, ElementwiseOp opType);
+        void copyOutputToHost();
+        void copyReferenceToDevice();
+
+        HostPtrT& hostInput1();
+        HostPtrT& hostInput2();
+        HostPtrT& hostInput3();
+        HostPtrT& hostOutput();
+        HostPtrT& hostReference();
+
+        DevicePtrT& deviceInput1();
+        DevicePtrT& deviceInput2();
+        DevicePtrT& deviceInput3();
+        DevicePtrT& deviceOutput();
+        DevicePtrT& deviceReference();
+
+        size_t getCurrentMatrixElement() const;
+
+    protected:
+        DevicePtrT mDeviceInput1;
+        DevicePtrT mDeviceInput2;
+        DevicePtrT mDeviceInput3;
+        DevicePtrT mDeviceOutput;
+        DevicePtrT mDeviceReference;
+        HostPtrT   mHostInput1;
+        HostPtrT   mHostInput2;
+        HostPtrT   mHostInput3;
+        HostPtrT   mHostOutput;
+        HostPtrT   mHostReference;
+
+        ElementwiseOp mOpType;
+        size_t        mCurrentMatrixElement; /**< Element count of Input[1,2,3]/Output */
         hipDataType
-            mCurrentDataType; /**< Type size of element of A/B, only support HIP_R_16F, HIP_R_32F */
+            mCurrentDataType; /**< Type size of element of Input[1,2,3]/Output, only support HIP_R_16F, HIP_R_32F, HIP_R_64F */
         size_t mCurrentAllocByte; /**< Allocated size of memory */
     };
 

@@ -30,7 +30,15 @@ namespace std
 {
     ostream& operator<<(ostream& os, hiptensor::PermutationOpId_t const& op)
     {
-        return os << (int32_t)op;
+        switch(op)
+        {
+        case hiptensor::PermutationOpId_t::SCALE:
+            return os << "PermutationOpId_t::SCALE";
+        case hiptensor::PermutationOpId_t::PASS_THROUGH:
+            return os << "PermutationOpId_t::PASS_THROUGH";
+        default:
+            return os << "PermutationOpId_t::UNKNOWN";
+        }
     }
 
 } // namespace std

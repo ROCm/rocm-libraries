@@ -38,7 +38,6 @@
 
 #include "performance.hpp"
 #include "permutation_meta_traits.hpp"
-#include "permutation_solution_params.hpp"
 #include "util.hpp"
 
 namespace hiptensor
@@ -49,56 +48,37 @@ namespace hiptensor
         // Due to unique_ptr ownership of members,
         // PermutationSolutions should also be considered unique.
         // This means disabling default and copy ctor
-        PermutationSolution()                                      = delete;
-        PermutationSolution(PermutationSolution const&)            = delete;
-        virtual ~PermutationSolution()                             = default;
+        PermutationSolution()                           = delete;
+        PermutationSolution(PermutationSolution const&) = delete;
+        virtual ~PermutationSolution()                  = default;
         PermutationSolution& operator=(PermutationSolution const&) = delete;
 
         // This class is intended to receive DeviceOp kernel pointers from
         // the CK generator and take ownership.
-        PermutationSolution(std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
-                            std::unique_ptr<PermutationSolutionParams>&&                  params);
+        explicit PermutationSolution(
+            std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp);
         PermutationSolution(PermutationSolution&& other);
         PermutationSolution& operator=(PermutationSolution&& other);
 
         // Must specialize incoming arg handling
-        virtual bool initArgs(void const*                     alpha,
-                              void const*                     A,
-                              void*                           B,
-                              std::vector<std::size_t> const& a_lengths,
-                              std::vector<std::size_t> const& a_strides,
-                              hiptensorOperator_t             opA,
-                              const int32_t                   modeA[],
-                              std::vector<std::size_t> const& b_lengths,
-                              std::vector<std::size_t> const& b_strides,
-                              hiptensorOperator_t             opB,
-                              const int32_t                   modeB[],
-                              const hipDataType               typeScalar)
+        virtual bool initArgs(std::vector<float> const&                    scalarValues,
+                              std::vector<std::vector<std::size_t>> const& inLengthsArray,
+                              std::vector<std::vector<std::size_t>> const& inStridesArray,
+                              std::vector<std::vector<int32_t>> const&     inModesArray,
+                              std::vector<std::vector<std::size_t>> const& outLengthsArray,
+                              std::vector<std::vector<std::size_t>> const& outStridesArray,
+                              std::vector<std::vector<int32_t>> const&     outModesArray,
+                              std::vector<hiptensorOperator_t> const&      operators,
+                              std::vector<const void*> const&              inBuffers,
+                              std::vector<void*> const&                    outBuffers)
             = 0;
 
         float operator()(StreamConfig const& streamConfig = StreamConfig{});
-
-        float operator()(void const*                     alpha,
-                         void const*                     A,
-                         void*                           B,
-                         std::vector<std::size_t> const& a_lengths,
-                         std::vector<std::size_t> const& a_strides,
-                         hiptensorOperator_t             opA,
-                         const int32_t                   modeA[],
-                         std::vector<std::size_t> const& b_lengths,
-                         std::vector<std::size_t> const& b_strides,
-                         hiptensorOperator_t             opB,
-                         const int32_t                   modeB[],
-                         const hipDataType               typeScalar,
-                         StreamConfig const&             streamConfig = StreamConfig{});
 
         /// Accessors
 
         // Problem can be solved with this kernel
         bool isValid() const;
-
-        // Run-time solution parameters
-        std::unique_ptr<PermutationSolutionParams> const& params() const;
 
         // Unique ID for the kernel
         size_t uid() const;
@@ -111,9 +91,6 @@ namespace hiptensor
 
         // Problem size
         ck::index_t problemSize() const;
-
-        // Byte count
-        ck::index_t problemBytes() const;
 
         // Kernel's name encoding
         std::string kernelName() const;
@@ -128,12 +105,10 @@ namespace hiptensor
         // Derived runtime arguments
         ck::index_t mDim;
         ck::index_t mSize;
-        ck::index_t mBytes;
         bool        mValid;
         uint32_t    mThreadDim;
 
         // Kernel Params
-        std::unique_ptr<PermutationSolutionParams>                  mParams;
         std::unique_ptr<ck::tensor_operation::device::BaseOperator> mDeviceOp;
         std::unique_ptr<ck::tensor_operation::device::BaseArgument> mInvokerArgPtr;
         std::unique_ptr<ck::tensor_operation::device::BaseInvoker>  mInvokerPtr;

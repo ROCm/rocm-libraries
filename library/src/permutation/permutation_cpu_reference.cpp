@@ -42,23 +42,170 @@ hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*        
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::PermutationCpuReferenceInstances::instance();
 
-    auto refCandidates = instances->query(
-        alpha, descA, modeA, descB, modeB, typeScalar, hiptensor::PermutationInstanceType_t::Host);
+    float alphaF;
+    if(alpha != nullptr)
+    {
+        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+    }
+
+    auto refCandidates = instances->query({alphaF},
+                                          descA->mLengths,
+                                          {descA->mType},
+                                          {descB->mType},
+                                          {{modeA, modeA + descA->mLengths.size()}},
+                                          {{modeB, modeB + descB->mLengths.size()}},
+                                          {descA->mUnaryOp, descB->mUnaryOp},
+                                          hiptensor::ElementwiseExecutionSpaceType_t::HOST);
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs(alpha,
-                                  A,
-                                  B,
-                                  descA->mLengths,
-                                  descA->mStrides,
-                                  descA->mUnaryOp,
-                                  modeA,
-                                  descB->mLengths,
-                                  descB->mStrides,
-                                  descB->mUnaryOp,
-                                  modeB,
-                                  typeScalar))
+        if(refCandidate->initArgs({alphaF},
+                                  {descA->mLengths},
+                                  {descA->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
+                                  {descB->mLengths},
+                                  {descB->mStrides},
+                                  {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
+                                  {descA->mUnaryOp},
+                                  {A},
+                                  {B}))
+        {
+            (*refCandidate)();
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+    }
+
+    return HIPTENSOR_STATUS_INTERNAL_ERROR;
+}
+
+hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const hiptensorHandle_t*           handle,
+                                                        const void*                        alpha,
+                                                        const void*                        A,
+                                                        const hiptensorTensorDescriptor_t* descA,
+                                                        const int32_t                      modeA[],
+                                                        const void*                        gamma,
+                                                        const void*                        C,
+                                                        const hiptensorTensorDescriptor_t* descC,
+                                                        const int32_t                      modeC[],
+                                                        void*                              D,
+                                                        const hiptensorTensorDescriptor_t* descD,
+                                                        const int32_t                      modeD[],
+                                                        hiptensorOperator_t                opAC,
+                                                        hipDataType typeScalar,
+                                                        hipStream_t stream)
+{
+    const int32_t dim       = descA->mLengths.size();
+    auto&         instances = hiptensor::PermutationCpuReferenceInstances::instance();
+
+    float alphaF;
+    if(alpha != nullptr)
+    {
+        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+    }
+    float gammaF;
+    if(gamma != nullptr)
+    {
+        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+    }
+
+    auto refCandidates = instances->query(
+        {alphaF, gammaF},
+        descA->mLengths,
+        {descA->mType, descC->mType},
+        {descD->mType},
+        {{modeA, modeA + descA->mLengths.size()}, {modeC, modeC + descC->mLengths.size()}},
+        {{modeD, modeD + descD->mLengths.size()}},
+        {descA->mUnaryOp, descC->mUnaryOp},
+        hiptensor::ElementwiseExecutionSpaceType_t::HOST);
+
+    for(auto refCandidate : refCandidates)
+    {
+        if(refCandidate->initArgs({alphaF, gammaF},
+                                  {descA->mLengths, descC->mLengths},
+                                  {descA->mStrides, descC->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                  {descD->mLengths},
+                                  {descD->mStrides},
+                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                  {opAC, descA->mUnaryOp, descC->mUnaryOp},
+                                  {A, C},
+                                  {D}))
+        {
+            (*refCandidate)();
+            return HIPTENSOR_STATUS_SUCCESS;
+        }
+    }
+
+    return HIPTENSOR_STATUS_INTERNAL_ERROR;
+}
+
+hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const hiptensorHandle_t*           handle,
+                                                         const void*                        alpha,
+                                                         const void*                        A,
+                                                         const hiptensorTensorDescriptor_t* descA,
+                                                         const int32_t                      modeA[],
+                                                         const void*                        beta,
+                                                         const void*                        B,
+                                                         const hiptensorTensorDescriptor_t* descB,
+                                                         const int32_t                      modeB[],
+                                                         const void*                        gamma,
+                                                         const void*                        C,
+                                                         const hiptensorTensorDescriptor_t* descC,
+                                                         const int32_t                      modeC[],
+                                                         void*                              D,
+                                                         const hiptensorTensorDescriptor_t* descD,
+                                                         const int32_t                      modeD[],
+                                                         hiptensorOperator_t                opAB,
+                                                         hiptensorOperator_t                opABC,
+                                                         hipDataType typeScalar,
+                                                         hipStream_t stream)
+{
+    const int32_t dim       = descA->mLengths.size();
+    auto&         instances = hiptensor::PermutationCpuReferenceInstances::instance();
+
+    float alphaF;
+    if(alpha != nullptr)
+    {
+        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+    }
+    float betaF;
+    if(beta != nullptr)
+    {
+        betaF = hiptensor::readVal<float>(beta, hiptensor::convertToComputeType(typeScalar));
+    }
+    float gammaF;
+    if(gamma != nullptr)
+    {
+        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+    }
+
+    auto refCandidates
+        = instances->query({alphaF, betaF, gammaF},
+                           descA->mLengths,
+                           {descA->mType, descB->mType, descC->mType},
+                           {descD->mType},
+                           {{modeA, modeA + descA->mLengths.size()},
+                            {modeB, modeB + descB->mLengths.size()},
+                            {modeC, modeC + descC->mLengths.size()}},
+                           {{modeD, modeD + descD->mLengths.size()}},
+                           {opABC, opAB, descA->mUnaryOp, descB->mUnaryOp, descC->mUnaryOp},
+                           hiptensor::ElementwiseExecutionSpaceType_t::HOST);
+
+    for(auto refCandidate : refCandidates)
+    {
+        if(refCandidate->initArgs({alphaF, betaF, gammaF},
+                                  {descA->mLengths, descB->mLengths, descC->mLengths},
+                                  {descA->mStrides, descB->mStrides, descC->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
+                                   std::vector<int32_t>(modeB, modeB + descB->mLengths.size()),
+                                   std::vector<int32_t>(modeC, modeC + descC->mLengths.size())},
+                                  {descD->mLengths},
+                                  {descD->mStrides},
+                                  {std::vector<int32_t>(modeD, modeD + descD->mLengths.size())},
+                                  {opABC, opAB, descA->mUnaryOp, descB->mUnaryOp, descC->mUnaryOp},
+                                  {A, B, C},
+                                  {D}))
         {
             (*refCandidate)();
             return HIPTENSOR_STATUS_SUCCESS;

@@ -34,46 +34,43 @@ namespace hiptensor
     /// Class PermutationSolutionRegistry ///
     /////////////////////////////////////////
     std::vector<PermutationSolution*>
-        PermutationSolutionRegistry::query(const void*                        alpha,
-                                           const hiptensorTensorDescriptor_t* descA,
-                                           const int32_t                      modeA[],
-                                           const hiptensorTensorDescriptor_t* descB,
-                                           const int32_t                      modeB[],
-                                           const hipDataType                  typeScalar,
-                                           PermutationInstanceType_t          instanceType) const
+        PermutationSolutionRegistry::query(std::vector<float> const&                scalarValues,
+                                           std::vector<std::size_t> const&          lengths,
+                                           std::vector<hipDataType> const&          inDataTypes,
+                                           std::vector<hipDataType> const&          outDataTypes,
+                                           std::vector<std::vector<int32_t>> const& inModesArray,
+                                           std::vector<std::vector<int32_t>> const& outModesArray,
+                                           std::vector<hiptensorOperator_t> const&  operators,
+                                           ElementwiseExecutionSpaceType_t instanceType) const
     {
-        int  nDims      = descA->mLengths.size();
-        auto ADataType  = descA->mType;
-        auto BDataType  = descB->mType;
-        auto AOp        = descA->mUnaryOp;
-        auto BOp        = descB->mUnaryOp;
-        auto outputDims = hiptensor::findIndices({modeA, modeA + descA->mLengths.size()},
-                                                 {modeB, modeB + descB->mLengths.size()});
+        int nDims = lengths.size();
+        // TODO Only handle all input tensors have the same modes here. Need to handle cases when they are not.
+        auto outputDims = hiptensor::findIndices(inModesArray[0], outModesArray[0]);
+
+        // TODO Only handle A, B have the same types here. Need to handle A, B are different types
         auto instanceParams
-            = instanceType == PermutationInstanceType_t::Device
-                  ? selectInstanceParams(descA->mLengths, outputDims, ADataType, BDataType, nDims)
-                  : InstanceHyperParams{0, 0, 0, 0, 0, {0, 0}, 0, 0};
+            = instanceType == ElementwiseExecutionSpaceType_t::DEVICE
+                  ? selectInstanceParams(lengths, outputDims, inDataTypes, outDataTypes, nDims)
+                  : InstanceHyperParams{};
 
-        float alphaValue = 1.0F;
-        if(alpha != nullptr)
-        {
-            alphaValue
-                = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
-        }
-
-        /// When AOp and BOp are both pass_through and alpha is 1.0. Permutation only moves data around.
+        /// When all operators are both pass_through and alpha is 1.0. Permutation only moves data around.
         /// Use PermutationOpId_t::PASS_THROUGH instead of PermutationOpId_t::SCALE in this case so that the performance is much better.
         /// Some special noop instances are created for this case.
         ///
         /// Do not use PermutationOpId_t::PASS_THROUGH when instanceType is Host since no such special
         /// instances have been created.
         bool usePassThroughIfAlphaIsOne
-            = (alphaValue == 1.0F && AOp == HIPTENSOR_OP_IDENTITY && BOp == HIPTENSOR_OP_IDENTITY
-               && instanceType == PermutationInstanceType_t::Device);
-        auto scale     = usePassThroughIfAlphaIsOne ? hiptensor::PermutationOpId_t::PASS_THROUGH
-                                                    : hiptensor::PermutationOpId_t::SCALE;
+            = (std::all_of(
+                   scalarValues.cbegin(), scalarValues.cend(), [](auto v) { return v == 1.0F; })
+               && std::all_of(operators.cbegin(),
+                              operators.cend(),
+                              [](auto v) { return v == HIPTENSOR_OP_IDENTITY; })
+               && instanceType == ElementwiseExecutionSpaceType_t::DEVICE);
+        auto scale = usePassThroughIfAlphaIsOne ? hiptensor::PermutationOpId_t::PASS_THROUGH
+                                                : hiptensor::PermutationOpId_t::SCALE;
         auto hashCodes = ck::tensor_operation::device::instance::getHashCodeOfBestPerfInstances(
-            ADataType, BDataType, scale, nDims, instanceParams);
+            inDataTypes, outDataTypes, scale, nDims, instanceParams);
+
         std::vector<PermutationSolution*> solutions;
         for(auto hashCode : hashCodes)
         {
@@ -94,11 +91,6 @@ namespace hiptensor
             // Register with the query then take ownership
             mAllSolutions.insert(std::move(solution));
         }
-    }
-
-    uint32_t PermutationSolutionRegistry::solutionCount() const
-    {
-        return mAllSolutions.size();
     }
 
 } // namespace hiptensor

@@ -15,8 +15,8 @@ Lengths:
   - [ 15, 12]
   - [ 23, 11]
 Operators:
-  - [HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY]
-  - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_NEG]
 Permuted Dims:
   - [0, 1]
   - [1, 0]

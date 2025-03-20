@@ -39,6 +39,7 @@
 #include <combined_element_wise_operation.hpp>
 #include <device_elementwise_dynamic_vector_dims_impl.hpp>
 
+#include "hiptensor_ck_types.hpp"
 #include "instance_params.hpp"
 
 namespace ck
@@ -96,19 +97,14 @@ namespace ck
 
                 template <typename InDataTypeTuple,
                           typename OutDataTypeTuple,
-                          typename Aop,
-                          typename Bop,
-                          typename Scale,
+                          typename ElementwiseOperation,
                           index_t NumDim>
                 struct DeviceOperationInstanceFactory<
-                    ck::tensor_operation::device::DeviceElementwise<
-                        InDataTypeTuple,
-                        OutDataTypeTuple,
-                        ck::tensor_operation::element_wise::UnaryCombinedOp<Aop, Scale, Bop>,
-                        NumDim>>
+                    ck::tensor_operation::device::DeviceElementwise<InDataTypeTuple,
+                                                                    OutDataTypeTuple,
+                                                                    ElementwiseOperation,
+                                                                    NumDim>>
                 {
-                    using ElementwiseOperation
-                        = ck::tensor_operation::element_wise::UnaryCombinedOp<Aop, Scale, Bop>;
                     using DeviceOp = DeviceElementwise<InDataTypeTuple,
                                                        OutDataTypeTuple,
                                                        ElementwiseOperation,
@@ -125,19 +121,26 @@ namespace ck
                               typename Container>
                     static void addInstance(Container& container)
                     {
+                        constexpr hiptensor::PermutationOpId_t opType
+                            = std::is_same_v<ElementwiseOperation,
+                                             hiptensor::CkPermutationPassThroughCombinedOp>
+                                  ? hiptensor::PermutationOpId_t::PASS_THROUGH
+                                  : hiptensor::PermutationOpId_t::SCALE;
+                        auto params = DeviceElementwiseParams::Gen<InDataTypeTuple,
+                                                                   OutDataTypeTuple,
+                                                                   opType,
+                                                                   NumDim,
+                                                                   BlockSize,
+                                                                   M0PerBlock,
+                                                                   M1PerBlock,
+                                                                   M0PerThread,
+                                                                   M1PerThread,
+                                                                   ThreadClusterArrangeOrder,
+                                                                   InScalarPerVectorSeq,
+                                                                   OutScalarPerVectorSeq>();
+
                         container.insert(
-                            {DeviceElementwiseParams<InDataTypeTuple,
-                                                     OutDataTypeTuple,
-                                                     Scale,
-                                                     NumDim,
-                                                     BlockSize,
-                                                     M0PerBlock,
-                                                     M1PerBlock,
-                                                     M0PerThread,
-                                                     M1PerThread,
-                                                     ThreadClusterArrangeOrder,
-                                                     InScalarPerVectorSeq,
-                                                     OutScalarPerVectorSeq>::hashCode(),
+                            {hiptensor::Hash{}(params),
                              std::make_unique<
                                  HiptensorDeviceElementwiseImpl<InDataTypeTuple,
                                                                 OutDataTypeTuple,
@@ -315,10 +318,27 @@ namespace ck
                             // the following instances are the safety net to half and rank4
                             addInstance<64  , 128 , 32  , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
                             addInstance<64  , 128 , 32  , 8  , 8  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
-                        } else if  constexpr(NumDim == 5 || NumDim == 6) {
+                        } else if  constexpr(InDataTypeTuple::Size() == 1 && (NumDim == 5 || NumDim == 6)){
+                            // We haven't yet determined the optimal hyper-parameters for permutation rank<5|6>.
+                            // We're currently using these specific hyper-parameters as they performed best across the
+                            // majority of our previous tests.
                             addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4>  , ck::Sequence<4>>(opPtrs);
                             addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2>  , ck::Sequence<2>>(opPtrs);
                             addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1>  , ck::Sequence<1>>(opPtrs);
+                        } else if  constexpr(InDataTypeTuple::Size() == 2){
+                            // We haven't yet determined the optimal hyper-parameters for element-wise binary
+                            // operations. We're currently using these specific hyper-parameters as they performed best across the
+                            // majority of our previous tests.
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4, 4>  , ck::Sequence<4>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2, 2>  , ck::Sequence<2>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1, 1>  , ck::Sequence<1>>(opPtrs);
+                        } else if  constexpr(InDataTypeTuple::Size() == 3){
+                            // We haven't yet determined the optimal hyper-parameters for element-wise trinary
+                            // operations. We're currently using these specific hyper-parameters as they performed best across the
+                            // majority of our previous tests.
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<4, 4, 4>  , ck::Sequence<4>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<2, 2, 2>  , ck::Sequence<2>>(opPtrs);
+                            addInstance<256 , 64  , 64  , 4  , 4  , ck::Sequence<0 , 1> , ck::Sequence<1, 1, 1>  , ck::Sequence<1>>(opPtrs);
                         }
                         // clang-format on
                         return opPtrs;

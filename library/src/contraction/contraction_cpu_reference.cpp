@@ -57,7 +57,7 @@ hiptensorStatus_t hiptensorContractionReference(const hiptensorContractionPlan_t
     auto  computeType = plan->mContractionDesc.mComputeType;
     auto  candidates
         = (C == nullptr) ? instances->allSolutions().query(
-              typeA, typeB, hiptensor::NONE_TYPE, typeD, computeType)
+                               typeA, typeB, hiptensor::NONE_TYPE, typeD, computeType)
                          : instances->allSolutions().query(typeA, typeB, typeC, typeD, computeType);
 
     auto toCKVec

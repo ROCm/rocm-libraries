@@ -30,10 +30,27 @@
 #include <ck/ck.hpp>
 #include <ck/utility/sequence.hpp>
 #include <ostream>
+#include <vector>
+
+#include "permutation_types.hpp"
+#include <combined_element_wise_operation.hpp>
+#include <hiptensor/hiptensor_types.hpp>
 
 namespace hiptensor
 {
     using Uid = std::size_t;
+
+    /**
+     * \brief This enum respresents the solution instance is of permutation, elementwise binary operation
+     * or elementwise trinary operation
+     */
+    enum struct ElementwiseInstanceType_t : int32_t
+    {
+        PERMUTATION,
+        ELEMENTWISE_BINARY_OP,
+        ELEMENTWISE_TRINARY_OP,
+        UNKNOWN,
+    };
     /**
      * \brief This enum decides the over the operation based on the inputs.
      * \details This enum decides the operation based on the in puts passed in the
@@ -47,31 +64,27 @@ namespace hiptensor
     };
 
     /**
-     * \brief This enum categorizes the permutation instance
+     * \brief This enum categorizes the elementwise instance
      * \details Device instances run on GPUs, while host instances run on CPUs.
      */
-    enum struct PermutationInstanceType_t : int32_t
+    enum struct ElementwiseExecutionSpaceType_t : int32_t
     {
-        Device,
-        Host,
+        DEVICE,
+        HOST,
         UNKNOWN,
     };
 
-    // Map type to runtime PermutationOpId_t
-    template <typename OpId>
-    struct PermutationOperatorType;
-
-    template <typename OpId>
-    static constexpr auto PermutationOperatorType_v = PermutationOperatorType<OpId>::value;
-
-    using InstanceHyperParams = std::tuple<ck::index_t,
-                                           ck::index_t,
-                                           ck::index_t,
-                                           ck::index_t,
-                                           ck::index_t,
-                                           std::pair<ck::index_t, ck::index_t>,
-                                           ck::index_t,
-                                           ck::index_t>;
+    struct InstanceHyperParams
+    {
+        ck::index_t      mBlockSize;
+        ck::index_t      mM0PerBlock;
+        ck::index_t      mM1PerBlock;
+        ck::index_t      mM0PerThread;
+        ck::index_t      mM1PerThread;
+        std::vector<int> mThreadClusterArrangeOrder;
+        std::vector<int> mInScalarPerVectorSeq;
+        std::vector<int> mOutScalarPerVectorSeq;
+    };
 } // namespace hiptensor
 
 namespace std
@@ -79,7 +92,5 @@ namespace std
     ostream& operator<<(ostream& os, hiptensor::PermutationOpId_t const&);
 
 } // namespace std
-
-#include "permutation_types_impl.hpp"
 
 #endif // HIPTENSOR_PERMUTATION_TYPES_HPP

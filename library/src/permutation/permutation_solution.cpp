@@ -30,24 +30,19 @@ namespace hiptensor
 {
 
     PermutationSolution::PermutationSolution(
-        std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp,
-        std::unique_ptr<PermutationSolutionParams>&&                  params)
+        std::unique_ptr<ck::tensor_operation::device::BaseOperator>&& deviceOp)
         : mDim(0)
         , mSize(0)
-        , mBytes(0)
         , mValid(false)
         , mDeviceOp(std::move(deviceOp))
-        , mParams(std::move(params))
     {
     }
 
     PermutationSolution::PermutationSolution(PermutationSolution&& other)
         : mDim(other.mDim)
         , mSize(other.mSize)
-        , mBytes(other.mBytes)
         , mValid(other.mValid)
         , mDeviceOp(std::move(other.mDeviceOp))
-        , mParams(std::move(other.mParams))
         , mInvokerArgPtr(std::move(other.mInvokerArgPtr))
         , mInvokerPtr(std::move(other.mInvokerPtr))
     {
@@ -60,10 +55,8 @@ namespace hiptensor
             mDim = other.mDim;
 
             mSize  = other.mSize;
-            mBytes = other.mBytes;
             mValid = other.mValid;
 
-            mParams        = std::move(other.mParams);
             mDeviceOp      = std::move(other.mDeviceOp);
             mInvokerArgPtr = std::move(other.mInvokerArgPtr);
             mInvokerPtr    = std::move(other.mInvokerPtr);
@@ -73,7 +66,7 @@ namespace hiptensor
 
     float PermutationSolution::operator()(StreamConfig const& streamConfig /*= StreamConfig{}*/)
     {
-        if(!mInvokerArgPtr || !mInvokerPtr || !mParams)
+        if(!mInvokerArgPtr || !mInvokerPtr)
         {
 #if !NDEBUG
             std::cout << mDeviceOp->GetTypeString() << " is not initialized" << std::endl;
@@ -92,50 +85,9 @@ namespace hiptensor
         return mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig);
     }
 
-    float PermutationSolution::operator()(void const*                     alpha,
-                                          void const*                     A,
-                                          void*                           B,
-                                          std::vector<std::size_t> const& a_lengths,
-                                          std::vector<std::size_t> const& a_strides,
-                                          hiptensorOperator_t             opA,
-                                          const int32_t                   modeA[],
-                                          std::vector<std::size_t> const& b_lengths,
-                                          std::vector<std::size_t> const& b_strides,
-                                          hiptensorOperator_t             opB,
-                                          const int32_t                   modeB[],
-                                          const hipDataType               typeScalar,
-                                          StreamConfig const&             streamConfig)
-    {
-        if(!initArgs(alpha,
-                     A,
-                     B,
-                     a_lengths,
-                     a_strides,
-                     opA,
-                     modeA,
-                     b_lengths,
-                     b_strides,
-                     opB,
-                     modeB,
-                     typeScalar))
-        {
-#if !NDEBUG
-            std::cout << kernelName() << " does not support this problem" << std::endl;
-#endif // !NDEBUG
-            return -1.0f;
-        }
-
-        return mInvokerPtr->Run(mInvokerArgPtr.get(), streamConfig);
-    }
-
     bool PermutationSolution::isValid() const
     {
         return mValid;
-    }
-
-    std::unique_ptr<PermutationSolutionParams> const& PermutationSolution::params() const
-    {
-        return mParams;
     }
 
     size_t PermutationSolution::uid() const
@@ -162,11 +114,6 @@ namespace hiptensor
         return mSize;
     }
 
-    ck::index_t PermutationSolution::problemBytes() const
-    {
-        return mBytes;
-    }
-
     std::string PermutationSolution::kernelName() const
     {
         return mDeviceOp->GetTypeString();
@@ -186,9 +133,8 @@ namespace hiptensor
 
     void PermutationSolution::resetArgs()
     {
-        mDim   = 0;
-        mSize  = 0;
-        mBytes = 0;
+        mDim  = 0;
+        mSize = 0;
 
         mInvokerArgPtr.reset(nullptr);
         mInvokerPtr.reset(nullptr);

@@ -41,6 +41,7 @@
 
 namespace hiptensor
 {
+    using index_t = int32_t;
     // Used to map to empty tensors
     struct NoneType;
 

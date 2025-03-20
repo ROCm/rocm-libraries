@@ -65,112 +65,69 @@ hiptensorStatus_t hiptensorPermutation(const hiptensorHandle_t*           handle
 
     logger->logAPITrace("hiptensorPermutation", msg);
 
-    if(!handle || !alpha || !A || !descA || !modeA || !B || !descB || !modeB)
-    {
-        auto errorCode         = HIPTENSOR_STATUS_NOT_INITIALIZED;
-        auto printErrorMessage = [&logger, errorCode](const std::string& paramName) {
-            char msg[512];
-            snprintf(msg,
-                     sizeof(msg),
-                     "Initialization Error : %s = nullptr (%s)",
-                     paramName.c_str(),
-                     hiptensorGetErrorString(errorCode));
-            logger->logError("hiptensorPermutation", msg);
-        };
-        if(!handle)
-        {
-            printErrorMessage("handle");
-        }
-        if(!alpha)
-        {
-            printErrorMessage("alpha");
-        }
-        if(!A)
-        {
-            printErrorMessage("A");
-        }
-        if(!descA)
-        {
-            printErrorMessage("descA");
-        }
-        if(!modeA)
-        {
-            printErrorMessage("modeA");
-        }
-        if(!B)
-        {
-            printErrorMessage("B");
-        }
-        if(!descB)
-        {
-            printErrorMessage("descB");
-        }
-        if(!modeB)
-        {
-            printErrorMessage("modeB");
-        }
-        return errorCode;
-    }
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, B);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeB);
 
-    if(descA->mType != HIP_R_16F && descA->mType != HIP_R_32F)
+    constexpr std::array<std::array<hipDataType, 2>, 3> validDataTypes
+        = {{// typeA, typeC, typeScalar
+            {HIP_R_16F, HIP_R_16F},
+            {HIP_R_16F, HIP_R_32F},
+            {HIP_R_32F, HIP_R_32F}}};
+
+    std::array<hipDataType, 2> inputTensorTypes = {descA->mType, typeScalar};
+    if(std::none_of(validDataTypes.cbegin(),
+                    validDataTypes.cend(),
+                    [&inputTensorTypes](auto&& types) { return types == inputTensorTypes; }))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg,
                  sizeof(msg),
-                 "Unsupported Data Type Error : The supported data types of A and B are HIP_R_16F "
-                 "and HIP_R_32F (%s)",
+                 "Unsupported Data Type Error : The combination of data types for input tensors A, "
+                 "and B is not supported. "
+                 "See the link for details "
+                 "https://rocm.docs.amd.com/projects/hipTensor/en/docs-6.5.0/api-reference/"
+                 "api-reference.html "
+                 "(%s)",
                  hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorPermutation", msg);
         return errorCode;
     }
 
-    if(descA->mType != descB->mType)
+    float alphaF;
+    if(alpha != nullptr)
     {
-        auto errorCode = HIPTENSOR_STATUS_INVALID_VALUE;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Mismatched Data Type Error : Data types of A and B are not the same. (%s)",
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("hiptensorPermutation", msg);
-        return errorCode;
-    }
-
-    if(typeScalar != HIP_R_16F && typeScalar != HIP_R_32F)
-    {
-        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
-        snprintf(msg,
-                 sizeof(msg),
-                 "Unsupported Data Type Error : The supported data types of alpha are HIP_R_16F "
-                 "and HIP_R_32F (%s)",
-                 hiptensorGetErrorString(errorCode));
-        logger->logError("hiptensorPermutation", msg);
-        return errorCode;
+        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
 
     auto& instances = hiptensor::PermutationSolutionInstances::instance();
-    auto  solutions = instances->query(alpha,
-                                      descA,
-                                      modeA,
-                                      descB,
-                                      modeB,
-                                      typeScalar,
-                                      hiptensor::PermutationInstanceType_t::Device);
+    auto  solutions = instances->query({alphaF},
+                                      descA->mLengths,
+                                      {descA->mType},
+                                      {descB->mType},
+                                      {{modeA, modeA + descA->mLengths.size()}},
+                                      {{modeB, modeB + descB->mLengths.size()}},
+                                      {descA->mUnaryOp, descB->mUnaryOp},
+                                      hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
 
     bool canRun = false;
     for(auto pSolution : solutions)
     {
-        canRun = pSolution->initArgs(alpha,
-                                     A,
-                                     B,
-                                     descA->mLengths,
-                                     descA->mStrides,
-                                     descA->mUnaryOp,
-                                     modeA,
-                                     descB->mLengths,
-                                     descB->mStrides,
-                                     descB->mUnaryOp,
-                                     modeB,
-                                     typeScalar);
+        canRun = pSolution->initArgs({alphaF},
+                                     {descA->mLengths},
+                                     {descA->mStrides},
+                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
+                                     {descB->mLengths},
+                                     {descB->mStrides},
+                                     {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
+                                     {descA->mUnaryOp},
+                                     {A},
+                                     {B});
 
         if(canRun)
         {
@@ -193,7 +150,9 @@ hiptensorStatus_t hiptensorPermutation(const hiptensorHandle_t*           handle
                 }
 
                 auto flops = std::size_t(2) * pSolution->problemSize();
-                auto bytes = pSolution->problemBytes();
+                auto bytes = (hiptensor::hipDataTypeSize(descA->mType)
+                              + hiptensor::hipDataTypeSize(descB->mType))
+                             * pSolution->problemSize();
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
