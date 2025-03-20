@@ -21,8 +21,8 @@ The test suite includes validation and benchmarking projects that focus on unit 
 
 rocWMMA currently supports the following AMD GPU architectures:
 
-* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx940, gfx941, gfx942 as 'gfx9'
-* RDNA3 class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102 as 'gfx11'
+* CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
+* RDNA3 class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102 as 'gfx11'; gfx1200, gfx1201 as 'gfx12'
 
 Dependencies:
 
@@ -47,8 +47,8 @@ For more detailed information, please refer to the [rocWMMA installation guide](
 
 |Option|Description|Default value|
 |---|---|---|
-|GPU_TARGETS|Build code for specific GPU target(s)|gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201|
-|AMDGPU_TARGETS|(Deprecated) Build code for specific GPU target(s)|gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201|
+|GPU_TARGETS|Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201|
+|AMDGPU_TARGETS|(Deprecated) Build code for specific GPU target(s)|gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201|
 |ROCWMMA_BUILD_TESTS|Build Tests|ON|
 |ROCWMMA_BUILD_SAMPLES|Build Samples|ON|
 |ROCWMMA_BUILD_DOCS|Build doxygen documentation from code|OFF|

@@ -48,8 +48,6 @@ namespace rocwmma
         {
             GFX908           = Constants::AMDGCN_ARCH_ID_GFX908,
             GFX90A           = Constants::AMDGCN_ARCH_ID_GFX90A,
-            GFX940           = Constants::AMDGCN_ARCH_ID_GFX940,
-            GFX941           = Constants::AMDGCN_ARCH_ID_GFX941,
             GFX942           = Constants::AMDGCN_ARCH_ID_GFX942,
             GFX950           = Constants::AMDGCN_ARCH_ID_GFX950,
             GFX1100          = Constants::AMDGCN_ARCH_ID_GFX1100,

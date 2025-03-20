@@ -53,14 +53,6 @@ namespace rocwmma
         {
             mGcnArch = hipGcnArch_t::GFX90A;
         }
-        else if(deviceName.find("gfx940") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX940;
-        }
-        else if(deviceName.find("gfx941") != std::string::npos)
-        {
-            mGcnArch = hipGcnArch_t::GFX941;
-        }
         else if(deviceName.find("gfx942") != std::string::npos)
         {
             mGcnArch = hipGcnArch_t::GFX942;

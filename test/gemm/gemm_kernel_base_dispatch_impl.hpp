@@ -59,7 +59,7 @@ namespace rocwmma
         // - TBlockX [32, 64, 128, 256]
         // - TBlockY [1, 2, 4]
         // - Wave Size [32, 64]
-        // - Arch [gfx908, gfx90a, gfx940, gfx941, gfx942, gfx1100, gfx1101, gfx1102]
+        // - Arch [gfx908, gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1102, gfx1200, gfx1201]
         auto dispatchGuardFunc = [this]() {
             bool dispatchResult = false;
 
@@ -80,20 +80,18 @@ namespace rocwmma
     ROCWMMA_SWITCH_BODY2_ARG2(         \
         waveSize, SWITCH_BODY_TBLOCK_Y, HipDevice::Wave32, HipDevice::Wave64, ARCH_ID)
 
-#define DISPATCH_GUARD_BODY                           \
-    ROCWMMA_SWITCH_BODY11_ARG1(deviceArch,            \
-                               SWITCH_BODY_WAVE_SIZE, \
-                               HipDevice::GFX908,     \
-                               HipDevice::GFX90A,     \
-                               HipDevice::GFX940,     \
-                               HipDevice::GFX941,     \
-                               HipDevice::GFX942,     \
-                               HipDevice::GFX950,     \
-                               HipDevice::GFX1100,    \
-                               HipDevice::GFX1101,    \
-                               HipDevice::GFX1102,    \
-                               HipDevice::GFX1200,    \
-                               HipDevice::GFX1201)
+#define DISPATCH_GUARD_BODY                          \
+    ROCWMMA_SWITCH_BODY9_ARG1(deviceArch,            \
+                              SWITCH_BODY_WAVE_SIZE, \
+                              HipDevice::GFX908,     \
+                              HipDevice::GFX90A,     \
+                              HipDevice::GFX942,     \
+                              HipDevice::GFX950,     \
+                              HipDevice::GFX1100,    \
+                              HipDevice::GFX1101,    \
+                              HipDevice::GFX1102,    \
+                              HipDevice::GFX1200,    \
+                              HipDevice::GFX1201)
 
             DISPATCH_GUARD_BODY
 
@@ -136,7 +134,7 @@ namespace rocwmma
         // - TBlockX [32, 64, 128, 256]
         // - TBlockY [1, 2, 4]
         // - Wave Size [32, 64]
-        // - Arch [gfx908, gfx90a, gfx940, gfx941, gfx942, gfx1100, gfx1101, gfx1102]
+        // - Arch [gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950 gfx1100, gfx1101, gfx1102, gfx1200, gfx1201]
         auto dispatchKernel = [this]() {
             auto waveSize   = DeviceInfo::instance()->warpSize();
             auto deviceArch = DeviceInfo::instance()->getGcnArch();
@@ -158,20 +156,18 @@ namespace rocwmma
     ROCWMMA_SWITCH_BODY2_ARG2(         \
         waveSize, SWITCH_BODY_TBLOCK_Y, HipDevice::Wave32, HipDevice::Wave64, ARCH_ID)
 
-#define DISPATCH_KERNEL_FUNC_BODY                     \
-    ROCWMMA_SWITCH_BODY11_ARG1(deviceArch,            \
-                               SWITCH_BODY_WAVE_SIZE, \
-                               HipDevice::GFX908,     \
-                               HipDevice::GFX90A,     \
-                               HipDevice::GFX940,     \
-                               HipDevice::GFX941,     \
-                               HipDevice::GFX942,     \
-                               HipDevice::GFX950,     \
-                               HipDevice::GFX1100,    \
-                               HipDevice::GFX1101,    \
-                               HipDevice::GFX1102,    \
-                               HipDevice::GFX1200,    \
-                               HipDevice::GFX1201)
+#define DISPATCH_KERNEL_FUNC_BODY                    \
+    ROCWMMA_SWITCH_BODY9_ARG1(deviceArch,            \
+                              SWITCH_BODY_WAVE_SIZE, \
+                              HipDevice::GFX908,     \
+                              HipDevice::GFX90A,     \
+                              HipDevice::GFX942,     \
+                              HipDevice::GFX950,     \
+                              HipDevice::GFX1100,    \
+                              HipDevice::GFX1101,    \
+                              HipDevice::GFX1102,    \
+                              HipDevice::GFX1200,    \
+                              HipDevice::GFX1201)
 
             DISPATCH_KERNEL_FUNC_BODY
 

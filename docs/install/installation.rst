@@ -57,7 +57,7 @@ To install rocWMMA on SLES, use:
 Once installed, rocWMMA can be used just like any other library with a C++ API.
 
 .. note::
- The prebuilt package supports the following targets: ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
+ The prebuilt package supports the following targets: ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
 
 
 Once rocWMMA is installed, you can see the ``rocwmma.hpp`` header file in the ``/opt/rocm/include/rocwmma`` directory.
@@ -79,16 +79,19 @@ This value may also increase in the future as more features are added to rocWMMA
 
 GPU support
 ^^^^^^^^^^^
-AMD CDNA class GPU featuring matrix core support: `gfx908`, `gfx90a`, `gfx940`, `gfx941`, `gfx942` as `gfx9`
+AMD CDNA class GPU featuring matrix core support: `gfx908`, `gfx90a`, `gfx942`, `gfx950` as `gfx9`
 
 .. note::
-    Double precision FP64 datatype support requires gfx90a, gfx940, gfx941 or gfx942.
+    Double precision FP64 datatype support requires gfx90a, gfx942 or gfx950.
 
-    F8 and BF8 datatype support requires gfx940, gfx941 or gfx942.
+    F8 and BF8 datatype support requires gfx942 or gfx950
 
 Or
 
-AMD RDNA3 class GPU featuring AI acceleration support: `gfx1100`, `gfx1101`, `gfx1102` as `gfx11`.
+AMD RDNA3 class GPU featuring AI acceleration support: `gfx1100`, `gfx1101`, `gfx1102` as `gfx11`; `gfx1200`, `gfx1201` as `gfx12`.
+
+.. note::
+    F8 and BF8 datatype support requires gfx1200 or gfx1201
 
 Dependencies
 ^^^^^^^^^^^^
@@ -189,7 +192,7 @@ Below are the project options available to build rocWMMA library with or without
         -   **Default Value**
     *   -   GPU_TARGETS
         -   Build code for specific GPU target(s)
-        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
+        -   ``gfx908``; ``gfx90a``; ``gfx942``; ``gfx950``; ``gfx1100``; ``gfx1101``; ``gfx1102``; ``gfx1200``; ``gfx1201``
     *   -   ROCWMMA_BUILD_TESTS
         -   Build Tests
         -   ON
