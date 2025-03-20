@@ -187,6 +187,7 @@ rocroller_add_dependency(
 )
 
 # does not show up in headers, no system package required
+rocroller_add_dependency(fmt VERSION 10.2.1)
 rocroller_add_dependency(spdlog VERSION 1.14.1)
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
@@ -246,13 +247,6 @@ rocm_package_add_deb_dependencies(
 )
 rocm_package_add_rpm_dependencies(
     COMPONENT devel DEPENDS liboost-container1.74-devel
-)
-
-rocm_package_add_deb_dependencies(
-    COMPONENT devel DEPENDS libfmt-dev
-)
-rocm_package_add_rpm_dependencies(
-    COMPONENT devel DEPENDS libfmt-devel
 )
 
 if(BUILD_CLIENTS OR BUILD_TESTING)

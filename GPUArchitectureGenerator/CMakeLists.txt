@@ -77,6 +77,7 @@ target_compile_options(
                                     ${EXTRA_COMPILE_OPTIONS}
 )
 target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
+
 target_link_libraries(
   GPUArchitectureGenerator PUBLIC
   ${llvm_libs}

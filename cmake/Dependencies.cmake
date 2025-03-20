@@ -50,6 +50,7 @@ set(_rocroller_all_local_deps
 )
 # Dependencies where we never look for a local version
 set(_rocroller_all_remote_deps
+    fmt
     yaml-cpp
     isa_spec_manager
     mrisa_xml
@@ -196,12 +197,27 @@ macro(_build_local)
 endmacro()
 
 # Functions to fetch individual components
+function(_fetch_fmt VERSION HASH)
+    _determine_git_tag("" master)
+
+    set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+    set(FMT_SYSTEM_HEADERS ON)
+
+    FetchContent_Declare(
+        fmt
+        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+        GIT_TAG ${GIT_TAG}
+    )
+    FetchContent_MakeAvailable(fmt)
+    _exclude_from_all(${fmt_SOURCE_DIR})
+endfunction()
+
 function(_fetch_spdlog VERSION HASH)
     _determine_git_tag(v v1.x)
 
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
     set(SPDLOG_USE_STD_FORMAT OFF)
-    set(SPDLOG_FMT_EXTERNAL ON)
+    set(SPDLOG_FMT_EXTERNAL_HO ON)
     set(SPDLOG_BUILD_PIC ON)
     set(SPDLOG_INSTALL ON)
     FetchContent_Declare(
@@ -478,7 +494,7 @@ set(ROCmCMakeBuildTools_EXPORT_VARS CMAKE_MODULE_PATH)
 macro(_determine_git_tag PREFIX DEFAULT)
     if(HASH)
         set(GIT_TAG ${HASH})
-    elseif(VERSION AND NOT ${PREFIX} STREQUAL "FALSE")
+    elseif(VERSION AND NOT "${PREFIX}" STREQUAL "FALSE")
         set(GIT_TAG ${PREFIX}${VERSION})
     else()
         set(GIT_TAG ${DEFAULT})
