@@ -1389,8 +1389,8 @@ namespace detail
 {
 struct search_n_config_params
 {
-    size_t               threshold;
     kernel_config_params kernel_config;
+    size_t               threshold;
 };
 } // namespace detail
 
@@ -1398,17 +1398,34 @@ struct search_n_config_params
 ///
 /// \tparam BlockSize number of threads in a block.
 /// \tparam ItemsPerThread number of items processed by each thread.
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
+template<unsigned int BlockSize, unsigned int ItemsPerThread, size_t Threshold>
 struct search_n_config : public detail::search_n_config_params
 {
 #ifndef DOXYGEN_DOCUMENTATION_BUILD
     constexpr search_n_config()
         : detail::search_n_config_params{
-            8, {BlockSize, ItemsPerThread, 0}
+            {BlockSize, ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT},
+            Threshold
     }
     {}
 #endif
 };
+
+namespace detail
+{
+template<class InputType>
+struct default_search_n_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(InputType), sizeof(int));
+
+    using type
+        = search_n_config<limit_block_size<256u, sizeof(InputType), ROCPRIM_WARP_SIZE_64>::value,
+                          ::rocprim::max(1u, 10u / item_scale),
+                          8>;
+};
+
+} // namespace detail
 
 namespace detail
 {

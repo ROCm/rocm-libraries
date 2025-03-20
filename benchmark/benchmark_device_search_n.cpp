@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,17 @@ int main(int argc, char* argv[])
                                      "human",
                                      "either: json,human,txt");
     parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -65,7 +76,18 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks{};
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        size,
+                                                        seed,
+                                                        stream);
+#else
     add_benchmark_search_n<benchmark_search_n_types>(benchmarks, seed, stream, size);
+#endif
 
     // Use manual timing
     for(auto& b : benchmarks)
@@ -85,6 +107,8 @@ int main(int argc, char* argv[])
 
     // Run benchmarks
     benchmark::RunSpecifiedBenchmarks();
+#ifndef BENCHMARK_CONFIG_TUNING
     clean_up_benchmarks_search_n();
+#endif
     return 0;
 }

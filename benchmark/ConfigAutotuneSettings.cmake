@@ -85,6 +85,11 @@ ${TUNING_TYPES};${LIMITED_TUNING_TYPES};using_warp_scan reduce_then_scan" PARENT
     set(list_across "\
 binary_search upper_bound lower_bound;${TUNING_TYPES};${LIMITED_TUNING_TYPES};64 128 256;1 2 4 8 16" PARENT_SCOPE)
     set(output_pattern_suffix "@SubAlgorithm@_@ValueType@_@OutputType@_@BlockSize@_@ItemsPerThread@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_search_n")
+    set(list_across_names "InputType;BlockSize;ItemsPerThread;Threshold" PARENT_SCOPE)
+    set(list_across "\
+${TUNING_TYPES};64 128 256 512 1024;1 2 4 8 16;4 8 12 16" PARENT_SCOPE)
+    set(output_pattern_suffix "@InputType@_@BlockSize@_@ItemsPerThread@_@Threshold@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_segmented_radix_sort_keys")
     set(list_across_names "\
 KeyType;RadixBits;BlockSize;ItemsPerThread;WarpSmallLWS;WarpSmallIPT;WarpSmallBS;WarpPartition;WarpMediumLWS;WarpMediumIPT;WarpMediumBS" PARENT_SCOPE)

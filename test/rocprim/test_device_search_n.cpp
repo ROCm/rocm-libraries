@@ -81,7 +81,7 @@ using custom_double2     = common::custom_type<double, double, true>;
 using custom_int64_array = test_utils::custom_test_array_type<std::int64_t, 4>;
 
 // Custom configs
-using custom_config_0 = rocprim::search_n_config<256, 4>;
+using custom_config_0 = rocprim::search_n_config<256, 4, 6>;
 
 using RocprimDeviceSearchNTestsParams = ::testing::Types<
     // Tests with default configuration

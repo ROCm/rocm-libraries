@@ -596,6 +596,14 @@ class AlgorithmDevicePartitionThreeWay(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
+class AlgorithmDeviceSearchN(Algorithm):
+    algorithm_name = "device_search_n"
+    cpp_configuration_template_name = "search_n_config_template"
+    config_selection_params = [
+        SelectionType(name="data_type", is_optional=False, select_on_size_only=False)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceSelectFlag(Algorithm):
     algorithm_name = "device_select_flag"
     cpp_configuration_template_name = "select_flag_config_template"
@@ -727,6 +735,8 @@ def create_algorithm(algorithm_name: str, fallback_entries: List[FallbackCase]):
         return AlgorithmDevicePartitionPredicate(fallback_entries)
     elif algorithm_name == 'device_partition_three_way':
         return AlgorithmDevicePartitionThreeWay(fallback_entries)
+    elif algorithm_name == 'device_search_n':
+        return AlgorithmDeviceSearchN(fallback_entries)
     elif algorithm_name == 'device_select_flag':
         return AlgorithmDeviceSelectFlag(fallback_entries)
     elif algorithm_name == 'device_select_predicate':
