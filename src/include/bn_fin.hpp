@@ -288,8 +288,7 @@ int BNFin<Tgpu, Tref>::SetBNDescriptor()
 template <typename Tgpu, typename Tref>
 auto BNFin<Tgpu, Tref>::GetFwdTrainSolvers()
 {
-    return miopen::solver::SolverContainer<miopen::solver::batchnorm::BnFwdTrainingSpatialSingle,
-                                           miopen::solver::batchnorm::BnFwdTrainingSpatialMultiple,
+    return miopen::solver::SolverContainer<miopen::solver::batchnorm::BnFwdTrainingSpatial,
                                            miopen::solver::batchnorm::BnFwdTrainingPerActivation>{};
 }
 
@@ -302,8 +301,7 @@ auto BNFin<Tgpu, Tref>::GetFwdInferSolvers()
 template <typename Tgpu, typename Tref>
 auto BNFin<Tgpu, Tref>::GetBwdSolvers()
 {
-    return miopen::solver::SolverContainer<miopen::solver::batchnorm::BnBwdTrainingSpatialSingle,
-                                           miopen::solver::batchnorm::BnBwdTrainingSpatialMultiple,
+    return miopen::solver::SolverContainer<miopen::solver::batchnorm::BnBwdTrainingSpatial,
                                            miopen::solver::batchnorm::BnBwdTrainingPerActivation>{};
 }
 
