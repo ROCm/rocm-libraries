@@ -64,15 +64,6 @@ THE SOFTWARE.
     }                                                                     \
 }
 
-static bool GetEnv(const char *name, char *value, size_t valueSize) {
-    const char *v = getenv(name);
-    if (v) {
-        strncpy(value, v, valueSize);
-        value[valueSize - 1] = 0;
-    }
-    return v ? true : false;
-}
-
 static inline int align(int value, int alignment) {
    return (value + alignment - 1) & ~(alignment - 1);
 }

@@ -22,7 +22,7 @@ THE SOFTWARE.
 #include "rocjpeg_parser.h"
 
 RocJpegStreamParser::RocJpegStreamParser() : stream_{nullptr}, stream_end_{nullptr}, stream_length_{0},
-    jpeg_stream_parameters_{{}} {
+    jpeg_stream_parameters_{} {
 }
 
 RocJpegStreamParser::~RocJpegStreamParser() {
@@ -337,7 +337,7 @@ bool RocJpegStreamParser::ParseSOS() {
     jpeg_stream_parameters_.slice_parameter_buffer.num_components = num_components;
 
     stream_ += 3;
-    for (int32_t i = 0; i < num_components; i++) {
+    for (uint32_t i = 0; i < num_components; i++) {
         component_id = *stream_++;
         table = *stream_++;
         jpeg_stream_parameters_.slice_parameter_buffer.components[i].component_selector = component_id;

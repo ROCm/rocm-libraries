@@ -49,12 +49,12 @@ __device__ __forceinline__ float4 hipUnpack(uint32_t src) {
     return make_float4(hipUnpack0(src), hipUnpack1(src), hipUnpack2(src), hipUnpack3(src));
 }
 
-__global__ void ColorConvertYUV444ToRGBKernel(uint32_t dst_width, uint32_t dst_height, uint8_t *dst_image, uint32_t dst_image_stride_in_bytes,
+__global__ void ColorConvertYUV444ToRGBKernel(uint8_t *dst_image, uint32_t dst_image_stride_in_bytes,
     uint32_t dst_image_stride_in_bytes_comp, const uint8_t *src_y_image, const uint8_t *src_u_image, const uint8_t *src_v_image,
     uint32_t src_yuv_image_stride_in_bytes, uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_yuv_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_yuv_image_stride_in_bytes_comp + (x << 3);
@@ -250,18 +250,18 @@ void ColorConvertYUV444ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t ds
     uint32_t src_yuv_image_stride_in_bytes_comp = src_yuv_image_stride_in_bytes * 2;
 
     ColorConvertYUV444ToRGBKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image,
                         dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_yuv_image, src_yuv_image + src_u_image_offset,
                         src_yuv_image + src_v_image_offset, src_yuv_image_stride_in_bytes,
                         dst_width_comp, dst_height_comp, src_yuv_image_stride_in_bytes_comp);
 }
 
-__global__ void ColorConvertYUV444ToRGBPlanarKernel(uint32_t dst_width, uint32_t dst_height, uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes,
+__global__ void ColorConvertYUV444ToRGBPlanarKernel(uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes,
     uint32_t dst_image_stride_in_bytes_comp, const uint8_t *src_y_image, const uint8_t *src_u_image, const uint8_t *src_v_image,
     uint32_t src_yuv_image_stride_in_bytes, uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_yuv_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_yuv_image_stride_in_bytes_comp + (x << 3);
@@ -480,18 +480,18 @@ void ColorConvertYUV444ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
     uint32_t src_yuv_image_stride_in_bytes_comp = src_yuv_image_stride_in_bytes * 2;
 
     ColorConvertYUV444ToRGBPlanarKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image_r, dst_image_g, dst_image_b,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image_r, dst_image_g, dst_image_b,
                         dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_yuv_image, src_yuv_image + src_u_image_offset,
                         src_yuv_image + src_v_image_offset, src_yuv_image_stride_in_bytes,
                         dst_width_comp, dst_height_comp, src_yuv_image_stride_in_bytes_comp);
 }
 
-__global__ void ColorConvertYUV440ToRGBKernel(uint32_t dst_width, uint32_t dst_height, uint8_t *dst_image, uint32_t dst_image_stride_in_bytes,
+__global__ void ColorConvertYUV440ToRGBKernel(uint8_t *dst_image, uint32_t dst_image_stride_in_bytes,
     uint32_t dst_image_stride_in_bytes_comp, const uint8_t *src_y_image, const uint8_t *src_u_image, const uint8_t *src_v_image,
     uint32_t src_yuv_image_stride_in_bytes, uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_yuv_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_yuv_image_stride_in_bytes_comp + (x << 3);
@@ -684,18 +684,18 @@ void ColorConvertYUV440ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t ds
     uint32_t src_yuv_image_stride_in_bytes_comp = src_yuv_image_stride_in_bytes * 2;
 
     ColorConvertYUV440ToRGBKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image,
                         dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_yuv_image, src_yuv_image + src_u_image_offset,
                         src_yuv_image + src_v_image_offset, src_yuv_image_stride_in_bytes,
                         dst_width_comp, dst_height_comp, src_yuv_image_stride_in_bytes_comp);
 }
 
-__global__ void ColorConvertYUV440ToRGBPlanarKernel(uint32_t dst_width, uint32_t dst_height, uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes,
+__global__ void ColorConvertYUV440ToRGBPlanarKernel(uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes,
     uint32_t dst_image_stride_in_bytes_comp, const uint8_t *src_y_image, const uint8_t *src_u_image, const uint8_t *src_v_image,
     uint32_t src_yuv_image_stride_in_bytes, uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_yuv_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_yuv_image_stride_in_bytes_comp + (x << 3);
@@ -911,19 +911,19 @@ void ColorConvertYUV440ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
     uint32_t src_yuv_image_stride_in_bytes_comp = src_yuv_image_stride_in_bytes * 2;
 
     ColorConvertYUV440ToRGBPlanarKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image_r, dst_image_g, dst_image_b,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image_r, dst_image_g, dst_image_b,
                         dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_yuv_image, src_yuv_image + src_u_image_offset,
                         src_yuv_image + src_v_image_offset, src_yuv_image_stride_in_bytes,
                         dst_width_comp, dst_height_comp, src_yuv_image_stride_in_bytes_comp);
 }
 
-__global__ void ColorConvertYUYVToRGBKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertYUYVToRGBKernel(
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes, uint32_t src_image_stride_in_bytes_comp,
     uint32_t dst_width_comp, uint32_t dst_height_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t l0_idx = y * src_image_stride_in_bytes_comp + (x << 4);
@@ -1127,17 +1127,17 @@ void ColorConvertYUYVToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_
     uint32_t src_image_stride_in_bytes_comp = src_image_stride_in_bytes * 2;
 
     ColorConvertYUYVToRGBKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                                   dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image,
+                                   dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image,
                                    dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_image, src_image_stride_in_bytes,
                                    src_image_stride_in_bytes_comp, dst_width_comp, dst_height_comp);
 }
 
-__global__ void ColorConvertYUYVToRGBPlanarKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertYUYVToRGBPlanarKernel(
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes, uint32_t src_image_stride_in_bytes_comp,
     uint32_t dst_width_comp, uint32_t dst_height_comp) {
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t l0_idx = y * src_image_stride_in_bytes_comp + (x << 4);
@@ -1369,19 +1369,19 @@ void ColorConvertYUYVToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_
     uint32_t src_image_stride_in_bytes_comp = src_image_stride_in_bytes * 2;
 
     ColorConvertYUYVToRGBPlanarKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                                   dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image_r, dst_image_g, dst_image_b,
+                                   dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image_r, dst_image_g, dst_image_b,
                                    dst_image_stride_in_bytes, dst_image_stride_in_bytes_comp, src_image, src_image_stride_in_bytes,
                                    src_image_stride_in_bytes_comp, dst_width_comp, dst_height_comp);
 }
 
-__global__ void ColorConvertNV12ToRGBKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertNV12ToRGBKernel(
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_luma_image, uint32_t src_luma_image_stride_in_bytes,
     const uint8_t *src_chroma_image, uint32_t src_chroma_image_stride_in_bytes,
     uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_luma_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_luma_image_stride_in_bytes_comp + (x << 3);
@@ -1605,19 +1605,19 @@ void ColorConvertNV12ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t dst_
     uint32_t src_luma_image_stride_in_bytes_comp = src_luma_image_stride_in_bytes * 2;
 
     ColorConvertNV12ToRGBKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image, dst_image_stride_in_bytes,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image, dst_image_stride_in_bytes,
                         dst_image_stride_in_bytes_comp, src_luma_image, src_luma_image_stride_in_bytes, src_chroma_image,
                         src_chroma_image_stride_in_bytes, dst_width_comp, dst_height_comp, src_luma_image_stride_in_bytes_comp);
 }
 
-__global__ void ColorConvertNV12ToRGBPlanarKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertNV12ToRGBPlanarKernel(
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_luma_image, uint32_t src_luma_image_stride_in_bytes,
     const uint8_t *src_chroma_image, uint32_t src_chroma_image_stride_in_bytes,
     uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_luma_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_luma_image_stride_in_bytes_comp + (x << 3);
@@ -1865,19 +1865,19 @@ void ColorConvertNV12ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint32_
     uint32_t src_luma_image_stride_in_bytes_comp = src_luma_image_stride_in_bytes * 2;
 
     ColorConvertNV12ToRGBPlanarKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image_r, dst_image_g, dst_image_b, dst_image_stride_in_bytes,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image_r, dst_image_g, dst_image_b, dst_image_stride_in_bytes,
                         dst_image_stride_in_bytes_comp, src_luma_image, src_luma_image_stride_in_bytes, src_chroma_image,
                         src_chroma_image_stride_in_bytes, dst_width_comp, dst_height_comp, src_luma_image_stride_in_bytes_comp);
 
 }
 
-__global__ void ColorConvertYUV400ToRGBKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertYUV400ToRGBKernel(
     uint8_t *dst_image, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_luma_image, uint32_t src_luma_image_stride_in_bytes,
     uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_luma_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_luma_image_stride_in_bytes_comp + (x << 3);
@@ -1959,19 +1959,19 @@ void ColorConvertYUV400ToRGB(hipStream_t stream, uint32_t dst_width, uint32_t ds
     uint32_t src_luma_image_stride_in_bytes_comp = src_luma_image_stride_in_bytes * 2;
 
     ColorConvertYUV400ToRGBKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image, dst_image_stride_in_bytes,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image, dst_image_stride_in_bytes,
                         dst_image_stride_in_bytes_comp, src_luma_image, src_luma_image_stride_in_bytes, dst_width_comp, dst_height_comp,
                         src_luma_image_stride_in_bytes_comp);
 
 }
 
-__global__ void ColorConvertYUV400ToRGBPlanarKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ColorConvertYUV400ToRGBPlanarKernel(
     uint8_t *dst_image_r, uint8_t *dst_image_g, uint8_t *dst_image_b, uint32_t dst_image_stride_in_bytes, uint32_t dst_image_stride_in_bytes_comp,
     const uint8_t *src_luma_image, uint32_t src_luma_image_stride_in_bytes,
     uint32_t dst_width_comp, uint32_t dst_height_comp, uint32_t src_luma_image_stride_in_bytes_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp) && (y < dst_height_comp)) {
         uint32_t src_y0_idx = y * src_luma_image_stride_in_bytes_comp + (x << 3);
@@ -2022,7 +2022,7 @@ void ColorConvertYUV400ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
     uint32_t src_luma_image_stride_in_bytes_comp = src_luma_image_stride_in_bytes * 2;
 
     ColorConvertYUV400ToRGBPlanarKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, dst_image_r, dst_image_g, dst_image_b, dst_image_stride_in_bytes,
+                        dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_image_r, dst_image_g, dst_image_b, dst_image_stride_in_bytes,
                         dst_image_stride_in_bytes_comp, src_luma_image, src_luma_image_stride_in_bytes, dst_width_comp, dst_height_comp,
                         src_luma_image_stride_in_bytes_comp);
 
@@ -2031,8 +2031,8 @@ void ColorConvertYUV400ToRGBPlanar(hipStream_t stream, uint32_t dst_width, uint3
 __global__ void ColorConvertRGBAToRGBKernel(uint32_t dst_width, uint32_t dst_height, uint8_t *dst_image, uint32_t dst_image_stride_in_bytes,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes) {
 
-    int x = (hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x) * 8;
-    int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = (hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x) * 8;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if (x >= dst_width || y >= dst_height) {
         return;
@@ -2083,8 +2083,8 @@ __global__ void ConvertInterleavedUVToPlanarUVKernel(uint32_t dst_width, uint32_
     uint8_t *dst_image1, uint8_t *dst_image2, uint32_t dst_image_stride_in_bytes,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes) {
 
-    int32_t x = (hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x) * 8;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = (hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x) * 8;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if (x >= dst_width || y >= dst_height) {
         return;
@@ -2133,13 +2133,13 @@ void ConvertInterleavedUVToPlanarUV(hipStream_t stream, uint32_t dst_width, uint
 
 }
 
-__global__ void ExtractYFromPackedYUYVKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ExtractYFromPackedYUYVKernel(uint32_t dst_height,
     uint8_t *destination_y, uint32_t dst_luma_stride_in_bytes,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes,
     uint32_t dst_width_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if (x < dst_width_comp && y < dst_height) {
         uint32_t src_idx = y * src_image_stride_in_bytes + (x << 4);
@@ -2179,17 +2179,17 @@ void ExtractYFromPackedYUYV(hipStream_t stream, uint32_t dst_width, uint32_t dst
     uint32_t dst_width_comp = (dst_width + 7) / 8;
 
     ExtractYFromPackedYUYVKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                                  dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, destination_y,
+                                  dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_height, destination_y,
                                   dst_luma_stride_in_bytes, src_image, src_image_stride_in_bytes, dst_width_comp);
 }
 
-__global__ void ConvertPackedYUYVToPlanarYUVKernel(uint32_t dst_width, uint32_t dst_height,
+__global__ void ConvertPackedYUYVToPlanarYUVKernel(uint32_t dst_height,
     uint8_t *destination_y, uint8_t *destination_u, uint8_t *destination_v, uint32_t dst_luma_stride_in_bytes, uint32_t dst_chroma_stride_in_bytes,
     const uint8_t *src_image, uint32_t src_image_stride_in_bytes,
     uint32_t dst_width_comp) {
 
-    int32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+    uint32_t x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+    uint32_t y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
     if ((x < dst_width_comp && y < dst_height)) {
         uint32_t src_idx = y * src_image_stride_in_bytes + (x << 4);
@@ -2241,6 +2241,6 @@ void ConvertPackedYUYVToPlanarYUV(hipStream_t stream, uint32_t dst_width, uint32
     uint32_t dst_width_comp = (dst_width + 7) / 8;
 
     ConvertPackedYUYVToPlanarYUVKernel<<<dim3(ceil(static_cast<float>(global_threads_x) / local_threads_x), ceil(static_cast<float>(global_threads_y) / local_threads_y)),
-                                    dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_width, dst_height, destination_y, destination_u,
+                                    dim3(local_threads_x, local_threads_y), 0, stream>>>(dst_height, destination_y, destination_u,
                                     destination_v, dst_luma_stride_in_bytes, dst_chroma_stride_in_bytes, src_image, src_image_stride_in_bytes, dst_width_comp);
 }

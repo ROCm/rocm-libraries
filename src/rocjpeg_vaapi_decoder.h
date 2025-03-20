@@ -277,12 +277,11 @@ public:
     /**
      * @brief Initializes the decoder with the specified device, GCN architecture, and device ID.
      * @param device_name The name of the device.
-     * @param gcn_arch_name The name of the GCN architecture.
      * @param device_id The ID of the device.
      * @param gpu_uuid The UUID of the GPU.
      * @return The status of the initialization.
      */
-    RocJpegStatus InitializeDecoder(std::string device_name, std::string gcn_arch_name, int device_id, std::string& gpu_uuid);
+    RocJpegStatus InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid);
 
     /**
      * @brief Submits a JPEG stream for decoding.

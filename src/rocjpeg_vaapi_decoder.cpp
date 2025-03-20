@@ -294,7 +294,7 @@ bool RocJpegVaapiMemoryPool::SetSurfaceAsIdle(VASurfaceID surface_id) {
  */
 RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id}, drm_fd_{-1}, min_picture_width_{64}, min_picture_height_{64},
     max_picture_width_{4096}, max_picture_height_{4096}, supports_modifiers_{false}, va_display_{0}, va_config_attrib_{{}}, va_config_id_{0}, va_profile_{VAProfileJPEGBaseline},
-    vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{0}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
+    vaapi_mem_pool_(std::make_unique<RocJpegVaapiMemoryPool>()), current_vcn_jpeg_spec_{}, va_picture_parameter_buf_id_{0}, va_quantization_matrix_buf_id_{0}, va_huffmantable_buf_id_{0},
     va_slice_param_buf_id_{0}, va_slice_data_buf_id_{0} {};
 
 /**
@@ -344,12 +344,11 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
  * and other necessary parameters. It also sets up the VAAPI display and creates the decoder configuration.
  *
  * @param device_name The name of the device.
- * @param gcn_arch_name The name of the GCN architecture.
  * @param device_id The ID of the device.
  * @param gpu_uuid The UUID of the GPU.
  * @return The status of the initialization process.
  */
-RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, std::string gcn_arch_name, int device_id, std::string& gpu_uuid) {
+RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(std::string device_name, int device_id, std::string& gpu_uuid) {
     device_id_ = device_id;
     std::vector<int> visible_devices;
     GetVisibleDevices(visible_devices);
@@ -788,14 +787,14 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
             CHECK_VAAPI(vaCreateSurfaces(va_display_, surface_format, key.width, key.height, mem_pool_entry.va_surface_ids.data(), mem_pool_entry.va_surface_ids.size(), surface_attribs.data(), supports_modifiers_ ? 2 : 1));
             mem_pool_entry.image_width = key.width;
             mem_pool_entry.image_height = key.height;
-            for (int i = 0; i < mem_pool_entry.va_surface_ids.size(); i++) {
+            for (size_t i = 0; i < mem_pool_entry.va_surface_ids.size(); i++) {
                 surface_ids[indices[i]] = mem_pool_entry.va_surface_ids[i];
             }
             mem_pool_entry.hip_interops.resize(indices.size(), HipInteropDeviceMem());
             mem_pool_entry.entry_status = kBusy;
             CHECK_ROCJPEG(vaapi_mem_pool_->AddPoolEntry(key.pixel_format, mem_pool_entry));
         } else {
-            for (int i = 0; i < mem_pool_entry.va_surface_ids.size(); i++) {
+            for (size_t i = 0; i < mem_pool_entry.va_surface_ids.size(); i++) {
                 surface_ids[indices[i]] = mem_pool_entry.va_surface_ids[i];
             }
         }

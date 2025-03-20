@@ -28,6 +28,9 @@ RocJpegDecoder::RocJpegDecoder(RocJpegBackend backend, int device_id) :
 RocJpegDecoder::~RocJpegDecoder() {
     if (hip_stream_) {
         hipError_t hip_status = hipStreamDestroy(hip_stream_);
+        if (hip_status != hipSuccess) {
+            ERR("ERROR: Failed to destroy the HIP stream!");
+        }
     }
 }
 
@@ -44,7 +47,6 @@ RocJpegDecoder::~RocJpegDecoder() {
  *         - ROCJPEG_STATUS_INVALID_PARAMETER if the requested device_id is not found.
  */
 RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
-    hipError_t hip_status = hipSuccess;
     CHECK_HIP(hipGetDeviceCount(&num_devices_));
     if (num_devices_ < 1) {
         ERR("ERROR: Failed to find any GPU!");
@@ -80,7 +82,7 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
     }
     if (backend_ == ROCJPEG_BACKEND_HARDWARE) {
         std::string gpu_uuid(hip_dev_prop_.uuid.bytes, sizeof(hip_dev_prop_.uuid.bytes));
-        rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, hip_dev_prop_.gcnArchName, device_id_, gpu_uuid);
+        rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, device_id_, gpu_uuid);
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
             ERR("ERROR: Failed to initialize the VA-API JPEG decoder!");
             return rocjpeg_status;
@@ -104,7 +106,6 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
  */
 RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, const RocJpegDecodeParams *decode_params, RocJpegImage *destination) {
     std::lock_guard<std::mutex> lock(mutex_);
-    RocJpegStatus rocjpeg_status = ROCJPEG_STATUS_SUCCESS;
     if (jpeg_stream_handle == nullptr || decode_params == nullptr || destination == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
