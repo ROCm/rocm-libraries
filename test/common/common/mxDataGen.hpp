@@ -115,11 +115,11 @@ namespace rocRoller
     }
 
     template <typename rrDT>
-    std::vector<typename UnsegmentedTypeOf<rrDT>::type>
+    std::vector<typename PackedTypeOf<rrDT>::type>
         getRandomVector(const DGen::DataGenerator<typename rrDT2DGenDT<rrDT>::type>& dgen,
                         bool                                                         hasScale)
     {
-        using UDT = typename UnsegmentedTypeOf<rrDT>::type;
+        using UDT = typename PackedTypeOf<rrDT>::type;
 
         std::vector<uint8_t> dataByte = dgen.getDataBytes();
 
@@ -158,14 +158,13 @@ namespace rocRoller
     }
 
     template <typename rrDT>
-    std::vector<typename UnsegmentedTypeOf<rrDT>::type> DGenVector(TensorDescriptor& desc,
-                                                                   const float       min = -1.f,
-                                                                   const float       max = 1.f,
-                                                                   const uint32_t seed = 1713573849,
-                                                                   bool           hasScale = false,
-                                                                   const int      blockScaling = 1,
-                                                                   const DataPattern pattern
-                                                                   = Bounded)
+    std::vector<typename PackedTypeOf<rrDT>::type> DGenVector(TensorDescriptor& desc,
+                                                              const float       min  = -1.f,
+                                                              const float       max  = 1.f,
+                                                              const uint32_t    seed = 1713573849,
+                                                              bool              hasScale = false,
+                                                              const int         blockScaling = 1,
+                                                              const DataPattern pattern = Bounded)
     {
         if(hasScale)
             AssertFatal(blockScaling == 32, "Block scaling size must be 32.");

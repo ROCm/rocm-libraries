@@ -5479,6 +5479,14 @@ Architectures:
         MaxLiteral: 0
         WaitCount: -1
         WaitQueues: []
+      s_alloc_vgpr:
+        ImplicitAccess: false
+        Instruction: s_alloc_vgpr
+        IsBranch: false
+        Latency: 0
+        MaxLiteral: 0
+        WaitCount: -1
+        WaitQueues: []
       s_and_b32:
         ImplicitAccess: false
         Instruction: s_and_b32
@@ -7894,14 +7902,6 @@ Architectures:
       s_wait_storecnt_dscnt:
         ImplicitAccess: false
         Instruction: s_wait_storecnt_dscnt
-        IsBranch: false
-        Latency: 0
-        MaxLiteral: 0
-        WaitCount: -1
-        WaitQueues: []
-      s_waitcnt:
-        ImplicitAccess: false
-        Instruction: s_waitcnt
         IsBranch: false
         Latency: 0
         MaxLiteral: 0

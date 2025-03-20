@@ -31,9 +31,9 @@
 namespace rocRoller
 {
     template <typename T, typename R>
-    std::vector<typename UnsegmentedTypeOf<T>::type> RandomGenerator::vector(uint nx, R min, R max)
+    std::vector<typename PackedTypeOf<T>::type> RandomGenerator::vector(uint nx, R min, R max)
     {
-        using U = typename UnsegmentedTypeOf<T>::type;
+        using U = typename PackedTypeOf<T>::type;
 
         std::vector<T>                   x(nx);
         std::uniform_real_distribution<> udist(min, max);

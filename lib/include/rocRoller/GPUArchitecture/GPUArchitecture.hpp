@@ -63,8 +63,6 @@ namespace rocRoller
         rocRoller::GPUInstructionInfo GetInstructionInfo(std::string const&) const;
         bool                          HasInstructionInfo(std::string const&) const;
 
-        friend std::ostream& operator<<(std::ostream& os, const GPUArchitecture& d);
-
         /**
          * Returns true if `reg` is a Literal value that can be represented as a
          * constant operand in an instruction.  This is one of only a limited set of

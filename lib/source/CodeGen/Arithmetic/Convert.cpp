@@ -90,7 +90,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateFloat(Register::ValuePtr dest,
                                                            Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
         AssertFatal(dest != nullptr);
@@ -239,7 +238,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateBFloat16x2(Register::ValuePtr dest,
                                                                 Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 
@@ -275,7 +273,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateFP8x4(Register::ValuePtr dest,
                                                            Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 
@@ -300,7 +297,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateBF8x4(Register::ValuePtr dest,
                                                            Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 
@@ -434,7 +430,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateInt64(Register::ValuePtr dest,
                                                            Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 
@@ -463,7 +458,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateUInt32(Register::ValuePtr dest,
                                                             Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 
@@ -487,7 +481,6 @@ namespace rocRoller
 
     Generator<Instruction> ConvertGenerator::generateUInt64(Register::ValuePtr dest,
                                                             Register::ValuePtr arg)
-
     {
         AssertFatal(arg != nullptr);
 

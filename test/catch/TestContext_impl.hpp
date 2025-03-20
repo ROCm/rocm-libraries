@@ -67,7 +67,7 @@ TestContext TestContext::ForTarget(rocRoller::GPUArchitecture const& arch,
                                    rocRoller::KernelOptions const&   kernelOpts,
                                    Params const&... params)
 {
-    auto kernelName = KernelName(arch, params...);
+    auto kernelName = KernelName(arch.target(), params...);
     auto ctx        = rocRoller::Context::ForTarget(arch, kernelName, kernelOpts);
     return {ctx};
 }

@@ -63,7 +63,7 @@ namespace rocRoller
          * between `min` and `max`.
          */
         template <typename T, typename R>
-        std::vector<typename UnsegmentedTypeOf<T>::type> vector(uint nx, R min, R max);
+        std::vector<typename PackedTypeOf<T>::type> vector(uint nx, R min, R max);
 
         template <std::integral T>
         T next(T min, T max);

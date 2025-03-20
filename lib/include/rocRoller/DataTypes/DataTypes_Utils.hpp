@@ -33,25 +33,25 @@
 namespace rocRoller
 {
     template <typename T>
-    struct UnsegmentedTypeOf
+    struct PackedTypeOf
     {
         typedef T type;
     };
 
     template <>
-    struct UnsegmentedTypeOf<FP6>
+    struct PackedTypeOf<FP6>
     {
         typedef FP6x16 type;
     };
 
     template <>
-    struct UnsegmentedTypeOf<BF6>
+    struct PackedTypeOf<BF6>
     {
         typedef BF6x16 type;
     };
 
     template <>
-    struct UnsegmentedTypeOf<FP4>
+    struct PackedTypeOf<FP4>
     {
         typedef FP4x8 type;
     };

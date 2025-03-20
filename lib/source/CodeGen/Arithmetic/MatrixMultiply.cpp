@@ -170,73 +170,6 @@ namespace rocRoller
 
             const auto isBF16 = [](DataType type) { return type == DataType::BFloat16x2; };
 
-            if(typeA == typeB)
-            {
-                // Uniform type for A and B.  Result will be similar
-                // to "f16", and may be "_f8f6f4".
-                inputType = typeStr(typeA);
-
-                // For F8 types, result will be "_fp8_fp8" (or "bf8").
-                // Change this to "_f8f6f4" for 32x32x64 and 16x16x128
-                // tile sizes.
-                if(isF8(typeA))
-                {
-                    if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
-                        inputType = "_f8f6f4";
-                }
-
-                if(isBF16(typeA))
-                {
-                    if(((M == 32) && (N == 32) && (K == 8))
-                       || ((M == 16) && (N == 16) && (K == 16)))
-                    {
-                        inputType = "bf16_1k";
-                    }
-                }
-                // For F16 types, result will be "f16" (or "bf16").
-                if((M == 16 && N == 16 && K == 32) || (M == 32 && N == 32 && K == 16))
-                {
-                    if(isFP16(typeA))
-                    {
-                        inputType = "_f16";
-                    }
-                    if(isBF16(typeA))
-                    {
-                        inputType = "_bf16";
-                    }
-                }
-            }
-            else
-            {
-                // Mixed types for A and B.  Only works for lower
-                // precisions.
-                auto segA = DataTypeInfo::Get(typeA).segmentVariableType;
-                auto segB = DataTypeInfo::Get(typeB).segmentVariableType;
-                AssertFatal(DataTypeInfo::Get(segA).elementBits <= 8,
-                            "Mixed MFMA inputs (A) must be low precision.",
-                            ShowValue(typeA));
-                AssertFatal(DataTypeInfo::Get(segB).elementBits <= 8,
-                            "Mixed MFMA inputs (B) must be low precision.",
-                            ShowValue(typeB));
-                inputType = "_f8f6f4";
-            }
-
-            // TODO: _fp8_bf8 not handled
-
-            if(inputType == "_f8f6f4")
-            {
-                if(!((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128)))
-                {
-                    Throw<FatalError>(
-                        "Invalid F8F6F4 MFMA size.", ShowValue(M), ShowValue(N), ShowValue(K));
-                }
-
-                modifier = concatenate("cbsz:",
-                                       Arithmetic::getModifier(typeA),
-                                       " blgp:",
-                                       Arithmetic::getModifier(typeB));
-            }
-
             if(arch.HasCapability(GPUCapability::HasWMMA))
             {
                 AssertFatal((M == 16) && (N == 16) && (K == 16 || K == 32),
@@ -250,10 +183,18 @@ namespace rocRoller
                     inputType = isFP8(typeA) ? "fp8" : "bf8";
                     inputType += isFP8(typeB) ? "_fp8" : "_bf8";
                 }
-
-                if(typeA == typeB && isF16(typeA))
+                else if(typeA == typeB && isF16(typeA))
                 {
                     inputType = isFP16(typeA) ? "f16" : "bf16";
+                }
+                else
+                {
+                    Throw<FatalError>("Matrix Multiplication is not supported for",
+                                      arch.target().toString(),
+                                      " with A=",
+                                      typeA,
+                                      "and B=",
+                                      typeB);
                 }
 
                 auto wmma = concatenate(
@@ -262,6 +203,72 @@ namespace rocRoller
             }
             else if(arch.HasCapability(GPUCapability::HasMFMA))
             {
+
+                if(typeA == typeB)
+                {
+                    // Uniform type for A and B.  Result will be similar
+                    // to "f16", and may be "_f8f6f4".
+                    inputType = typeStr(typeA);
+
+                    // For F8 types, result will be "_fp8_fp8" (or "bf8").
+                    // Change this to "_f8f6f4" for 32x32x64 and 16x16x128
+                    // tile sizes.
+                    if(isF8(typeA))
+                    {
+                        if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
+                            inputType = "_f8f6f4";
+                    }
+
+                    if(isBF16(typeA))
+                    {
+                        if(((M == 32) && (N == 32) && (K == 8))
+                           || ((M == 16) && (N == 16) && (K == 16)))
+                        {
+                            inputType = "bf16_1k";
+                        }
+                    }
+                    // For F16 types, result will be "f16" (or "bf16").
+                    if((M == 16 && N == 16 && K == 32) || (M == 32 && N == 32 && K == 16))
+                    {
+                        if(isFP16(typeA))
+                        {
+                            inputType = "_f16";
+                        }
+                        if(isBF16(typeA))
+                        {
+                            inputType = "_bf16";
+                        }
+                    }
+                }
+                else
+                {
+                    // Mixed types for A and B.  Only works for lower
+                    // precisions.
+                    auto segA = DataTypeInfo::Get(typeA).segmentVariableType;
+                    auto segB = DataTypeInfo::Get(typeB).segmentVariableType;
+                    AssertFatal(DataTypeInfo::Get(segA).elementBits <= 8,
+                                "Mixed MFMA inputs (A) must be low precision.",
+                                ShowValue(typeA));
+                    AssertFatal(DataTypeInfo::Get(segB).elementBits <= 8,
+                                "Mixed MFMA inputs (B) must be low precision.",
+                                ShowValue(typeB));
+                    inputType = "_f8f6f4";
+                }
+
+                // TODO: _fp8_bf8 not handled
+                if(inputType == "_f8f6f4")
+                {
+                    if(!((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128)))
+                    {
+                        Throw<FatalError>(
+                            "Invalid F8F6F4 MFMA size.", ShowValue(M), ShowValue(N), ShowValue(K));
+                    }
+
+                    modifier = concatenate("cbsz:",
+                                           Arithmetic::getModifier(typeA),
+                                           " blgp:",
+                                           Arithmetic::getModifier(typeB));
+                }
 
                 auto mfma
                     = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);

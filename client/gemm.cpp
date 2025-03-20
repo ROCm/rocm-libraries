@@ -205,8 +205,8 @@ namespace rocRoller::Client::GEMMClient
 
     template <typename A, typename B, typename C, typename D>
     std::pair<bool, double>
-        validate(std::vector<typename UnsegmentedTypeOf<A>::type> const& h_A,
-                 std::vector<typename UnsegmentedTypeOf<B>::type> const& h_B,
+        validate(std::vector<typename PackedTypeOf<A>::type> const&      h_A,
+                 std::vector<typename PackedTypeOf<B>::type> const&      h_B,
                  std::vector<C> const&                                   h_C,
                  std::vector<D> const&                                   h_D,
                  std::vector<uint8_t> const&                             h_scaleA,
@@ -293,13 +293,13 @@ namespace rocRoller::Client::GEMMClient
                                 static_cast<unsigned long>(problemParams.n)},
                                "N");
 
-        using UnsegmentedTypeA = typename UnsegmentedTypeOf<A>::type;
-        using UnsegmentedTypeB = typename UnsegmentedTypeOf<B>::type;
-        std::vector<UnsegmentedTypeA> hostA;
-        std::vector<UnsegmentedTypeB> hostB;
-        std::vector<C>                hostC;
-        std::vector<D>                hostD(problemParams.m * problemParams.n, D{});
-        std::vector<uint8_t>          hostScaleA, hostScaleB;
+        using PackedTypeA = typename PackedTypeOf<A>::type;
+        using PackedTypeB = typename PackedTypeOf<B>::type;
+        std::vector<PackedTypeA> hostA;
+        std::vector<PackedTypeB> hostB;
+        std::vector<C>           hostC;
+        std::vector<D>           hostD(problemParams.m * problemParams.n, D{});
+        std::vector<uint8_t>     hostScaleA, hostScaleB;
 
         auto seed = 31415u;
         DGenInput(seed,
