@@ -3803,6 +3803,21 @@ class Solution(collections.abc.Mapping):
       else:
         state["NumElementsPerBatchStore"] = 16 if not state["ProblemType"]["DataType"].numBytes() == 8 else 1
 
+    # Mbsk prefetch optimization
+    if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
+        state["MbskPrefetchOpt"] = 0
+    elif state["MbskPrefetchOpt"] == -1:
+      numStoreElements = state["NumElementsPerThread"] // state["StoreVectorWidth"]
+      state["MbskPrefetchOpt"] = 1 if numStoreElements >= 4 else 0
+    if state["MbskPrefetchOpt"] == 1:
+      state["NumMbskPrefetchElements"] = 16
+      storeRegs = state["StoreVectorWidth"] * state["ProblemType"]["ComputeDataType"].numRegisters()
+      # exceed 16*4 = 64 VPGRs
+      if storeRegs > 4:
+        state["NumMbskPrefetchElements"] //= storeRegs // 4
+      if state["NumElementsPerBatchStore"] == 0 or state["NumElementsPerBatchStore"] > state["NumMbskPrefetchElements"]:
+          state["NumElementsPerBatchStore"] = state["NumMbskPrefetchElements"]
+
     if state["StoreRemapVectorWidth"] == -1:
       # use de_read_b64 as default in storeRemap to avoid bank conflict
       defaultRemap = 8 // state["ProblemType"]["DestDataType"].numBytes()

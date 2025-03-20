@@ -1264,6 +1264,11 @@ validParameters = {
     # True:  Use WaveSplitK. Number of WorkGroup[2] threads in the same wave compute the same output elements (matrix D) along different unroll indices.
     #        The local sum from those threads are reduced through suffling using VALU instructions. Currently only support dot2 kernel.
     "WaveSplitK": [False, True],
+    # Control mbsk reduction prefetch order
+    # -1 : Select between 0/1 based on # store elements.
+    # 0  : Fetch from workgroup dim -> elements dim. (default)
+    # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
+    "MbskPrefetchOpt": [-1, 0, 1],
 }
 
 
@@ -1365,6 +1370,7 @@ defaultBenchmarkCommonParameters = [
     {"ForceDisableShadowInit": [False]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
+    {"MbskPrefetchOpt": [0]},
 ]
 
 # dictionary of defaults comprised of default option for each parameter
