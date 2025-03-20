@@ -1474,10 +1474,7 @@ class Solution(collections.abc.Mapping):
 
     # DepthU == -1?
     if state["DepthU"] == -1:
-      if state["ProblemType"]["ComputeDataType"].numBytes() < 4:
-        depthuList = [256, 128, 64, 32]
-      else:
-        depthuList = [128, 64, 32, 16]
+      depthuList = [1024,512,256,128,64,32,16]
     else:
       depthuList = [state["DepthU"]]
     index = [0]

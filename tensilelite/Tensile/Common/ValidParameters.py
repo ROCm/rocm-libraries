@@ -65,7 +65,6 @@ validMacroTileSides = [
 validMacroTiles = []
 validISA = [(0, 0, 0)]
 validISA.extend(SUPPORTED_ISA)
-depthUs = list(range(2, 1024 + 1, 1))
 for i in validMacroTileSides:
     for j in validMacroTileSides:
         validMacroTiles.append([i, j])
@@ -717,7 +716,7 @@ validParameters = { # we need to make sure this matches develop
     # -1 : Only allow GLVW=1
     # -2 : Only allow max(GLVWA,GLVWB) < VW ?
     # -3 : Only allow min(GLVWA,GLVWB) < VW ?
-    "DepthU": depthUs,
+    "DepthU": [-1] + list(range(2, 1024 + 1, 1)),
     # integer amount of padding to put into LDS, in 2016 this didn't seem to help performance, profilers were showing that channel conflicts weren't really hurting
     # performance so this has been deprecated and probably doesn't work
     # -1 means use same padding as the VectorWidth if TLU=0 else 0.  (Padding only helps when transpose is required)
