@@ -7543,8 +7543,9 @@ class KernelWriterAssembly(KernelWriter):
                     destVgpr=0
                     self.vgprs.globalReadRegisters[tc].append(0)
                   else:
-                    destVgpr="G2L%s+%u+%u"%(tc, g2lIdx + tP["shiftGR"] if not tP["isM"] else graIdx, regIdx+eccOffset)
-                    self.vgprs.globalReadRegisters[tc].append( (g2lIdx + tP["shiftGR"] if not tP["isM"] else graIdx) + regIdx+eccOffset)
+                    g2lIdxM = i * max(loadWidth * tP["bpeRatio"], 1)
+                    destVgpr="G2L%s+%u+%u"%(tc, g2lIdx + tP["shiftGR"] if not tP["isM"] else g2lIdxM, regIdx+eccOffset)
+                    self.vgprs.globalReadRegisters[tc].append( (g2lIdx + tP["shiftGR"] if not tP["isM"] else g2lIdxM) + regIdx+eccOffset)
 
                   offset = r * tP["bpeGR"] + instOffset
                   comment = "load one buffer value"
@@ -8720,7 +8721,7 @@ class KernelWriterAssembly(KernelWriter):
 
             if tP["isM"]:
               if not needToSplitMetadata:
-                g2lIdx = graIdx
+                g2lIdx = graIdx * ceil(blockWidth)
 
             # If g2lIdx is already in the dict and blockWidth < 1, the data may
             # be packed into one register.

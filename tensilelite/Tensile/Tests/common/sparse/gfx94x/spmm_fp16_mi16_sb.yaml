@@ -105,6 +105,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 32, 1,  1,  3, 2,  2, 2 ]
+          - [16, 16, 32, 1,  1,  8, 6,  1, 1 ]
           - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
         - GlobalReadVectorWidthA: [-1]
         - VectorWidthA: [-1]
@@ -176,6 +177,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 32, 1,  1,  3, 2,  2, 2 ]
+          - [16, 16, 32, 1,  1,  8, 6,  1, 1 ]
           - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthA: [4, 8]
@@ -249,6 +251,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 32, 1,  1,  3, 2,  2, 2 ]
+          - [16, 16, 32, 1,  1,  8, 6,  1, 1 ]
           - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
         - GlobalReadVectorWidthA: [-1]
         - VectorWidthA: [-1]
@@ -320,6 +323,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1,  1,  1, 1,  1, 1 ]
           - [16, 16, 32, 1,  1,  3, 2,  2, 2 ]
+          - [16, 16, 32, 1,  1,  8, 6,  1, 1 ]
           - [16, 16, 32, 1,  1,  8, 8,  2, 2 ]
         - GlobalReadVectorWidthA: [-1]
         - VectorWidthA: [-1]
