@@ -138,15 +138,6 @@ class ROHostContext : public Context {
   __host__ void broadcast(rocshmem_team_t team, T *dest, const T *source,
                           int nelems, int pe_root);
 
-  template <typename T, ROCSHMEM_OP Op>
-  __host__ void to_all(T *dest, const T *source, int nreduce, int pe_start,
-                       int log_pe_stride, int pe_size, T *p_wrk,
-                       long *p_sync);  // NOLINT(runtime/int)
-
-  template <typename T, ROCSHMEM_OP Op>
-  __host__ void to_all(rocshmem_team_t team, T *dest, const T *source,
-                       int nreduce);
-
   template <typename T>
   __host__ void wait_until(T *ivars, int cmp, T val);
 

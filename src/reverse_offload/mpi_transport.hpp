@@ -54,20 +54,10 @@ public:
   void barrier(int contextId, volatile char *status, bool blocking,
                MPI_Comm team) override;
 
-  void reduction(void *dst, void *src, int size, int pe, int win_id,
-                 int contextId, int start, int logPstride, int sizePE,
-                 void *pWrk, long *pSync, ROCSHMEM_OP op, ro_net_types type,
-                 volatile char *status, bool blocking) override;
-
   void team_reduction(void *dst, void *src, int size, int win_id,
                       int contextId, MPI_Comm team, ROCSHMEM_OP op,
                       ro_net_types type, volatile char *status,
                       bool blocking) override;
-
-  void broadcast(void *dst, void *src, int size, int pe, int win_id,
-                 int contextId, int start, int logPstride, int sizePE,
-                 int PE_root, long *pSync, ro_net_types type,
-                 volatile char *status, bool blocking) override;
 
   void team_broadcast(void *dst, void *src, int size, int win_id,
                       int contextId, MPI_Comm team, int PE_root,
@@ -78,43 +68,9 @@ public:
                 MPI_Comm team, void *ata_buffptr, ro_net_types type,
                 volatile char *status, bool blocking) override;
 
-  void alltoall_broadcast(void *dst, void *src, int size, int win_id,
-                          int contextId, MPI_Comm team, void *ata_buffptr,
-                          ro_net_types type, volatile char *status,
-                          bool blocking);
-
-  void alltoall_mpi(void *dst, void *src, int size, int contextId,
-                    MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                    volatile char *status, bool blocking);
-
-  void alltoall_gcen(void *dst, void *src, int size, int win_id,
-                     int contextId, MPI_Comm team, void *ata_buffptr,
-                     ro_net_types type, volatile char *status, bool blocking);
-
-  void alltoall_gcen2(void *dst, void *src, int size, int win_id,
-                      int contextId, MPI_Comm team, void *ata_buffptr,
-                      ro_net_types type, volatile char *status, bool blocking);
-
   void fcollect(void *dst, void *src, int size, int win_id, int contextId,
                 MPI_Comm team, void *ata_buffptr, ro_net_types type,
                 volatile char *status, bool blocking) override;
-
-  void fcollect_broadcast(void *dst, void *src, int size, int win_id,
-                          int contextId, MPI_Comm team, void *ata_buffptr,
-                          ro_net_types type, volatile char *status,
-                          bool blocking);
-
-  void fcollect_mpi(void *dst, void *src, int size, int contextId,
-                    MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                    volatile char *status, bool blocking);
-
-  void fcollect_gcen(void *dst, void *src, int size, int win_id, int contextId,
-                     MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                     volatile char *status, bool blocking);
-
-  void fcollect_gcen2(void *dst, void *src, int size, int win_id,
-                      int contextId, MPI_Comm team, void *ata_buffptr,
-                      ro_net_types type, volatile char *status, bool blocking);
 
   void putMem(void *dst, void *src, int size, int pe, int win_id,
               int contextId, volatile char *status, bool blocking,

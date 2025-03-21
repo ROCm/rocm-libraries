@@ -53,21 +53,10 @@ class Transport {
   virtual void barrier(int wg_id, volatile char *status, bool blocking,
                        MPI_Comm team) = 0;
 
-  virtual void reduction(void *dst, void *src, int size, int pe, int win_id,
-                         int wg_id, int start, int logPstride, int sizePE,
-                         void *pWrk, long *pSync, ROCSHMEM_OP op,
-                         ro_net_types type, volatile char *status,
-                         bool blocking) = 0;
-
   virtual void team_reduction(void *dst, void *src, int size, int win_id,
                               int wg_id, MPI_Comm team, ROCSHMEM_OP op,
                               ro_net_types type, volatile char *status,
                               bool blocking) = 0;
-
-  virtual void broadcast(void *dst, void *src, int size, int pe, int win_id,
-                         int wg_id, int start, int logPstride, int sizePE,
-                         int PE_root, long *pSync, ro_net_types type,
-                         volatile char *status, bool blocking) = 0;
 
   virtual void team_broadcast(void *dst, void *src, int size, int win_id,
                               int wg_id, MPI_Comm team, int PE_root,

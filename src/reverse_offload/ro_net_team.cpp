@@ -34,7 +34,9 @@ ROTeam::ROTeam(Backend* backend, TeamInfo* team_info_wrt_parent,
            mpi_comm) {
   type = BackendType::RO_BACKEND;
 
-  ata_buffer = malloc(MAX_ATA_BUFF_SIZE);
+  // Disable allocating ata_buffer for now. It is not
+  // used at the moment, but might come back in future versions.
+  ata_buffer = nullptr;
 }
 
 ROTeam::~ROTeam() {

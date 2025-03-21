@@ -610,25 +610,10 @@ __device__ void build_queue_element(
     queue_element->ol2.pWrk = pWrk;
     queue_element->datatype = datatype;
   }
-  if (type == RO_NET_TO_ALL) {
-    queue_element->logPE_stride = logPE_stride;
-    queue_element->PE_size = PE_size;
-    queue_element->ol2.pWrk = pWrk;
-    queue_element->pSync = pSync;
-    queue_element->op = op;
-    queue_element->datatype = datatype;
-  }
   if (type == RO_NET_TEAM_REDUCE) {
     queue_element->op = op;
     queue_element->datatype = datatype;
     queue_element->team_comm = team_comm;
-  }
-  if (type == RO_NET_BROADCAST) {
-    queue_element->logPE_stride = logPE_stride;
-    queue_element->PE_size = PE_size;
-    queue_element->pSync = pSync;
-    queue_element->PE_root = PE_root;
-    queue_element->datatype = datatype;
   }
   if (type == RO_NET_TEAM_BROADCAST) {
     queue_element->PE_root = PE_root;

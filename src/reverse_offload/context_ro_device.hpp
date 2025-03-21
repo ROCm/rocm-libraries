@@ -76,11 +76,6 @@ class ROContext : public Context {
   __device__ T g(const T *source, int pe);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ void to_all(T *dest, const T *source, int nreduce, int PE_start,
-                         int logPE_stride, int PE_size, T *pWrk,
-                         long *pSync);  // NOLINT(runtime/int)
-
-  template <typename T, ROCSHMEM_OP Op>
   __device__ int reduce(rocshmem_team_t team, T *dest, const T *source,
                         int nreduce);
 
@@ -146,40 +141,8 @@ class ROContext : public Context {
                            int nelems);
 
   template <typename T>
-  __device__ void alltoall_broadcast(rocshmem_team_t team, T *dest,
-                                     const T *source, int nelems);
-
-  template <typename T>
-  __device__ void alltoall_mpi(rocshmem_team_t team, T *dest, const T *source,
-                               int nelems);
-
-  template <typename T>
-  __device__ void alltoall_gcen(rocshmem_team_t team, T *dest, const T *source,
-                                int nelems);
-
-  template <typename T>
-  __device__ void alltoall_gcen2(rocshmem_team_t team, T *dest,
-                                 const T *source, int nelems);
-
-  template <typename T>
   __device__ void fcollect(rocshmem_team_t team, T *dest, const T *source,
                            int nelems);
-
-  template <typename T>
-  __device__ void fcollect_broadcast(rocshmem_team_t team, T *dest,
-                                     const T *source, int nelems);
-
-  template <typename T>
-  __device__ void fcollect_mpi(rocshmem_team_t team, T *dest, const T *source,
-                               int nelems);
-
-  template <typename T>
-  __device__ void fcollect_gcen(rocshmem_team_t team, T *dest, const T *source,
-                                int nelems);
-
-  template <typename T>
-  __device__ void fcollect_gcen2(rocshmem_team_t team, T *dest,
-                                 const T *source, int nelems);
 
   __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
                             int pe);

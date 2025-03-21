@@ -127,23 +127,6 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
   return ROCSHMEM_SUCCESS;
 }
 
-template <typename T, ROCSHMEM_OP Op>
-__device__ void ROContext::to_all(T *dest, const T *source, int nreduce,
-                                  int PE_start, int logPE_stride, int PE_size,
-                                  T *pWrk, long *pSync) {
-  if (!is_thread_zero_in_block()) {
-    __syncthreads();
-    return;
-  }
-
-  build_queue_element(RO_NET_TO_ALL, dest, const_cast<T *>(source), nreduce,
-                      PE_start, logPE_stride, PE_size, 0, pWrk, pSync,
-                      (MPI_Comm)NULL, ro_net_win_id, block_handle, true,
-                      get_status_flag(), Op, GetROType<T>::Type);
-
-  __syncthreads();
-}
-
 template <typename T>
 __device__ void ROContext::put(T *dest, const T *source, size_t nelems,
                                int pe) {
@@ -311,24 +294,6 @@ __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
   build_queue_element(RO_NET_TEAM_BROADCAST, dest, const_cast<T *>(source),
                       nelems, 0, 0, 0, pe_root, nullptr, nullptr,
                       team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                      get_status_flag(), ROCSHMEM_SUM, GetROType<T>::Type);
-
-  __syncthreads();
-}
-
-template <typename T>
-__device__ void ROContext::broadcast(T *dest, const T *source, int nelems,
-                                     int pe_root, int pe_start,
-                                     int log_pe_stride, int pe_size,
-                                     long *p_sync) {
-  if (!is_thread_zero_in_block()) {
-    __syncthreads();
-    return;
-  }
-
-  build_queue_element(RO_NET_BROADCAST, dest, const_cast<T *>(source), nelems,
-                      pe_start, log_pe_stride, pe_size, pe_root, nullptr,
-                      p_sync, (MPI_Comm)NULL, ro_net_win_id, block_handle, true,
                       get_status_flag(), ROCSHMEM_SUM, GetROType<T>::Type);
 
   __syncthreads();

@@ -122,24 +122,6 @@ __host__ void ROHostContext::broadcast(rocshmem_team_t team, T *dest,
   host_interface->broadcast<T>(team, dest, source, nelems, pe_root);
 }
 
-template <typename T, ROCSHMEM_OP Op>
-__host__ void ROHostContext::to_all(T *dest, const T *source, int nreduce,
-                                    int pe_start, int log_pe_stride,
-                                    int pe_size, T *p_wrk, long *p_sync) {
-  DPRINTF("Function: gpu_ib_host_to_all\n");
-
-  host_interface->to_all<T, Op>(dest, source, nreduce, pe_start, log_pe_stride,
-                                pe_size, p_wrk, p_sync);
-}
-
-template <typename T, ROCSHMEM_OP Op>
-__host__ void ROHostContext::to_all(rocshmem_team_t team, T *dest,
-                                    const T *source, int nreduce) {
-  DPRINTF("Function: Team-based ro_net_host_to_all\n");
-
-  host_interface->to_all<T, Op>(team, dest, source, nreduce);
-}
-
 template <typename T>
 __host__ void ROHostContext::wait_until(T *ivars, int cmp, T val) {
   host_interface->wait_until<T>(ivars, cmp, val, context_window_info);
