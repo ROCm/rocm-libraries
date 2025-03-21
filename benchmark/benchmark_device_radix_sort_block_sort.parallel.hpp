@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -93,14 +94,8 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
         rocprim::empty_type* values_ptr = nullptr;
         unsigned int         items_per_block;
@@ -109,8 +104,8 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
                   [&]
                   {
                       HIP_CHECK((rocprim::detail::radix_sort_block_sort<Config, false>(
-                          d_keys_input,
-                          d_keys_output,
+                          d_keys_input.get(),
+                          d_keys_output.get(),
                           values_ptr,
                           values_ptr,
                           size,
@@ -123,9 +118,6 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
                   });
 
         state.set_items_processed_per_iteration<key_type>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 
     // pairs benchmark
@@ -156,23 +148,11 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
             values_input[i] = value_type(i);
         }
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_input), size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_keys_output), size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        value_type* d_values_input;
-        value_type* d_values_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_output), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
+        common::device_ptr<value_type> d_values_output(size);
 
         unsigned int items_per_block;
 
@@ -182,10 +162,10 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
                   [&]
                   {
                       HIP_CHECK((rocprim::detail::radix_sort_block_sort<Config, false>(
-                          d_keys_input,
-                          d_keys_output,
-                          d_values_input,
-                          d_values_output,
+                          d_keys_input.get(),
+                          d_keys_output.get(),
+                          d_values_input.get(),
+                          d_values_output.get(),
                           size,
                           items_per_block,
                           rocprim::identity_decomposer{},
@@ -203,11 +183,6 @@ struct device_radix_sort_block_sort_benchmark : public benchmark_utils::autotune
         };
 #pragma pack(pop)
         state.set_items_processed_per_iteration<combined>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_values_output));
     }
 
     void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override

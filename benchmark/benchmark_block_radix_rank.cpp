@@ -23,6 +23,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -108,11 +109,8 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                                               common::generate_limits<T>::max(),
                                               seed.get_0());
 
-    T*            d_input;
-    unsigned int* d_output;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(unsigned int)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<unsigned int> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
@@ -120,14 +118,11 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
         [&]
         {
             rank_kernel<T, BlockSize, ItemsPerThread, RadixBits, Descending, Algorithm, Trials>
-                <<<dim3(grid_size), dim3(BlockSize), 0, stream>>>(d_input, d_output);
+                <<<dim3(grid_size), dim3(BlockSize), 0, stream>>>(d_input.get(), d_output.get());
             HIP_CHECK(hipGetLastError());
         });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                    \

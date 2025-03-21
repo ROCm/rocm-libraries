@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -84,39 +85,31 @@ struct device_nth_element_benchmark : public benchmark_utils::autotune_interface
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(*d_keys_input)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(*d_keys_output)));
-
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(*d_keys_input),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
         ::rocprim::less<key_type> lesser_op;
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::nth_element(d_temporary_storage,
+        HIP_CHECK(rocprim::nth_element(nullptr,
                                        temporary_storage_bytes,
-                                       d_keys_input,
-                                       d_keys_output,
+                                       d_keys_input.get(),
+                                       d_keys_output.get(),
                                        nth,
                                        size,
                                        lesser_op,
                                        stream,
                                        false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         state.run(gbench_state,
                   [&]
                   {
-                      HIP_CHECK(rocprim::nth_element(d_temporary_storage,
+                      HIP_CHECK(rocprim::nth_element(d_temporary_storage.get(),
                                                      temporary_storage_bytes,
-                                                     d_keys_input,
-                                                     d_keys_output,
+                                                     d_keys_input.get(),
+                                                     d_keys_output.get(),
                                                      nth,
                                                      size,
                                                      lesser_op,
@@ -125,9 +118,6 @@ struct device_nth_element_benchmark : public benchmark_utils::autotune_interface
                   });
 
         state.set_items_processed_per_iteration<key_type>(gbench_state, size);
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 };
 #endif // ROCPRIM_BENCHMARK_DEVICE_NTH_ELEMENT_PARALLEL_HPP_
