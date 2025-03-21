@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,7 +69,7 @@ inline std::string non_trivial_runs_config_name<rocprim::default_config>()
 }
 
 template<typename T, size_t MaxLength, typename Config = rocprim::default_config>
-struct device_non_trivial_runs_benchmark : public config_autotune_interface
+struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -79,16 +79,15 @@ struct device_non_trivial_runs_benchmark : public config_autotune_interface
             + ",cfg:" + non_trivial_runs_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using offset_type = unsigned int;
         using count_type  = unsigned int;
 
-        constexpr int                batch_size                 = 10;
-        constexpr int                warmup_size                = 5;
         constexpr std::array<int, 2> tuning_max_segment_lengths = {10, 1000};
         constexpr int num_input_arrays = is_tuning ? tuning_max_segment_lengths.size() : 1;
 
@@ -158,47 +157,19 @@ struct device_non_trivial_runs_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(int i = 0; i < warmup_size; ++i)
+        state.run(gbench_state, [&] { dispatch(d_temporary_storage, temporary_storage_bytes); });
+
+#pragma pack(push, 1)
+
+        struct combined
         {
-            dispatch(d_temporary_storage, temporary_storage_bytes);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+            T           a;
+            offset_type b;
+            count_type  c;
+        };
+#pragma pack(pop)
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(int i = 0; i < batch_size; ++i)
-            {
-                dispatch(d_temporary_storage, temporary_storage_bytes);
-            }
-            HIP_CHECK(hipStreamSynchronize(stream));
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            HIP_CHECK(hipGetLastError());
-            HIP_CHECK(hipDeviceSynchronize());
-
-            float elapsed_mseconds{};
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * item_size);
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<combined>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         for(int i = 0; i < num_input_arrays; ++i)
@@ -238,7 +209,7 @@ struct device_non_trivial_runs_benchmark_generator
     template<int ItemsPerThreadExp>
     struct create_ipt
     {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             if(!is_load_warp_transpose || is_warp_load_supp)
             {
@@ -256,7 +227,7 @@ struct device_non_trivial_runs_benchmark_generator
         static constexpr unsigned int items_per_thread = 1u << ItemsPerThreadExp;
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static_for_each<
             make_index_range<int, min_items_per_thread_exponent, max_items_per_thread_exponent>,

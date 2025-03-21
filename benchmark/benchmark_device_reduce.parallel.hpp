@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -74,7 +74,7 @@ inline std::string config_name<rocprim::default_config>()
 template<typename T              = int,
          typename BinaryFunction = rocprim::plus<T>,
          typename Config         = rocprim::default_config>
-struct device_reduce_benchmark : public config_autotune_interface
+struct device_reduce_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
@@ -83,14 +83,12 @@ struct device_reduce_benchmark : public config_autotune_interface
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         // Calculate the number of elements
         size_t size = bytes / sizeof(T);
 
@@ -121,58 +119,19 @@ struct device_reduce_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
-                                              temp_storage_size_bytes,
-                                              d_input,
-                                              d_output,
-                                              T(),
-                                              size,
-                                              reduce_op,
-                                              stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
-                                                  temp_storage_size_bytes,
-                                                  d_input,
-                                                  d_output,
-                                                  T(),
-                                                  size,
-                                                  reduce_op,
-                                                  stream));
-            }
-            HIP_CHECK(hipStreamSynchronize(stream));
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.run(gbench_state,
+                  [&]
+                  {
+                      HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+                                                        temp_storage_size_bytes,
+                                                        d_input,
+                                                        d_output,
+                                                        T(),
+                                                        size,
+                                                        reduce_op,
+                                                        stream));
+                  });
+        state.set_items_processed_per_iteration<T>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));

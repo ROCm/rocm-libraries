@@ -38,9 +38,11 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)                                  \
-    executor.queue_sorted_instance<block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
-    executor.queue_sorted_instance<block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
+#define CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, ALG)       \
+    benchmark_utils::executor::queue_sorted_instance<      \
+        block_sort_benchmark<K, V, BS, IPT, ALG, true>>(); \
+    benchmark_utils::executor::queue_sorted_instance<      \
+        block_sort_benchmark<K, V, BS, IPT, ALG, false>>();
 
 #define CREATE_BENCHMARK_IPT(K, V, BS, IPT)                                                   \
     CREATE_BENCHMARK_IPT_ALG(K, V, BS, IPT, rocprim::block_sort_algorithm::merge_sort)        \

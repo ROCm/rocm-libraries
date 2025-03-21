@@ -1376,9 +1376,10 @@ public:
     }
 
     template<typename Benchmark>
-    void queue_sorted_instance()
+    static bool queue_sorted_instance()
     {
         sorted_benchmarks().push_back(std::make_unique<Benchmark>());
+        return true;
     }
 
     template<typename BulkCreateFunction>
