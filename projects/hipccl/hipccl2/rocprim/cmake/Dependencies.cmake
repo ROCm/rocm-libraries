@@ -82,7 +82,13 @@ if(BUILD_TEST)
   #        console via a non-QUIET find_package call and if CONFIG succeeded, creates ALIAS targets
   #        with the MODULE IMPORTED names.
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(GTest QUIET)
+    if(WIN32)
+      # Older versions of gtest on Windows does not support printing of 128-bit values,
+      # Causing compilation errors.
+      find_package(GTest 1.11.0 REQUIRED)
+    else()
+      find_package(GTest QUIET)
+    endif()
   endif()
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     option(BUILD_GTEST "Builds the googletest subproject" ON)
