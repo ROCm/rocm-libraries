@@ -415,11 +415,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dnnz_compress(rocsparse_handle          handle,
                                                     rocsparse_int             m,
@@ -436,11 +438,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cnnz_compress(rocsparse_handle               handle,
                                                     rocsparse_int                  m,
@@ -457,11 +461,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_znnz_compress(rocsparse_handle                handle,
                                                     rocsparse_int                   m,
@@ -478,8 +484,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::nnz_compress_template(
         handle, m, descr_A, csr_val_A, csr_row_ptr_A, nnz_per_row, nnz_C, tol));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

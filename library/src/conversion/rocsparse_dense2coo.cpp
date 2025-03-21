@@ -187,11 +187,13 @@ try
                                                             coo_row_ind,
                                                             coo_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_ddense2coo(rocsparse_handle          handle,
                                                  rocsparse_int             m,
@@ -227,11 +229,13 @@ try
                                                             coo_row_ind,
                                                             coo_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cdense2coo(rocsparse_handle               handle,
                                                  rocsparse_int                  m,
@@ -267,11 +271,13 @@ try
                                                             coo_row_ind,
                                                             coo_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zdense2coo(rocsparse_handle                handle,
                                                  rocsparse_int                   m,
@@ -306,8 +312,10 @@ try
                                                             coo_row_ind,
                                                             coo_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

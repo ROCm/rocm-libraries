@@ -136,7 +136,9 @@ rocsparse_status rocsparse::nnz_template(rocsparse_handle    handle,
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 namespace rocsparse

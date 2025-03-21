@@ -53,11 +53,13 @@ try
     *handle = new _rocsparse_handle();
     rocsparse::log_trace(*handle, "rocsparse_create_handle");
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief destroy handle
@@ -71,11 +73,13 @@ try
     rocsparse::log_trace(handle, "rocsparse_destroy_handle");
     delete handle;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Get rocSPARSE status enum name as a string
@@ -98,8 +102,10 @@ const char* rocsparse_get_status_name(rocsparse_status status)
         return "rocsparse_status_memory_error";
     case rocsparse_status_internal_error:
         return "rocsparse_status_internal_error";
+        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "rocsparse_status_invalid_value";
+        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "rocsparse_status_arch_mismatch";
     case rocsparse_status_zero_pivot:
@@ -140,8 +146,10 @@ const char* rocsparse_get_status_description(rocsparse_status status)
         return "failed memory allocation, copy, dealloc";
     case rocsparse_status_internal_error:
         return "other internal library failure";
+        // LCOV_EXCL_START
     case rocsparse_status_invalid_value:
         return "invalid value parameter";
+        // LCOV_EXCL_STOP
     case rocsparse_status_arch_mismatch:
         return "device arch is not supported";
     case rocsparse_status_zero_pivot:
@@ -177,11 +185,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(handle->set_pointer_mode(mode));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Get pointer mode, can be host or device.
@@ -198,11 +208,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(handle->get_pointer_mode(mode));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  *! \brief Set rocsparse stream used for all subsequent library function calls.
@@ -218,11 +230,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(handle->set_stream(stream_id));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  *! \brief Get rocsparse stream used for all subsequent library function calls.
@@ -237,11 +251,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(handle->get_stream(stream_id));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Get rocSPARSE version
@@ -261,11 +277,13 @@ try
     rocsparse::log_trace(handle, "rocsparse_get_version", *version);
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Get rocSPARSE git revision
@@ -285,11 +303,13 @@ try
     rocsparse::log_trace(handle, "rocsparse_get_git_rev", rev);
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_mat_descr_t is a structure holding the rocsparse matrix
@@ -306,11 +326,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     *descr = new _rocsparse_mat_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief copy matrix descriptor
@@ -331,11 +353,13 @@ try
     dest->storage_mode = src->storage_mode;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief destroy matrix descriptor
@@ -347,11 +371,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Set the index base of the matrix descriptor.
@@ -365,11 +391,13 @@ try
     ROCSPARSE_CHECKARG_ENUM(1, base);
     descr->base = base;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Returns the index base of the matrix descriptor.
@@ -399,11 +427,13 @@ try
 
     descr->type = type;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Returns the matrix type of the matrix descriptor.
@@ -431,11 +461,13 @@ try
 
     descr->fill_mode = fill_mode;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_fill_mode rocsparse_get_mat_fill_mode(const rocsparse_mat_descr descr)
 {
@@ -459,11 +491,13 @@ try
     ROCSPARSE_CHECKARG_ENUM(1, diag_type);
     descr->diag_type = diag_type;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_diag_type rocsparse_get_mat_diag_type(const rocsparse_mat_descr descr)
 {
@@ -487,11 +521,13 @@ try
     ROCSPARSE_CHECKARG_ENUM(1, storage_mode);
     descr->storage_mode = storage_mode;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_storage_mode rocsparse_get_mat_storage_mode(const rocsparse_mat_descr descr)
 {
@@ -520,11 +556,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, hyb);
     *hyb = new _rocsparse_hyb_mat;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Copy HYB matrix.
@@ -691,11 +729,13 @@ try
     dest->data_type_T = src->data_type_T;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Destroy HYB matrix.
@@ -732,11 +772,13 @@ try
 
     delete hyb;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_mat_info is a structure holding the matrix info data that is
@@ -753,11 +795,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, info);
     *info = new _rocsparse_mat_info;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Copy mat info.
@@ -1098,11 +1142,13 @@ try
     dest->boost_val      = src->boost_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Destroy mat info.
@@ -1356,11 +1402,13 @@ try
         return status;
     }
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_color_info is a structure holding the color info data that is
@@ -1377,11 +1425,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, info);
     *info = new _rocsparse_color_info;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Copy color info.
@@ -1397,11 +1447,13 @@ try
     ROCSPARSE_CHECKARG(1, src, (src == dest), rocsparse_status_invalid_pointer);
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief Destroy color info.
@@ -1417,11 +1469,13 @@ try
     }
     delete info;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_spvec_descr creates a descriptor holding the sparse
@@ -1469,11 +1523,13 @@ try
 
     (*descr)->idx_base = idx_base;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_spvec_descr(rocsparse_const_spvec_descr* descr,
                                                     int64_t                      size,
@@ -1517,11 +1573,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_destroy_spvec_descr destroys a sparse vector descriptor.
@@ -1541,11 +1599,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spvec_get returns the sparse vector matrix data, sizes and
@@ -1584,11 +1644,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_spvec_get(rocsparse_const_spvec_descr descr,
                                            int64_t*                    size,
@@ -1622,11 +1684,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spvec_get_index_base returns the sparse vector index base.
@@ -1644,11 +1708,13 @@ try
     *idx_base = descr->idx_base;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spvec_get_values returns the sparse vector value pointer.
@@ -1663,11 +1729,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, values);
     *values = descr->val_data;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_spvec_get_values(rocsparse_const_spvec_descr descr,
                                                   const void**                values)
@@ -1680,11 +1748,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, values);
     *values = descr->const_val_data;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spvec_set_values sets the sparse vector value pointer.
@@ -1701,11 +1771,13 @@ try
     descr->const_val_data = values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_coo_descr creates a descriptor holding the COO matrix
@@ -1772,11 +1844,13 @@ try
     (*descr)->columns_values_batch_stride = 0;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_coo_descr(rocsparse_const_spmat_descr* descr,
                                                   int64_t                      rows,
@@ -1840,11 +1914,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_coo_aos_descr creates a descriptor holding the COO matrix
@@ -1909,11 +1985,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_csr_descr creates a descriptor holding the CSR matrix
@@ -1989,11 +2067,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_csr_descr(rocsparse_const_spmat_descr* descr,
                                                   int64_t                      rows,
@@ -2066,11 +2146,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_csc_descr creates a descriptor holding the CSC matrix
@@ -2139,11 +2221,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_csc_descr(rocsparse_const_spmat_descr* descr,
                                                   int64_t                      rows,
@@ -2209,11 +2293,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_ell_descr creates a descriptor holding the ELL matrix
@@ -2284,11 +2370,13 @@ try
     (*descr)->columns_values_batch_stride = 0;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_bell_descr creates a descriptor holding the
@@ -2362,11 +2450,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_bell_descr(rocsparse_const_spmat_descr* descr,
                                                    int64_t                      rows,
@@ -2436,11 +2526,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_bsr_descr creates a descriptor holding the BSR matrix
@@ -2518,11 +2610,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_destroy_spmat_descr destroys a sparse matrix descriptor.
@@ -2546,11 +2640,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_coo_get returns the sparse COO matrix data, sizes and
@@ -2595,11 +2691,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_coo_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    rows,
@@ -2640,11 +2738,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_coo_aos_get returns the sparse COO (AoS) matrix data, sizes and
@@ -2686,11 +2786,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_coo_aos_get(rocsparse_const_spmat_descr descr,
                                              int64_t*                    rows,
@@ -2728,11 +2830,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csr_get returns the sparse CSR matrix data, sizes and
@@ -2780,11 +2884,13 @@ try
     *data_type    = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_csr_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    rows,
@@ -2828,11 +2934,13 @@ try
     *data_type    = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_bsr_get returns the sparse BSR matrix data, sizes and
@@ -2901,11 +3009,13 @@ try
     *bdim         = descr->block_dim;
     *bdir         = descr->block_dir;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_bsr_get(const rocsparse_spmat_descr descr,
                                    int64_t*                    brows,
@@ -2970,11 +3080,13 @@ try
     *bdim         = descr->block_dim;
     *bdir         = descr->block_dir;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csc_get returns the sparse CSC matrix data, sizes and
@@ -3022,11 +3134,13 @@ try
     *data_type    = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_csc_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    rows,
@@ -3070,11 +3184,13 @@ try
     *data_type    = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_ell_get returns the sparse ELL matrix data, sizes and
@@ -3116,11 +3232,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
                                          int64_t*                    rows,
@@ -3158,11 +3276,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_bell_get returns the sparse BLOCKED ELL matrix data,
@@ -3210,11 +3330,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_bell_get(rocsparse_const_spmat_descr descr,
                                           int64_t*                    rows,
@@ -3258,11 +3380,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_coo_set_pointers sets the sparse COO matrix data pointers.
@@ -3290,11 +3414,13 @@ try
     descr->const_val_data = coo_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_coo_aos_set_pointers sets the sparse COO (AoS) matrix data pointers.
@@ -3317,11 +3443,13 @@ try
     descr->const_val_data = coo_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csr_set_pointers sets the sparse CSR matrix data pointers.
@@ -3355,11 +3483,13 @@ try
     descr->const_val_data = csr_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csc_set_pointers sets the sparse CSR matrix data pointers.
@@ -3393,11 +3523,13 @@ try
     descr->const_val_data = csc_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_ell_set_pointers sets the sparse ELL matrix data pointers.
@@ -3420,11 +3552,13 @@ try
     descr->const_val_data = ell_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_bsr_set_pointers sets the sparse BSR matrix data pointers.
@@ -3458,11 +3592,13 @@ try
     descr->const_val_data = bsr_val;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_size returns the sparse matrix sizes.
@@ -3486,11 +3622,13 @@ try
     *nnz  = descr->nnz;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_format returns the sparse matrix format.
@@ -3508,11 +3646,13 @@ try
     *format = descr->format;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_index_base returns the sparse matrix index base.
@@ -3530,11 +3670,13 @@ try
     *idx_base = descr->idx_base;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_values returns the sparse matrix value pointer.
@@ -3550,11 +3692,13 @@ try
     *values = descr->val_data;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_spmat_get_values(rocsparse_const_spmat_descr descr,
                                                   const void**                values)
@@ -3569,11 +3713,13 @@ try
     *values = descr->const_val_data;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_set_values sets the sparse matrix value pointer.
@@ -3591,11 +3737,13 @@ try
     descr->const_val_data = values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_strided_batch gets the sparse matrix batch count.
@@ -3613,11 +3761,13 @@ try
     *batch_count = descr->batch_count;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /****************************************************************************
  * \brief rocsparse_spmat_get_nnz gets the sparse matrix number of non-zeros.
@@ -3662,11 +3812,13 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /****************************************************************************
  * \brief rocsparse_spmat_get_nnz sets the sparse matrix number of non-zeros.
@@ -3684,17 +3836,21 @@ try
     {
     case rocsparse_format_bell:
     {
+        // LCOV_EXCL_START
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
             rocsparse_status_invalid_value,
             "Cannot set the number of non-zeros of a Block ELL sparse matrix.");
+        // LCOV_EXCL_STOP
         break;
     }
 
     case rocsparse_format_ell:
     {
+        // LCOV_EXCL_START
         RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
             rocsparse_status_invalid_value,
             "Cannot set the number of non-zeros of an ELL sparse matrix.");
+        // LCOV_EXCL_STOP
         break;
     }
 
@@ -3726,11 +3882,13 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_set_strided_batch sets the sparse matrix batch count.
@@ -3748,11 +3906,13 @@ try
     descr->batch_count = batch_count;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_coo_set_strided_batch sets the COO sparse matrix batch count
@@ -3774,11 +3934,13 @@ try
     descr->batch_stride = batch_stride;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csr_set_strided_batch sets the CSR sparse matrix batch count
@@ -3807,11 +3969,13 @@ try
     descr->columns_values_batch_stride = columns_values_batch_stride;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_csc_set_strided_batch sets the CSC sparse matrix batch count
@@ -3839,11 +4003,13 @@ try
     descr->offsets_batch_stride        = offsets_batch_stride;
     descr->columns_values_batch_stride = rows_values_batch_stride;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_get_attribute gets the sparse matrix attribute.
@@ -3903,12 +4069,14 @@ try
     }
     }
 
+    // LCOV_EXCL_START
     return rocsparse_status_invalid_value;
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_spmat_set_attribute sets the sparse matrix attribute.
@@ -3965,12 +4133,14 @@ try
         return rocsparse_set_mat_storage_mode(descr->descr, storage);
     }
     }
+    // LCOV_EXCL_START
     return rocsparse_status_invalid_value;
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_dnvec_descr creates a descriptor holding the dense
@@ -4001,11 +4171,13 @@ try
     (*descr)->const_values = values;
     (*descr)->data_type    = data_type;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr* descr,
                                                     int64_t                      size,
@@ -4031,11 +4203,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnvec_descr destroys a dense vector descriptor.
@@ -4049,11 +4223,13 @@ try
 
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnvec_get returns the dense vector data, size and properties.
@@ -4077,11 +4253,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_dnvec_get(rocsparse_const_dnvec_descr descr,
                                            int64_t*                    size,
@@ -4102,11 +4280,13 @@ try
     *data_type = descr->data_type;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnvec_get_values returns the dense vector value pointer.
@@ -4123,11 +4303,13 @@ try
     *values = descr->values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_dnvec_get_values(rocsparse_const_dnvec_descr descr,
                                                   const void**                values)
@@ -4142,11 +4324,13 @@ try
     *values = descr->const_values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnvec_set_values sets the dense vector value pointer.
@@ -4163,11 +4347,13 @@ try
     descr->const_values = values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_create_dnmat_descr creates a descriptor holding the dense
@@ -4227,11 +4413,13 @@ try
     (*descr)->batch_stride = 0;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_create_const_dnmat_descr(rocsparse_const_dnmat_descr* descr,
                                                     int64_t                      rows,
@@ -4284,11 +4472,13 @@ try
 
     *descr = new_descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_destroy_dnmat_descr destroys a dense matrix descriptor.
@@ -4301,11 +4491,13 @@ try
     ROCSPARSE_CHECKARG_POINTER(0, descr);
     delete descr;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnmat_get returns the dense matrix data, size and properties.
@@ -4338,11 +4530,13 @@ try
     *order     = descr->order;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_dnmat_get(rocsparse_const_dnmat_descr descr,
                                            int64_t*                    rows,
@@ -4372,11 +4566,13 @@ try
     *order     = descr->order;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnmat_get_values returns the dense matrix value pointer.
@@ -4392,11 +4588,13 @@ try
     *values = descr->values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 rocsparse_status rocsparse_const_dnmat_get_values(rocsparse_const_dnmat_descr descr,
                                                   const void**                values)
@@ -4411,11 +4609,13 @@ try
     *values = descr->const_values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnmat_set_values sets the dense matrix value pointer.
@@ -4433,11 +4633,13 @@ try
     descr->const_values = values;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnmat_get_strided_batch gets the dense matrix batch count
@@ -4459,11 +4661,13 @@ try
     *batch_stride = descr->batch_stride;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 /********************************************************************************
  * \brief rocsparse_dnmat_set_strided_batch sets the dense matrix batch count
@@ -4500,11 +4704,13 @@ try
     descr->batch_stride = batch_stride;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_csr_descr_SWDEV_453599(rocsparse_spmat_descr* descr,
@@ -4573,11 +4779,13 @@ try
     (*descr)->offsets_batch_stride        = 0;
     (*descr)->columns_values_batch_stride = 0;
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #ifdef __cplusplus
 }

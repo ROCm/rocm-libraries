@@ -78,8 +78,10 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
 
     if(nnz != (end - start))
     {
+        // LCOV_EXCL_START
         rocsparse::log_debug(handle, "CSR row pointer array does not match nnz.");
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     // clear output status to success

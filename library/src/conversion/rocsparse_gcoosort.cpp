@@ -59,7 +59,9 @@ rocsparse_status rocsparse::gcoosort_buffer_size(rocsparse_handle    handle_,
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 }
@@ -97,7 +99,9 @@ rocsparse_status rocsparse::gcoosort_by_row(rocsparse_handle    handle_,
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 }
@@ -136,7 +140,9 @@ rocsparse_status rocsparse::gcoosort_by_column(rocsparse_handle    handle_,
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 }

@@ -171,12 +171,16 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
         // ELL width cannot be 0 or negative
         if(user_ell_width < 0)
         {
+            // LCOV_EXCL_START
             return rocsparse_status_invalid_value;
+            // LCOV_EXCL_STOP
         }
 
         if(user_ell_width > max_row_nnz)
         {
+            // LCOV_EXCL_START
             return rocsparse_status_invalid_value;
+            // LCOV_EXCL_STOP
         }
     }
 
@@ -236,7 +240,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     // Re-check ELL width
     if(hyb->ell_width > max_row_nnz)
     {
+        // LCOV_EXCL_START
         return rocsparse_status_invalid_value;
+        // LCOV_EXCL_STOP
     }
 
     // Compute ELL non-zeros
@@ -385,11 +391,13 @@ try
                                                           user_ell_width,
                                                           partition_type));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dcsr2hyb(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -416,11 +424,13 @@ try
                                                           user_ell_width,
                                                           partition_type));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_ccsr2hyb(rocsparse_handle               handle,
                                                rocsparse_int                  m,
@@ -447,11 +457,13 @@ try
                                                           user_ell_width,
                                                           partition_type));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zcsr2hyb(rocsparse_handle                handle,
                                                rocsparse_int                   m,
@@ -478,8 +490,10 @@ try
                                                           user_ell_width,
                                                           partition_type));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

@@ -85,7 +85,9 @@ namespace rocsparse
             CASE(rocsparse_indextype_i64, int64_t);
 #undef CASE
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename T>
@@ -141,7 +143,9 @@ namespace rocsparse
             CASE(rocsparse_indextype_i64, int64_t);
 #undef CASE
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -226,7 +230,9 @@ rocsparse_status rocsparse::gbsr2csr(rocsparse_handle          handle,
         CASE(rocsparse_datatype_f64_c, rocsparse_double_complex);
 #undef CASE
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 rocsparse_status rocsparse::spmat_bsr2csr_buffer_size(rocsparse_handle            handle,

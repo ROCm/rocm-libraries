@@ -109,11 +109,13 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_identity_permutation_impl(handle, n, p));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_set_identity_permutation(rocsparse_handle    handle,
                                                                int64_t             n,
@@ -125,8 +127,10 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcreate_identity_permutation(handle, n, indextype, p));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

@@ -137,8 +137,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::extract_impl(
         handle, descr, source, target, stage, buffer_size_in_bytes, buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

@@ -222,8 +222,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::csr2ell_width_impl(handle, m, csr_descr, csr_row_ptr, ell_descr, ell_width));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

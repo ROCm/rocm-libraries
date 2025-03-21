@@ -196,10 +196,12 @@ namespace rocsparse
         case rocsparse_spmv_alg_bsr:
         case rocsparse_spmv_alg_ell:
         {
+            // LCOV_EXCL_START
             return rocsparse_status_invalid_value;
         }
         }
         return rocsparse_status_invalid_value;
+        // LCOV_EXCL_STOP
     }
 
     static rocsparse_status spmv_alg2coomv_alg(rocsparse_spmv_alg   spmv_alg,

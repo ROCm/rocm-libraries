@@ -559,7 +559,9 @@ namespace rocsparse
             }
         }
         }
+        // LCOV_EXCL_START
         return rocsparse_status_invalid_value;
+        // LCOV_EXCL_STOP
     }
 
     static rocsparse_status spgemm_checkarg(rocsparse_handle            handle, //0
@@ -713,8 +715,10 @@ try
                                                                   temp_buffer));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

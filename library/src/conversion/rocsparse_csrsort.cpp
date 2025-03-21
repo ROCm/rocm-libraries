@@ -93,11 +93,13 @@ try
     *buffer_size += ((sizeof(rocsparse_int) * m) / 256 + 1) * 256;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csrsort(rocsparse_handle          handle,
                                               rocsparse_int             m,
@@ -248,8 +250,10 @@ try
         }
     }
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

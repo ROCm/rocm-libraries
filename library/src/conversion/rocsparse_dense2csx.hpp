@@ -147,6 +147,8 @@ namespace rocsparse
         }
         }
 
+        // LCOV_EXCL_START
         return rocsparse_status_invalid_value;
+        // LCOV_EXCL_STOP
     }
 }

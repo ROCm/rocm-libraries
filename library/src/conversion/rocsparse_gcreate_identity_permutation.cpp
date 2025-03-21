@@ -58,5 +58,7 @@ rocsparse_status rocsparse::gcreate_identity_permutation(rocsparse_handle    han
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }

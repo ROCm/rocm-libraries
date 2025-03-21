@@ -703,11 +703,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dcsrilu0_numeric_boost(rocsparse_handle   handle,
                                                              rocsparse_mat_info info,
@@ -721,11 +723,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_ccsrilu0_numeric_boost(rocsparse_handle               handle,
@@ -740,11 +744,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(float), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_zcsrilu0_numeric_boost(rocsparse_handle                handle,
@@ -759,11 +765,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dscsrilu0_numeric_boost(rocsparse_handle   handle,
                                                               rocsparse_mat_info info,
@@ -777,11 +785,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_dccsrilu0_numeric_boost(rocsparse_handle               handle,
@@ -796,11 +806,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrilu0_numeric_boost_template(
         handle, info, enable_boost, sizeof(double), boost_tol, boost_val));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csrilu0_clear(rocsparse_handle   handle,
                                                     rocsparse_mat_info info)
@@ -823,11 +835,13 @@ try
     info->csrilu0_info = nullptr;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_scsrilu0(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -846,11 +860,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dcsrilu0(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -869,11 +885,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_ccsrilu0(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -892,11 +910,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zcsrilu0(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -915,11 +935,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrilu0_template(
         handle, m, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, info, policy, temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csrilu0_zero_pivot(rocsparse_handle   handle,
                                                          rocsparse_mat_info info,
@@ -1003,11 +1025,13 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_csrilu0_singular_pivot(rocsparse_handle   handle,
                                                              rocsparse_mat_info info,
@@ -1082,11 +1106,13 @@ try
     }
 
     return (rocsparse_status_success);
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     return rocsparse::exception_to_rocsparse_status();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_csrilu0_set_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double tol)
@@ -1104,11 +1130,13 @@ try
     info->singular_tol = tol;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     return rocsparse::exception_to_rocsparse_status();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_csrilu0_get_tolerance(rocsparse_handle handle, rocsparse_mat_info info, double* tol)
@@ -1126,8 +1154,10 @@ try
     *tol = info->singular_tol;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     return rocsparse::exception_to_rocsparse_status();
 }
+// LCOV_EXCL_STOP

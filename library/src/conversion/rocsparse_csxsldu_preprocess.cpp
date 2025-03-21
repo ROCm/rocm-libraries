@@ -159,7 +159,9 @@ namespace rocsparse
             {
             case rocsparse_diag_type_non_unit:
             {
+                // LCOV_EXCL_START
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+                // LCOV_EXCL_STOP
             }
             case rocsparse_diag_type_unit:
             {

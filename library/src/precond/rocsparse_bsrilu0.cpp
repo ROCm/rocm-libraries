@@ -667,11 +667,13 @@ try
     info->bsrilu0_info = nullptr;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -905,11 +907,13 @@ try
                                                            temp_buffer)));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dbsrilu0(rocsparse_handle          handle,
                                                rocsparse_direction       dir,
@@ -939,11 +943,13 @@ try
                                                            policy,
                                                            temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cbsrilu0(rocsparse_handle          handle,
                                                rocsparse_direction       dir,
@@ -973,11 +979,13 @@ try
                                                            policy,
                                                            temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zbsrilu0(rocsparse_handle          handle,
                                                rocsparse_direction       dir,
@@ -1007,11 +1015,13 @@ try
                                                            policy,
                                                            temp_buffer)));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_bsrilu0_zero_pivot(rocsparse_handle   handle,
                                                          rocsparse_mat_info info,
@@ -1094,8 +1104,10 @@ try
     }
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

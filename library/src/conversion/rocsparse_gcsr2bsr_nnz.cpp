@@ -73,7 +73,9 @@ namespace rocsparse
             CASE(rocsparse_indextype_i64, int64_t);
 #undef CASE
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -128,5 +130,7 @@ rocsparse_status rocsparse::gcsr2bsr_nnz(rocsparse_handle          handle,
         CASE(rocsparse_indextype_i64, int64_t);
 #undef CASE
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }

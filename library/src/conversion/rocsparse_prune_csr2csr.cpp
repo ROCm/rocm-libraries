@@ -644,11 +644,13 @@ try
                                                                             csr_col_ind_C,
                                                                             buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_dprune_csr2csr_buffer_size(rocsparse_handle          handle,
@@ -684,11 +686,13 @@ try
                                                                             csr_col_ind_C,
                                                                             buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sprune_csr2csr_nnz(rocsparse_handle          handle,
                                                          rocsparse_int             m,
@@ -721,11 +725,13 @@ try
                                                                     nnz_total_dev_host_ptr,
                                                                     temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dprune_csr2csr_nnz(rocsparse_handle          handle,
                                                          rocsparse_int             m,
@@ -758,11 +764,13 @@ try
                                                                     nnz_total_dev_host_ptr,
                                                                     temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sprune_csr2csr(rocsparse_handle          handle,
                                                      rocsparse_int             m,
@@ -797,11 +805,13 @@ try
                                                                 csr_col_ind_C,
                                                                 temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dprune_csr2csr(rocsparse_handle          handle,
                                                      rocsparse_int             m,
@@ -836,8 +846,10 @@ try
                                                                 csr_col_ind_C,
                                                                 temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

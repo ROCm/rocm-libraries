@@ -161,11 +161,13 @@ try
 
     return rocsparse::coosort_buffer_size_template(
         handle, m, n, nnz, coo_row_ind, coo_col_ind, buffer_size);
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -498,11 +500,13 @@ try
         handle, m, n, nnz, coo_row_ind, coo_col_ind, perm, temp_buffer));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -611,11 +615,13 @@ try
         handle, m, n, nnz, coo_row_ind, coo_col_ind, perm, temp_buffer));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #define INSTANTIATE(J)                                                                            \
     template rocsparse_status rocsparse::coosort_buffer_size_template<J>(rocsparse_handle handle, \

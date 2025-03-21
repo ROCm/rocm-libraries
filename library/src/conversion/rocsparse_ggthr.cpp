@@ -112,7 +112,9 @@ rocsparse_status rocsparse::ggthr(rocsparse_handle     handle_,
         DISPATCH_DATA_TYPE(int64_t);
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 #undef DISPATCH_DATA_TYPE

@@ -166,8 +166,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::coo2csr_impl(handle, coo_row_ind, nnz, m, csr_row_ptr, idx_base));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

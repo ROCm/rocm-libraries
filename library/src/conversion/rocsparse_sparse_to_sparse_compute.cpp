@@ -105,7 +105,9 @@ FUNCTION_CONVERT(coo, coo_aos)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -140,7 +142,9 @@ FUNCTION_CONVERT(coo, csr)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -213,7 +217,9 @@ FUNCTION_CONVERT(coo_aos, coo)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -249,7 +255,9 @@ FUNCTION_CONVERT(coo_aos, csr)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -286,7 +294,9 @@ FUNCTION_CONVERT(csr, coo_aos)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -323,7 +333,9 @@ FUNCTION_CONVERT(csr, coo)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -358,7 +370,9 @@ FUNCTION_CONVERT(csr, csc)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -404,7 +418,9 @@ FUNCTION_CONVERT(csr, ell)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -442,7 +458,9 @@ FUNCTION_CONVERT(csr, bsr)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -479,7 +497,9 @@ FUNCTION_CONVERT(csc, csr)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -517,7 +537,9 @@ FUNCTION_CONVERT(ell, csr)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -552,7 +574,9 @@ FUNCTION_CONVERT(bsr, csr)
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 //
@@ -713,7 +737,9 @@ FUNCTION_CONVERT(coo, coo)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(coo_aos, coo_aos)
@@ -742,7 +768,9 @@ FUNCTION_CONVERT(coo_aos, coo_aos)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(csr, csr)
@@ -772,7 +800,9 @@ FUNCTION_CONVERT(csr, csr)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(csc, csc)
@@ -801,7 +831,9 @@ FUNCTION_CONVERT(csc, csc)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(ell, ell)
@@ -834,7 +866,9 @@ FUNCTION_CONVERT(ell, ell)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(bsr, bsr)
@@ -863,7 +897,9 @@ FUNCTION_CONVERT(bsr, bsr)
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 FUNCTION_CONVERT(bell, bell)

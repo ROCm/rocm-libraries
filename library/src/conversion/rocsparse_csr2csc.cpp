@@ -542,11 +542,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csr2csc_buffer_size_impl(
         handle, m, n, nnz, csr_row_ptr, csr_col_ind, copy_values, buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 #define CIMPL(NAME, T)                                                   \
     extern "C" rocsparse_status NAME(rocsparse_handle     handle,        \

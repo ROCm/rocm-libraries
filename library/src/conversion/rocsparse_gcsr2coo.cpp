@@ -68,7 +68,9 @@ rocsparse_status rocsparse::gcsr2coo(rocsparse_handle     handle_,
         case rocsparse_indextype_i64:
             DO(int32_t, int64_t);
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     case rocsparse_indextype_i64:
@@ -82,11 +84,15 @@ rocsparse_status rocsparse::gcsr2coo(rocsparse_handle     handle_,
         case rocsparse_indextype_i64:
             DO(int64_t, int64_t);
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
     }
 #undef DO
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 rocsparse_status rocsparse::spmat_csr2coo_buffer_size(rocsparse_handle            handle,

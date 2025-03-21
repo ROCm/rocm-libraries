@@ -420,11 +420,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_buffer_size_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dprune_dense2csr_buffer_size(rocsparse_handle handle,
                                                                    rocsparse_int    m,
@@ -444,11 +446,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_buffer_size_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sprune_dense2csr_nnz(rocsparse_handle          handle,
                                                            rocsparse_int             m,
@@ -467,11 +471,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_nnz_template(
         handle, m, n, A, lda, threshold, descr, csr_row_ptr, nnz_total_dev_host_ptr, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dprune_dense2csr_nnz(rocsparse_handle          handle,
                                                            rocsparse_int             m,
@@ -490,11 +496,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_nnz_template(
         handle, m, n, A, lda, threshold, descr, csr_row_ptr, nnz_total_dev_host_ptr, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sprune_dense2csr(rocsparse_handle          handle,
                                                        rocsparse_int             m,
@@ -514,11 +522,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dprune_dense2csr(rocsparse_handle          handle,
                                                        rocsparse_int             m,
@@ -538,8 +548,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::prune_dense2csr_template(
         handle, m, n, A, lda, threshold, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

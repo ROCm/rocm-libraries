@@ -406,11 +406,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::ell2csr_nnz_impl(
         handle, m, n, ell_descr, ell_width, ell_col_ind, csr_descr, csr_row_ptr, csr_nnz));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_sell2csr(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -439,11 +441,13 @@ try
                                                       csr_row_ptr,
                                                       csr_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dell2csr(rocsparse_handle          handle,
                                                rocsparse_int             m,
@@ -472,11 +476,13 @@ try
                                                       csr_row_ptr,
                                                       csr_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cell2csr(rocsparse_handle               handle,
                                                rocsparse_int                  m,
@@ -505,11 +511,13 @@ try
                                                       csr_row_ptr,
                                                       csr_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zell2csr(rocsparse_handle                handle,
                                                rocsparse_int                   m,
@@ -538,8 +546,10 @@ try
                                                       csr_row_ptr,
                                                       csr_col_ind));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

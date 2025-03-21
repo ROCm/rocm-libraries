@@ -724,11 +724,13 @@ try
                                                                     info,
                                                                     buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_dprune_csr2csr_by_percentage_buffer_size(rocsparse_handle          handle,
@@ -767,11 +769,13 @@ try
                                                                     info,
                                                                     buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_sprune_csr2csr_nnz_by_percentage(rocsparse_handle          handle,
@@ -808,11 +812,13 @@ try
                                                             info,
                                                             temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_dprune_csr2csr_nnz_by_percentage(rocsparse_handle          handle,
@@ -849,11 +855,13 @@ try
                                                             info,
                                                             temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_sprune_csr2csr_by_percentage(rocsparse_handle          handle,
@@ -891,11 +899,13 @@ try
                                                                               info,
                                                                               temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status
     rocsparse_dprune_csr2csr_by_percentage(rocsparse_handle          handle,
@@ -933,8 +943,10 @@ try
                                                                               info,
                                                                               temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

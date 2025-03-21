@@ -54,11 +54,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_csrsort_buffer_size(handle, n, m, nnz, csc_col_ptr, csc_row_ind, buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_cscsort(rocsparse_handle          handle,
                                               rocsparse_int             m,
@@ -91,8 +93,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse_csrsort(handle, n, m, nnz, descr, csc_col_ptr, csc_row_ind, perm, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

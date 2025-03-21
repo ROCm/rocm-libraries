@@ -152,8 +152,10 @@ try
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::inverse_permutation_impl(handle_, n_, p_, q_, base_));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

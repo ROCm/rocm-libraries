@@ -270,11 +270,13 @@ try
     *buffer_size += rocprim_size;
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_shyb2csr(rocsparse_handle          handle,
                                                const rocsparse_mat_descr descr,
@@ -290,11 +292,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::hyb2csr_template(
         handle, descr, hyb, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_dhyb2csr(rocsparse_handle          handle,
                                                const rocsparse_mat_descr descr,
@@ -310,11 +314,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::hyb2csr_template(
         handle, descr, hyb, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_chyb2csr(rocsparse_handle          handle,
                                                const rocsparse_mat_descr descr,
@@ -330,11 +336,13 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::hyb2csr_template(
         handle, descr, hyb, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_zhyb2csr(rocsparse_handle          handle,
                                                const rocsparse_mat_descr descr,
@@ -350,8 +358,10 @@ try
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::hyb2csr_template(
         handle, descr, hyb, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

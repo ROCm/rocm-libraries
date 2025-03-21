@@ -94,7 +94,9 @@ rocsparse_status rocsparse::gcsr2csc_buffer_size(rocsparse_handle    handle,
         return rocsparse_status_success;
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 #undef DISPATCH_INDEX_TYPE_IND
@@ -194,7 +196,9 @@ rocsparse_status rocsparse::gcsr2csc(rocsparse_handle     handle,
     }
     case rocsparse_datatype_f16_r:
     {
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
     case rocsparse_datatype_u32_r:
     {
@@ -222,7 +226,9 @@ rocsparse_status rocsparse::gcsr2csc(rocsparse_handle     handle,
     }
     }
 
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 
 #undef CALL_TEMPLATE
 #undef DISPATCH_INDEX_TYPE_IND

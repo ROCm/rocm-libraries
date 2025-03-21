@@ -62,8 +62,10 @@ rocsparse_status rocsparse::check_matrix_gebsr_core(rocsparse_handle       handl
 
     if(nnzb != (end - start))
     {
+        // LCOV_EXCL_START
         rocsparse::log_debug(handle, "GEBSR row pointer array does not match nnzb.");
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     // Temporary buffer entry points

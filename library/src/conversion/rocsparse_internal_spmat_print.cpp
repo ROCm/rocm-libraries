@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 
+// LCOV_EXCL_START
 #include "rocsparse_internal_spmat_print.hpp"
 #include "rocsparse_convert_array.hpp"
 #include "to_string.hpp"
@@ -530,3 +531,4 @@ rocsparse_status rocsparse::internal_spmat_print(std::ostream&               out
     }
     return rocsparse_status_success;
 }
+// LCOV_EXCL_STOP
