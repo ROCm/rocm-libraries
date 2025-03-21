@@ -57,7 +57,7 @@ namespace
             return rocblas_status_invalid_handle;
 
         rocblas_internal_logger logger;
-        if(handle->getArch() >= 942 && handle->getArch() < 1000)
+        if(handle->getArch() == 942)
         {
             // Copy alpha and beta to host if on device
             rocblas_union_t alpha_h, beta_h;

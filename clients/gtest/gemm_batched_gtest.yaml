@@ -224,6 +224,15 @@ Tests:
   transB: N
   api: [ C, FORTRAN ]
 
+- name: gemm_ex3_xx_batched_bad_arg
+  category: quick
+  function:
+    - gemm_batched_ex3_bad_arg: *float8_float8_float8
+  transA: N
+  transB: N
+  api: [ C, FORTRAN ]
+  gpu_arch: '942'
+
 - name: gemm_batched_algorithm_complex_coverage
   category: pre_checkin
   function:

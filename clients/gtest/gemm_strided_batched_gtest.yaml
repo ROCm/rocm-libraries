@@ -252,10 +252,18 @@ Tests:
   function:
     - gemm_strided_batched_ex_bad_arg: *real_precisions
     - gemm_strided_batched_ex_bad_arg: *complex_precisions
+  transA: N
+  transB: N
+  api: [ C, FORTRAN ]
+
+- name: gemm_strided_batched_ex3_xx_bad_arg
+  category: quick
+  function:
     - gemm_strided_batched_ex3_bad_arg: *float8_float8_float8
   transA: N
   transB: N
   api: [ C, FORTRAN ]
+  gpu_arch: '942'
 
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *single_precision, batch_count: 1,
