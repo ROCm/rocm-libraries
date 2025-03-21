@@ -342,7 +342,9 @@ namespace rocsparse
         const bool Ci_Ai_Bi = (batch_count_A == batch_count_C && batch_count_A == batch_count_B);
         if(!Ci_A_Bi && !Ci_Ai_B && !Ci_Ai_Bi)
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+            // LCOV_EXCL_STOP
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_template_dispatch(handle,

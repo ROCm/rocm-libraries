@@ -52,7 +52,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename I, typename J, typename T, typename... Ts>
@@ -108,8 +110,10 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+            // LCOV_EXCL_START
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -196,11 +200,12 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-
+        // LCOV_EXCL_START
 #undef DATATYPE_CASE
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -285,11 +290,13 @@ try
         alg,
         buffer_size));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -315,7 +322,9 @@ namespace rocsparse
             return rocsparse_status_success;
         }
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename I, typename J, typename T, typename... Ts>
@@ -370,15 +379,15 @@ namespace rocsparse
         case rocsparse_format_bell:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            return rocsparse_status_success;
         }
         case rocsparse_format_bsr:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            return rocsparse_status_success;
         }
+            // LCOV_EXCL_START
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -464,11 +473,12 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
-
+        // LCOV_EXCL_START
 #undef DATATYPE_CASE
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -556,11 +566,13 @@ try
         alg,
         temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 namespace rocsparse
 {
@@ -584,7 +596,9 @@ namespace rocsparse
                 compute_template(ts...);
         }
         }
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename I, typename J, typename T, typename... Ts>
@@ -639,8 +653,10 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+            // LCOV_EXCL_START
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -728,9 +744,11 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
+        // LCOV_EXCL_START
 #undef DATATYPE_CASE
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -819,8 +837,10 @@ try
                                   alg,
                                   temp_buffer));
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

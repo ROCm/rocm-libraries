@@ -55,10 +55,12 @@ namespace rocsparse
         case rocsparse_spmm_alg_coo_atomic:
         case rocsparse_spmm_alg_coo_segmented_atomic:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     rocsparse_status spmm_alg2csrmm_alg(rocsparse_spmm_alg spmm_alg, rocsparse_csrmm_alg& csrmm_alg)
@@ -96,10 +98,12 @@ namespace rocsparse
         case rocsparse_spmm_alg_coo_atomic:
         case rocsparse_spmm_alg_coo_segmented_atomic:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     rocsparse_status spmm_alg2coomm_alg(rocsparse_spmm_alg spmm_alg, rocsparse_coomm_alg& coomm_alg)
@@ -137,10 +141,12 @@ namespace rocsparse
         case rocsparse_spmm_alg_csr_nnz_split:
         case rocsparse_spmm_alg_csr_merge_path:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     rocsparse_status spmm_alg2bsrmm_alg(rocsparse_spmm_alg spmm_alg, rocsparse_bsrmm_alg& bsrmm_alg)
@@ -163,10 +169,12 @@ namespace rocsparse
         case rocsparse_spmm_alg_coo_atomic:
         case rocsparse_spmm_alg_coo_segmented_atomic:
         {
+            // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
         }
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename T, typename I, typename J, typename A, typename B, typename C>
@@ -637,9 +645,11 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
+            // LCOV_EXCL_START
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     template <typename... Ts>
@@ -814,7 +824,9 @@ namespace rocsparse
         }
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     rocsparse_indextype determine_I_index_type(rocsparse_const_spmat_descr mat)
@@ -954,8 +966,10 @@ try
                                          temp_buffer));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

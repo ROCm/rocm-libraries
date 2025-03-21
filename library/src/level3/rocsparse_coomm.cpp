@@ -322,7 +322,9 @@ rocsparse_status rocsparse::coomm_template_dispatch(rocsparse_handle          ha
         }
     }
     }
+    // LCOV_EXCL_START
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
 }
 
 namespace rocsparse
@@ -718,7 +720,9 @@ rocsparse_status rocsparse::coomm_template(rocsparse_handle          handle,
 
     if(!Ci_A_Bi && !Ci_Ai_B && !Ci_Ai_Bi)
     {
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        // LCOV_EXCL_STOP
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_core(handle,
