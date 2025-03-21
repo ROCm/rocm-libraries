@@ -71,9 +71,9 @@ void ArgumentModel_log_efficiency(rocblas_internal_ostream& name_line,
         return;
 
     if(rocblas_internal_get_arch_name() == "gfx942"
-       && rocblas_get_flops_per_clock_per_cu_gfx942(arg.compute_type) != 0)
+       && rocblas_get_flops_per_clock_per_cu_gfx942(arg.a_type) != 0)
     {
-        double theoretical_gflops = rocblas_get_flops_per_clock_per_cu_gfx942(arg.compute_type)
+        double theoretical_gflops = rocblas_get_flops_per_clock_per_cu_gfx942(arg.a_type)
                                     * frequency_monitor.getCuCount()
                                     * frequency_monitor.getLowestAverageSYSCLK() * 0.001;
         name_line << ",efficiency";
