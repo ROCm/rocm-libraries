@@ -684,6 +684,39 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
     }
 }
 
+// returns final grid integrating inter-process and intra-process grids
+std::vector<unsigned int> compute_final_grid(const std::vector<unsigned int>& mpi_grid,
+                                             const std::vector<unsigned int>& intra_grid)
+{
+    std::vector<unsigned int> final_grid(mpi_grid.size());
+    for(size_t i = 0; i < mpi_grid.size(); ++i)
+    {
+        final_grid[i] = mpi_grid[i] * intra_grid[i];
+    }
+    return final_grid;
+}
+
+// get number of nodes being required by user
+int get_num_nodes(MPI_Comm mpi_comm)
+{
+    int      node_rank, node_size;
+    MPI_Comm node_comm;
+
+    // split MPI ranks by node
+    MPI_Comm_split_type(mpi_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &node_comm);
+
+    // get number of ranks within the same node
+    MPI_Comm_rank(node_comm, &node_rank);
+    MPI_Comm_size(node_comm, &node_size);
+
+    // get total number of unique nodes
+    int num_nodes;
+    MPI_Allreduce(&node_size, &num_nodes, 1, MPI_INT, MPI_MAX, mpi_comm);
+
+    MPI_Comm_free(&node_comm);
+    return num_nodes;
+}
+
 // AllParams is a callable that returns a container of fft_params
 // structs to test.  It accepts a vector of library strings, which
 // "dyna" workers will turn into params that load the specified
@@ -762,6 +795,13 @@ int mpi_worker_main(const char*                                               de
     std::vector<unsigned int> imgrid;
     std::vector<unsigned int> omgrid;
 
+    // input/output GPU grids per process
+    std::vector<unsigned int> ingrid;
+    std::vector<unsigned int> outgrid;
+
+    // number of GPUs to use per rank
+    int ngpus{};
+
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token
         ->add_flag("--double", "Double precision transform (deprecated: use --precision double)")
@@ -812,6 +852,20 @@ int mpi_worker_main(const char*                                               de
                      "If this value is greater than one, arrays will be used")
         ->default_val(1);
 
+    // set number of GPUs to user per MPI rank
+    non_token->add_option("--ngpus", ngpus, "Number of GPUs to use per rank")
+        ->default_val(1)
+        ->check(CLI::NonNegativeNumber);
+
+    // define multi-GPU grids per process
+    non_token->add_option("--ingrid", ingrid, "Single-process grid of GPUs at input")
+        ->expected(1, 3)
+        ->needs("--ngpus");
+
+    non_token->add_option("--outgrid", outgrid, "Single-process grid of GPUs at output")
+        ->expected(1, 3)
+        ->needs("--ngpus");
+
     CLI::Option* opt_istride = non_token->add_option("--istride", params.istride, "Input strides");
     CLI::Option* opt_ostride = non_token->add_option("--ostride", params.ostride, "Output strides");
 
@@ -851,11 +905,11 @@ int mpi_worker_main(const char*                                               de
 
     if(token.empty())
     {
-        int localDeviceCount = 0;
-        (void)hipGetDeviceCount(&localDeviceCount);
-
         // set default multi-process grids in case none were given
         params.set_default_grid(mp_size, imgrid, omgrid);
+
+        // set default GPU grids per process
+        params.set_default_grid(ngpus, ingrid, outgrid);
 
         // start with all-ones in grids
         std::vector<unsigned int> input_grid(params.length.size() + 1, 1);
@@ -865,10 +919,14 @@ int mpi_worker_main(const char*                                               de
         int imgrid_size = product(imgrid.begin(), imgrid.end());
         int omgrid_size = product(omgrid.begin(), omgrid.end());
 
-        if((imgrid.size() != params.length.size()) || (omgrid.size() != params.length.size()))
+        int ingrid_size  = product(ingrid.begin(), ingrid.end());
+        int outgrid_size = product(outgrid.begin(), outgrid.end());
+
+        if((imgrid.size() != params.length.size()) || (omgrid.size() != params.length.size())
+           || (ingrid.size() != params.length.size()) || (outgrid.size() != params.length.size()))
         {
             throw std::runtime_error(
-                "grid of processors must be of the same size as the problem dimension!");
+                "grid of processors and GPUs must be of the same size as the problem dimension!");
         }
 
         if((imgrid_size != mp_size) || (omgrid_size != mp_size))
@@ -877,12 +935,26 @@ int mpi_worker_main(const char*                                               de
                 "size of grid of processors must be equal to the number of MPI resources!");
         }
 
-        // create input and output grids and distribute it according to user requirements
-        std::copy(imgrid.begin(), imgrid.end(), input_grid.begin() + 1);
-        std::copy(omgrid.begin(), omgrid.end(), output_grid.begin() + 1);
+        if((ingrid_size != ngpus) || (outgrid_size != ngpus))
+        {
+            throw std::runtime_error("size of grid of GPUs per process must be equal to ngpus!");
+        }
 
-        params.distribute_input(localDeviceCount, input_grid);
-        params.distribute_output(localDeviceCount, output_grid);
+        // create input and output grids and distribute it according to user requirements
+        std::vector<unsigned int> final_input_grid, final_output_grid;
+        final_input_grid  = compute_final_grid(imgrid, ingrid);
+        final_output_grid = compute_final_grid(omgrid, outgrid);
+
+        std::copy(final_input_grid.begin(), final_input_grid.end(), input_grid.begin() + 1);
+        std::copy(final_output_grid.begin(), final_output_grid.end(), output_grid.begin() + 1);
+
+        // get number of nodes to asign local GPU indexing, since within
+        // each node, GPUs are indexed 0,1,...,N
+        int num_nodes = get_num_nodes(mpi_comm);
+
+        // distribute input and output among the available number of ranks and GPUs per rank
+        params.distribute_input(ngpus, input_grid, num_nodes);
+        params.distribute_output(ngpus, output_grid, num_nodes);
 
         params.validate();
         token = params.token();
@@ -942,9 +1014,27 @@ int mpi_worker_main(const char*                                               de
                 std::cout << " " << i;
             std::cout << "\n";
 
+            if(!ingrid.empty())
+            {
+                std::cout << "\tGPU grid:";
+                for(auto& i : ingrid)
+                    std::cout << " " << i;
+                std::cout << "\n";
+            }
+
             std::cout << "output grid:";
             for(auto& i : omgrid)
                 std::cout << " " << i;
+            std::cout << "\n";
+
+            if(!outgrid.empty())
+            {
+                std::cout << "\tGPU grid:";
+                for(auto& i : outgrid)
+                    std::cout << " " << i;
+                std::cout << "\n";
+            }
+
             std::cout << "\n";
 
             std::cout << "Token: " << token << std::endl;

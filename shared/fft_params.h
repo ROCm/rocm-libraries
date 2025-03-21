@@ -1,4 +1,4 @@
-// Copyright (C) 2023 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2023 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -2271,6 +2271,8 @@ public:
     // normal GPU buffer that is used for single-device FFTs.
     // gpu_output is the host buffer where transform output needs to
     // go for validation
+    // Field is distributed among ranks and then among the number
+    // of GPUs per rank (which defaults to 1).
     virtual void multi_gpu_finalize(std::vector<hostbuf>& gpu_output,
                                     std::vector<gpubuf>&  obuffer,
                                     std::vector<void*>&   pobuffer)
@@ -2282,10 +2284,13 @@ public:
     // number of bricks to split that dimension on.  Field length
     // starts with batch dimension, followed by FFT dimensions
     // slowest to fastest.
-    void distribute_field(int                              localDeviceCount,
+    // num_nodes represents the number of nodes used in the parallel
+    // computer, which are assumed to have at least ngpus each
+    void distribute_field(int                              ngpus,
                           const std::vector<unsigned int>& brick_grid,
                           std::vector<fft_field>&          fields,
-                          const std::vector<size_t>&       field_length)
+                          const std::vector<size_t>&       field_length,
+                          int                              num_nodes)
     {
         if(brick_grid.size() != field_length.size())
             throw std::runtime_error(
@@ -2353,34 +2358,38 @@ public:
                 b.device = brickIdx++;
             else
             {
-                b.rank = brickIdx++;
+                int rank = brickIdx / ngpus; // determine MPI rank
+                int gpu  = brickIdx % ngpus; // determine GPU within rank
 
-                // if there are at least as many devices as bricks,
-                // give each rank a separate device
-                if(localDeviceCount >= static_cast<int>(field.bricks.size()))
-                    b.device = b.rank;
+                b.rank   = rank;
+                b.device = (rank % num_nodes) * ngpus + gpu;
+
+                brickIdx++;
             }
         }
     }
 
     // Distribute problem input among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
-    // and ending with fastest FFT dimension.
-    void distribute_input(int localDeviceCount, const std::vector<unsigned int>& brick_grid)
+    // and ending with fastest FFT dimension. For single-proc single-proc
+    // multi-gpu, ngpus represents the number of GPUs to use;
+    // while for multi-proc it represents the number of GPUs on each rank.
+    void distribute_input(int ngpus, const std::vector<unsigned int>& brick_grid, int num_nodes = 1)
     {
         auto len = length;
         len.insert(len.begin(), nbatch);
-        distribute_field(localDeviceCount, brick_grid, ifields, len);
+        distribute_field(ngpus, brick_grid, ifields, len, num_nodes);
     }
 
     // Distribute problem output among specified grid of devices/processors.
     // Grid specifies number of bricks per dimension, starting with batch
     // and ending with fastest FFT dimension.
-    void distribute_output(int localDeviceCount, const std::vector<unsigned int>& brick_grid)
+    void
+        distribute_output(int ngpus, const std::vector<unsigned int>& brick_grid, int num_nodes = 1)
     {
         auto len = olength();
         len.insert(len.begin(), nbatch);
-        distribute_field(localDeviceCount, brick_grid, ofields, len);
+        distribute_field(ngpus, brick_grid, ofields, len, num_nodes);
     }
 };
 
@@ -2917,7 +2926,8 @@ inline VectorNorms distance_1to1_complex(const Tcomplex*                        
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -3002,7 +3012,8 @@ inline VectorNorms distance_1to1_real(const Tfloat*                           in
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
@@ -3075,7 +3086,8 @@ inline VectorNorms distance_1to2(const rocfft_complex<Tval>*             input,
     for(size_t b = 0; b < nbatch; b++, idx_base += idist, odx_base += odist)
     {
 #ifdef _OPENMP
-#pragma omp parallel for reduction(max : linf) reduction(+ : l2) num_threads(partitions.size()) private(linf_failures_private)
+#pragma omp parallel for reduction(max : linf) reduction(+ : l2) \
+    num_threads(partitions.size()) private(linf_failures_private)
 #endif
         for(size_t part = 0; part < partitions.size(); ++part)
         {
