@@ -37,6 +37,8 @@ subtrees:
     title: Use the rocDecode RocVideoDecoder
   - file: how-to/using-rocDecode-ffmpeg.rst
     title: Use the rocDecode FFmpeg demultiplexer
+  - file: how-to/using-rocDecode-bitstream.rst
+    title: Use the rocDecode bitstream reader APIs  
   - file: how-to/using-rocdecode.rst
     title: Use the rocDecode core APIs
 

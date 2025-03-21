@@ -34,6 +34,7 @@ The rocDecode public repository is located at `https://github.com/ROCm/rocDecode
     * :doc:`Understand the rocDecode videodecode.cpp sample <./how-to/using-rocDecode-videodecode-sample>`
     * :doc:`Use the rocDecode RocVideoDecoder <./how-to/using-rocDecode-video-decoder>`
     * :doc:`Use the rocDecode FFmpeg demultiplexer <./how-to/using-rocDecode-ffmpeg>`
+    * :doc:`Use the rocDecode bitstream reader APIs <./how-to/using-rocDecode-bitstream>`    
     * :doc:`Use the rocDecode core APIs <./how-to/using-rocdecode>`
 
 
