@@ -2996,10 +2996,6 @@ class Solution(collections.abc.Mapping):
             GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
             MIInPerThread = state[f"MIInputPerThread{tc}"]
             reject(state, f"SwizzleTensor{tc} doesn't support GRVW{tc} ({GRVW_TC}) != MIInputPerThread{tc} ({MIInPerThread}) * {SwizzlePackK}")
-          # TODO- increasing VW might have better perf. But it'll change the swizzling pattern.
-          if state[f"VectorWidth{tc}"] != 1:
-            VW_TC = state[f"VectorWidth{tc}"]
-            reject(state, f"SwizzleTensor{tc} requires VectorWidth{tc} ({VW_TC}) == 1")
 
       if state["ProblemType"]["SwizzleTensorA"]:
         if not state["DirectToVgprA"]:

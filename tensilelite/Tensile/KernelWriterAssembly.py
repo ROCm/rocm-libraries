@@ -982,9 +982,6 @@ class KernelWriterAssembly(KernelWriter):
             calcDims.append(i)
             macroArgs.append("sgprOffset%s:req" % idxChars[i])
 
-      # swizzle: passing fake stride (swizzled stride)
-      if isSwizzled:
-        macroArgs.append("sgprStrideSW%s:req" % tc)
       macro = Macro("GLOBAL_OFFSET_%s" % suffix_tc, "vgprAddr:req", *macroArgs, "vgprTmp:req")
 
       # Each index may be skipped, scaled by stride, or unscaled
@@ -1094,10 +1091,8 @@ class KernelWriterAssembly(KernelWriter):
 
             # offset * stride
             if isSwizzled:
-              macro.add(VMulLOU32(dst=destLo,
-                src0="s[\\sgprStrideSW%s]" % tc, \
-                src1=offset, \
-                comment="SWZ-%s: mul d%u lower"%(tc, i)))
+              # Swizzle directly uses the offset base that has already been multiplied by the stride.
+              macro.add(VMovB32(dst=destLo, src=offset))
             else:
               macro.add(VMulLOU32(dst=destLo,
                 src0=self.strideRef(tc, indices[i]), \
@@ -2405,22 +2400,46 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VLShiftRightB32(dst=vgpr(v), shiftHex=hex(log2(margin)), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u /= %d"%(tP["tensorChar"], tP["tileChar"], 0, margin)))
         module.add(VLShiftLeftB32(dst=vgpr(v), shiftHex=hex(log2(margin)), src=vgpr(v), comment="gro%s%s_%u *= %d"%(tP["tensorChar"], tP["tileChar"], 0, margin)))
       else:
-        module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
-        # swizzle
-        if tP["isSwizzled"]:
-          swizzleStridePerWave = self.sgprPool.checkOut(1)
-          # Calc stride = numKr * WaveG
-          swizzleStrideVal = tP["swizzleK"]
-          module.addComment(f"Align to {swizzleStrideVal}")
-          module.add(SAddU32(sgpr(swizzleStridePerWave), sgpr("SizesSum"), swizzleStrideVal-1))
-          module.add(SLShiftRightB32(dst=sgpr(swizzleStridePerWave), src=sgpr(swizzleStridePerWave), shiftHex=hex(log2(swizzleStrideVal)), comment="SWZ-%s: numKr = DimK / 32"%tc))
+        if not tP["isSwizzled"]:
+          module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"]), comment="gro%s%s_%u"%(tP["tensorChar"], tP["tileChar"], 0) ))
+        else:
           if tP["isA"]:
             WvG_MorN = kernel["MIWaveGroup"][0]
-            commentMsg = "SWZ-%s: numKr *= MI_WvG[0] (%u), how many wave-M per WG" %(tc, WvG_MorN)
+            swzMorN = kernel["MatrixInstM"]
           elif tP["isB"]:
             WvG_MorN = kernel["MIWaveGroup"][1]
-            commentMsg = "SWZ-%s: numKr *= MI_WvG[1] (%u), how many wave-N per WG" %(tc, WvG_MorN)
-          module.add(SMulI32(dst=sgpr(swizzleStridePerWave), src0=hex(WvG_MorN), src1=sgpr(swizzleStridePerWave), comment=commentMsg))
+            swzMorN = kernel["MatrixInstN"]
+          swzStride = tP["swizzleK"]
+          swzBlockSize = swzMorN * swzStride
+          vw = kernel[f"VectorWidth{tc}"]
+          kPack = tP["swizzlePackK"]
+          laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+
+          with self.allocTmpSgpr(2) as tmpSgprInfo:
+            swzBlkVWSizeSgpr = tmpSgprInfo.idx
+            swzStridePerWave = swzBlkVWSizeSgpr + 1
+
+            module.addComment0("SWZ-%s: calculation of gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], 0))
+            module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["tReg"])))
+            swzBlkVWSizeVgpr = self.vgprPool.checkOut(1)
+            module.add(SMovB32(dst=sgpr(swzBlkVWSizeSgpr), src=hex(swzBlockSize * vw), \
+              comment="swizzled block * VW = (MI_M(%u) * MI_K(%u) * kPack) * VW(%u)" %(swzMorN, int(swzStride / kPack), vw)))
+            module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)))
+            module.add(VMulU32U24(dst=vgpr(v), src0=vgpr(v), src1=vgpr(swzBlkVWSizeVgpr)))
+
+            module.addComment0("swzStridePerWave = (number of swizzle block in K) * WaveGroup_MorN")
+            module.add(SAddU32(sgpr(swzStridePerWave), sgpr("SizesSum"), swzStride - 1, comment=f"Align to {swzStride}")),
+            module.add(SLShiftRightB32(dst=sgpr(swzStridePerWave), src=sgpr(swzStridePerWave), shiftHex=hex(log2(swzStride)),
+                                      comment="numKr = DimK / swizzleK")),
+            module.add(SMulI32(dst=sgpr(swzStridePerWave), src0=hex(WvG_MorN), src1=sgpr(swzStridePerWave),
+                              comment="numKr *= MI_WaveGroup, wave-M (SWZ-A) or wave-N (SWZ-B)"))
+
+            module.addComment0("swzBlkVWOffset = swzBlkWvGSize - laneSize * (VW - 1)")
+            module.add(SMulI32(dst=sgpr(swzBlkVWSizeSgpr), src0=sgpr(swzStridePerWave), src1=sgpr(swzBlkVWSizeSgpr), \
+              comment="swzBlkWvGSize = numKr * (swzBlockSize * VW)"))
+            module.add(SSubU32(dst=sgpr(swzBlkVWSizeSgpr), src0=sgpr(swzBlkVWSizeSgpr), src1=(laneSize * (vw - 1)), \
+              comment="swzBlkVWOffset = swzBlkWvGSize - laneSize * (VW - 1)"))
+            module.add(VMovB32(dst=vgpr(swzBlkVWSizeVgpr), src=sgpr(swzBlkVWSizeSgpr)) )
 
       for l in range(1, tP["nrt"]):
         strideValue = stride
@@ -2431,10 +2450,14 @@ class KernelWriterAssembly(KernelWriter):
             src1=vgpr(v+l-1), comment="gro%s%s_%u += %s"%(tP["tensorChar"], tP["tileChar"], l, strideIdx) ))
         # swizzle
         else:
-          module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=sgpr(swizzleStridePerWave), \
-            src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u += (numKr * WaveG[0 or 1])"%(tc, tc, tP["tileChar"], l) ))
+          if (strideInterleave and (l & strideMask) != 0):
+            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=laneSize, \
+              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
+          else:
+            module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=vgpr(swzBlkVWSizeVgpr), \
+              src1=vgpr(v+l-1), comment="SWZ-%s: gro%s%s_%u"%(tc, tP["tensorChar"], tP["tileChar"], l) ))
       if tP["isSwizzled"]:
-        self.sgprPool.checkIn(swizzleStridePerWave)
+        self.vgprPool.checkIn(swzBlkVWSizeVgpr)
 
       # TODO- check for swizzle
       if numExtraPackedOffsetsPerTile:
@@ -2476,11 +2499,84 @@ class KernelWriterAssembly(KernelWriter):
       tP["gpr"]["unrollOffsets"] = tP["gpr"]["uReg"]
     # swizzle
     elif tP["isSwizzled"]:
-      numUnrollOffsets = 1
+      numUnrollOffsets = tP["nru"]
       tP["gpr"]["unrollOffsets"] = self.vgprPool.checkOut(numUnrollOffsets, "unrollOffsets", self.states.preventVgprOverflowDuringNewTile)
       v = tP["gpr"]["unrollOffsets"]
-      module.addComment0("SWZ-%s: Unroll increament is calculated in I/J-Offset since tile-memory is flattened"%tc)
-      module.add(VMovB32(dst=vgpr(v), src=vgpr(tP["gpr"]["uReg"]), comment="SWZ-%s: only one gro%s%s_%u Base"%(tc, tc, self.states.unrollChar, 0)))
+
+      # Please note that the following description uses swizzle A as an example.
+      # The notation of A and M should be replaced with B and N when referring to swizzle B.
+      #
+      # swizzle offset formula = F(row, col) + swzBlkOffsetM(tid)    (unit: element)
+      #   row, col: local index in a swizzled block
+      #     row = (tid / swzM) * laneSize
+      #     col = (tid % (swzM / VWA)) * VWA
+      #       laneSize: number of elements loaded by a single lane.
+      #   F(row, col): swizzled offset when vector width is 1.
+      #     F(row, col) = row % laneSize + col * laneSize + (row / laneSize) * swzM * laneSize
+      #   swzBlkOffsetM(tid) = [tid / (swzM / VWA)] * swzSizeK
+      #     swzSizeK = numSwzBlkK * numElmInSwzBlk
+      #       numSwzBlkK: number of swizzled block in K dimension.
+      #       numElmInSwzBlk: number of element in a swizzled block.
+
+      if tP["isA"]:
+        swzMorN = kernel["MatrixInstM"]
+      elif tP["isB"]:
+        swzMorN = kernel["MatrixInstN"]
+      swzStride = tP["swizzleK"]
+      vw = kernel[f"VectorWidth{tc}"]
+      kPack = tP["swizzlePackK"]
+      laneSize = int(kernel["MatrixInstK"] / 4) * kPack  # the size of one swizzle's lane
+      numElmInSwzBlk = swzMorN * swzStride
+
+      # Calculate local index in a swizzled block
+      row = self.vgprPool.checkOut(1)
+      col = self.vgprPool.checkOut(1)
+      tmpVgpr = self.vgprPool.checkOut(1)
+      module.addComment0("SWZ-%s: r = swzRow = (tid / swzMorN(%u)) * laneSize(%u)"%(tc, swzMorN, laneSize))
+      module.add(VAndB32(dst=vgpr(v), src0=vgpr("Serial"), src1=(kernel["WavefrontSize"]-1), comment="tid"))
+      module.add(VLShiftRightB32(dst=vgpr(row), shiftHex=hex(int(log(swzMorN, 2))), src=vgpr(v)))
+      module.add(VLShiftLeftB32(dst=vgpr(row), shiftHex=hex(int(log(laneSize, 2))), src=vgpr(row)))
+      module.addComment0("SWZ-%s: c = swzCol = [tid mod (swzMorN(%u) / VW(%u))] * VW(%u)"%(tc, swzMorN, vw, vw))
+      module.add(VAndB32(dst=vgpr(col), src0=vgpr(v), src1=int(swzMorN/vw)-1))
+      if vw > 1:
+        module.add(VLShiftLeftB32(dst=vgpr(col), shiftHex=hex(int(log(vw, 2))), src=vgpr(col)))
+
+      module.addComment0("SWZ-%s: F = r mod laneSize + c * laneSize + (r/laneSize) * swzMorN * laneSize"%tc)
+      module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(int(log(laneSize, 2))), src=vgpr(row), comment="tmp = r / laneSize"))
+      module.add(VLShiftLeftB32(dst=vgpr(tmpVgpr), shiftHex=hex(int(log(swzMorN * laneSize, 2))), src=vgpr(tmpVgpr), comment="tmp *= swzMorN * laneSize"))
+      module.add(VMadU32U24(dst=vgpr(tmpVgpr), src0=vgpr(col), src1=laneSize, src2=vgpr(tmpVgpr), comment="tmp += c * laneSize"))
+      module.add(VAndB32(dst=vgpr(row), src0=vgpr(row), src1=laneSize-1, comment="tmp2 = row mod laneSize"))
+      if vw == 1:
+        module.add(VAddU32(dst=vgpr(v), src0=vgpr(tmpVgpr), src1=vgpr(row), comment="offset = tmp + tmp2"))
+
+      else:
+        fVgpr = self.vgprPool.checkOut(1)
+        module.add(VAddU32(dst=vgpr(fVgpr), src0=vgpr(tmpVgpr), src1=vgpr(row), comment="F = tmp + tmp2"))
+
+        module.addComment0("SWZ-%s: swzSizeK = numSwzBlkK * numElmInSwzBlk"%tc)
+        swzSizeK = self.vgprPool.checkOut(1)
+        tmpSgpr = self.sgprPool.checkOut(1)
+        module.add(SAddU32(sgpr(tmpSgpr), sgpr("SizesSum"), swzStride - 1, comment="Align to %u"%swzStride))
+        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=hex(log2(swzStride)), comment="numKr = DimK / 32"))
+        module.add(SMulI32(dst=sgpr(tmpSgpr, 1), src0=sgpr(tmpSgpr, 1), src1=hex(numElmInSwzBlk)))
+        module.add(VMovB32(dst=vgpr(swzSizeK), src=sgpr(tmpSgpr, 1)))
+        self.sgprPool.checkIn(tmpSgpr)
+
+        module.addComment0("SWZ-%s: swizzle offset = F + [(tid / (swzMorN(%u) / VW(%u))) mod VW] * swzSizeK"%(tc, swzMorN, vw))
+        module.add(VLShiftRightB32(dst=vgpr(tmpVgpr), shiftHex=hex(int(log((swzMorN/vw), 2))), src=vgpr(v), comment="tmp = tid / (swzMorN / VW)"))
+        module.add(VAndB32(dst=vgpr(tmpVgpr), src0=vgpr(tmpVgpr), src1=vw-1, comment="tmp = tmp mod VW"))
+        module.add(VMadU32U24(dst=vgpr(v), src0=vgpr(tmpVgpr), src1=vgpr(swzSizeK), src2=vgpr(fVgpr), comment="offset = tmp * swzSizeK + F"))
+        self.vgprPool.checkIn(fVgpr)
+        self.vgprPool.checkIn(swzSizeK)
+
+      self.vgprPool.checkIn(row)
+      self.vgprPool.checkIn(col)
+      self.vgprPool.checkIn(tmpVgpr)
+
+      for l in range(1, tP["nru"]):
+        module.add(VAddCOU32(dst=vgpr(v+l), dst1=VCC(), src0=hex(numElmInSwzBlk), \
+            src1=vgpr(v+l-1), comment="gro%s%s_%u"%(tP["tensorChar"], self.states.unrollChar, l)))
+
     else:
       numUnrollOffsets = tP["nru"]
       tP["gpr"]["unrollOffsets"] = self.vgprPool.checkOut(numUnrollOffsets, "unrollOffsets", self.states.preventVgprOverflowDuringNewTile)
@@ -2686,6 +2782,7 @@ class KernelWriterAssembly(KernelWriter):
         commentMsg = "SWZ-%s: swizzled block = MI_M(%u) * MI_K(%u) * pack-K(%u)" %(tc, 16, kernel["MatrixInstK"], tP["swizzlePackK"])
       elif tc == "B":
         commentMsg = "SWZ-%s: swizzled block = MI_N(%u) * MI_K(%u) * pack-K(%u)" %(tc, 16, kernel["MatrixInstK"], tP["swizzlePackK"])
+
       module.add(SMovB32(dst=sgpr(tP["swizzledBlockSize"]), src=hex(16*swizzleK), comment=commentMsg))
 
     # both UseSgprForGRO and DTVA/B are enabled
@@ -2781,10 +2878,7 @@ class KernelWriterAssembly(KernelWriter):
     # single loop start
 
     # vgpr assignments
-    if tP["isSwizzled"]:
-      vgprTile   = tP["vgprTileOffsets"]   + perp*tVW + sPara*tVS
-      vgprUnroll = tP["gpr"]["unrollOffsets"] # unroll: always use base unroll
-    elif tP["tlu"]:
+    if tP["tlu"]:
       vgprTile   = tP["vgprTileOffsets"]   + para*tVW + sPara*tVS
       vgprUnroll = tP["gpr"]["unrollOffsets"] + perp*uVW + sPerp*uVS
     else:
@@ -2835,10 +2929,6 @@ class KernelWriterAssembly(KernelWriter):
           commentMsg = "SWZ-%s: groAL = groA0I + 1 Block of flattened mem"%tc
         elif tc == "B":
           commentMsg = "SWZ-%s: groBL = groB0J + 1 Block of flattened mem"%tc
-
-        bfArgs.append(tP["swizzledBlockSize"])
-        if para > 0:
-          module.add(VAddCOU32(dst=vgpr(vgprTile), dst1=VCC(), src0=hex(1), src1=vgpr(vgprTile), comment=commentMsg))
 
       bfArgs.append( "%u" % tmp )
       bfComment = "gRO%s_%u_%u_%u_%u" % (tP["tensorChar"], para, sPara, perp, sPerp)
@@ -3497,10 +3587,10 @@ class KernelWriterAssembly(KernelWriter):
       with self.allocTmpSgpr(1) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
         # Calc numKr
-        swizzleStrideVal = tP["swizzleK"]
-        module.addComment(f"Align to {swizzleStrideVal}")
-        module.add(SAddU32(sgpr(tmpSgpr), sgpr("SizesSum"), swizzleStrideVal-1))
-        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(log2(swizzleStrideVal)), src=sgpr(tmpSgpr),  comment="SWZ-%s: numKr = DimK / %s"%(tc, swizzleStrideVal)))
+        swzStride = tP["swizzleK"]
+        module.addComment(f"Align to {swzStride}")
+        module.add(SAddU32(sgpr(tmpSgpr), sgpr("SizesSum"), swzStride-1))
+        module.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(log2(swzStride)), src=sgpr(tmpSgpr),  comment="SWZ-%s: numKr = DimK / %s"%(tc, swzStride)))
         WvG_M = kernel["MIWaveGroup"][0]
         if tP["isA"]:
           module.add(VAndB32(dst=vgpr(qReg), src0=hex(WvG_M-1), src1=vgpr(qReg), comment="SWZ-%s: wave_id (along_M) mod MIWG[0]"%tc))
