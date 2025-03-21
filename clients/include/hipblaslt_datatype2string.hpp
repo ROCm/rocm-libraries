@@ -38,6 +38,7 @@ enum class hipblaslt_initialization
     hpl        = 333,
     special    = 444,
     zero       = 555,
+    norm_dist  = 666,
 };
 
 typedef enum class _hipblaslt_activation_type
@@ -114,6 +115,8 @@ constexpr auto hipblaslt_initialization2string(hipblaslt_initialization init)
         return "special";
     case hipblaslt_initialization::zero:
         return "zero";
+    case hipblaslt_initialization::norm_dist:
+        return "norm_dist";
     }
     return "invalid";
 }
@@ -133,6 +136,7 @@ inline hipblaslt_initialization string2hipblaslt_initialization(const std::strin
         value == "hpl"        ? hipblaslt_initialization::hpl        :
         value == "special"    ? hipblaslt_initialization::special    :
         value == "zero"       ? hipblaslt_initialization::zero       :
+        value == "norm_dist"  ? hipblaslt_initialization::norm_dist  :
         static_cast<hipblaslt_initialization>(0);
 }
 // clang-format on

@@ -103,8 +103,8 @@ bool allclose_check_general(char    allclose_type,
         }
     }
 
-    std::vector<double> atols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
-    std::vector<double> rtols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> atols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> rtols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
     for(auto& atol : atols)
     {
         for(auto& rtol : rtols)
@@ -159,8 +159,8 @@ bool allclose_check_general(char    allclose_type,
         }
     }
 
-    std::vector<double> atols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
-    std::vector<double> rtols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> atols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> rtols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
     for(auto& atol : atols)
     {
         for(auto& rtol : rtols)
@@ -215,8 +215,8 @@ bool allclose_check_general(char    allclose_type,
         }
     }
 
-    std::vector<double> atols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
-    std::vector<double> rtols{1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> atols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
+    std::vector<double> rtols{1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1};
     for(auto& atol : atols)
     {
         for(auto& rtol : rtols)

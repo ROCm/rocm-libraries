@@ -195,6 +195,17 @@ void hipblaslt_init_device(ABC                      abc,
         case hipblaslt_initialization::zero:
             fill_batch(A, M, N, lda, stride, batch_count, [](size_t idx) -> T { return T(0); });
             break;
+        case hipblaslt_initialization::norm_dist:
+            {
+                std::random_device rd;
+                auto base_seed = rd(); // Get a random seed for each run
+                fill_batch(A, M, N, lda, stride, batch_count, [base_seed] __device__ (size_t idx) -> T {
+                    hipblaslt_norm_dist::XorwowState state;
+                    hipblaslt_norm_dist::init_xorwow(&state, base_seed + idx); // Unique seed per thread
+                    return T(hipblaslt_norm_dist::box_muller_normal(&state));
+                });
+                break;
+            }
         default:
             hipblaslt_cerr << "Error type in hipblaslt_init_device" << std::endl;
             break;
