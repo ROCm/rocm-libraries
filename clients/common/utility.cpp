@@ -258,6 +258,7 @@ std::vector<void*> benchmark_allocation()
     }
     return ptrs;
 }
+
 int32_t hipblaslt_get_arch_major()
 {
     int             deviceId;
@@ -276,4 +277,15 @@ int32_t hipblaslt_get_arch_major()
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     auto gpu_arch_no_prefix = removePrefix(deviceProperties.gcnArchName);
     return stoi(gpu_arch_no_prefix) / 100;
+}
+
+void hipblaslt_print_version()
+{
+    int                    version;
+    char                   git_version[128];
+    hipblaslt_local_handle handle;
+    hipblasLtGetVersion(handle, &version);
+    hipblasLtGetGitRevision(handle, &git_version[0]);
+    hipblaslt_cout << "hipBLASLt version: " << version << std::endl;
+    hipblaslt_cout << "hipBLASLt git version: " << git_version << std::endl;
 }

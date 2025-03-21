@@ -181,14 +181,6 @@ static int hipblaslt_version()
     return version;
 }
 
-// Print Version
-static void hipblaslt_print_version()
-{
-    static int version = hipblaslt_version();
-
-    hipblaslt_cout << "hipBLASLt version: " << version << "\n" << std::endl;
-}
-
 static void hipblaslt_print_usage_warning()
 {
     std::string warning(

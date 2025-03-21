@@ -43,10 +43,6 @@
 
 #include "testing_matmul.hpp"
 
-#include "utility.hpp"
-#include <algorithm>
-#undef I
-
 using namespace roc; // For emulated program_options
 using namespace std::literals; // For std::string literals of form "str"s
 
@@ -269,17 +265,6 @@ bool tuning_path_compare_git_version(const char* tuningEnv)
     hipblaslt_cout << "The hipBLASLt git version and the tuning file git version are not the same."
                    << std::endl;
     return false;
-}
-
-void hipblaslt_print_version(void)
-{
-    int                    version;
-    char                   git_version[128];
-    hipblaslt_local_handle handle;
-    hipblasLtGetVersion(handle, &version);
-    hipblasLtGetGitRevision(handle, &git_version[0]);
-    hipblaslt_cout << "hipBLASLt version: " << version << std::endl;
-    hipblaslt_cout << "hipBLASLt git version: " << git_version << std::endl;
 }
 
 int main(int argc, char* argv[])
