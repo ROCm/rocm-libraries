@@ -167,6 +167,83 @@ namespace ExpressionTest
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
     }
 
+    TEST_CASE("BFE Expressions", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        auto ra = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::UInt32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto a = ra->expression();
+
+        // Unsigned (no sign extension)
+        auto expr1 = bfe(DataType::UInt8, a, 0, 8); // full width
+        auto expr2 = bfe(DataType::UInt8, a, 1, 5); // partial
+
+        // Signed (maybe sign extension)
+        auto expr3
+            = bfe(DataType::Int8, a, 2, 8); // full width, bfe as unsigned with no sign extension
+        auto expr4 = bfe(DataType::Int8, a, 3, 7); // partial, sign extension logic
+        auto expr5
+            = bfe(DataType::Int8, a, 4, 7); // second partial, hopefully avoid additional load
+        auto expr6 = bfe(DataType::Int32, a, 5, 17); // partial but full register,
+        auto expr7 = bfe(DataType::Int64, a, 6, 23); // extract to wider output
+
+#define create_output_reg(width, sign_char) \
+    std::make_shared<Register::Value>(      \
+        context.get(), Register::Type::Vector, DataType::sign_char##Int##width, 1)
+
+        auto dest1 = create_output_reg(8, U);
+        auto dest2 = create_output_reg(8, U);
+        auto dest3 = create_output_reg(8, );
+        auto dest4 = create_output_reg(8, );
+        auto dest5 = create_output_reg(8, );
+        auto dest6 = create_output_reg(32, );
+        auto dest7 = create_output_reg(64, );
+
+        context.get()->schedule(Expression::generate(dest1, expr1, context.get()));
+        context.get()->schedule(Expression::generate(dest2, expr2, context.get()));
+        context.get()->schedule(Expression::generate(dest3, expr3, context.get()));
+        context.get()->schedule(Expression::generate(dest4, expr4, context.get()));
+        context.get()->schedule(Expression::generate(dest5, expr5, context.get()));
+        context.get()->schedule(Expression::generate(dest6, expr6, context.get()));
+        context.get()->schedule(Expression::generate(dest7, expr7, context.get()));
+
+        std::string expected = R"(
+            // Unsigned (no sign extension)
+            // expr1
+            v_bfe_u32 v1, v0, 0, 8
+
+            // expr2
+            v_bfe_u32 v2, v0, 1, 5
+
+            // Signed (maybe sign extension)
+            // expr3
+            v_bfe_u32 v3, v0, 2, 8
+
+            // expr4
+            v_bfe_i32 v4, v0, 3, 7
+            v_mov_b32 v5, 255
+            v_and_b32 v4, v5, v4
+
+            // expr5
+            v_bfe_i32 v5, v0, 4, 7
+            v_mov_b32 v6, 255
+            v_and_b32 v5, v6, v5
+
+            // expr6
+            v_bfe_i32 v6, v0, 5, 17
+
+            // expr7
+            v_bfe_i32 v9, v0, 6, 23
+            v_ashrrev_i64 v[8:9], 32, v[8:9]
+        )";
+
+        CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+    }
+
     TEST_CASE("Expression comments", "[expression][comments][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
