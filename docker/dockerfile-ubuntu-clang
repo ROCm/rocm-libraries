@@ -43,19 +43,22 @@ RUN apt-get update && apt-get install -y \
    bc \
    gdb \
    libboost-container1.74-dev \
-   libfmt-dev \
    libopenblas-dev \
-   libtinfo5 \
    libncurses-dev \
    m4 \
    make \
    nano \
-   netcat \
+   netcat-traditional \
    ninja-build \
    python3-dev \
+   python3-venv \
    vim \
    wget \
    xz-utils
+
+# Needed for clang-format from ROCm 4.3.1
+RUN wget -nv --show-progress --progress=dot:mega -O /tmp/libtinfo5.deb http://security.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.3-2ubuntu0.1_amd64.deb \
+    && apt-get install -y /tmp/libtinfo5.deb
 
 # cmake 3.22.1
  RUN wget -nv --show-progress --progress=dot:mega -O /tmp/cmake-install.sh https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh \
@@ -70,15 +73,14 @@ ENV PATH="/opt/clang-format/bin:${PATH}"
 # ccache
 RUN apt-get update && apt-get install -y \
       libzstd-dev
-RUN wget -nv --show-progress --progress=dot:mega https://github.com/ccache/ccache/releases/download/v4.4.2/ccache-4.4.2.tar.gz -O ccache-4.4.2.tar.gz && \
-    tar xf ccache-4.4.2.tar.gz && \
-    cmake -Sccache-4.4.2 -Bbuild -GNinja \
+RUN wget -nv --show-progress --progress=dot:mega https://github.com/ccache/ccache/releases/download/v4.11/ccache-4.11.tar.gz -O /tmp/ccache-4.11.tar.gz && \
+    tar xf /tmp/ccache-4.11.tar.gz -C /tmp && \
+    cmake -S/tmp/ccache-4.11 -B/tmp/ccache-4.11/build -GNinja \
       -DCMAKE_BUILD_TYPE=Release \
       -DENABLE_TESTING=OFF \
       -DREDIS_STORAGE_BACKEND=OFF && \
-    ninja -C build && \
-    sudo ninja -C build install && \
-    rm -r ccache-4.4.2 ccache*.tar.gz build
+    ninja -C /tmp/ccache-4.11/build install && \
+    rm -r /tmp/ccache-4.11 /tmp/ccache-4.11.tar.gz
 
 # cppcheck
 ADD docker/install-cppcheck /tmp
@@ -91,10 +93,10 @@ RUN apt-get update && apt-get install -y \
       linux-tools-common linux-tools-generic
 
 # Python
-RUN wget -nv --show-progress --progress=dot:mega https://bootstrap.pypa.io/get-pip.py && python3 get-pip.py && rm get-pip.py
-ADD requirements.txt /tmp/requirements.txt
-RUN apt-get purge -y python3-blinker && apt-get autoremove -y
-RUN pip install -r /tmp/requirements.txt && rm /tmp/requirements.txt
+RUN python3 -m venv /opt/rr-python-venv
+ENV PATH="/opt/rr-python-venv/bin:$PATH"
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Install newer version of npm than is available on apt.
 # This includes diff2html-cli for code coverage report.

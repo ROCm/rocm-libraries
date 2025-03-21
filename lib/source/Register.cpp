@@ -69,7 +69,8 @@ namespace rocRoller
          */
         Generator<RegisterId> Value::getRegisterIds() const
         {
-            if(m_regType == Type::Literal || m_regType == Type::Label)
+            if(m_regType == Type::Literal || m_regType == Type::NullLiteral
+               || m_regType == Type::Label)
             {
                 co_return;
             }

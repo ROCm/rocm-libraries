@@ -316,7 +316,6 @@ namespace rocRollerTest
             auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
             co_yield bufDesc->setup();
             co_yield bufDesc->setSize(Register::Value::Literal(N));
-            co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
 
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
 

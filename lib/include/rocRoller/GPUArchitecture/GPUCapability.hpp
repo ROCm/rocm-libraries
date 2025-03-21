@@ -112,6 +112,9 @@ namespace rocRoller
 
             v_add3_u32,
 
+            s_barrier,
+            s_barrier_signal,
+
             HasAtomicAdd,
 
             MaxVmcnt,

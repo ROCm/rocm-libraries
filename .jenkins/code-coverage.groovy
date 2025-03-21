@@ -120,7 +120,7 @@ ci: {
     def propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang13":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a']])]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each
@@ -143,7 +143,7 @@ ci: {
     {
         properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * 6')])]))
         stage(urlJobName) {
-            runCI(["rocroller-ubuntu-clang13":['rocroller-compile']], urlJobName)
+            runCI(["rocroller-ubuntu20-clang":['rocroller-compile']], urlJobName)
         }
     }
 }

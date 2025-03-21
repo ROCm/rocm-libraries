@@ -30,6 +30,7 @@ Architectures:
       SupportedISA: 0
       SupportedSource: 0
       Waitcnt0Disabled: 0
+      s_barrier: 0
       v_add3_u32: 0
       v_dot2_f32_f16: 0
       v_dot2c_f32_f16: 0

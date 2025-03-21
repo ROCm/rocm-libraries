@@ -107,9 +107,9 @@ namespace rocRoller
         Generator<Instruction> setOptions(Register::ValuePtr value);
 
         Register::ValuePtr allRegisters() const;
-        Register::ValuePtr basePointerAndStride() const;
-        Register::ValuePtr size() const;
         Register::ValuePtr descriptorOptions() const;
+
+        static uint32_t getDefaultOptionsValue(ContextPtr ctx);
 
     private:
         Register::ValuePtr m_bufferResourceDescriptor;

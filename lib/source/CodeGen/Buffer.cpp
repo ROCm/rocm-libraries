@@ -174,10 +174,9 @@ namespace rocRoller
         co_yield setDefaultOpts();
     }
 
-    Generator<Instruction> BufferDescriptor::setDefaultOpts()
+    uint32_t BufferDescriptor::getDefaultOptionsValue(ContextPtr ctx)
     {
-        if(m_context->targetArchitecture().HasCapability(
-               GPUCapability::HasBufferOutOfBoundsCheckOption))
+        if(ctx->targetArchitecture().HasCapability(GPUCapability::HasBufferOutOfBoundsCheckOption))
         {
             // Bits 29:28 are for Out-of-Bounds check.
             //   0 - index >= NumRecords || offset + payload > stride, used for structured buffers.
@@ -187,17 +186,18 @@ namespace rocRoller
             // Bits 17:12 are for data format.
             //   5 - 8_UINT. Currently, everything is buffer-loaded in terms of bytes.
             // TODO: Add GFX12 buffer descriptor when other formats and/or features are needed.
-            uint32_t opts = (1u << 28) | (5u << 12);
-            co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
-                                               Register::Value::Literal(opts),
-                                               "default options");
+            return (1u << 28) | (5u << 12);
         }
-        else
-        {
-            co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
-                                               Register::Value::Literal(0x00020000),
-                                               "default options");
-        }
+        // 0x00020000
+        return (4u << 15);
+    }
+
+    Generator<Instruction> BufferDescriptor::setDefaultOpts()
+    {
+        uint32_t opts = getDefaultOptionsValue(m_context);
+        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
+                                           Register::Value::Literal(opts),
+                                           "default options");
     }
 
     Generator<Instruction> BufferDescriptor::incrementBasePointer(Register::ValuePtr value)
@@ -225,16 +225,6 @@ namespace rocRoller
     Register::ValuePtr BufferDescriptor::allRegisters() const
     {
         return m_bufferResourceDescriptor;
-    }
-
-    Register::ValuePtr BufferDescriptor::basePointerAndStride() const
-    {
-        return m_bufferResourceDescriptor->subset({0, 1});
-    }
-
-    Register::ValuePtr BufferDescriptor::size() const
-    {
-        return m_bufferResourceDescriptor->subset({2});
     }
 
     Register::ValuePtr BufferDescriptor::descriptorOptions() const

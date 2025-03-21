@@ -155,6 +155,9 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::v_add3_u32, {{"v_add3_u32 v0, v1, v2, v3"}, ""}},
 
+            {rocRoller::GPUCapability::s_barrier, {{"s_barrier"}, ""}},
+            {rocRoller::GPUCapability::s_barrier_signal, {{"s_barrier_signal -1"}, ""}},
+
             {rocRoller::GPUCapability::HasAtomicAdd,
              {{"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0"}, ""}},
 

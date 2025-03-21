@@ -128,6 +128,9 @@ namespace rocRoller
 
             {"v_add3_u32", Value::v_add3_u32},
 
+            {"s_barrier", Value::s_barrier},
+            {"s_barrier_signal", Value::s_barrier_signal},
+
             {"HasAtomicAdd", Value::HasAtomicAdd},
 
             {"MaxVmcnt", Value::MaxVmcnt},

@@ -399,6 +399,8 @@ namespace MemoryInstructionsTest
 
     TEST_P(MemoryInstructionsTest, GPU_BufferDescriptor)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasGlobalOffset);
+
         auto generate = [&]() {
             auto k = m_context->kernel();
 
@@ -437,36 +439,15 @@ namespace MemoryInstructionsTest
                 co_yield bufDesc.setup();
                 co_yield bufDesc.setBasePointer(Register::Value::Literal(0x00000000));
                 co_yield bufDesc.setSize(Register::Value::Literal(0x00000001));
-                co_yield bufDesc.setOptions(Register::Value::Literal(131072)); //0x00020000
                 co_yield bufDesc.incrementBasePointer(Register::Value::Literal(0x00000001));
 
                 auto sRD = bufDesc.allRegisters();
                 co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 16);
 
-                auto bPnS = bufDesc.basePointerAndStride();
-                co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                                 v_result,
-                                                 v_a->subset({0, 1}),
-                                                 Register::Value::Literal(16),
-                                                 8);
-
-                auto size = bufDesc.size();
-                co_yield m_context->copier()->copy(v_a->subset({2}), size, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                                 v_result,
-                                                 v_a->subset({2}),
-                                                 Register::Value::Literal(24),
-                                                 4);
-
                 auto dOpt = bufDesc.descriptorOptions();
                 co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
-                co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                                 v_result,
-                                                 v_a->subset({3}),
-                                                 Register::Value::Literal(28),
-                                                 4);
+                co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({3}), 16, 4);
             };
 
             m_context->schedule(kb());
@@ -475,8 +456,6 @@ namespace MemoryInstructionsTest
         };
 
         generate();
-
-        REQUIRE_ARCH_CAP(GPUCapability::HasGlobalOffset);
 
         if(!isLocalDevice())
         {
@@ -488,7 +467,8 @@ namespace MemoryInstructionsTest
             std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
                 = m_context->instructions()->getExecutableKernel();
 
-            auto d_result = make_shared_device<unsigned int>(8); //Srd twice
+            const auto resultSize = 5; // descriptorOptions is written twice
+            auto       d_result   = make_shared_device<unsigned int>(resultSize);
 
             KernelArguments kargs;
             kargs.append<void*>("result", d_result.get());
@@ -496,24 +476,22 @@ namespace MemoryInstructionsTest
 
             executableKernel->executeKernel(kargs, invocation);
 
-            std::vector<unsigned int> result(8);
-            ASSERT_THAT(
-                hipMemcpy(
-                    result.data(), d_result.get(), sizeof(unsigned int) * 8, hipMemcpyDefault),
-                HasHipSuccess(0));
+            std::vector<unsigned int> result(resultSize);
+            ASSERT_THAT(hipMemcpy(result.data(),
+                                  d_result.get(),
+                                  sizeof(unsigned int) * resultSize,
+                                  hipMemcpyDefault),
+                        HasHipSuccess(0));
 
             EXPECT_EQ(result[0], 0x00000001);
             EXPECT_EQ(result[1], 0x00000000);
             EXPECT_EQ(result[2], 0x00000001);
-            EXPECT_EQ(result[3], 131072);
-            EXPECT_EQ(result[4], 0x00000001);
-            EXPECT_EQ(result[5], 0x00000000);
-            EXPECT_EQ(result[6], 0x00000001);
-            EXPECT_EQ(result[7], 131072);
+            EXPECT_EQ(result[3], BufferDescriptor::getDefaultOptionsValue(m_context));
+            EXPECT_EQ(result[4], BufferDescriptor::getDefaultOptionsValue(m_context));
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, CDNAISATuples());
+    INSTANTIATE_TEST_SUITE_P(MemoryInstructionsTests, MemoryInstructionsTest, supportedISATuples());
 
     struct BufferMemoryInstructionsTest : public GPUContextFixtureParam<int>
     {
@@ -561,7 +539,6 @@ namespace MemoryInstructionsTest
                 co_yield bufDesc->setup();
                 co_yield bufDesc->setBasePointer(s_a);
                 co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
@@ -629,119 +606,8 @@ namespace MemoryInstructionsTest
 
     INSTANTIATE_TEST_SUITE_P(BufferMemoryInstructionsTest,
                              BufferMemoryInstructionsTest,
-                             ::testing::Combine(mfmaSupportedISAValues(),
+                             ::testing::Combine(supportedISAValues(),
                                                 ::testing::Values(1, 2, 3, 4, 8, 16, 20, 44, 47)));
-
-    TEST_P(MemoryInstructionsTest, GPU_ExecuteBufDescriptor)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasGlobalOffset);
-
-        auto k = m_context->kernel();
-
-        k->setKernelName("BufferDescriptorTest");
-        k->setKernelDimensions(1);
-
-        k->addArgument(
-            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-
-            auto v_result
-                = Register::Value::Placeholder(m_context,
-                                               Register::Type::Vector,
-                                               {DataType::Int32, PointerType::PointerGlobal},
-                                               1);
-
-            auto v_a = Register::Value::Placeholder(m_context,
-                                                    Register::Type::Vector,
-                                                    DataType::UInt32,
-                                                    4,
-                                                    Register::AllocationOptions::FullyContiguous());
-
-            co_yield v_a->allocate();
-            co_yield v_result->allocate();
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
-
-            auto bufDesc = rocRoller::BufferDescriptor(m_context);
-
-            co_yield bufDesc.setup();
-            co_yield bufDesc.setBasePointer(Register::Value::Literal(0x00000000));
-            co_yield bufDesc.setSize(Register::Value::Literal(0x00000001));
-            co_yield bufDesc.setOptions(Register::Value::Literal(131072)); //0x00020000
-            co_yield bufDesc.incrementBasePointer(Register::Value::Literal(0x00000001));
-
-            auto sRD = bufDesc.allRegisters();
-            co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
-            co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 16);
-
-            auto bPnS = bufDesc.basePointerAndStride();
-            co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                             v_result,
-                                             v_a->subset({0, 1}),
-                                             Register::Value::Literal(16),
-                                             8);
-
-            auto size = bufDesc.size();
-            co_yield m_context->copier()->copy(v_a->subset({2}), size, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                             v_result,
-                                             v_a->subset({2}),
-                                             Register::Value::Literal(24),
-                                             4);
-
-            auto dOpt = bufDesc.descriptorOptions();
-            co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
-            co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Global,
-                                             v_result,
-                                             v_a->subset({3}),
-                                             Register::Value::Literal(28),
-                                             4);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(!isLocalDevice())
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-        else
-        {
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
-
-            auto d_result = make_shared_device<unsigned int>(8); //Srd twice
-
-            KernelArguments kargs;
-            kargs.append<void*>("result", d_result.get());
-            KernelInvocation invocation;
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            std::vector<unsigned int> result(8);
-            ASSERT_THAT(
-                hipMemcpy(
-                    result.data(), d_result.get(), sizeof(unsigned int) * 8, hipMemcpyDefault),
-                HasHipSuccess(0));
-
-            EXPECT_EQ(result[0], 0x00000001);
-            EXPECT_EQ(result[1], 0x00000000);
-            EXPECT_EQ(result[2], 0x00000001);
-            EXPECT_EQ(result[3], 131072);
-            EXPECT_EQ(result[4], 0x00000001);
-            EXPECT_EQ(result[5], 0x00000000);
-            EXPECT_EQ(result[6], 0x00000001);
-            EXPECT_EQ(result[7], 131072);
-        }
-    }
 
     struct MemoryInstructionsLDSTest : public CurrentGPUContextFixture
     {
