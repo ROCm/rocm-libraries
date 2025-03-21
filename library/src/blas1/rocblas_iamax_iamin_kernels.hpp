@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,11 +29,11 @@
 
 // iamax, iamin kernels
 
-template <int NB, typename REDUCE, typename T>
+template <int WARP, typename REDUCE, typename T>
 __inline__ __device__ rocblas_index_value_t<T>
                       rocblas_wavefront_reduce_method(rocblas_index_value_t<T> x)
 {
-    constexpr int WFBITS = rocblas_log2ui(NB);
+    constexpr int WFBITS = rocblas_log2ui(WARP);
     int           offset = 1 << (WFBITS - 1);
     for(int i = 0; i < WFBITS; i++)
     {
@@ -46,29 +46,29 @@ __inline__ __device__ rocblas_index_value_t<T>
     return x;
 }
 
-template <int NB, typename REDUCE, typename T>
+template <int WARP, int NB, typename REDUCE, typename T>
 __inline__ __device__ T rocblas_shuffle_block_reduce_method(T val)
 {
-    __shared__ T psums[warpSize];
+    __shared__ T psums[WARP];
 
-    rocblas_int wavefront = threadIdx.x / warpSize;
-    rocblas_int wavelet   = threadIdx.x % warpSize;
+    rocblas_int wavefront = threadIdx.x / WARP;
+    rocblas_int wavelet   = threadIdx.x % WARP;
 
     if(wavefront == 0)
         psums[wavelet] = T{};
     __syncthreads();
 
-    val = rocblas_wavefront_reduce_method<warpSize, REDUCE>(val); // sum over wavefront
+    val = rocblas_wavefront_reduce_method<WARP, REDUCE>(val); // sum over wavefront
     if(wavelet == 0)
         psums[wavefront] = val; // store sum for wavefront
 
     __syncthreads(); // Wait for all wavefront reductions
 
     // ensure wavefront was run
-    static constexpr rocblas_int num_wavefronts = NB / warpSize;
-    val = (threadIdx.x < num_wavefronts) ? psums[wavelet] : T{};
+    static constexpr rocblas_int NUM_WARPS = NB / WARP;
+    val                                    = (threadIdx.x < NUM_WARPS) ? psums[wavelet] : T{};
     if(wavefront == 0)
-        val = rocblas_wavefront_reduce_method<num_wavefronts, REDUCE>(val); // sum wavefront sums
+        val = rocblas_wavefront_reduce_method<NUM_WARPS, REDUCE>(val); // sum wavefront sums
 
     return val;
 }
@@ -104,7 +104,10 @@ rocblas_iamax_iamin_kernel_part1(rocblas_int    n,
         else
             sum = rocblas_default_value<To>{}(); // pad with default value
 
-        sum = rocblas_shuffle_block_reduce_method<NB, REDUCE>(sum);
+        if(warpSize == WARP_32)
+            sum = rocblas_shuffle_block_reduce_method<WARP_32, NB, REDUCE>(sum);
+        else
+            sum = rocblas_shuffle_block_reduce_method<WARP_64, NB, REDUCE>(sum);
 
         if(threadIdx.x == 0)
             workspace[batch * nblocks + blockIdx.x] = sum;
@@ -137,7 +140,10 @@ rocblas_iamax_iamin_kernel_part2(rocblas_int nblocks, To* workspace, Tr* result)
         sum = rocblas_default_value<To>{}();
     }
 
-    sum = rocblas_shuffle_block_reduce_method<NB, REDUCE>(sum);
+    if(warpSize == WARP_32)
+        sum = rocblas_shuffle_block_reduce_method<WARP_32, NB, REDUCE>(sum);
+    else
+        sum = rocblas_shuffle_block_reduce_method<WARP_64, NB, REDUCE>(sum);
 
     // Store result on device or in workspace
     if(tx == 0)

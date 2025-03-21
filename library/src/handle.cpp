@@ -167,6 +167,9 @@ _rocblas_handle::_rocblas_handle()
     archMajor      = arch / 100; // this may need to switch to string handling in the future
     archMajorMinor = arch / 10;
 
+    THROW_IF_HIP_ERROR(hipDeviceGetAttribute(
+        &mWarpSize, hipDeviceAttribute_t(hipDeviceAttributeWarpSize), device));
+
     //ROCBLAS_STREAM_ORDER_ALLOC
     const char* stream_order_alloc_env = read_env("ROCBLAS_STREAM_ORDER_ALLOC");
 

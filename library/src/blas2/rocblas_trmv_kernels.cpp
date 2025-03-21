@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining A copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,10 @@ ROCBLAS_KERNEL_ILF void rocblas_trmvt_kernel_calc(
             res += (CONJ ? conj(A[i]) : A[i]) * x[(tx + i) * incx];
     }
 
-    res = rocblas_dot_block_reduce<NB>(res);
+    if(warpSize == WARP_32)
+        res = rocblas_dot_block_reduce<WARP_32, NB>(res);
+    else
+        res = rocblas_dot_block_reduce<WARP_64, NB>(res);
 
     if(tx == 0)
     {

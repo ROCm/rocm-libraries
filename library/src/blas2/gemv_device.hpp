@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -642,16 +642,16 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_kernel_calc(rocblas_int m,
 
 //Optimized kernel for GEMV transpose case when m or n is less than 6000
 template <bool CONJ, int NB_X, typename T_Index, typename Ti, typename Tex, typename To>
-ROCBLAS_KERNEL_ILF void rocblas_gemvt_warp_reduce_kernel_calc(rocblas_int m,
-                                                              rocblas_int n,
-                                                              Tex         alpha,
-                                                              const Ti* __restrict__ A,
-                                                              T_Index lda,
-                                                              const Ti* __restrict__ x,
-                                                              T_Index incx,
-                                                              Tex     beta,
-                                                              To* __restrict__ y,
-                                                              T_Index incy)
+ROCBLAS_KERNEL_ILF void rocblas_gemvt_reduce_kernel_calc(rocblas_int m,
+                                                         rocblas_int n,
+                                                         Tex         alpha,
+                                                         const Ti* __restrict__ A,
+                                                         T_Index lda,
+                                                         const Ti* __restrict__ x,
+                                                         T_Index incx,
+                                                         Tex     beta,
+                                                         To* __restrict__ y,
+                                                         T_Index incy)
 {
     rocblas_int tx  = threadIdx.x;
     rocblas_int col = blockIdx.x;
@@ -682,16 +682,23 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_warp_reduce_kernel_calc(rocblas_int m,
     if(tx + m_full < m)
         res += (CONJ ? conj(A[m_full]) : A[m_full]) * x[(tx + m_full) * (incx)];
 
-    if(NB_X <= warpSize)
-    {
-        //shuffle warp reduction if NB_X is less than or equal to 64 (WarpSize)
-        res = rocblas_wavefront_reduce<NB_X>(res);
-    }
+    static_assert(NB_X > WARP_32);
+
+    // if ever use smaller NB_X then call directly a faster warp only reduce
+    // if(NB_X <= warpSize)
+    // {
+    //     // shuffle warp reduction if NB_X is less than or equal warpSize
+    //     rocblas_wavefront_reduce<NB_X>(res);
+    // }
+    // else
+    // {
+
+    //block shuffle warp reduction
+    if(warpSize == WARP_32)
+        res = rocblas_dot_block_reduce<WARP_32, NB_X>(res);
     else
-    {
-        //block shuffle warp reduction if NB_X is greater than 64 (WarpSize)
-        res = rocblas_dot_block_reduce<NB_X>(res);
-    }
+        res = rocblas_dot_block_reduce<WARP_64, NB_X>(res);
+    //}
 
     if(tx == 0)
     {
@@ -774,7 +781,12 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_sn_kernel_calc(rocblas_int m,
         }
 
         for(int k = 0; k < NC; k++)
-            sum[k] = rocblas_dot_block_reduce<NB_X>(sum[k]);
+        {
+            if(warpSize == WARP_32)
+                sum[k] = rocblas_dot_block_reduce<WARP_32, NB_X>(sum[k]);
+            else
+                sum[k] = rocblas_dot_block_reduce<WARP_64, NB_X>(sum[k]);
+        }
 
         if(tx == 0)
         {
@@ -812,7 +824,10 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_sn_kernel_calc(rocblas_int m,
                        * xvec[j];
             }
         }
-        sum[0] = rocblas_dot_block_reduce<NB_X>(sum[0]);
+        if(warpSize == WARP_32)
+            sum[0] = rocblas_dot_block_reduce<WARP_32, NB_X>(sum[0]);
+        else
+            sum[0] = rocblas_dot_block_reduce<WARP_64, NB_X>(sum[0]);
         if(tx == 0)
             workspace[blockIdx.x + size_t(i) * gridDim.x] = alpha * sum[0];
     }
@@ -845,7 +860,10 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_sn_reduce_calc(rocblas_int n_sums,
     {
         sum += workspace[n_sums - 1 - threadIdx.x];
     }
-    sum = rocblas_dot_block_reduce<NB>(sum);
+    if(warpSize == WARP_32)
+        sum = rocblas_dot_block_reduce<WARP_32, NB>(sum);
+    else
+        sum = rocblas_dot_block_reduce<WARP_64, NB>(sum);
 
     if(threadIdx.x == 0)
     {
@@ -1176,7 +1194,7 @@ rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
 
         auto* y = load_ptr_batch(ya, batch, shifty, stridey);
 
-        rocblas_gemvt_warp_reduce_kernel_calc<CONJ, NB_X, T_Index>(
+        rocblas_gemvt_reduce_kernel_calc<CONJ, NB_X, T_Index>(
             m, n, alpha, A, lda, x, incx, beta, y, incy);
 
 #if DEVICE_GRID_YZ_16BIT

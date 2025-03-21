@@ -103,7 +103,10 @@ rocblas_reduction_kernel_part1(rocblas_int    n,
         for(int j = 0; j < WIN && tid < n; j++, tid += inc)
             sum += FETCH{}(x[tid * incx]);
 
-        sum = rocblas_dot_block_reduce<NB, To>(sum); // sum reduction only
+        if(warpSize == WARP_32)
+            sum = rocblas_dot_block_reduce<WARP_32, NB, To>(sum); // sum reduction only
+        else
+            sum = rocblas_dot_block_reduce<WARP_64, NB, To>(sum);
 
         if(threadIdx.x == 0)
             workspace[batch * nblocks + blockIdx.x] = sum;

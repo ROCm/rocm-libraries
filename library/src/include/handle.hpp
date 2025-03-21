@@ -244,6 +244,11 @@ public:
         return archMajorMinor;
     }
 
+    int getWarpSize()
+    {
+        return mWarpSize;
+    }
+
     int getMaxSharedMemPerBlock()
     {
         int max_mem = -1;
@@ -513,6 +518,8 @@ private:
     const int arch;
     int       archMajor;
     int       archMajorMinor;
+
+    int mWarpSize;
 
     // hipBLASLt handle is created at handle creation time and remains in effect for the life of the handle.
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
