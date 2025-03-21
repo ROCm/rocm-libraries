@@ -78,11 +78,16 @@ namespace rocRoller
         return {ret_code, result};
     }
 
-    void SubprocessAssembler::executeChecked(std::string const& command)
+    void SubprocessAssembler::executeChecked(std::string const&           command,
+                                             std::function<void()> const& cleanupCall)
     {
         auto [retCode, output] = execute(command);
 
-        AssertFatal(retCode == 0, ShowValue(command), ShowValue(retCode), ShowValue(output));
+        if(retCode != 0)
+        {
+            cleanupCall();
+            Throw<FatalError>(ShowValue(command), ShowValue(retCode), ShowValue(output));
+        }
     }
 
     std::string SubprocessAssembler::makeTempFolder()
@@ -111,7 +116,7 @@ namespace rocRoller
 
         std::filesystem::path tmpFolder = makeTempFolder();
 
-        auto deleteDir = [tmpFolder](auto*) { std::filesystem::remove_all(tmpFolder); };
+        auto deleteDir = [tmpFolder]() { std::filesystem::remove_all(tmpFolder); };
 
         auto assemblyFile   = tmpFolder / "kernel.s";
         auto objectFile     = tmpFolder / "kernel.o";
@@ -144,7 +149,7 @@ namespace rocRoller
 
             auto command = joinArgs(args);
 
-            executeChecked(command);
+            executeChecked(command, deleteDir);
         }
 
         {
@@ -153,10 +158,14 @@ namespace rocRoller
 
             auto command = joinArgs(args);
 
-            executeChecked(command);
+            executeChecked(command, deleteDir);
         }
 
-        return readFile(codeObjectFile);
+        auto fileContents = readFile(codeObjectFile);
+
+        deleteDir();
+
+        return fileContents;
     }
 
     std::vector<char> SubprocessAssembler::assembleMachineCode(const std::string& machineCode,

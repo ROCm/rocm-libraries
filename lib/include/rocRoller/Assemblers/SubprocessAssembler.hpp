@@ -29,6 +29,7 @@
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 
+#include <functional>
 #include <vector>
 
 namespace rocRoller
@@ -58,7 +59,7 @@ namespace rocRoller
 
     private:
         std::tuple<int, std::string> execute(std::string const& command);
-        void                         executeChecked(std::string const& command);
+        void executeChecked(std::string const& command, std::function<void()> const& cleanupCall);
 
         std::string makeTempFolder();
     };
