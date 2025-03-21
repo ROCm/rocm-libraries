@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -69,8 +69,10 @@ endif( )
 
 # FOR OPTIONAL CODE COVERAGE
 if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage)
+  #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
+  #add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+  #add_compile_options(-fprofile-arcs -ftest-coverage)
+  #add_link_options(--coverage -lgcov)
 endif()
 
 if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)

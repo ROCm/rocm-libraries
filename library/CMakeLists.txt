@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -92,6 +92,12 @@ function( rocblas_library_settings lib_target_ )
   if( NOT BUILD_SHARED_LIBS )
     # Following Boost conventions of prefixing 'lib' on static built libraries, across all platforms
     set_target_properties( ${lib_target_} PROPERTIES PREFIX "lib" )
+  endif()
+
+  if(BUILD_CODE_COVERAGE)
+    #target_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    target_compile_options( ${lib_target_} PRIVATE -fprofile-arcs -ftest-coverage )
+    target_link_libraries( ${lib_target_} PRIVATE --coverage -lgcov)
   endif()
 
   rocm_set_soversion( ${lib_target_} ${rocblas_SOVERSION} )

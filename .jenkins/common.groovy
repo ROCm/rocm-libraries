@@ -226,6 +226,30 @@ def runTestCommand (platform, project, settings)
     platform.runCommand(this, command)
 }
 
+def runCoverageCommand (platform, project, gfilter, String cmddir = "release-debug")
+{
+    //Temporary workaround due to bug in container
+    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
+
+    def command = """#!/usr/bin/env bash
+                set -x
+                cd ${project.paths.project_build_prefix}/build/${cmddir}
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                ${centos7Workaround}
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
+            """
+
+    platform.runCommand(this, command)
+
+    publishHTML([allowMissing: false,
+                alwaysLinkToLastBuild: false,
+                keepAll: false,
+                reportDir: "${project.paths.project_build_prefix}/build/${cmddir}/lcoverage",
+                reportFiles: "index.html",
+                reportName: "Code coverage report",
+                reportTitles: "Code coverage report"])
+}
+
 def runPackageCommand(platform, project, boolean debug=false)
 {
     String buildTypeDir = debug ? 'debug' : 'release'
