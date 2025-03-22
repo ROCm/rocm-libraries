@@ -20,6 +20,8 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.container import EXEC, VCC
+
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from functools import wraps
@@ -433,14 +435,14 @@ class AMaxKernelGenerator:
         if self.is_scale:
             mod.add(ti.VMulF32(ti.vgpr(f"OutputD+{i}"), ti.sgpr("Scale"), ti.vgpr(f"Value+{i}")))
             if self.scale_type == ti.DataType("F8") or self.scale_type == ti.DataType("F8N"):
-                mod.add(ti.VCmpClassF32(dst="vcc", src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("Fp8NanInf")))
+                mod.add(ti.VCmpClassF32(dst=VCC(), src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("Fp8NanInf")))
                 mod.add(ti.VMed3F32(dst=ti.vgpr("Fp8Tmp"), src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("Fp8Min"), src2=ti.vgpr("Fp8Max")))
-                mod.add(ti.VCndMaskB32(dst=ti.vgpr(f"OutputD+{i}"), src0=ti.vgpr("Fp8Tmp"), src1=ti.vgpr(f"OutputD+{i}"), src2="vcc"))
+                mod.add(ti.VCndMaskB32(dst=ti.vgpr(f"OutputD+{i}"), src0=ti.vgpr("Fp8Tmp"), src1=ti.vgpr(f"OutputD+{i}"), src2=VCC()))
                 mod.add(ti.VCvtPkF32toFP8(ti.vgpr(f"OutputD+{i}"), ti.vgpr(f"OutputD+{i}"), ti.vgpr(f"OutputD+{i}")))
             elif self.scale_type == ti.DataType("B8") or self.scale_type == ti.DataType("B8N"):
-                mod.add(ti.VCmpClassF32(dst="vcc", src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("BF8NanInf")))
+                mod.add(ti.VCmpClassF32(dst=VCC(), src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("BF8NanInf")))
                 mod.add(ti.VMed3F32(dst=ti.vgpr("BF8Tmp"), src0=ti.vgpr(f"OutputD+{i}"), src1=ti.vgpr("BF8Min"), src2=ti.vgpr("BF8Max")))
-                mod.add(ti.VCndMaskB32(dst=ti.vgpr(f"OutputD+{i}"), src0=ti.vgpr("BF8Tmp"), src1=ti.vgpr(f"OutputD+{i}"), src2="vcc"))
+                mod.add(ti.VCndMaskB32(dst=ti.vgpr(f"OutputD+{i}"), src0=ti.vgpr("BF8Tmp"), src1=ti.vgpr(f"OutputD+{i}"), src2=VCC()))
                 mod.add(ti.VCvtPkF32toBF8(ti.vgpr(f"OutputD+{i}"), ti.vgpr(f"OutputD+{i}"), ti.vgpr(f"OutputD+{i}")))
         return mod
 
@@ -592,9 +594,9 @@ class AMaxKernelGenerator:
         mod = ti.Module("sum_in_some_thread")
         mod.addComment0("sum_in_some_thread")
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), ti.sgpr("SizeLength"), self.num_workitems-1))
-        mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Serial"), ti.sgpr("MainLoop")))
+        mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Serial"), ti.sgpr("MainLoop")))
         mod.add(ti.SCBranchVCCZ(label_sum_end.getLabelName()))
-        mod.add(ti.SMovB64("exec", "vcc"))
+        mod.add(ti.SMovB64(EXEC(), VCC()))
         mod.add(ti.SNop(1))
         BufferLoadx1 = self.global_read_inst_type(1)
         mod.add(BufferLoadx1(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
@@ -608,7 +610,7 @@ class AMaxKernelGenerator:
             mod.add(ti.BufferStoreB8(ti.vgpr("OutputD"),
                                      ti.vgpr("OffsetD"), ti.sgpr("DstD",4), 0, ti.MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
-        mod.add(ti.SMovB64("exec", "-1"))
+        mod.add(ti.SMovB64(EXEC(), "-1"))
         mod.add(ti.SNop(1))
         mod.add(label_sum_end)
         mod.addSpaceLine()
@@ -665,9 +667,9 @@ class AMaxKernelGenerator:
         mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), 1, ti.sgpr("Offset")))
         mod.add(ti.VCmpLtU32(ti.sgpr("Tmp+2",2), ti.vgpr("Widx"), ti.sgpr("Tmp")))
         mod.add(ti.VCmpGEU32(ti.sgpr("Tmp+4",2), ti.vgpr("Widx"), ti.sgpr("Offset")))
-        mod.add(ti.SAndB64("vcc", ti.sgpr("Tmp+2",2), ti.sgpr("Tmp+4",2)))
+        mod.add(ti.SAndB64(VCC(), ti.sgpr("Tmp+2",2), ti.sgpr("Tmp+4",2)))
         mod.add(ti.SCBranchVCCNZ(label_upper.getLabelName()))
-        mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Widx"), ti.sgpr("Offset")))
+        mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Widx"), ti.sgpr("Offset")))
         mod.add(ti.SCBranchVCCNZ(label_lower.getLabelName()))
         mod.add(ti.SBranch(label_empty.getLabelName()))
 
@@ -703,7 +705,7 @@ class AMaxKernelGenerator:
 
         mod = ti.Module("broadcast")
         mod.addComment0("broadcast")
-        mod.add(ti.VCmpEQU32("vcc", ti.vgpr("Widx"), 0))
+        mod.add(ti.VCmpEQU32(VCC(), ti.vgpr("Widx"), 0))
         mod.add(ti.SCBranchVCCZ(label_lower.getLabelName()))
         ds = ti.DSModifiers(offset=0)
         DSStorex1 = self.local_write_inst_type(1)
@@ -854,6 +856,7 @@ if __name__ == '__main__':
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
     ti.Base._global_ti.init(isa, toolchain_path, False)
+    ti.Base._global_ti.setKernel(isa, 64)
     amax = AMaxKernelGenerator(ti.DataType(t), ti.DataType(d), ti.DataType(s), w, c, 4, arch, is_scale)
     kernel_body = amax.amax_kernel_body()
     args = amax.kernel_args()

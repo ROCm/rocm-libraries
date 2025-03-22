@@ -20,13 +20,15 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa import rocIsa
+
 from ..TensileInstructions import Module, SDWAModifiers, SelectBit, UnusedBit, \
                             SaturateCastType, VSaturateCastInt, \
                             VAdd3U32, VCvtF32toF16, VLShiftRightB32, \
                             VCmpUF32, VCndMaskB32, VCvtPkF32toFP8, VCvtPkF32toBF8, \
                             VOP3PModifiers, VCmpClassF32, VOrB32, VPackF16toB32, \
                             VAndOrB32, VBfeU32, VLShiftLeftB16, SNop, VMed3F32, \
-                            vgpr, sgpr, DataType, TensileInstructions, VCvtPkF32toBF16, VAndB32, \
+                            vgpr, sgpr, DataType, VCvtPkF32toBF16, VAndB32, \
                             VMovB32, VLShiftLeftB32
 
 from ..Component import PackData
@@ -67,7 +69,7 @@ class PackData_F16(PackData):
 class PackData_BF16(PackData):
     kernel = {"ProblemType": {"ComputeDataType": DataType(DataType.single), "DestDataType": DataType(DataType.bfloat16)}}
     def __call__(self, gwvw, destIdx, elementSumIdx, bf16CVTVgprStruct, tmpS01, laneSGPRC, tmpVgpr=None, inputPrefix="", prefixOffset=0):
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
 
         module = Module("PackData BF16")
         if gwvw == 1:
@@ -255,7 +257,7 @@ class PackData_INT8(PackData):
         vgprI8Temp0 = i8CVTVgprStruct.vgprI8Temp0
         vgprI8Temp1 = i8CVTVgprStruct.vgprI8Temp1
 
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
         module = Module("PackData int8")
         gwvw4 = (gwvw // 4) * 4
         for vi in range(0, gwvw4):

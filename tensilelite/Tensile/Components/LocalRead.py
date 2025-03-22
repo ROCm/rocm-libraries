@@ -113,7 +113,7 @@ class LocalReadVALU(LocalRead):
                         # localReadCode.addInst("s_waitcnt lgkmcnt(0)", "CheckValue1 wait for LDS read")
                         localReadCode.add(SWaitCnt(lgkmcnt=0, comment="CheckValue1 wait for lds read"))
                         if writer.archCaps["SeparateVscnt"]:
-                            # localReadCode.addInst( "s_waitcnt_vscnt", "null", "0", "")
+                            # localReadCode.addInst( "s_waitcnt_vscnt", -2, "0", "")
                             localReadCode.add(SWaitCnt(vmcnt=0, vscnt=0))
 
                         if kernel["ProblemType"]["DataType"].isHalf():

@@ -20,14 +20,16 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa import rocIsa
+from rocisa.container import DSModifiers, SDWAModifiers
+from rocisa.enum import SelectBit
+from rocisa.instruction import *
+
 from .Code import Module, Label, TextBlock
 from .Containers import RegisterContainer, VCC
 from .DataType import DataType
 from .RegisterPool import RegisterPoolResource
 from .Utils import vgpr, sgpr, log2
-from .Instructions import *
-from .Enums import SelectBit
-from .Base import TensileInstructions
 
 from enum import Enum 
 
@@ -64,7 +66,7 @@ def SLongBranch(label: Label, tmpSgprRes: RegisterPoolResource, postiveLabelStr:
     positiveLabel = Label(postiveLabelStr, "")
     module.add(SGetPCB64(dst=sgpr(tmpSgpr,2), comment="addr of next instr"))
     module.add(SAddI32(dst=sgpr(tmpSgpr+2), src0=labelName, src1=hex(4), comment="target branch offset"))
-    module.add(SCmpGeI32(src0=sgpr(tmpSgpr+2), src1=hex(0), comment="check positive or negative"))
+    module.add(SCmpGeI32(src0=sgpr(tmpSgpr+2), src1=0, comment="check positive or negative"))
     module.add(SCBranchSCC1(labelName=positiveLabel.getLabelName(), comment="jump when positive"))
 
     # negative offset
@@ -202,10 +204,10 @@ def SBranchIfZero(sgprName, computeDataType: DataType, tmpSgpr, laneSC, label, w
         module.add(VCmpEQF64(dst=VCC(), src0=sgpr(sgprVar, 2), src1=0.0, comment="%s.imag == 0.0 ?" % sgprStr))
         if waveFrontSize == 32:
             module.add(SAndB32(dst=sgpr(tmpSgpr, laneSC), src0=VCC(), src1=sgpr(tmpSgpr, laneSC), comment="%s == 0 ?" % sgprStr))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr, laneSC), src1=hex(0), comment="branch if %s == 0" % sgprStr))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr, laneSC), src1=0, comment="branch if %s == 0" % sgprStr))
         else:
             module.add(SAndB64(dst=sgpr(tmpSgpr, laneSC), src0=VCC(), src1=sgpr(tmpSgpr, laneSC), comment="%s == 0 ?" % sgprStr))
-            module.add(SCmpEQU64(src0=sgpr(tmpSgpr, laneSC), src1=hex(0), comment="branch if %s == 0" % sgprStr))
+            module.add(SCmpEQU64(src0=sgpr(tmpSgpr, laneSC), src1=0, comment="branch if %s == 0" % sgprStr))
         module.add(SCBranchSCC0(labelName=label.getLabelName(), comment="branch if %s == 0" % sgprStr))
     elif computeDataType.isDouble():
         module.add(VCmpEQF64(dst=VCC(), src0=sgpr(sgprName, 2), src1=0.0, comment="%s == 0.0 ?" % sgprStr))
@@ -216,10 +218,10 @@ def SBranchIfZero(sgprName, computeDataType: DataType, tmpSgpr, laneSC, label, w
         module.add(VCmpEQF32(dst=VCC(), src0=sgpr(sgprVar), src1=0.0, comment="%s.imag == 0.0f ?" % sgprStr))
         if waveFrontSize == 32:
             module.add(SAndB32(dst=sgpr(tmpSgpr, laneSC), src0=VCC(), src1=sgpr(tmpSgpr, laneSC), comment="%s == 0 ?" % sgprStr))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr, laneSC), src1=hex(0), comment="branch if %s == 0" % sgprStr))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr, laneSC), src1=0, comment="branch if %s == 0" % sgprStr))
         else:
             module.add(SAndB64(dst=sgpr(tmpSgpr, laneSC), src0=VCC(), src1=sgpr(tmpSgpr, laneSC), comment="%s == 0 ?" % sgprStr))
-            module.add(SCmpEQU64(src0=sgpr(tmpSgpr, laneSC), src1=hex(0), comment="branch if %s == 0" % sgprStr))
+            module.add(SCmpEQU64(src0=sgpr(tmpSgpr, laneSC), src1=0, comment="branch if %s == 0" % sgprStr))
         module.add(SCBranchSCC0(labelName=label.getLabelName(), comment="branch if %s == 0" % sgprStr))
     elif computeDataType.isSingle() or computeDataType.isHalf() or computeDataType.isBFloat16():
         module.add(VCmpEQF32(dst=VCC(), src0=sgpr(sgprName), src1=0.0, comment="%s == 0.0f ?" % sgprStr))
@@ -334,7 +336,7 @@ def VSaturateCastInt(vgprSumIdxV, tmpVgpr, tmpSgpr, lowerBound, upperBound, type
 ########################################
 
 def VCvtBF16toFP32(dst, src, vgprMask, vi, additionalCmts=""):
-    ti = TensileInstructions()
+    ti = rocIsa.getInstance()
     if ti.getAsmCaps()["HasBF16CVT"]:
         select_bit = SelectBit.WORD_0 if vi%2 == 0 else SelectBit.WORD_1
         sdwa=SDWAModifiers(src0_sel=select_bit);

@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import rocisa
+
 import functools
 import glob
 import itertools
@@ -57,7 +59,6 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
-from Tensile.TensileInstructions import TensileInstructions
 from Tensile.Toolchain.Assembly import AssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import SourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -81,13 +82,13 @@ class KernelCodeGenResult(NamedTuple):
     wavefrontSize: int
 
 
-def processKernelSource(kernelWriterAssembly, ti, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setTensileInstructions(ti)
+    kernelWriter.setTensileInstructions(data)
     asmFilename = kernelWriter.getKernelFileBase(kernel)
     err, src = kernelWriter.getSourceFileString(kernel)
     header = kernelWriter.getHeaderFileString(kernel)
@@ -232,7 +233,7 @@ def writeSolutionsAndKernels(
     numKernels = len(asmKernels)
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
     asmIter = zip(
-        itertools.repeat(kernelWriterAssembly), itertools.repeat(TensileInstructions()), asmKernels
+        itertools.repeat(kernelWriterAssembly), itertools.repeat(rocisa.rocIsa.getInstance().getData()), asmKernels
     )
     asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels")
     removeInvalidSolutionsAndKernels(
@@ -309,7 +310,7 @@ def writeSolutionsAndKernelsTCL(
         asmToolchain.assemble(str(p), str(p.with_suffix(".o")), isaToGfx(isa), wavefrontsize)
 
     unaryProcessKernelSource = functools.partial(
-        processKernelSource, kernelWriterAssembly, TensileInstructions()
+        processKernelSource, kernelWriterAssembly, rocisa.rocIsa.getInstance().getData()
     )
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
     compose = lambda *F: functools.reduce(lambda f, g: lambda x: f(g(x)), F)

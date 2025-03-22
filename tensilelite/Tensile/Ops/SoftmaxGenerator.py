@@ -291,7 +291,7 @@ class SoftmaxKernelGenerator:
             local_byte_offset_reg_idx = ext_local_byte_offset_reg_idx
 
         data_reg_idx = self.vgpr_pool.checkOut(1)
-        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx), ti.vgpr(local_byte_offset_reg_idx), False))
+        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx), ti.vgpr(local_byte_offset_reg_idx)))
 
         if sync:
             module.add(ti.SWaitCnt(lgkmcnt=0))
@@ -353,8 +353,8 @@ class SoftmaxKernelGenerator:
         data_reg_idx_0 = self.vgpr_pool.checkOut(2)
         data_reg_idx_1 = data_reg_idx_0 + 1
         max_reg_idx = data_reg_idx_0
-        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_0), ti.vgpr(lds_addr0), False))
-        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_1), ti.vgpr(lds_addr1), False))
+        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_0), ti.vgpr(lds_addr0)))
+        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_1), ti.vgpr(lds_addr1)))
         module.add(ti.SWaitCnt(lgkmcnt=0))
         module.add(ti.VMaxF32(ti.vgpr(max_reg_idx), ti.vgpr(data_reg_idx_0), ti.vgpr(data_reg_idx_1)))
         module.add(ti.DSStoreB32(ti.vgpr(lds_addr0), ti.vgpr(max_reg_idx)))
@@ -377,7 +377,7 @@ class SoftmaxKernelGenerator:
         addr_reg_idx = self.vgpr_pool.checkOut(1)
         mod.add(ti.vectorStaticDivide(addr_reg_idx, t_id_reg_idx, self.num_cols, None))
         mod.add(ti.staticMultiply(ti.vgpr(addr_reg_idx), ti.vgpr(addr_reg_idx), self.bpe * self.num_cols, None))
-        mod.add(ti.DSLoadB32(ti.vgpr(addr_reg_idx), ti.vgpr(addr_reg_idx), False))
+        mod.add(ti.DSLoadB32(ti.vgpr(addr_reg_idx), ti.vgpr(addr_reg_idx)))
         mod.add(ti.SWaitCnt(lgkmcnt=0))
         return mod, addr_reg_idx
 
@@ -392,8 +392,8 @@ class SoftmaxKernelGenerator:
         data_reg_idx_0 = self.vgpr_pool.checkOut(2)
         data_reg_idx_1 = data_reg_idx_0 + 1
         sum_reg_idx = data_reg_idx_0
-        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_0), ti.vgpr(lds_addr0), False))
-        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_1), ti.vgpr(lds_addr1), False))
+        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_0), ti.vgpr(lds_addr0)))
+        module.add(ti.DSLoadB32(ti.vgpr(data_reg_idx_1), ti.vgpr(lds_addr1)))
         module.add(ti.SWaitCnt(lgkmcnt=0))
         module.add(ti.VAddF32(ti.vgpr(sum_reg_idx), ti.vgpr(data_reg_idx_0), ti.vgpr(data_reg_idx_1)))
         module.add(ti.DSStoreB32(ti.vgpr(lds_addr0), ti.vgpr(sum_reg_idx)))
@@ -698,6 +698,7 @@ if __name__ == '__main__':
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
     ti.Base._global_ti.init(isa, toolchain_path, False)
+    ti.Base._global_ti.setKernel(isa, 64)
     softmax = SoftmaxKernelGenerator(ti.DataType('S'), n, m, 256, arch)
     kernel_body = softmax.softmax_kernel_body()
     args = softmax.kernel_args()

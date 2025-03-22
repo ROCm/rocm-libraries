@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import rocisa
 import math
 import os.path
 import subprocess
@@ -1727,10 +1728,12 @@ def assignGlobalParameters(config, cxxCompiler=None):
     globalParameters["ArchCaps"] = {}
     globalParameters["AsmBugs"] = {}
 
+    ti = rocisa.rocIsa.getInstance()
     for v in globalParameters["SupportedISA"] + [(0, 0, 0)]:
-        globalParameters["AsmCaps"][v] = initAsmCaps(v, cxxCompiler, False)
-        globalParameters["ArchCaps"][v] = initArchCaps(v)
-        globalParameters["AsmBugs"][v] = initAsmBugs(globalParameters["AsmCaps"][v])
+        ti.init(v, cxxCompiler, False)
+        globalParameters["AsmCaps"][v] = ti.getIsaInfo(v).asmCaps
+        globalParameters["ArchCaps"][v] = ti.getIsaInfo(v).archCaps
+        globalParameters["AsmBugs"][v] = ti.getIsaInfo(v).asmBugs
 
     if globalParameters["PrintLevel"] >= 1:
         printCapTable(globalParameters)

@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+import inspect
 import os
 import subprocess
 import shlex
@@ -30,6 +31,8 @@ import shutil
 from pathlib import Path
 from enum import Enum
 from glob import glob
+
+import rocisa
 
 from . import ROOT_PATH
 from . import ClientExecutable
@@ -97,8 +100,17 @@ def main(config, cxxCompiler: str, cCompiler: str, outputPath: Path):
   functions = []
   functionNames = []
 
+  # Get rocIsa path, remove this when subprocess is removed
+  module_path = os.path.dirname(inspect.getfile(rocisa))
+  env = os.environ.copy()
+  if 'PYTHONPATH' in env:
+    if not module_path in env['PYTHONPATH']:
+        env["PYTHONPATH"] = module_path + ":" + env["PYTHONPATH"]
+  else:
+    env["PYTHONPATH"] = module_path
+
   createLibraryScript = getBuildClientLibraryScript(clientLibraryPath, libraryLogicPath, cxxCompiler)
-  subprocess.run(shlex.split(createLibraryScript), cwd=clientLibraryPath)
+  subprocess.run(shlex.split(createLibraryScript), env=env, cwd=clientLibraryPath)
   coList = glob(os.path.join(clientLibraryPath, "library/*.co"))
   yamlList = glob(os.path.join(clientLibraryPath, "library/*.yaml"))
 

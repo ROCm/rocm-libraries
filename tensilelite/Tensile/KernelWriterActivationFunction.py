@@ -20,9 +20,10 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa import rocIsa
+
 from copy import deepcopy
 
-from .TensileInstructions import TensileInstructions
 from .Common import globalParameters, gfxToIsa, isaToGfx
 from .Activation import ActivationInline, ActivationType
 from .KernelWriterBase import KernelWriterBase
@@ -34,7 +35,6 @@ class KernelWriterActivationFunction(KernelWriterBase):
     self.cxxCompiler = cxxCompiler
     self.state["ProblemType"] = deepcopy(state["ProblemType"])
     self.state["Kernel"] = state["Kernel"]
-    self._tf = TensileInstructions()
 
     self.actGradientPrefix = ""
     self.actExportType =  ActivationType.Export.NORMAL
@@ -94,13 +94,14 @@ class KernelWriterActivationFunction(KernelWriterBase):
     activationStrList = []
 
     isa = tuple(self.state["Kernel"]["ISA"])
-    if not self._tf.isInit():
-      self._tf.init(isa, self.cxxCompiler)
-    self._tf.setKernelInfo(isa, self.state["Kernel"]["WavefrontSize"])
+    tf  = rocIsa.getInstance()
+    if not tf.isInit():
+      tf.init(isa, self.cxxCompiler)
+    tf.setKernel(isa, self.state["Kernel"]["WavefrontSize"])
 
     for arch in self.supportedArchs:
-      self._tf.init(arch, self.cxxCompiler)
-      self._tf.setKernelInfo(arch, self.state["Kernel"]["WavefrontSize"])
+      tf.init(arch, self.cxxCompiler)
+      tf.setKernel(arch, self.state["Kernel"]["WavefrontSize"])
       activationStrList.append(activation.generateInlineAssemblyBody(spaces, activationType))
 
     activationStrSetList = list(set(activationStrList))
@@ -140,12 +141,13 @@ class KernelWriterActivationFunction(KernelWriterBase):
       return fileString
 
     isa = tuple(self.state["Kernel"]["ISA"])
-    self._tf.init(isa, self.cxxCompiler)
-    self._tf.setKernelInfo(isa, self.state["Kernel"]["WavefrontSize"])
+    tf  = rocIsa.getInstance()
+    tf.init(isa, self.cxxCompiler)
+    tf.setKernel(isa, self.state["Kernel"]["WavefrontSize"])
 
     activationCDataType = self.state["ProblemType"]["ActivationComputeDataType"]
     activationType = self.state["ProblemType"]["ActivationType"]
-    self._tf.setKernelInfo(tuple(self.state["Kernel"]["ISA"]), self.state["Kernel"]["WavefrontSize"])
+    tf.setKernel(tuple(self.state["Kernel"]["ISA"]), self.state["Kernel"]["WavefrontSize"])
     activation = ActivationInline(activationCDataType, not self.state["ProblemType"]["ActivationNoGuard"])
 
     fileString = "" # CHeader

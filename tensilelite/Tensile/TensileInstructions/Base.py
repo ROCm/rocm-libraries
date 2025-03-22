@@ -20,6 +20,10 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa import rocIsa, base
+from rocisa.base import KernelInfo
+from rocisa.base import Item
+
 import pickle
 import threading
 
@@ -35,87 +39,6 @@ def fastdeepcopy(x):
     # Note: Some object can't be pickled
     return pickle.loads(pickle.dumps(x))
 
-class TensileInstructions:
-
-    _instance  = None
-    _lock = threading.Lock()
-
-    def __new__(cls, *args, **kwargs):
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._isaInfo = {}  # type: ignore
-                cls._instance._kernelInfo = {}
-        return cls._instance
-
-    def __reduce__(self):
-        return (TensileInstructions, ())
-
-    @dataclass
-    class IsaInfo:
-        assemblerPath: str
-        asmCaps: dict
-        archCaps: dict
-        regCaps: dict
-        asmBugs: dict
-
-    @dataclass
-    class kernelInfo:
-        isa: Tuple[int, int, int]
-        wavefrontSize: int = 64
-
-    def init(self, isaVersion: Tuple[int, int, int], assemblerPath: str, debug: bool=False) -> None:
-        with self._lock:
-            if len(self._kernelInfo) > 1000:
-                self._kernelInfo = _removeIdent(self._kernelInfo)
-            self._kernelInfo[threading.get_ident()] = TensileInstructions.kernelInfo(isa=isaVersion)
-            if isaVersion not in self._isaInfo: # type: ignore
-                asmCaps  = initAsmCaps(isaVersion, assemblerPath, debug)
-                archCaps = initArchCaps(isaVersion)
-                regCaps  = initRegisterCaps(isaVersion, archCaps)
-                asmBugs  = initAsmBugs(asmCaps)
-                self._isaInfo[isaVersion] = TensileInstructions.IsaInfo(assemblerPath, # type: ignore
-                    asmCaps, archCaps, regCaps, asmBugs)
-
-    def setDebugLevel(self, level: int) -> None:
-        __TI_DEBUG_LEVEL__ = level
-
-    def setKernelInfo(self, isaVersion: Tuple[int, int, int], wavefrontSize: int) -> None:
-        if isaVersion not in self._isaInfo: # type: ignore
-            import traceback
-            printExit(f"Current isa {str(isaVersion)} not initialized. Initialized isas are {str(self._isaInfo.keys())}, traceback: {traceback.format_stack()}")
-        with self._lock:
-            if len(self._kernelInfo) > 1000:
-                self._kernelInfo = _removeIdent(self._kernelInfo)
-            tid = threading.get_ident()
-            if tid not in self._kernelInfo:
-                self._kernelInfo[threading.get_ident()] = \
-                    TensileInstructions.kernelInfo(isa=isaVersion, wavefrontSize=wavefrontSize)
-            else:
-                self._kernelInfo[threading.get_ident()].isa           = isaVersion
-                self._kernelInfo[threading.get_ident()].wavefrontSize = wavefrontSize
-
-    def getCurrentIsa(self) -> Tuple[int]:
-        return self._kernelInfo[threading.get_ident()].isa
-
-    def getAsmCaps(self) -> dict:
-        return self._isaInfo[self._kernelInfo[threading.get_ident()].isa].asmCaps # type: ignore
-
-    def getArchCaps(self) -> dict:
-        return self._isaInfo[self._kernelInfo[threading.get_ident()].isa].archCaps # type: ignore
-
-    def getRegCaps(self) -> dict:
-        return self._isaInfo[self._kernelInfo[threading.get_ident()].isa].regCaps
-
-    def getAsmBugs(self) -> dict:
-        return self._isaInfo[self._kernelInfo[threading.get_ident()].isa].asmBugs # type: ignore
-
-    def getKernel(self) -> kernelInfo:
-        return self._kernelInfo[threading.get_ident()]
-
-    def isInit(self):
-        return len(self._isaInfo) > 0
-
 def printItemList(listOfItems, tag="__unnamed__") -> None:
     header = "="*40
     print("%s\nbegin list %s\n%s"%(header, tag, header))
@@ -129,64 +52,28 @@ def printItemList(listOfItems, tag="__unnamed__") -> None:
     print("%s\nend list %s\n%s"%(header, tag, header))
 
 # Global
-_global_ti = TensileInstructions()
+_global_ti = rocIsa.getInstance()
 
-class Item:
-    """
-    Base class for Modules, Instructions, etc
-    Item is a atomic collection of or more instructions and commentsA
-    """
+# This is a temporary wrapper.Will remove when TensileInstructions are all moved to rocisa
+# class Item(base.Item):
+#     def __init__(self, name=""):
+#         super().__init__(name)
 
-    def __init__(self, name: str="") -> None:
-        self.parent = ""
-        self.name = name
-
-    def __deepcopy__(self, memo):
-        cls = self.__class__
-        result = cls.__new__(cls)
-        memo[id(self)] = result
-        for k, v in self.__dict__.items():
-            setattr(result, k, deepcopy(v, memo))
-        return result
-
-    @property
-    def asmCaps(self) -> dict:
-        return _global_ti.getAsmCaps()
-
-    @property
-    def archCaps(self) -> dict:
-        return _global_ti.getArchCaps()
+#     def __getstate__(self):
+#         base_state = super().__getstate__()
+#         py_state = {key: value for key, value in self.__dict__.items() if not key.startswith("__")}
+#         return (base_state, py_state)
     
-    @property
-    def regCaps(self) -> dict:
-        return _global_ti.getRegCaps()
+#     def __setstate__(self, state):
+#         base_state, py_state = state
+#         super().__setstate__(base_state)
+#         self.__dict__.update(py_state)
 
-    @property
-    def asmBugs(self) -> dict:
-        return _global_ti.getAsmBugs()
+#     def __deepcopy__(self, memo):
+#         assert 0, "Not implemented"
 
-    @property
-    def kernel(self) -> TensileInstructions.kernelInfo:
-        return _global_ti.getKernel()
-
-    def countType(self, ttype) -> int:
-        return int(isinstance(self, ttype))
-
-    def prettyPrint(self, indent="") -> str:
-        ostream = ""
-        ostream += "%s%s "%(indent, type(self).__name__)
-        ostream += str(self)
-        return ostream
-
-def getGlcBitName(hasGLCModifier):
-  if hasGLCModifier:
-    return "glc"
-  return "sc0"
-
-def getSlcBitName(hasGLCModifier):
-  if hasGLCModifier:
-    return "slc"
-  return "sc1"
+#     def countType(self, ttype) -> int:
+#         return int(isinstance(self, ttype))
 
 def _removeIdent(isaDict) -> list:
     ids = [th.ident for th in threading.enumerate()]

@@ -25,6 +25,7 @@
 import os
 import pytest
 import subprocess
+import sys
 import yaml
 
 from Tensile import Tensile

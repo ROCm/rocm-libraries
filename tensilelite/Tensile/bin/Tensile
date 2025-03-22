@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-
+#!/bin/bash
 ################################################################################
 #
 # Copyright (C) 2022 Advanced Micro Devices, Inc. All rights reserved.
@@ -24,16 +23,29 @@
 #
 ################################################################################
 
-try:
-    from Tensile import Tensile
-except ImportError:
-    import os.path
-    import sys
-    parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
-    sys.path.append(parentdir)
+relative2absolute()
+{
+    local relative_path="$1"
+    local absolute_path
+    cd "$(dirname "$relative_path")" || exit
+    absolute_path=$(pwd)/$(basename "$relative_path")
+    cd - > /dev/null || exit
+    echo $absolute_path
+}
 
-    from Tensile import Tensile
+ROCM_PATH="${ROCM_PATH}"
+if [ -z "$ROCM_PATH" ]; then
+    ROCM_PATH="/opt/rocm"
+fi
+WORKING_DIR=$2
+ROCISA_LIB_DIR=$(relative2absolute $WORKING_DIR)/rocisa/lib
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+ROCISA_DIR=$SCRIPT_DIR/../../rocisa
+### Build rocisa
+# Currently the path to rocisa is fixed
+mkdir -p $WORKING_DIR/rocisa
+cmake -DCMAKE_CXX_COMPILER=$ROCM_PATH/bin/amdclang++ -DCMAKE_PREFIX_PATH=$(python3 -m nanobind --cmake_dir) -DCMAKE_BUILD_TYPE=Debug -DPYTHON_VERSION=$(python3 --version 2>&1 | cut -d ' ' -f 2) -S $ROCISA_DIR -B $WORKING_DIR/rocisa
+cmake --build $WORKING_DIR/rocisa -j 8
 
-# script run from commandline
-if __name__ == "__main__":
-    Tensile.main()
+# Run Tensile
+PYTHONPATH=$ROCISA_LIB_DIR $SCRIPT_DIR/TensilePy "$1" "$2"
