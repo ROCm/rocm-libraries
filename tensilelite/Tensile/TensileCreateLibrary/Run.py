@@ -22,6 +22,8 @@
 #
 ################################################################################
 
+import rocisa
+
 import functools
 import glob
 import itertools
@@ -63,7 +65,6 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
-from Tensile.TensileInstructions import TensileInstructions
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, SourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -87,13 +88,13 @@ class KernelCodeGenResult(NamedTuple):
     wavefrontSize: int
 
 
-def processKernelSource(kernelWriterAssembly, ti, useShortNames, splitGSU, kernelMinNaming, kernelSerialNaming, kernel) -> KernelCodeGenResult:
+def processKernelSource(kernelWriterAssembly, data, useShortNames, splitGSU, kernelMinNaming, kernelSerialNaming, kernel) -> KernelCodeGenResult:
     """
     Generate source for a single kernel.
     Returns (error, source, header, kernelName).
     """
     kernelWriter = kernelWriterAssembly
-    kernelWriter.setTensileInstructions(ti)
+    kernelWriter.setTensileInstructions(data)
     asmFilename = getKernelFileBase(useShortNames, splitGSU, kernelMinNaming, kernelSerialNaming, kernel)
     err, src = kernelWriter.getSourceFileString(kernel, useShortNames)
     header = kernelWriter.getHeaderFileString(kernel)
@@ -244,7 +245,7 @@ def writeSolutionsAndKernels(
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
-        itertools.repeat(TensileInstructions()),
+        itertools.repeat(rocisa.rocIsa.getInstance().getData()),
         itertools.repeat(useShortNames),
         itertools.repeat(splitGSU),
         itertools.repeat(kernelMinNaming),
@@ -344,7 +345,7 @@ def writeSolutionsAndKernelsTCL(
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
-        TensileInstructions(),
+        rocisa.rocIsa.getInstance().getData(),
         useShortNames,
         splitGSU,
         kernelMinNaming,

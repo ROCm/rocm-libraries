@@ -24,12 +24,16 @@ import ctypes
 import math
 import struct
 from collections import OrderedDict
-from enum import IntFlag
+from copy import deepcopy
+from enum import Enum, IntFlag
+from typing import List, Union
 
-from .TensileInstructions import Module, TextBlock, HolderContainer, RegisterContainer, \
-                          VCC, EXEC, vgpr, sgpr, Holder, fastdeepcopy, DataType, SNop, \
-                          TensileInstructions
-from .TensileInstructions.Enums import *
+from rocisa import rocIsa
+from rocisa.code import Module, TextBlock
+from rocisa.container import VCC, EXEC, vgpr, sgpr, HolderContainer, RegisterContainer, Holder
+from rocisa.enum import InstType
+
+from .TensileInstructions import DataType
 from .TensileInstructions.Instructions import *
 from Tensile.Common.Utilities import printExit, printWarning
 
@@ -327,6 +331,9 @@ class ActivationModule:
         self.enableGuard = False
         self.isAlt       = False
 
+    def __reduce__(self):
+        return (ActivationModule, ())
+
     # Public function
     def getModule(self, cDataType, activationType, vgprIn, vgprOut):
         if self.useCache:
@@ -511,7 +518,7 @@ class ActivationModule:
         return module
 
     def getExpModule(self, cDataType, vgprIn, vgprOut):
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
         module = Module("Exp")
         if cDataType.isHalf():
             sgprMagic = self.getSgpr(1)
@@ -660,7 +667,7 @@ class ActivationModule:
         return module
 
     def getSigmoidModule(self, cDataType, vgprIn, vgprOut):
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
         self.needCombine = True
         module = Module("Sigmoid")
         if cDataType.isHalf():
@@ -695,7 +702,7 @@ class ActivationModule:
         return module
 
     def getTanhModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
         self.needCombine = True
         module = Module("Tanh")
         if cDataType.isHalf():
@@ -755,7 +762,7 @@ class ActivationModule:
         return module
 
     def getDGeluModule(self, cDataType, vgprIn, vgprOut):
-        ti = TensileInstructions()
+        ti = rocIsa.getInstance()
         self.needCombine = True
         module = Module("Gradient Gelu")
         # x1 = (0.0535161 * pow(x, 3) + 0.398942 * x)
@@ -868,7 +875,7 @@ class ActivationModule:
         if activationType not in self.cacheDict:
             self.cacheDict[activationType] = {}
         actDict = self.cacheDict[activationType]
-        copied = fastdeepcopy(module)
+        copied = deepcopy(module)
         # Get reg name
         regName = self.vgprPrefixFormat.split("+")[0] if self.vgprPrefixFormat else ""
         vgprIdxList = createVgprIdxList(copied, [vgprIn, vgprOut], regName)
@@ -891,9 +898,9 @@ class ActivationModule:
                                       enableGuard=self.enableGuard, prefix=self.vgprPrefixFormat):
                         if self.vgprPrefixFormat:
                             for vgpr in actInfo.vgprIdxList[0]:
-                                vgpr.regName.offsets[0] = vgprIn
+                                vgpr.regName.setOffset(0, vgprIn)
                             for vgpr in actInfo.vgprIdxList[1]:
-                                vgpr.regName.offsets[0] = vgprOut
+                                vgpr.regName.setOffset(0, vgprOut)
                         else:
                             for vgpr in actInfo.vgprIdxList[0]:
                                 vgpr.regIdx = vgprIn
@@ -901,7 +908,7 @@ class ActivationModule:
                                 vgpr.regIdx = vgprOut
                         self.vgprCounter = actInfo.vgprCounter
                         self.sgprCounter = actInfo.sgprCounter
-                        return fastdeepcopy(actInfo.module)
+                        return deepcopy(actInfo.module)
         return None
 
 ################################################################################
@@ -946,7 +953,7 @@ def RemoveEmptyBlocks(module):
     for idx, item in enumerate(module.items()):
         if isinstance(item, Module):
             newItem = RemoveEmptyBlocks(item)
-            module.items()[idx] = newItem
+            module.setItem(idx, newItem)
     if len(module.items()) == 1 and isinstance(module.items()[0], Module):
         return module.items()[0]
     return module
@@ -985,7 +992,7 @@ def FuseInstruction(currentInst, moduleAndIndex, fuseDebug):
                     # used before the current instruction
                     if not FindAssignAndUse(oldInst, currentInst, outVgpr, outVgpr):
                         newInst = type(oldInst)(oldInst.dst, *oldInst.srcs, oldInst.sdwa)
-                        newInst.srcs[2] = addConst + newInst.srcs[2]
+                        newInst.setSrc(2, addConst + newInst.srcs[2])
                         newInst.comment += " ( + 1 (fused))"
                         replaceInst(currentInst, newInst, fuseDebug)
                         removeOldInst(oldInst, currentInst, newInst, fuseDebug)
@@ -1035,11 +1042,11 @@ def FuseInstruction(currentInst, moduleAndIndex, fuseDebug):
                                 newValue = param * mulConst
                                 formatting = " (fused %f)" if isinstance(param, float) else " (fused %d)"
                                 if newFuseInst:
-                                    newFuseInst.srcs[0] = newValue
-                                    newInst.srcs[paramIdx] = newFuseInst.dst
+                                    newFuseInst.setSrc(0, newValue)
+                                    newInst.setSrc(paramIdx, newFuseInst.dst)
                                     newFuseInst.comment += formatting%newValue
                                 else:
-                                    newInst.srcs[paramIdx] = newValue
+                                    newInst.setSrc(paramIdx, newValue)
                                 newInst.comment += formatting%newValue
                                 replaceInst(currentInst, newInst, fuseDebug)
                                 removeOldInst(oldInst, currentInst, newInst, fuseDebug)
@@ -1132,7 +1139,7 @@ def removeOldInst(removeInst, dstInst, fusedInst, debug):
             if debug:
                 tb = TextBlock("\n/* Fused to block %s + %s -> %s */\n"%(str(removeInst), str(dstInst), str(fusedInst)))
                 tb.name = __FUSE_MAGIC_NAME__
-                module.items()[idx] = tb
+                module.setItem(idx, tb)
             else:
                 targetIdx = idx
             break
@@ -1190,20 +1197,20 @@ def HexToStr(cDataType, isPack, *args):
 
 def ConvertCoeffToHex(module, cDataType, isPack):
     if (module.name == "Exp"):
-        param = module.items()[0].srcs[0]
-        module.items()[0].srcs[0] = getMagic(cDataType, param, isPack)
+        param = module.getItem(0).srcs[0]
+        module.getItem(0).setSrc(0, getMagic(cDataType, param, isPack))
         return module
     for itemIdx, item in enumerate(module.items()):
         if isinstance(item, Module):
             newItem = ConvertCoeffToHex(item, cDataType, isPack)
-            module.items()[itemIdx] = newItem
+            module.setItem(itemIdx, newItem)
     return module
 
 def HolderToGpr(module, idx, pf):
     for itemIdx, item in enumerate(module.items()):
         if isinstance(item, Module):
             newItem = HolderToGpr(item, idx, pf)
-            module.items()[itemIdx] = newItem
+            module.setItem(itemIdx, newItem)
         elif isinstance(item, SNop):
             pass
         elif isinstance(item, Instruction):
@@ -1214,7 +1221,7 @@ def HolderToGpr(module, idx, pf):
                 for itemIdx, param in enumerate(item.srcs):
                     if isinstance(param, HolderContainer) and param.regType == pf:
                         param.setRegNum(idx)
-                        item.srcs[itemIdx] = param.getCopiedRC()
+                        item.setSrc(itemIdx, param.getCopiedRC())
     return module
 
 def addSpace(alignStr, str):
@@ -1384,7 +1391,7 @@ def createVgprIdxList(module, vgprList: list, regName):
             for param in item.getParams():
                 if isinstance(param, RegisterContainer):
                     for index, vgprIdx in enumerate(vgprList):
-                        if param.regName and (param.regName.name == regName) and (param.regName.offsets[0] == vgprIdx):
+                        if param.regName and (param.regName.name == regName) and (param.regName.getOffset()[0] == vgprIdx):
                             vlist[index].append(param)
                         elif param.regIdx == vgprIdx:
                             vlist[index].append(param)

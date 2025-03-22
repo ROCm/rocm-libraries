@@ -20,9 +20,11 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from ..TensileInstructions import Module, Label, SAddU32, RegisterPoolResource, sgpr, scalarStaticDivideAndRemainder, \
+from rocisa.code import Module, Label
+from rocisa.container import sgpr, SMEMModifiers
+from ..TensileInstructions import SAddU32, RegisterPoolResource, scalarStaticDivideAndRemainder, \
     SCmpLtU32, SCSelectB32, sMagicDivAlg2, SMulI32, SSubU32, SMinU32, SMovB32, SMovB64, SCBranchSCC1, SCmpLeU32, VMovB32, \
-    vgpr, SAddCU32, SCmpGtU32, SCMovB32, SAddI32, SCmpEQU32, SCBranchSCC0, SLShiftLeftB32, SLoadB32, SWaitCnt, SMEMModifiers, \
+    vgpr, SAddCU32, SCmpGtU32, SCMovB32, SAddI32, SCmpEQU32, SCBranchSCC0, SLShiftLeftB32, SLoadB32, SWaitCnt, \
     log2, SBarrier, SStoreB32, SLongBranchPositive, SBranch, ceilDivide, replaceHolder, SNop, staticMultiply, SSleep, \
     VAddU32, VAddF32, VAddF64, SAndB32, SLShiftRightB32, VReadfirstlaneB32, SBranchIfNotZero
 from ..Common import print2
@@ -30,6 +32,7 @@ from ..Common import print2
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 import abc
+
 from copy import deepcopy
 
 class XCCMapping(Component):
@@ -220,7 +223,7 @@ class StreamK(Component):
         # skip tail loop if StreamK WG not processing final iteration
         # Check if tile finished
         module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
-        module.add(SCMovB32(dst=loopCounter, src=hex(0), comment="This WG not completing tile"))
+        module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
 
         return module
 
@@ -251,7 +254,7 @@ class StreamK(Component):
             else:
                 with writer.allocTmpSgpr(4) as tmpSgpr1:
                     module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=hex(0), comment="numIter%s == 0"%loopChar ))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
@@ -301,7 +304,7 @@ class StreamK(Component):
 
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="get flag"))
+            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
 
             module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag load"))
             if kernel["DebugStreamK"] & 2 == 0:
@@ -315,7 +318,7 @@ class StreamK(Component):
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
             # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="reset flag"))
+            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
             module.add(skipFlagReset)
             writer.sgprPool.checkIn(tmpSgpr)
 
@@ -616,7 +619,7 @@ class StreamK(Component):
                 module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
                 module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="set flag"))
+                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
                 module.add(skipFlagSet)
             module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -693,8 +696,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
-                        # module.add(replaceHolder(self.codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
+                        # module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -733,49 +736,25 @@ class StreamK(Component):
         #     vgprBf16Mask = vgprBf16Temp + 1
         #     vgprFp32Nan = vgprBf16Temp + 2
         #     vgprBf16Inc = vgprBf16Temp + 3
-        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Mask), "0xffff0000", "mask for pack two bfloat16 element to 32bit" )
-        #     kStr += inst("v_mov_b32", vgpr(vgprFp32Nan), "0x7fff0000", "fp32 Nan" )
-        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Inc), "0x7fff", "rounding bias for bfloat16" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" )
         if kernel["ProblemType"]["DestDataType"].isBFloat16() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Mask), "0xffff0000", "mask for pack two bfloat16 element to 32bit" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp32Nan), "0x7fff0000", "fp32 Nan" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Inc), "0x7fff", "rounding bias for bfloat16" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" ))
         elif kernel["ProblemType"]["DestDataType"].isFloat8_fnuz() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43700000", "Fp8 Max value 240 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3700000", "Fp8 Min value -240 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43700000", comment="Fp8 Max value 240 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3700000", comment="Fp8 Min value -240 as float32" ))
         elif kernel["ProblemType"]["DestDataType"].isFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43E00000", "Fp8 Max value 448 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3E00000", "Fp8 Min value -448 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43E00000", comment="Fp8 Max value 448 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3E00000", comment="Fp8 Min value -448 as float32" ))
         elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Max), "0x47600000", "BF8 Max value 57344 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Min), "0xc7600000", "BF8 Min value -57344 as float32" ))
-
-        # DestDataType for 8bit Float can only be F8 or B8
-        # if kernel["ProblemType"]["DestDataType"].isFloat8() or kernel["ProblemType"]["DestDataType"].isBFloat8(): # F8 is always HPA
-        #     # make vgprF8Temp0 always even to use pk instruction later
-        #     if tmpCVTVgpr % 2 == 0:
-        #         vgprF8Temp0 = tmpCVTVgpr
-        #         vgprF8Max = vgprF8Temp0 + 2
-        #         vgprF8Min = vgprF8Temp0 + 3
-        #     else:
-        #         vgprF8Max = tmpCVTVgpr
-        #         vgprF8Temp0 = vgprF8Max + 1
-        #         vgprF8Min = vgprF8Max + 3
-
-        #     if kernel["ProblemType"]["Fp32toFp8SWClip"]:
-        #         # set flag of f32 NaN and +/- INF for v_cmp_class
-        #         vgprFp32NanInfFlag = vgprF8Min + 1
-        #         kStr += inst("v_mov_b32", vgpr(vgprFp32NanInfFlag), "0x207", "flag for Nan and +/- inf" )
-        #         # set max/min values for clipping
-        #         if kernel["ProblemType"]["DestDataType"].isFloat8():
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x43700000", "save 240.0f as max for clipping" )
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC3700000", "save -240.0f as min for clipping" )
-        #         else: #BFloat8
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x47600000", "save 57344.0f as max for clipping" )
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC7600000", "save -57344`.0f as min for clipping" )
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Max), "0x47600000", comment="BF8 Max value 57344 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
         storeCode = Module("Partials GroupLoadStore")
         for elementIdx in range(len(batchElements)):
@@ -1185,8 +1164,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprRead.items().pop(0))
+                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        # tempStr = str(codeAccVgprRead.popFirstItem())
                         # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
@@ -1234,51 +1213,25 @@ class StreamK(Component):
         #     vgprBf16Mask = vgprBf16Temp + 1
         #     vgprFp32Nan = vgprBf16Temp + 2
         #     vgprBf16Inc = vgprBf16Temp + 3
-        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Mask), "0xffff0000", "mask for pack two bfloat16 element to 32bit" )
-        #     kStr += inst("v_mov_b32", vgpr(vgprFp32Nan), "0x7fff0000", "fp32 Nan" )
-        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Inc), "0x7fff", "rounding bias for bfloat16" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" )
+        #     kStr += inst("v_mov_b32", vgpr(vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" )
         if kernel["ProblemType"]["DestDataType"].isBFloat16() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Mask), "0xffff0000", "mask for pack two bfloat16 element to 32bit" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp32Nan), "0x7fff0000", "fp32 Nan" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Inc), "0x7fff", "rounding bias for bfloat16" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Mask), "0xffff0000", comment="mask for pack two bfloat16 element to 32bit" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp32Nan), "0x7fff0000", comment="fp32 Nan" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBf16Inc), "0x7fff", comment="rounding bias for bfloat16" ))
         elif kernel["ProblemType"]["DestDataType"].isFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43E00000", "OCP Fp8 Max value 448 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3E00000", "OCP Fp8 Min value -448 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43E00000", comment="OCP Fp8 Max value 448 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3E00000", comment="OCP Fp8 Min value -448 as float32" ))
         elif kernel["ProblemType"]["DestDataType"].isFloat8_fnuz() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43700000", "Fp8 Max value 240 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3700000", "Fp8 Min value -240 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Max), "0x43700000", comment="Fp8 Max value 240 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprFp8Min), "0xc3700000", comment="Fp8 Min value -240 as float32" ))
         elif kernel["ProblemType"]["DestDataType"].isAnyBFloat8() and kernel["ProblemType"]["HighPrecisionAccumulate"]:
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8NanInf), "0x207", "Nan and +/- inf" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Max), "0x47600000", "BF8 Max value 57344 as float32" ))
-            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Min), "0xc7600000", "BF8 Min value -57344 as float32" ))
-
-        # DestDataType for 8bit Float can only be F8 or B8
-        # if kernel["ProblemType"]["DestDataType"].isFloat8() or kernel["ProblemType"]["DestDataType"].isBFloat8(): # F8 is always HPA
-        #     # make vgprF8Temp0 always even to use pk instruction later
-        #     if tmpCVTVgpr % 2 == 0:
-        #         vgprF8Temp0 = tmpCVTVgpr
-        #         vgprF8Temp1 = vgprF8Temp0 + 1
-        #         vgprF8Max = vgprF8Temp0 + 2
-        #         vgprF8Min = vgprF8Temp0 + 3
-        #     else:
-        #         vgprF8Max = tmpCVTVgpr
-        #         vgprF8Temp0 = vgprF8Max + 1
-        #         vgprF8Temp1 = vgprF8Max + 2
-        #         vgprF8Min = vgprF8Max + 3
-
-        #     if kernel["ProblemType"]["Fp32toFp8SWClip"]:
-        #         # set flag of f32 NaN and +/- INF for v_cmp_class
-        #         vgprFp32NanInfFlag = vgprF8Min + 1
-        #         kStr += inst("v_mov_b32", vgpr(vgprFp32NanInfFlag), "0x207", "flag for Nan and +/- inf" )
-        #         # set max/min values for clipping
-        #         if kernel["ProblemType"]["DestDataType"].isFloat8():
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x43700000", "save 240.0f as max for clipping" )
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC3700000", "save -240.0f as min for clipping" )
-        #         else: #BFloat8
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Max), "0x47600000", "save 57344.0f as max for clipping" )
-        #             kStr += inst("v_mov_b32", vgpr(vgprF8Min), "0xC7600000", "save -57344`.0f as min for clipping" )
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8NanInf), "0x207", comment="Nan and +/- inf" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Max), "0x47600000", comment="BF8 Max value 57344 as float32" ))
+            module.add(VMovB32(vgpr(cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
         for elementIdx in range(0, len(batchElements)):
             element = batchElements[elementIdx]
@@ -1430,8 +1383,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprWrite.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprWrite.items().pop(0))
+                        module.add(replaceHolder(codeAccVgprWrite.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        # tempStr = str(codeAccVgprWrite.popFirstItem())
                         # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
@@ -1447,7 +1400,7 @@ class StreamK(Component):
         #     # Note - TODO- CheckStoreC also won't work for StoreRemap
         #     kStr += inst("s_waitcnt", "vmcnt(0)", "CheckStoreC, wait for stores to complete" )
         #     if self.archCaps["SeparateVscnt"]:
-        #         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
+        #         kStr += inst("s_waitcnt_vscnt", -2, "0", "writes")
         #     for elementIdx in range(0, len(batchElements)):
         #         addr = ss.elementAddr[elementIdx].addrDVgpr
         #         sumIdx = ss.elementSumIdx[elementIdx]
@@ -1478,7 +1431,7 @@ class StreamK(Component):
         #                                 addr0, addr1, soffset=0, offset=0, extraFields="", dtlNoDestVgpr=False).toStr()
         #     kStr += inst("s_waitcnt", "vmcnt(0)", "CheckStoreC, wait for stores to complete" )
         #     if self.archCaps["SeparateVscnt"]:
-        #         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
+        #         kStr += inst("s_waitcnt_vscnt", -2, "0", "writes")
 
         #     # Add checks for expected values:
         #     kStr += inst("s_mov_b32", sgpr(tmpS01), self.db["CheckStoreC"], "expected value")

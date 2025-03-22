@@ -22,7 +22,11 @@
 #
 ################################################################################
 
-from ..TensileInstructions import DataType, Module, vgpr, SSetPrior, VFmaMixF32, VMadMixF32, VOP3PModifiers, VDot2F32F16, VDot2CF32F16
+from rocisa.code import Module
+from rocisa.container import vgpr
+from rocisa.instruction import SSetPrior, VDot2F32F16, VDot2CF32F16
+
+from ..TensileInstructions import DataType
 from ..Component import Component, MAC
 
 # dot2

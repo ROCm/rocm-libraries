@@ -36,6 +36,10 @@ function(virtualenv_install)
       COMMAND_ECHO STDOUT
     )
     execute_process(
+      COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install --upgrade nanobind
+      COMMAND_ECHO STDOUT
+    )
+    execute_process(
       COMMAND ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} -m pip install ${ARGN}
       COMMAND_ECHO STDOUT
       RESULT_VARIABLE return_code

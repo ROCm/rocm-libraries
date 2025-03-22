@@ -1,3 +1,5 @@
+recursive-include rocisa *.hpp *.cpp *.txt *.cmake
+recursive-exclude rocisa/build *.txt
 recursive-include Tensile *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml
 recursive-include Tensile/CustomKernels *.s
 include Tensile/bin/Tensile Tensile/bin/TensileCreateLibrary

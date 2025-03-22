@@ -20,13 +20,14 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.code import Module
+from rocisa.container import vgpr, sgpr, EXEC, VCC, HWRegContainer, RegisterContainer
+from rocisa.instruction import *
+
 from typing import Optional
-from .Code import Module
-from .Containers import HWRegContainer, RegisterContainer
 from .ExtInstructions import SMulInt64to32
-from .Instructions import *
 from .RegisterPool import RegisterPoolResource
-from .Utils import vgpr, sgpr, log2
+from .Utils import log2
 
 ########################################
 # Divide & Remainder
@@ -216,12 +217,12 @@ def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Option
         magicHi = magic // (2**16)
         magicLo = magic & (2**16-1)
 
-        module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0), comment="STATIC_DIV: divisior=%s"%divisor))
+        module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=0, comment="STATIC_DIV: divisior=%s"%divisor))
         module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=hex(magicHi), src1=dRegSgpr, comment="tmp1 = dividend * magic hi"))
         module.add(SLShiftLeftB64(dst=sgpr(tmpSgpr,2), shiftHex=hex(16), src=sgpr(tmpSgpr,2), comment="left shift 16 bits"))
         module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=hex(magicLo), comment="tmp0 = dividend * magic lo"))
         module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=qRegSgpr, src1=sgpr(tmpSgpr+0), comment="add lo"))
-        module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=hex(0), comment="add hi"))
+        module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=0, comment="add hi"))
         module.add(SLShiftRightB64(dst=sgpr(tmpSgpr,2), shiftHex=hex(shift), src=sgpr(tmpSgpr,2), comment="tmp1 = (dividend * magic) << shift"))
         module.add(SMovB32(dst=qRegSgpr, src=sgpr(tmpSgpr), comment="quotient"))
         if doRemainder:
@@ -242,7 +243,7 @@ def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoo
                 comment="%s = %s / %u"%(qRegSgpr, dRegSgpr, divisor)))
         module.add(SAndB32(dst=sgpr(tmpSgprRes.idx), src0=(divisor-1), src1=dRegSgpr, \
                     comment="%s = %s %% %u"%(sgpr(tmpSgprRes.idx), dRegSgpr, divisor)))
-        module.add(SAddCU32(dst=qRegSgpr, src0=qRegSgpr, src1=hex(0)))
+        module.add(SAddCU32(dst=qRegSgpr, src0=qRegSgpr, src1=0))
     else:
         assert tmpSgprRes and tmpSgprRes.size >= 2
         tmpSgpr = tmpSgprRes.idx
@@ -264,16 +265,16 @@ def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoo
         magicHi = magic // (2**16)
         magicLo = magic & (2**16-1)
 
-        module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=hex(0), comment="STATIC_DIV: divisior=%s"%divisor))
+        module.add(SMovB32(dst=sgpr(tmpSgpr+1), src=0, comment="STATIC_DIV: divisior=%s"%divisor))
         module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=hex(magicHi), src1=dRegSgpr, comment="tmp1 = dividend * magic hi"))
         module.add(SLShiftLeftB64(dst=sgpr(tmpSgpr,2), shiftHex=hex(16), src=sgpr(tmpSgpr,2), comment="left shift 16 bits"))
         module.add(SMulI32(dst=qRegSgpr, src0=dRegSgpr, src1=hex(magicLo), comment="tmp0 = dividend * magic lo"))
         module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=qRegSgpr, src1=sgpr(tmpSgpr+0), comment="add lo"))
-        module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=hex(0), comment="add hi"))
+        module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=0, comment="add hi"))
         module.add(SLShiftRightB64(dst=sgpr(tmpSgpr,2), shiftHex=hex(shift), src=sgpr(tmpSgpr,2), comment="tmp0 = quotient"))
         module.add(SMulI32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr), src1=hex(divisor), comment="tmp1 = quotient * divisor"))
         module.add(SCmpLgU32(src0=sgpr(tmpSgpr+1), src1=dRegSgpr, comment="if (quotient * divisor != dividend), result+=1"))
-        module.add(SAddCU32(dst=qRegSgpr, src0=sgpr(tmpSgpr), src1=hex(0), comment="if (quotient * divisor != dividend), result+=1"))
+        module.add(SAddCU32(dst=qRegSgpr, src0=sgpr(tmpSgpr), src1=0, comment="if (quotient * divisor != dividend), result+=1"))
     return module
 
 def scalarStaticRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoolResource], comment=""):
@@ -454,7 +455,7 @@ def staticMultiply(product, operand, multiplier, tmpSgprRes: Optional[RegisterPo
         module.add(VMovB32(dst=product, src=hex(multiplier), comment=comment))
     elif ((multiplier & (multiplier - 1)) == 0): # pow of 2
         multiplier_log2 = log2(multiplier)
-        if multiplier_log2==0 and product == operand:
+        if multiplier_log2==0 and ((str(product) == operand or product == operand) or product == operand):
             module.addCommentAlign(comment + " (multiplier is 1, do nothing)")
         else:
             module.add(VLShiftLeftB32(dst=product, shiftHex=hex(multiplier_log2), src=operand, comment=comment))
@@ -482,7 +483,7 @@ def staticMultiplyAdd(product, operand, multiplier, accumulator, tmpSgprRes: Opt
         module.add(VMovB32(dst=product, src=hex(multiplier), comment=comment))
     elif ((multiplier & (multiplier - 1)) == 0): # pow of 2
         multiplier_log2 = log2(multiplier)
-        if multiplier_log2==0 and product == operand:
+        if multiplier_log2==0 and (str(product) == operand or product == operand):
             module.addCommentAlign(comment + " (multiplier is 1, do nothing)")
         else:
             module.add(VLShiftLeftAddU32(dst=product, shiftHex=hex(multiplier_log2), src0=operand, src1=accumulator, comment=comment))
@@ -514,7 +515,7 @@ def scalarStaticMultiply(product, operand, multiplier, tmpSgpr=None, comment="")
     assert ((multiplier & (multiplier - 1)) == 0) # assert pow of 2
 
     multiplier_log2 = log2(multiplier)
-    if multiplier_log2==0 and product == operand:
+    if multiplier_log2==0 and (str(product) == operand or product == operand):
         module.addCommentAlign(comment + " (multiplier is 1, do nothing)")
     else:
         # notice that the src-order of s_lshl_b64 is different from v_lshlrev_b32.

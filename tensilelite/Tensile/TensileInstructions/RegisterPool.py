@@ -22,10 +22,11 @@
 #
 ################################################################################
 
-from .Code import Module
+from rocisa.instruction import SMovB32, VMovB32
+from rocisa.code import Module
+from rocisa.container import vgpr, sgpr
 from .Formatting import print2, printExit, printWarning
-from .Instructions import SMovB32, VMovB32
-from .Utils import vgpr, sgpr, roundUpToNearestMultiple
+from .Utils import roundUpToNearestMultiple
 
 from contextlib import contextmanager
 from dataclasses import dataclass

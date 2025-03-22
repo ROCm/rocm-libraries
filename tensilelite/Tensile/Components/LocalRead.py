@@ -22,10 +22,14 @@
 #
 ################################################################################
 
+from rocisa.code import Module
+from rocisa.container import DSModifiers, vgpr, sgpr, SDWAModifiers, VOP3PModifiers
+from rocisa.enum import SelectBit
+from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
+                            VMovB32, VLShiftRightB32, VCvtPkFP8toF32, VCvtF32toF16, VCvtFP8toF32,VCvtFP8toF16,VCvtPkFP8toF16
+
 from ..Component import LocalRead
-from ..TensileInstructions import Module, DSModifiers, vgpr, sgpr, \
-                            SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
-                            VMovB32, VLShiftRightB32, VCvtPkFP8toF32, VCvtF32toF16, VCvtFP8toF32,VCvtFP8toF16,VCvtPkFP8toF16, SDWAModifiers, VOP3PModifiers, SelectBit
+                            
 from math import ceil
 
 class LocalReadVALU(LocalRead):
@@ -113,7 +117,7 @@ class LocalReadVALU(LocalRead):
                         # localReadCode.addInst("s_waitcnt lgkmcnt(0)", "CheckValue1 wait for LDS read")
                         localReadCode.add(SWaitCnt(lgkmcnt=0, comment="CheckValue1 wait for lds read"))
                         if writer.archCaps["SeparateVscnt"]:
-                            # localReadCode.addInst( "s_waitcnt_vscnt", "null", "0", "")
+                            # localReadCode.addInst( "s_waitcnt_vscnt", -2, "0", "")
                             localReadCode.add(SWaitCnt(vmcnt=0, vscnt=0))
 
                         if kernel["ProblemType"]["DataType"].isHalf():

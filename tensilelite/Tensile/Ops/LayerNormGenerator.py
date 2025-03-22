@@ -20,6 +20,9 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet
+from rocisa.container import EXEC, VCC, MUBUFModifiers
+
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from functools import wraps
@@ -69,18 +72,18 @@ def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
     return header
 
 @contextmanager
-def asm_func(func_name: str, module: ti.Module):
+def asm_func(func_name: str, module: Module):
     try:
-        module.add(ti.TextBlock(f'{func_name}:\n'))
+        module.add(TextBlock(f'{func_name}:\n'))
         yield
     finally:
         end_label_name = f'.L{func_name}_end'
         module.add(ti.SEndpgm())
-        module.add(ti.TextBlock(f'{end_label_name}:\n'))
-        module.add(ti.TextBlock(f'.size {func_name}, {end_label_name} - {func_name}\n'))
+        module.add(TextBlock(f'{end_label_name}:\n'))
+        module.add(TextBlock(f'.size {func_name}, {end_label_name} - {func_name}\n'))
 
 @contextmanager
-def asm_loop(mod: ti.Module, name: str, it: str, sweep_once: int):
+def asm_loop(mod: Module, name: str, it: str, sweep_once: int):
     try:
         if not sweep_once:
             loop_start_label = ti.Label(name, f'loop {name} starts')
@@ -225,25 +228,25 @@ class LayerNormKernelGenerator:
         self.defineSgpr("SrcBeta", 4, 4)
         self.defineSgpr("Tmp", 6, 2)
 
-        mod = ti.Module("defineVariables")
+        mod = Module("defineVariables")
 
         for vkey in self.vgprs:
-            mod.add(ti.RegSet("v", "vgpr"+vkey, self.vgprs[vkey]))
+            mod.add(RegSet("v", "vgpr"+vkey, self.vgprs[vkey]))
         mod.addSpaceLine()
 
         for skey in self.sgprs:
-            mod.add(ti.RegSet("s", "sgpr"+skey, self.sgprs[skey]))
+            mod.add(RegSet("s", "sgpr"+skey, self.sgprs[skey]))
         mod.addSpaceLine()
 
-        mod.add(ti.ValueSet("Srd127_96", "0x00020000", format=-1))
-        mod.add(ti.ValueSet("BufferLimit", "0xffffffff", format=-1))
+        mod.add(ValueSet("Srd127_96", "0x00020000", format=-1))
+        mod.add(ValueSet("BufferLimit", "0xffffffff", format=-1))
         mod.addSpaceLine()
 
         return mod
 
 
     def load_kernel_args(self):
-        mod = ti.Module('Load kernel args')
+        mod = Module('Load kernel args')
         mod.addComment0('Load kernel args')
         mod.add(ti.SLoadB64(ti.sgpr("AddressOut", 2),    ti.sgpr("KernelArg", 2),  0))
         mod.add(ti.SLoadB64(ti.sgpr("AddressMean", 2),   ti.sgpr("KernelArg", 2),  8))
@@ -258,8 +261,8 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def init_param(self) -> ti.Module:
-        mod = ti.Module("defineVariables")
+    def init_param(self) -> Module:
+        mod = Module("defineVariables")
         mod.addComment0("defineVariables")
         mod.add(ti.SMovB32(ti.sgpr("Src+0"), ti.sgpr("AddressIn+0")))
         mod.add(ti.SMovB32(ti.sgpr("Src+1"), ti.sgpr("AddressIn+1")))
@@ -303,9 +306,9 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def calculate_global_address(self) -> ti.Module:
+    def calculate_global_address(self) -> Module:
 
-        mod = ti.Module("calculate_global_address")
+        mod = Module("calculate_global_address")
         mod.addComment0("calculate_global_address")
 
 
@@ -320,12 +323,12 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def sum_per_data(self, val) -> ti.Module:
-        mod = ti.Module("sum_per_data")
+    def sum_per_data(self, val) -> Module:
+        mod = Module("sum_per_data")
         if self.sweep_once:
-            mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Index"), ti.sgpr("SizeLength")))
+            mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Index"), ti.sgpr("SizeLength")))
             #mod.add(ti.SCBranchddVCCZ(label_sum_end.getLabelName()))
-            mod.add(ti.SMovB64("exec", "vcc"))
+            mod.add(ti.SMovB64(EXEC(), VCC()))
             mod.add(ti.SNop(1))
         mod.add(ti.VAddF32(ti.vgpr("Count"), ti.vgpr("Count"), 1.0))
         mod.add(ti.VSubF32(ti.vgpr("Tmp"), val, ti.vgpr("Mean")))  # delta
@@ -337,22 +340,22 @@ class LayerNormKernelGenerator:
         mod.add(ti.VMulF32(ti.vgpr("Tmp"), ti.vgpr("Tmp"), ti.vgpr("Tmp+1")))
         mod.add(ti.VAddF32(ti.vgpr("Invvar"), ti.vgpr("Invvar"), ti.vgpr("Tmp")))
         if self.sweep_once:
-            mod.add(ti.SMovB64("exec", "-1"))
+            mod.add(ti.SMovB64(EXEC(), "-1"))
             mod.add(ti.SNop(1))
             mod.add(ti.VAddU32(ti.vgpr("Index"), ti.vgpr("Index"), 1))
         mod.addSpaceLine()
         return mod
 
 
-    def sum_per_threadxN(self) -> ti.Module:
+    def sum_per_threadxN(self) -> Module:
         offset = self.num_workitems * self.num_load_count * self.num_load_size
-        mod = ti.Module("sum_per_threadxN")
+        mod = Module("sum_per_threadxN")
         mod.addComment0("sum_per_threadxN")
         if not self.sweep_once:
             mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         with asm_loop(mod, "sum_per_threadxN", "MainLoop", self.sweep_once):
             for i in range(0, self.num_load_count):
-                mod.add(ti.BufferLoadB128(ti.vgpr(f"Value+{i*self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+                mod.add(ti.BufferLoadB128(ti.vgpr(f"Value+{i*self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             for i in range(0, self.num_load_count):
                 mod.add(ti.SWaitCnt(vmcnt=(self.num_load_count-i-1)))
@@ -374,14 +377,14 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def sum_per_threadx4(self) -> ti.Module:
+    def sum_per_threadx4(self) -> Module:
         offset = self.num_workitems * self.num_load_size
-        mod = ti.Module("sum_per_threadx4")
+        mod = Module("sum_per_threadx4")
         mod.addComment0("sum_per_threadx4")
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), hex(self.num_load_count-1), ti.sgpr("MainLoop")))
         with asm_loop(mod, "sum_per_threadx4", "MainLoop", self.sweep_once):
-            mod.add(ti.BufferLoadB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(self.sum_per_data(ti.vgpr("Value+0")))
@@ -394,8 +397,8 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def adjusst_global_address(self) -> ti.Module:
-        mod = ti.Module("adjusst_global_address")
+    def adjusst_global_address(self) -> Module:
+        mod = Module("adjusst_global_address")
         mod.add(ti.VMulLOU32(ti.vgpr("Tmp"), 3, ti.vgpr("Serial")))
         mod.add(ti.VLShiftLeftB32(ti.vgpr("Tmp"), 2, ti.vgpr("Tmp")))
         mod.add(ti.VSubU32(ti.vgpr("Offset"), ti.vgpr("Offset"), ti.vgpr("Tmp")))
@@ -403,14 +406,14 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def sum_per_thread(self) -> ti.Module:
+    def sum_per_thread(self) -> Module:
         offset = self.num_workitems
-        mod = ti.Module("sum_per_thread")
+        mod = Module("sum_per_thread")
         mod.addComment0("sum_per_thread")
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), ti.sgpr("MainLoop"), self.num_load_size-1))
         with asm_loop(mod, "sum_per_thread", "MainLoop", self.sweep_once):
-            mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.addSpaceLine()
             mod.add(self.sum_per_data(ti.vgpr("Value")))
@@ -420,36 +423,36 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def sum_in_some_thread(self)  -> ti.Module:
+    def sum_in_some_thread(self)  -> Module:
         label_sum_end = ti.Label("sum", f'loop sum end')
-        mod = ti.Module("sum_in_some_thread")
+        mod = Module("sum_in_some_thread")
         mod.addComment0("sum_in_some_thread")
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), ti.sgpr("SizeLength"), self.num_workitems-1))
-        mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Serial"), ti.sgpr("MainLoop")))
+        mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Serial"), ti.sgpr("MainLoop")))
         mod.add(ti.SCBranchVCCZ(label_sum_end.getLabelName()))
-        mod.add(ti.SMovB64("exec", "vcc"))
+        mod.add(ti.SMovB64(EXEC(), VCC()))
         mod.add(ti.SNop(1))
-        mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.addSpaceLine()
         mod.add(self.sum_per_data(ti.vgpr("Value")))
-        mod.add(ti.SMovB64("exec", "-1"))
+        mod.add(ti.SMovB64(EXEC(), "-1"))
         mod.add(ti.SNop(1))
         mod.add(label_sum_end)
         mod.addSpaceLine()
         return mod
 
 
-    def merge_sum(self) -> ti.Module:
-        mod = ti.Module("merge_sum")
+    def merge_sum(self) -> Module:
+        mod = Module("merge_sum")
         mod.add(ti.VMovB32(ti.vgpr("CountA"), ti.vgpr("Count")))
         mod.add(ti.VMovB32(ti.vgpr("MeanA"), ti.vgpr("Mean")))
         mod.add(ti.VMovB32(ti.vgpr("StdA"), ti.vgpr("Invvar")))
 
         mod.add(ti.VSubF32(ti.vgpr("Tmp"), ti.vgpr("MeanB"), ti.vgpr("MeanA")))
         mod.add(ti.VAddF32(ti.vgpr("Count"), ti.vgpr("CountA"), ti.vgpr("CountB")))
-        mod.add(ti.VCmpGTF32("vcc", ti.vgpr("Count"), 0))
-        mod.add(ti.SMovB64("exec", "vcc"))
+        mod.add(ti.VCmpGTF32(VCC(), ti.vgpr("Count"), 0))
+        mod.add(ti.SMovB64(EXEC(), VCC()))
         mod.add(ti.SNop(1))
         mod.add(ti.VRcpF32(ti.vgpr("Tmp+3"), ti.vgpr("Count")))
         mod.add(ti.SNop(waitState=0, comment="1 wait states"))
@@ -465,14 +468,14 @@ class LayerNormKernelGenerator:
         mod.add(ti.VMulF32(ti.vgpr("Tmp"), ti.vgpr("Tmp"), ti.vgpr("Tmp+2")))
         mod.add(ti.VMulF32(ti.vgpr("Tmp"), ti.vgpr("Tmp"), ti.vgpr("Count")))
         mod.add(ti.VAddF32(ti.vgpr("Invvar"), ti.vgpr("Invvar"), ti.vgpr("Tmp")))
-        mod.add(ti.SMovB64("exec", "-1"))
+        mod.add(ti.SMovB64(EXEC(), "-1"))
         mod.add(ti.SNop(1))
         return mod
 
 
-    def intra_wave_reduction(self) -> ti.Module:
+    def intra_wave_reduction(self) -> Module:
         label = ti.Label("permute", f'permuge')
-        mod = ti.Module("intra_wave_reduction")
+        mod = Module("intra_wave_reduction")
         mod.addComment0("intra_wave_reduction")
         mod.add(ti.SMovB32(ti.sgpr("Tmp"), 1))
         mod.add(label)
@@ -494,13 +497,13 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def inter_wave_reduction(self) -> ti.Module:
+    def inter_wave_reduction(self) -> Module:
         label_inter = ti.Label("inter", f'inter')
         label_upper = ti.Label("upper", f'upper')
         label_lower = ti.Label("lower", f'lower')
         label_empty = ti.Label("empty", f'empty')
         label_end   = ti.Label("end", f'end')
-        mod = ti.Module("inter_wave_reduction")
+        mod = Module("inter_wave_reduction")
         mod.addComment0("inter_wave_reduction")
         mod.add(ti.VLShiftRightB32(ti.vgpr("Widx"), 6, ti.vgpr("Serial")))
         mod.add(ti.SMovB32(ti.sgpr("Offset"), self.num_workitems // 64))
@@ -511,9 +514,9 @@ class LayerNormKernelGenerator:
         mod.add(ti.SLShiftLeftB32(ti.sgpr("Tmp"), 1, ti.sgpr("Offset")))
         mod.add(ti.VCmpLtU32(ti.sgpr("Tmp+2",2), ti.vgpr("Widx"), ti.sgpr("Tmp")))
         mod.add(ti.VCmpGEU32(ti.sgpr("Tmp+4",2), ti.vgpr("Widx"), ti.sgpr("Offset")))
-        mod.add(ti.SAndB64("vcc", ti.sgpr("Tmp+2",2), ti.sgpr("Tmp+4",2)))
+        mod.add(ti.SAndB64(VCC(), ti.sgpr("Tmp+2",2), ti.sgpr("Tmp+4",2)))
         mod.add(ti.SCBranchVCCNZ(label_upper.getLabelName()))
-        mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Widx"), ti.sgpr("Offset")))
+        mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Widx"), ti.sgpr("Offset")))
         mod.add(ti.SCBranchVCCNZ(label_lower.getLabelName()))
         mod.add(ti.SBranch(label_empty.getLabelName()))
 
@@ -551,13 +554,13 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def broadcast(self) -> ti.Module:
+    def broadcast(self) -> Module:
         label_lower = ti.Label("broadcast_lower", f'broadcast_lower')
         label_end = ti.Label("broadcast_end", f'broadcast_end')
 
-        mod = ti.Module("broadcast")
+        mod = Module("broadcast")
         mod.addComment0("broadcast")
-        mod.add(ti.VCmpEQU32("vcc", ti.vgpr("Widx"), 0))
+        mod.add(ti.VCmpEQU32(VCC(), ti.vgpr("Widx"), 0))
         mod.add(ti.SCBranchVCCZ(label_lower.getLabelName()))
         ds = ti.DSModifiers(offset=0)
         mod.add(ti.DSStoreB32(ti.vgpr("Widx"), ti.vgpr("Count"), ds))
@@ -583,8 +586,8 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def get_average(self) -> ti.Module:
-        mod = ti.Module("get_average")
+    def get_average(self) -> Module:
+        mod = Module("get_average")
         mod.addComment0("get_average")
         mod.add(ti.VCvtI32toF32(ti.vgpr("Tmp"), ti.sgpr("SizeLength")))
         mod.add(ti.VRcpF32(ti.vgpr("Tmp"),ti.vgpr("Tmp")))
@@ -598,23 +601,23 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def layernorm_cal(self, val) -> ti.Module:
-        mod = ti.Module("layernorm_cal")
+    def layernorm_cal(self, val) -> Module:
+        mod = Module("layernorm_cal")
         mod.add(ti.VSubF32(val, val, ti.vgpr("Mean")))
         mod.add(ti.VMulF32(val, val, ti.vgpr("Invvar")))
         return mod
 
 
-    def layernorm_threadxN(self) -> ti.Module:
+    def layernorm_threadxN(self) -> Module:
         offset = self.num_workitems * self.num_load_count * self.num_load_size
-        mod = ti.Module("layernorm_threadxN")
+        mod = Module("layernorm_threadxN")
         mod.addComment0("layernorm_threadxN")
         if not self.sweep_once:
             mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         with asm_loop(mod, "layernorm_threadxN", "MainLoop", self.sweep_once):
             if not self.sweep_once:
                 for i in range(0, self.num_load_count):
-                    mod.add(ti.BufferLoadB128(ti.vgpr(f"Value+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+                    mod.add(ti.BufferLoadB128(ti.vgpr(f"Value+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             for i in range(0, self.num_load_count):
                 mod.add(ti.SWaitCnt(vmcnt=self.num_load_count-i-1))
@@ -628,7 +631,7 @@ class LayerNormKernelGenerator:
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcGamma",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_gamma.getLabelName()))
             for i in range(0, self.num_load_count):
-                mod.add(ti.BufferLoadB128(ti.vgpr(f"Gamma+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("SrcGamma",4), 0, ti.MUBUFModifiers(offen=True)))
+                mod.add(ti.BufferLoadB128(ti.vgpr(f"Gamma+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("SrcGamma",4), 0, MUBUFModifiers(offen=True)))
             for i in range(0, self.num_load_count):
                 mod.add(ti.SWaitCnt(vmcnt=self.num_load_count-i-1))
                 mod.add(ti.VMulF32(ti.vgpr(f"Value+{i * self.num_load_size + 0}"), ti.vgpr(f"Value+{i * self.num_load_size + 0}"), ti.vgpr(f"Gamma+{i * self.num_load_size + 0}")))
@@ -642,7 +645,7 @@ class LayerNormKernelGenerator:
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcBeta",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_beta.getLabelName()))
             for i in range(0, self.num_load_count):
-                mod.add(ti.BufferLoadB128(ti.vgpr(f"Beta+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("SrcBeta",4), 0, ti.MUBUFModifiers(offen=True)))
+                mod.add(ti.BufferLoadB128(ti.vgpr(f"Beta+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("SrcBeta",4), 0, MUBUFModifiers(offen=True)))
             for i in range(0, self.num_load_count):
                 mod.add(ti.SWaitCnt(vmcnt=self.num_load_count-i-1))
                 mod.add(ti.VAddF32(ti.vgpr(f"Value+{i * self.num_load_size + 0}"), ti.vgpr(f"Value+{i * self.num_load_size + 0}"), ti.vgpr(f"Beta+{i * self.num_load_size + 0}")))
@@ -653,7 +656,7 @@ class LayerNormKernelGenerator:
             mod.addSpaceLine()
 
             for i in range(0, self.num_load_count):
-                mod.add(ti.BufferStoreB128(ti.vgpr(f"Value+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+                mod.add(ti.BufferStoreB128(ti.vgpr(f"Value+{i * self.num_load_size}",4), ti.vgpr(f"Offset+{i}"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             if not self.sweep_once:
                 mod.add(ti.SMovB32(ti.sgpr("Tmp"), offset * self.bpe))
@@ -664,14 +667,14 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def layernorm_threadx4(self) -> ti.Module:
+    def layernorm_threadx4(self) -> Module:
         offset = self.num_workitems * self.num_load_size
-        mod = ti.Module("layernorm_threadx4")
+        mod = Module("layernorm_threadx4")
         mod.addComment0("layernorm_threadx4")
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), hex(self.num_load_count-1), ti.sgpr("MainLoop")))
         with asm_loop(mod, "layernorm_threadx4", "MainLoop", self.sweep_once):
-            mod.add(ti.BufferLoadB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(self.layernorm_cal(ti.vgpr("Value+0")))
@@ -683,7 +686,7 @@ class LayerNormKernelGenerator:
             label_skip_gamma = ti.Label("skip_gamma_x4", f'skip_gamma')
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcGamma",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_gamma.getLabelName()))
-            mod.add(ti.BufferLoadB128(ti.vgpr("Gamma",4), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB128(ti.vgpr("Gamma",4), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(ti.VMulF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Gamma+0")))
             mod.add(ti.VMulF32(ti.vgpr("Value+1"), ti.vgpr("Value+1"), ti.vgpr("Gamma+1")))
@@ -695,7 +698,7 @@ class LayerNormKernelGenerator:
             label_skip_beta = ti.Label("skip_beta_x4", f'skip_beta')
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcBeta",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_beta.getLabelName()))
-            mod.add(ti.BufferLoadB128(ti.vgpr("Beta",4), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB128(ti.vgpr("Beta",4), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(ti.VAddF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Beta+0")))
             mod.add(ti.VAddF32(ti.vgpr("Value+1"), ti.vgpr("Value+1"), ti.vgpr("Beta+1")))
@@ -704,7 +707,7 @@ class LayerNormKernelGenerator:
             mod.add(label_skip_beta)
             mod.addSpaceLine()
 
-            mod.add(ti.BufferStoreB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferStoreB128(ti.vgpr("Value",4), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
             mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.num_workitems * self.num_load_size * self.bpe))
             mod.add(ti.VAddU32(ti.vgpr("Offset+0"), ti.vgpr("Offset"), ti.sgpr("Tmp")))
@@ -712,21 +715,21 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def layernorm_thread(self) -> ti.Module:
+    def layernorm_thread(self) -> Module:
         offset = self.num_workitems
-        mod = ti.Module("layernorm_thread")
+        mod = Module("layernorm_thread")
         mod.addComment0("layernorm_thread")
         mod.add(ti.SLShiftRightB32(ti.sgpr("MainLoop"), int(log2(offset)), ti.sgpr("SizeLength")))
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), ti.sgpr("MainLoop"), 0x3))
         with asm_loop(mod, "layernorm_thread", "MainLoop", self.sweep_once):
-            mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(self.layernorm_cal(ti.vgpr("Value")))
 
             label_skip_gamma = ti.Label("skip_gamma", f'skip_gamma')
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcGamma",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_gamma.getLabelName()))
-            mod.add(ti.BufferLoadB32(ti.vgpr("Gamma"), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB32(ti.vgpr("Gamma"), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(ti.VMulF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Gamma+0")))
             mod.add(label_skip_gamma)
@@ -735,13 +738,13 @@ class LayerNormKernelGenerator:
             label_skip_beta = ti.Label("skip_beta", f'skip_beta')
             mod.add(ti.SCmpEQU64(ti.sgpr("SrcBeta",2), 0))
             mod.add(ti.SCBranchSCC1(label_skip_beta.getLabelName()))
-            mod.add(ti.BufferLoadB32(ti.vgpr("Beta"), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferLoadB32(ti.vgpr("Beta"), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(ti.VAddF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Beta+0")))
             mod.add(label_skip_beta)
             mod.addSpaceLine()
 
-            mod.add(ti.BufferStoreB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+            mod.add(ti.BufferStoreB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
             mod.add(ti.SWaitCnt(vmcnt=0))
             mod.add(ti.SMovB32(ti.sgpr("Tmp"), self.num_workitems * self.bpe))
             mod.add(ti.VAddU32(ti.vgpr("Offset"), ti.vgpr("Offset"), ti.sgpr("Tmp")))
@@ -749,23 +752,23 @@ class LayerNormKernelGenerator:
         return mod
 
 
-    def layernorm_in_some_thread(self)  -> ti.Module:
+    def layernorm_in_some_thread(self)  -> Module:
         label_layernorm_end = ti.Label("layernorm", f'loop layernorm end')
-        mod = ti.Module("layernorm_in_some_thread")
+        mod = Module("layernorm_in_some_thread")
         mod.addComment0("layernorm_in_some_thread")
         mod.add(ti.SAndB32(ti.sgpr("MainLoop"), ti.sgpr("SizeLength"), self.num_workitems-1))
-        mod.add(ti.VCmpLtU32("vcc", ti.vgpr("Serial"), ti.sgpr("MainLoop")))
+        mod.add(ti.VCmpLtU32(VCC(), ti.vgpr("Serial"), ti.sgpr("MainLoop")))
         mod.add(ti.SCBranchVCCZ(label_layernorm_end.getLabelName()))
-        mod.add(ti.SMovB64("exec", "vcc"))
+        mod.add(ti.SMovB64(EXEC(), VCC()))
         mod.add(ti.SNop(1))
-        mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferLoadB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.add(self.layernorm_cal(ti.vgpr("Value")))
 
         label_skip_gamma = ti.Label("skip_gamma_partial", f'skip_gamma')
         mod.add(ti.SCmpEQU64(ti.sgpr("SrcGamma",2), 0))
         mod.add(ti.SCBranchSCC1(label_skip_gamma.getLabelName()))
-        mod.add(ti.BufferLoadB32(ti.vgpr("Gamma"), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferLoadB32(ti.vgpr("Gamma"), ti.vgpr("Offset+0"), ti.sgpr("SrcGamma",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.add(ti.VMulF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Gamma+0")))
         mod.add(label_skip_gamma)
@@ -774,23 +777,23 @@ class LayerNormKernelGenerator:
         label_skip_beta = ti.Label("skip_beta_partial", f'skip_beta')
         mod.add(ti.SCmpEQU64(ti.sgpr("SrcBeta",2), 0))
         mod.add(ti.SCBranchSCC1(label_skip_beta.getLabelName()))
-        mod.add(ti.BufferLoadB32(ti.vgpr("Beta"), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferLoadB32(ti.vgpr("Beta"), ti.vgpr("Offset"), ti.sgpr("SrcBeta",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
         mod.add(ti.VAddF32(ti.vgpr("Value+0"), ti.vgpr("Value+0"), ti.vgpr("Beta+0")))
         mod.add(label_skip_beta)
         mod.addSpaceLine()
 
-        mod.add(ti.BufferStoreB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferStoreB32(ti.vgpr("Value"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.add(ti.SWaitCnt(vmcnt=0))
-        mod.add(ti.SMovB64("exec", "-1"))
+        mod.add(ti.SMovB64(EXEC(), "-1"))
         mod.add(ti.SNop(1))
         mod.add(label_layernorm_end)
         mod.addSpaceLine()
         return mod
 
 
-    def output_mean_and_invvar(self) -> ti.Module:
-        mod = ti.Module("output_mean_and_invvar")
+    def output_mean_and_invvar(self) -> Module:
+        mod = Module("output_mean_and_invvar")
         mod.addComment0("output_mean_and_invvar")
 
         mod.add(ti.VLShiftLeftB32(ti.vgpr("Offset"), hex(int(log2(self.bpe))), ti.sgpr("WorkGroup1")))
@@ -800,19 +803,19 @@ class LayerNormKernelGenerator:
         mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressMean+1")))
         mod.add(ti.SMovB32(ti.sgpr("Dst+2"), "BufferLimit"))
         mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
-        mod.add(ti.BufferStoreB32(ti.vgpr("Mean"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferStoreB32(ti.vgpr("Mean"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
 
         mod.add(ti.SMovB32(ti.sgpr("Dst+0"), ti.sgpr("AddressInvvar+0")))
         mod.add(ti.SMovB32(ti.sgpr("Dst+1"), ti.sgpr("AddressInvvar+1")))
         mod.add(ti.SMovB32(ti.sgpr("Dst+2"), "BufferLimit"))
         mod.add(ti.SMovB32(ti.sgpr("Dst+3"), "Srd127_96"))
-        mod.add(ti.BufferStoreB32(ti.vgpr("Invvar"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, ti.MUBUFModifiers(offen=True)))
+        mod.add(ti.BufferStoreB32(ti.vgpr("Invvar"), ti.vgpr("Offset"), ti.sgpr("Dst",4), 0, MUBUFModifiers(offen=True)))
         mod.addSpaceLine()
         return mod
 
-    def layernorm_kernel_body(self) -> ti.Module:
-        mod = ti.Module(self.func_name)
+    def layernorm_kernel_body(self) -> Module:
+        mod = Module(self.func_name)
         mod.add(self.defineVariables())
         with asm_func(self.func_name, mod):
             mod.add(self.load_kernel_args())
@@ -931,6 +934,7 @@ if __name__ == '__main__':
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 
     ti.Base._global_ti.init(isa, toolchain_path, False)
+    ti.Base._global_ti.setKernel(isa, 64)
     layernorm = LayerNormKernelGenerator(ti.DataType('S'), w, c, 4, sweep_once, arch)
     kernel_body = layernorm.layernorm_kernel_body()
     args = layernorm.kernel_args()
