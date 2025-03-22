@@ -368,10 +368,18 @@ namespace rocRoller
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
 
+                        params->prefetchMixMemOps = false;
+
                         if(solutionParams.prefetchLDSFactor != 0)
-                        {
                             params->prefetchMixMemOps = true;
-                        }
+
+                        if(solutionParams.scaleB == Operations::ScaleMode::Separate
+                           && !solutionParams.loadLDSScaleB)
+                            params->prefetchMixMemOps = false;
+
+                        if(solutionParams.scaleA == Operations::ScaleMode::Separate
+                           && !solutionParams.loadLDSScaleA)
+                            params->prefetchMixMemOps = false;
                     }
                     else
                     {

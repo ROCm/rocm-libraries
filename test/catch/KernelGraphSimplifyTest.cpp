@@ -166,7 +166,7 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
         CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 1);
     }
 
-    SECTION("Scheduling non-redundant NOP")
+    SECTION("Scheduling redundant NOP")
     {
         KernelGraph graph0;
 
@@ -191,15 +191,76 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *           NOP
          *            |
          *         Assign
+	 *
+	 * Some transforms use NOPs as aids for scheduling.  As an
+	 * example, the NOP here ensures the loads happen before
+	 * assign.
          */
 
         auto graph1 = removeRedundantNOPs(graph0);
 
-        /* graph1 should be the same.
+        /* graph1 should be:
+         *
+         *          Kernel
+         *          /   \
+         *      LoadA   LoadB
+         *          \   /
+         *         Assign
          */
 
+        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 5);
+        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 4);
+
         CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 1);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 1);
+        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
+    }
+
+    SECTION("Scheduling NOPs from a ForLoop")
+    {
+        KernelGraph graph0;
+
+        auto forLoop = graph0.control.addElement(ForLoopOp());
+        auto nop0    = graph0.control.addElement(NOP());
+        auto nop1    = graph0.control.addElement(NOP());
+        auto loadA   = graph0.control.addElement(LoadTiled());
+        auto loadB   = graph0.control.addElement(LoadTiled());
+
+        graph0.control.addElement(Body(), {forLoop}, {nop0});
+        graph0.control.addElement(Body(), {forLoop}, {nop1});
+        graph0.control.addElement(Sequence(), {nop0}, {loadA});
+        graph0.control.addElement(Sequence(), {nop1}, {loadB});
+
+        /* graph0 is:
+         *
+         *         ForLoop
+         *          /   \
+         *        NOP   NOP
+         *         |     |
+	 *       LoadA  LoadB
+	 *
+	 * where the edges out of the ForLoop are bodies.
+         */
+
+        auto graph1 = removeRedundantNOPs(graph0);
+
+        /* graph1 should be:
+         *
+         *
+         *         ForLoop
+         *          /   \
+	 *       LoadA  LoadB
+	 *
+	 * where the edges out of the ForLoop are bodies.
+         */
+
+        CHECK(graph0.control.getElements<Body>().to<std::vector>().size() == 2);
+        CHECK(graph1.control.getElements<Body>().to<std::vector>().size() == 2);
+
+        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 2);
+        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 0);
+
+        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 2);
+        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
     }
 
     SECTION("Nasty NOP cluster")

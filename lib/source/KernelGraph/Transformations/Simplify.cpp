@@ -175,6 +175,9 @@ namespace rocRoller::KernelGraph
         if(hasBody)
             return false;
 
+        //
+        // If the NOP has a single incoming Sequence edge, it's redundant.
+        //
         auto singleIncomingSequence = only(graph.control.getInputNodeIndices<Sequence>(nop));
         if(singleIncomingSequence)
         {
@@ -202,6 +205,40 @@ namespace rocRoller::KernelGraph
             return true;
         }
 
+        //
+        // If the NOP has a single outgoing Sequence edge, it's redundant.
+        //
+        auto singleOutgoingSequence = only(graph.control.getOutputNodeIndices<Sequence>(nop));
+        if(singleOutgoingSequence)
+        {
+            auto outNode = *singleOutgoingSequence;
+
+            auto outgoingEdge = only(graph.control.getNeighbours<GD::Downstream>(nop));
+            if(!outgoingEdge)
+                return false;
+
+            auto incomingEdges = graph.control.getNeighbours<GD::Upstream>(nop).to<std::vector>();
+
+            for(auto inEdge : incomingEdges)
+            {
+                auto edgeType = graph.control.getElement(inEdge);
+                auto inNode   = *only(graph.control.getNeighbours<GD::Upstream>(inEdge));
+                graph.control.addElement(edgeType, {inNode}, {outNode});
+            }
+
+            Log::debug("Deleting single-outgoing NOP: {}", nop);
+
+            graph.control.deleteElement(*outgoingEdge);
+            for(auto incomingEdge : incomingEdges)
+                graph.control.deleteElement(incomingEdge);
+            graph.control.deleteElement(nop);
+
+            return true;
+        }
+
+        //
+        // Can we reach all output nodes from each input node?
+        //
         auto inputs = graph.control.getInputNodeIndices(nop, [](ControlEdge) { return true; })
                           .to<std::vector>();
         auto outputs = graph.control.getOutputNodeIndices(nop, [](ControlEdge) { return true; })
@@ -224,13 +261,16 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        // If we get here, you can get to all outputs from each input
+        // If we get here, we can reach all outputs from each input
         // without going through the NOP.  Delete it!
 
         auto incoming = only(graph.control.getNeighbours<GD::Upstream>(nop));
         auto outgoing = only(graph.control.getNeighbours<GD::Downstream>(nop));
         if((!incoming) || (!outgoing))
             return false;
+
+        Log::debug("Deleting redundant NOP: {}", nop);
+
         graph.control.deleteElement(*incoming);
         graph.control.deleteElement(*outgoing);
         graph.control.deleteElement(nop);

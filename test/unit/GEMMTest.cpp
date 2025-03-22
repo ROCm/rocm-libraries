@@ -1469,7 +1469,7 @@ namespace GEMMDriverTest
         for(auto inflight : {1, 2})
         {
             gemm.prefetchInFlight = inflight;
-            for(auto ldsFactor : {0, 2})
+            for(auto ldsFactor : {0, 1, 2})
             {
                 gemm.prefetchLDSFactor = ldsFactor;
                 for(auto mixMemOps : {false, true})
@@ -1941,6 +1941,38 @@ namespace GEMMDriverTest
             EXPECT_NE(generatedCode.find("v_cvt_sr_bf8_f32"), std::string::npos);
             EXPECT_EQ(generatedCode.find("v_cvt_pk_bf8_f32"), std::string::npos);
         }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_ScaledPrefetchGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        basicGEMM<FP8, FP8, float>(gemm);
     }
 
     void checkGEMMF8F6F4(rocRoller::ContextPtr m_context,

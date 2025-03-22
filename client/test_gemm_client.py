@@ -153,14 +153,59 @@ class Types:
     C: str
     D: str
 
+    def client_arguments(self):
+        return [
+            "--type_A",
+            self.A,
+            "--type_B",
+            self.B,
+            "--type_C",
+            self.C,
+            "--type_D",
+            self.D,
+        ]
+
 
 @dataclass
 class Scale:
     """Container for MX GEMM scaling parameters."""
 
-    mode: str
-    lds: bool
-    value: float
+    argument: str  # A or B
+    mode: str  # Separate, SingleScale, etc
+    lds: bool  # load through LDS
+    value: float  # for SingleScale, the value
+
+    def client_arguments(self):
+        params = []
+        if self.mode is not None:
+            params.extend(["--scale_" + self.argument, self.mode])
+            if self.value is not None:
+                params.extend(["--scaleValue_" + self.argument, str(self.value)])
+            if self.lds:
+                params.append("--loadLDSScale_" + self.argument)
+        return params
+
+
+@dataclass
+class Prefetch:
+    """Container for GEMM prefetching parameters."""
+
+    in_flight: int
+    lds_factor: int
+
+    def client_arguments(self):
+        params = []
+        if self.in_flight != 0:
+            params.extend(
+                [
+                    "--prefetch",
+                    "--prefetchInFlight",
+                    str(self.in_flight),
+                    "--prefetchLDSFactor",
+                    str(self.lds_factor),
+                ]
+            )
+        return params
 
 
 DP_GEMM = """\
@@ -209,7 +254,7 @@ loadScaleLDS_B: false
 """
 
 
-def types():
+def type_configurations():
     """Return list of type combinations to test."""
     typeAs = ["fp4"]
     typeBs = ["fp4", "fp8"]
@@ -217,7 +262,7 @@ def types():
     return [Types(A, B, D, D) for A, B, D in itertools.product(typeAs, typeBs, typeDs)]
 
 
-def scales():
+def scale_configurations(argument):
     """Return list of MX scale modes to test for each of A and B."""
     modes = [None, "None", "Separate", "SingleScale"]
     ldss = [True, False]
@@ -226,11 +271,19 @@ def scales():
     rv = []
     for mode in modes:
         if mode is not None and mode == "Separate":
-            rv.extend([Scale(mode, lds, None) for lds in ldss])
+            rv.extend([Scale(argument, mode, lds, None) for lds in ldss])
         elif mode is not None and mode == "SingleScale":
-            rv.extend([Scale(mode, False, value) for value in values])
+            rv.extend([Scale(argument, mode, False, value) for value in values])
         else:
-            rv.append(Scale(mode, False, None))
+            rv.append(Scale(argument, mode, False, None))
+    return rv
+
+
+def prefetch_configurations():
+    """Return list of prefetching modes to test."""
+    rv = [Prefetch(0, 0)]
+    for lds_factor in [0, 2]:
+        rv.append(Prefetch(2, lds_factor))
     return rv
 
 
@@ -246,7 +299,12 @@ def build_solution_params():
         ["--streamk"],
     ]
 
-    for type, scaleA, scaleB in itertools.product(types(), scales(), scales()):
+    for type, prefetch, scaleA, scaleB in itertools.product(
+        type_configurations(),
+        prefetch_configurations(),
+        scale_configurations("A"),
+        scale_configurations("B"),
+    ):
         # XXXX Mixing and outputting to half precision fails correctness checks.
         if (type.A != type.B) and (type.D == "half"):
             continue
@@ -261,27 +319,9 @@ def build_solution_params():
             "64",
             "--mi",
             "32x32x64x1",
-            "--type_A",
-            type.A,
-            "--type_B",
-            type.B,
-            "--type_C",
-            type.C,
-            "--type_D",
-            type.D,
         ]
-        if scaleA.mode is not None:
-            params.extend(["--scale_A", scaleA.mode])
-            if scaleA.value is not None:
-                params.extend(["--scaleValue_A", str(scaleA.value)])
-            if scaleA.lds:
-                params.append("--loadLDSScale_A")
-        if scaleB.mode is not None:
-            params.extend(["--scale_B", scaleB.mode])
-            if scaleB.value is not None:
-                params.extend(["--scaleValue_B", str(scaleB.value)])
-            if scaleB.lds:
-                params.append("--loadLDSScale_B")
+        for x in [type, prefetch, scaleA, scaleB]:
+            params.extend(x.client_arguments())
         solution_params.append(params)
 
     return solution_params
@@ -413,15 +453,35 @@ def test_gemm_generate(tmp_path):
             subprocess.run([gemm, "generate", "--config"], check=True)
 
 
+def test_gemm_validate(tmp_path):
+    """GEMM generate and validate using one and two stages.
+
+    This runs each problem/solution three times.
+    """
+
+    problem_params = [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]
+    solution_params = [
+        # data-parallel gemm, float, params from command line
+        [],
+        # data-parallel gemm, float, params from config file
+        ["--config", DP_GEMM],
+        # streamk gemm, float, params from command line
+        # ["--streamk"],
+    ]
+
+    for problem, solution in itertools.product(problem_params, solution_params):
+        gemm_validate_single_stage(tmp_path, solution, problem)
+        gemm_validate_two_stage_codeobject(tmp_path, solution, problem)
+        gemm_validate_two_stage_assembly(tmp_path, solution, problem)
+
+
 @pytest.mark.parametrize(
     "solution_params,problem_params",
     itertools.product(build_solution_params(), build_problem_params()),
 )
-def test_gemm_validate(tmp_path, solution_params, problem_params):
-    """GEMM generate and validate."""
-    gemm_validate_single_stage(tmp_path, solution_params, problem_params)
+def test_gemm_validate_once(tmp_path, solution_params, problem_params):
+    """GEMM generate (always) and validate (if arch matches)."""
     gemm_validate_two_stage_codeobject(tmp_path, solution_params, problem_params)
-    gemm_validate_two_stage_assembly(tmp_path, solution_params, problem_params)
 
 
 if __name__ == "__main__":
