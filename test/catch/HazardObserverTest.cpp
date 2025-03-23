@@ -671,6 +671,38 @@ namespace HazardObserverTest
 
                 CHECK_THAT(context.output(), !ContainsSubstring("s_nop"));
             }
+
+            SECTION("No NOPs after buffer_store_dwordx4")
+            {
+                auto context = TestContext::ForTarget(arch);
+                auto v1
+                    = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
+                auto v2
+                    = createRegisters(context, Register::Type::Vector, DataType::Float, 1, 4)[0];
+                auto addr = createRegisters(context, Register::Type::Vector, DataType::Raw32, 1)[0];
+                auto a    = createRegisters(
+                    context, Register::Type::Accumulator, DataType::Float, 1, 4)[0];
+                auto s = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 4)[0];
+                auto soffset
+                    = createRegisters(context, Register::Type::Scalar, DataType::Raw32, 1, 1)[0];
+
+                std::vector<Instruction> insts = {
+                    Instruction("buffer_store_dwordx4", {}, {v1, addr, s, soffset}, {"offen"}, ""),
+                    Instruction("v_accvgpr_read", {v2->subset({0})}, {a->subset({0})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v2->subset({1})}, {a->subset({1})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v2->subset({2})}, {a->subset({2})}, {}, ""),
+                    Instruction("v_accvgpr_read", {v2->subset({3})}, {a->subset({3})}, {}, ""),
+                    Instruction("s_endpgm", {}, {}, {}, "")};
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[2]);
+                peekAndSchedule(context, insts[3]);
+                peekAndSchedule(context, insts[4]);
+                peekAndSchedule(context, insts[5]);
+
+                CHECK_THAT(context.output(), !ContainsSubstring("s_nop"));
+            }
         }
     }
 
