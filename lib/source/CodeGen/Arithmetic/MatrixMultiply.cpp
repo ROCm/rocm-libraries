@@ -203,7 +203,6 @@ namespace rocRoller
             }
             else if(arch.HasCapability(GPUCapability::HasMFMA))
             {
-
                 if(typeA == typeB)
                 {
                     // Uniform type for A and B.  Result will be similar
