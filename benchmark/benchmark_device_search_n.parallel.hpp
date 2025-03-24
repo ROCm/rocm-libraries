@@ -27,6 +27,7 @@
 #include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // gbench
 #include <benchmark/benchmark.h>
@@ -41,6 +42,17 @@
 #include <rocprim/functional.hpp>
 #ifndef BENCHMARK_CONFIG_TUNING
     #include <rocprim/types.hpp>
+#endif
+
+#include <cstddef>
+#include <string>
+#include <vector>
+#ifdef BENCHMARK_CONFIG_TUNING
+    #include <memory>
+#else
+    #include <functional>
+    #include <stdint.h>
+    #include <type_traits>
 #endif
 
 using custom_int2            = common::custom_type<int>;
@@ -131,14 +143,14 @@ public:
     {
         InputType              h_noise{0};
         InputType              h_value{1};
-        void*                  d_temp_storage    = nullptr;
+        common::device_ptr<void>       d_temp_storage;
         size_t                 temp_storage_size = 0;
         size_t                 size;
         size_t                 count;
         std::vector<InputType> input{};
-        InputType*             d_input;
-        OutputType*            d_output;
-        InputType*             d_value;
+        common::device_ptr<InputType>  d_input;
+        common::device_ptr<OutputType> d_output(1);
+        common::device_ptr<InputType>  d_value(std::vector<decltype(h_value)>{h_value}, stream);
         hipEvent_t             start;
         hipEvent_t             stop;
 
@@ -154,29 +166,20 @@ public:
             ++cur_tile;
         }
 
-        HIP_CHECK(hipMallocAsync(&d_value, sizeof(InputType), stream));
-        HIP_CHECK(hipMallocAsync(&d_input, sizeof(InputType) * input.size(), stream));
-        HIP_CHECK(hipMallocAsync(&d_output, sizeof(OutputType), stream));
-        HIP_CHECK(
-            hipMemcpyAsync(d_value, &h_value, sizeof(InputType), hipMemcpyHostToDevice, stream));
-        HIP_CHECK(hipMemcpyAsync(d_input,
-                                 input.data(),
-                                 sizeof(InputType) * input.size(),
-                                 hipMemcpyHostToDevice,
-                                 stream));
+        d_input.store_async(input, stream);
 
         HIP_CHECK(hipEventCreate(&start));
         HIP_CHECK(hipEventCreate(&stop));
 
         auto launch_search_n = [&]()
         {
-            HIP_CHECK(::rocprim::search_n<Config>(d_temp_storage,
+            HIP_CHECK(::rocprim::search_n<Config>(d_temp_storage.get(),
                                                   temp_storage_size,
-                                                  d_input,
-                                                  d_output,
+                                                  d_input.get(),
+                                                  d_output.get(),
                                                   size,
                                                   count,
-                                                  d_value,
+                                                  d_value.get(),
                                                   rocprim::equal_to<InputType>{},
                                                   stream,
                                                   false));
@@ -184,7 +187,7 @@ public:
 
         // allocate temp memory
         launch_search_n();
-        HIP_CHECK(hipMallocAsync(&d_temp_storage, temp_storage_size, stream));
+        d_temp_storage.resize_async(temp_storage_size, stream);
         // Warm-up
         for(size_t i = 0; i < warmup_size; ++i)
         {
@@ -213,15 +216,10 @@ public:
         }
 
         // Clean-up
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(*(d_input)));
+        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(*(d_input.get())));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
         HIP_CHECK(hipEventDestroy(start));
         HIP_CHECK(hipEventDestroy(stop));
-        HIP_CHECK(hipFree(d_temp_storage));
-        HIP_CHECK(hipFree(d_value));
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
-        d_temp_storage    = nullptr;
         temp_storage_size = 0;
         decltype(input) tmp;
         input.swap(tmp); // clear input memspace

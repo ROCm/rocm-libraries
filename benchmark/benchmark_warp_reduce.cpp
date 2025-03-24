@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,9 @@
 // SOFTWARE.
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_device_ptr.hpp"
+
 // CmdParser
 #include "cmdparser.hpp"
 
@@ -149,14 +152,9 @@ void run_benchmark(benchmark::State&   state,
     std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
     std::vector<flag_type> flags = get_random_data<flag_type>(size, 0, 1, seed.get_1());
-    T*                     d_input;
-    flag_type*             d_flags;
-    T*                     d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_flags), size * sizeof(flag_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_flags, flags.data(), size * sizeof(flag_type), hipMemcpyHostToDevice));
+    common::device_ptr<T>         d_input(input);
+    common::device_ptr<flag_type> d_flags(flags);
+    common::device_ptr<T>         d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
     // HIP events creation
@@ -169,11 +167,12 @@ void run_benchmark(benchmark::State&   state,
         // Record start event
         HIP_CHECK(hipEventRecord(start, stream));
 
-        execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(d_input,
-                                                                                      d_output,
-                                                                                      d_flags,
-                                                                                      size,
-                                                                                      stream);
+        execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
+            d_input.get(),
+            d_output.get(),
+            d_flags.get(),
+            size,
+            stream);
 
         // Record stop event and wait until it completes
         HIP_CHECK(hipEventRecord(stop, stream));
@@ -190,10 +189,6 @@ void run_benchmark(benchmark::State&   state,
 
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_flags));
 }
 
 #define CREATE_BENCHMARK(T, WS, BS)                                                           \

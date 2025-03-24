@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -97,45 +99,37 @@ struct device_reduce_benchmark : public benchmark_utils::autotune_interface
         std::vector<T> input
             = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-        T* d_input;
-        T* d_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), sizeof(T)));
-        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+        common::device_ptr<T> d_input(input);
+        common::device_ptr<T> d_output(1);
         HIP_CHECK(hipDeviceSynchronize());
 
         // Allocate temporary storage memory
         size_t temp_storage_size_bytes;
-        void*  d_temp_storage = nullptr;
         // Get size of d_temp_storage
-        HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+        HIP_CHECK(rocprim::reduce<Config>(nullptr,
                                           temp_storage_size_bytes,
-                                          d_input,
-                                          d_output,
+                                          d_input.get(),
+                                          d_output.get(),
                                           T(),
                                           size,
                                           reduce_op,
                                           stream));
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         state.run(gbench_state,
                   [&]
                   {
-                      HIP_CHECK(rocprim::reduce<Config>(d_temp_storage,
+                      HIP_CHECK(rocprim::reduce<Config>(d_temp_storage.get(),
                                                         temp_storage_size_bytes,
-                                                        d_input,
-                                                        d_output,
+                                                        d_input.get(),
+                                                        d_output.get(),
                                                         T(),
                                                         size,
                                                         reduce_op,
                                                         stream));
                   });
         state.set_items_processed_per_iteration<T>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
-        HIP_CHECK(hipFree(d_temp_storage));
     }
 };
 

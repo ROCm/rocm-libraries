@@ -23,6 +23,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // rocPRIM
 #include <rocprim/block/block_load.hpp>
@@ -344,11 +345,8 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                                               common::generate_limits<T>::max(),
                                               seed.get_0());
 
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
     operation<KernelOp, T, ItemsPerThread, BlockSize> selected_operation;
@@ -362,15 +360,12 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                       dim3(BlockSize),
                       0,
                       stream,
-                      d_input,
-                      d_output,
+                      d_input.get(),
+                      d_output.get(),
                       selected_operation);
               });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 template<typename T>
@@ -384,20 +379,19 @@ void run_benchmark_memcpy(benchmark::State& gbench_state, benchmark_utils::state
     // Note: since this benchmark only tests performance by memcpying between device buffers,
     // we don't really need to transfer data into these from the host - whatever happens
     // to be in device memory will do.
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
+    common::device_ptr<T> d_input(size);
+    common::device_ptr<T> d_output(size);
 
-    state.run(
-        gbench_state,
-        [&]
-        { HIP_CHECK(hipMemcpy(d_output, d_input, size * sizeof(T), hipMemcpyDeviceToDevice)); });
+    state.run(gbench_state,
+              [&]
+              {
+                  HIP_CHECK(hipMemcpy(d_output.get(),
+                                      d_input.get(),
+                                      size * sizeof(T),
+                                      hipMemcpyDeviceToDevice));
+              });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(METHOD, OPERATION, T, BLOCK_SIZE, IPT)                            \

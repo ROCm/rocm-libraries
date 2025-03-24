@@ -25,6 +25,7 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
 #ifndef BENCHMARK_CONFIG_TUNING
     #include "../common/utils_custom_type.hpp"
 #endif
@@ -204,44 +205,34 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
         CompareOp compare_op{};
 
         Value  initial_value = Value(123);
-        Value* d_input;
-        Key*   d_keys;
-        Value* d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMalloc(&d_keys, keys.size() * sizeof(keys[0])));
-        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            input.size() * sizeof(input[0]),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(
-            hipMemcpy(d_keys, keys.data(), keys.size() * sizeof(keys[0]), hipMemcpyHostToDevice));
+        common::device_ptr<Value> d_input(input);
+        common::device_ptr<Key>   d_keys(keys);
+        common::device_ptr<Value> d_output(input.size());
 
         // Allocate temporary storage memory
         size_t temp_storage_size_bytes;
-        void*  d_temp_storage = nullptr;
         // Get size of d_temp_storage
-        HIP_CHECK((run_device_scan_by_key(d_temp_storage,
+        HIP_CHECK((run_device_scan_by_key(nullptr,
                                           temp_storage_size_bytes,
-                                          d_keys,
-                                          d_input,
-                                          d_output,
+                                          d_keys.get(),
+                                          d_input.get(),
+                                          d_output.get(),
                                           initial_value,
                                           size,
                                           scan_op,
                                           compare_op,
                                           stream,
                                           debug)));
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
         state.run(gbench_state,
                   [&]
                   {
-                      HIP_CHECK((run_device_scan_by_key(d_temp_storage,
+                      HIP_CHECK((run_device_scan_by_key(d_temp_storage.get(),
                                                         temp_storage_size_bytes,
-                                                        d_keys,
-                                                        d_input,
-                                                        d_output,
+                                                        d_keys.get(),
+                                                        d_input.get(),
+                                                        d_output.get(),
                                                         initial_value,
                                                         size,
                                                         scan_op,
@@ -258,11 +249,6 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
         };
 #pragma pack(pop)
         state.set_items_processed_per_iteration<combined>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_keys));
-        HIP_CHECK(hipFree(d_output));
-        HIP_CHECK(hipFree(d_temp_storage));
     }
 };
 
