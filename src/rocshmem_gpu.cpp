@@ -580,6 +580,12 @@ __device__ void rocshmem_wg_barrier_all() {
   rocshmem_ctx_wg_barrier_all(ROCSHMEM_CTX_DEFAULT);
 }
 
+__device__ void rocshmem_barrier(rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_barrier\n");
+
+  get_internal_ctx(ROCSHMEM_CTX_DEFAULT)->barrier(team);
+}
+
 __device__ void rocshmem_ctx_wg_sync_all(rocshmem_ctx_t ctx) {
   GPU_DPRINTF("Function: rocshmem_ctx_sync_all\n");
 

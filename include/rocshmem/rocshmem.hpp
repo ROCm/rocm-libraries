@@ -466,6 +466,16 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_wg_barrier_all(
 __device__ ATTR_NO_INLINE void rocshmem_wg_barrier_all();
 
 /**
+ * @brief perform a collective barrier between all PEs in the team.
+ * The caller is blocked until the barrier is resolved.
+ *
+ * @param[in] team    The team on which to perform barrier synchronization
+ *
+ * @return void
+ */
+__device__ void rocshmem_barrier(rocshmem_team_t);
+
+/**
  * @brief registers the arrival of a PE at a barrier.
  * The caller is blocked until the synchronization is resolved.
  *

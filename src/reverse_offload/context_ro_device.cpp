@@ -165,16 +165,26 @@ __device__ void *ROContext::shmem_ptr(const void *dest, int pe) {
 
 __device__ void ROContext::barrier_all() {
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_BARRIER_ALL, nullptr, nullptr, 0, 0, 0, 0, 0,
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
                         nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
                         block_handle, true, get_status_flag());
   }
   __syncthreads();
 }
 
+__device__ void ROContext::barrier(rocshmem_team_t team) {
+  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
+  if (is_thread_zero_in_block()) {
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
+                        nullptr, team_obj->mpi_comm, ro_net_win_id, block_handle,
+                        true, get_status_flag());
+  }
+  __syncthreads();
+}
+
 __device__ void ROContext::sync_all() {
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_BARRIER_ALL, nullptr, nullptr, 0, 0, 0, 0, 0,
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
                         nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
                         block_handle, true, get_status_flag());
   }

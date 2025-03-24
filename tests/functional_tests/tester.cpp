@@ -45,6 +45,7 @@
 #include "sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
 #include "team_broadcast_tester.hpp"
+#include "team_barrier_tester.hpp"
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
@@ -295,6 +296,10 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Barrier_All ###" << std::endl;
       testers.push_back(new BarrierAllTester(args));
       return testers;
+    case TeamBarrierTestType:
+      if (rank == 0) std::cout << "Team Barrier Test ###" << std::endl;
+      testers.push_back(new TeamBarrierTester(args));
+      return testers;
     case SyncAllTestType:
       if (rank == 0) std::cout << "SyncAll ###" << std::endl;
       testers.push_back(new SyncTester(args));
@@ -485,7 +490,8 @@ bool Tester::peLaunchesKernel() {
                 (_type == TeamAllToAllTestType) || (_type == TeamFCollectTestType) ||
                 (_type == PingPongTestType) || (_type == BarrierAllTestType) ||
                 (_type == SyncTestType) || (_type == SyncAllTestType) ||
-                (_type == RandomAccessTestType) || (_type == PingAllTestType);
+                (_type == RandomAccessTestType) || (_type == PingAllTestType) ||
+                (_type == TeamBarrierTestType);
 
   return is_launcher;
 }

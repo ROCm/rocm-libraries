@@ -20,45 +20,47 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#ifndef LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
-#define LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#ifndef _TEAM_BARRIER_TESTER_HPP_
+#define _TEAM_BARRIER_TESTER_HPP_
 
+#include <functional>
+#include <utility>
 
-namespace rocshmem {
+#include "tester.hpp"
 
-enum ro_net_cmds {
-  RO_NET_PUT,
-  RO_NET_P,
-  RO_NET_GET,
-  RO_NET_PUT_NBI,
-  RO_NET_GET_NBI,
-  RO_NET_AMO_FOP,
-  RO_NET_AMO_FCAS,
-  RO_NET_FENCE,
-  RO_NET_QUIET,
-  RO_NET_FINALIZE,
-  RO_NET_TEAM_REDUCE,
-  RO_NET_SYNC,
-  RO_NET_BARRIER,
-  RO_NET_TEAM_BROADCAST,
-  RO_NET_ALLTOALL,
-  RO_NET_FCOLLECT,
+using namespace rocshmem;
+
+/************* *****************************************************************
+ * HOST TESTER CLASS
+ *****************************************************************************/
+class TeamBarrierTester : public Tester {
+ public:
+  explicit TeamBarrierTester(TesterArguments args);
+  virtual ~TeamBarrierTester();
+
+ protected:
+  virtual void resetBuffers(uint64_t size) override;
+
+  virtual void preLaunchKernel() override;
+
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                            uint64_t size) override;
+
+  virtual void postLaunchKernel() override;
+
+  virtual void verifyResults(uint64_t size) override;
+
+ private:
+  int my_pe = 0;
+  int n_pes = 0;
+  /**
+   * This constant should equal ROCSHMEM_MAX_NUM_TEAMS - 1.
+   * The default value for the maximum number of teams is 40.
+   */
+  int num_teams = 39;
+  rocshmem_team_t *team_barrier_world_dup;
 };
 
-enum ro_net_types {
-  RO_NET_FLOAT,
-  RO_NET_CHAR,
-  RO_NET_SIGNED_CHAR,
-  RO_NET_UNSIGNED_CHAR,
-  RO_NET_DOUBLE,
-  RO_NET_INT,
-  RO_NET_LONG,
-  RO_NET_UNSIGNED_LONG,
-  RO_NET_LONG_LONG,
-  RO_NET_SHORT,
-  RO_NET_LONG_DOUBLE
-};
+#include "team_barrier_tester.cpp"
 
-}  // namespace rocshmem
-
-#endif  // LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
+#endif

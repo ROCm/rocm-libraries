@@ -51,7 +51,7 @@ class Transport {
                              rocshmem_team_t *new_team) = 0;
 
   virtual void barrier(int wg_id, volatile char *status, bool blocking,
-                       MPI_Comm team) = 0;
+                       MPI_Comm team, bool quiet) = 0;
 
   virtual void team_reduction(void *dst, void *src, int size, int win_id,
                               int wg_id, MPI_Comm team, ROCSHMEM_OP op,

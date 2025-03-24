@@ -148,6 +148,12 @@ __device__ void Context::barrier_all() {
   DISPATCH(barrier_all());
 }
 
+__device__ void Context::barrier(rocshmem_team_t team) {
+  ctxStats.incStat(NUM_BARRIER_ALL);
+
+  DISPATCH(barrier(team));
+}
+
 __device__ void Context::sync_all() {
   ctxStats.incStat(NUM_SYNC_ALL);
 

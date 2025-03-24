@@ -92,6 +92,7 @@ enum TestType {
   SignalFetchTestType = 55,
   WGSignalFetchTestType = 56,
   WAVESignalFetchTestType = 57,
+  TeamBarrierTestType = 58,
 };
 
 enum OpType { PutType = 0, GetType = 1 };

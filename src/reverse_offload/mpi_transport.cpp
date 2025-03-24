@@ -201,12 +201,16 @@ void MPITransport::submitRequestsToMPI() {
               next_element.dst, next_element.src, next_element.ol1.size,
               next_element.team_comm);
       break;
-    case RO_NET_BARRIER_ALL:
-      barrier(queue_idx, next_element.status, true, ro_net_comm_world);
+    case RO_NET_BARRIER:
+      barrier(queue_idx, next_element.status, true,
+	      next_element.team_comm == NULL ? ro_net_comm_world : next_element.team_comm,
+	      true);
       DPRINTF("Received Barrier_all\n");
       break;
     case RO_NET_SYNC:
-      barrier(queue_idx, next_element.status, true, next_element.team_comm);
+      barrier(queue_idx, next_element.status, true,
+	      next_element.team_comm == NULL ? ro_net_comm_world : next_element.team_comm,
+	      false);
       DPRINTF("Received Sync\n");
       break;
     case RO_NET_FENCE:
@@ -269,12 +273,19 @@ void MPITransport::global_exit(int status) {
 }
 
 void MPITransport::barrier(int contextId, volatile char *status, bool blocking,
-                           MPI_Comm team) {
+                           MPI_Comm team, bool do_quiet) {
   MPI_Request request{};
   NET_CHECK(MPI_Ibarrier(team, &request));
 
-  requests.push_back({request, {status, contextId, blocking}});
-  outstanding[contextId]++;
+  if (do_quiet) {
+    requests.push_back({request, {nullptr, contextId, false}});
+    outstanding[contextId]++;
+
+    quiet(contextId, status);
+  } else {
+    requests.push_back({request, {status, contextId, blocking}});
+    outstanding[contextId]++;
+  }
 }
 
 MPI_Op MPITransport::get_mpi_op(ROCSHMEM_OP op) {
@@ -388,7 +399,7 @@ void MPITransport::team_broadcast(void *dst, void *src, int size, int win_id,
   }
 
   NET_CHECK(MPI_Win_flush_all(bp->heap_window_info[win_id]->get_win()));
-  barrier(contextId, nullptr, false, comm);
+  barrier(contextId, nullptr, false, comm, false);
   quiet(contextId, status);
 }
 

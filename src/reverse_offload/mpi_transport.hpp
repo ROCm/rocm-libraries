@@ -52,7 +52,7 @@ public:
                      rocshmem_team_t *new_team) override;
 
   void barrier(int contextId, volatile char *status, bool blocking,
-               MPI_Comm team) override;
+               MPI_Comm team, bool quiet) override;
 
   void team_reduction(void *dst, void *src, int size, int win_id,
                       int contextId, MPI_Comm team, ROCSHMEM_OP op,

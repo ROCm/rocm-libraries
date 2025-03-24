@@ -80,6 +80,7 @@ declare -A TEST_NUMBERS=(
   ["signalfetch"]="55"
   ["wgsignalfetch"]="56"
   ["wavesignalfetch"]="57"
+  ["teambarrier"]="58"
 )
 
 ExecTest() {
@@ -306,6 +307,7 @@ TestColl() {
   #       | Name             | Ranks | Workgroups | Threads | Max Message Size #
   ##############################################################################
   ExecTest  "barrierall"       2       1            1
+  ExecTest  "teambarrier"      2       1            1
 
   ExecTest  "sync"             2       1            1
 
