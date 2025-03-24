@@ -23,9 +23,8 @@ macro(pythonize_bool var)
   endif()
 endmacro()
 
-find_package(CUDAToolkit REQUIRED)
-get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
-
+#find_package(CUDAToolkit REQUIRED)
+#get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
   
 if (LIBCUDACXX_ENABLE_CUDA)
 set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
@@ -108,11 +107,14 @@ elseif (${CMAKE_CUDA_COMPILER_ID} STREQUAL "NVHPC")
 endif()
 
 if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "HIPCC")
-  set(LIBCUDACXX_TEST_COMPILER_FLAGS
-    "${LIBCUDACXX_TEST_COMPILER_FLAGS} \
-    ${LIBCUDACXX_FORCE_INCLUDE} \
-    -I${CMAKE_SOURCE_DIR}/include"
-    CACHE INTERNAL "Flags for libcxx testing." FORCE)
+  message(STATUS "libhipcxx_SOURCE_DIR: ${libhipcxx_SOURCE_DIR}" )
+  string(APPEND LIBCUDACXX_TEST_COMPILER_FLAGS
+#    "${LIBCUDACXX_TEST_COMPILER_FLAGS} \
+    " ${LIBCUDACXX_FORCE_INCLUDE}" 
+    " -I${CMAKE_SOURCE_DIR}/include"
+    " -I${libhipcxx_SOURCE_DIR}/include"
+#    " CACHE INTERNAL "Flags for libcxx testing."
+  )
 endif()
 
 set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_CUDA_ARCHITECTURES}")
@@ -136,7 +138,7 @@ configure_lit_site_cfg(
   "${lit_site_cfg_path}")
 
 add_lit_testsuite(check-hipcxx
-  "Running libcu++ tests"
+  "Running libhip++ tests"
   "${CMAKE_CURRENT_BINARY_DIR}")
 
 find_program(libcudacxx_LIT lit REQUIRED)
