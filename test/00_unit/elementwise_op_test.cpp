@@ -30,10 +30,9 @@
 #include <hiptensor_unary_element_wise_operation.hpp>
 #include <iostream>
 
+using ck::tensor_operation::element_wise::HiptensorBinaryOp;
 using ck::tensor_operation::element_wise::HiptensorUnaryOp;
-// using HiptensorUnaryOp = ck::tensor_operation::element_wise::HiptensorUnaryOp;
 
-// Kernel function to add two arrays
 __global__ void unary_op_kernel(const float* x, float* y, int size, hiptensorOperator_t op_type)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -41,6 +40,17 @@ __global__ void unary_op_kernel(const float* x, float* y, int size, hiptensorOpe
     {
         HiptensorUnaryOp op(op_type);
         op(y[idx], x[idx]);
+    }
+}
+
+__global__ void binary_op_kernel(
+    const float* x1, const float* x2, float* y, int size, hiptensorOperator_t op_type)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx < size)
+    {
+        HiptensorBinaryOp op(op_type);
+        op(y[idx], x1[idx], x2[idx]);
     }
 }
 
@@ -84,6 +94,62 @@ float unaryOpOnHostTest(float x, hiptensorOperator_t op_type)
     HiptensorUnaryOp op(op_type);
     float            y;
     op(y, x);
+    return y;
+}
+
+float binaryOpOnDeviceTest(float x1, float x2, hiptensorOperator_t op_type)
+{
+    const int array_size  = 1;
+    const int array_bytes = array_size * sizeof(float);
+
+    // Host arrays
+    float array_x1[array_size] = {0.0F};
+    float array_x2[array_size] = {0.0F};
+    float array_y[array_size]  = {0.0F};
+
+    array_x1[0] = x1;
+    array_x2[0] = x2;
+
+    // Device arrays
+    float *d_x1, *d_x2, *d_y;
+    CHECK_HIP_ERROR(hipMalloc(&d_x1, array_bytes));
+    CHECK_HIP_ERROR(hipMalloc(&d_x2, array_bytes));
+    CHECK_HIP_ERROR(hipMalloc(&d_y, array_bytes));
+
+    // Copy data from host to device
+    CHECK_HIP_ERROR(hipMemcpy(d_x1, array_x1, array_bytes, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(d_x2, array_x2, array_bytes, hipMemcpyHostToDevice));
+
+    // Launch kernel
+    int block_size = 64;
+    int grid_size  = (array_size + block_size - 1) / block_size;
+    hipLaunchKernelGGL(binary_op_kernel,
+                       dim3(grid_size),
+                       dim3(block_size),
+                       0,
+                       0,
+                       d_x1,
+                       d_x2,
+                       d_y,
+                       array_size,
+                       op_type);
+
+    // Copy result back to host
+    CHECK_HIP_ERROR(hipMemcpy(array_y, d_y, array_bytes, hipMemcpyDeviceToHost));
+
+    // Free device memory
+    CHECK_HIP_ERROR(hipFree(d_x1));
+    CHECK_HIP_ERROR(hipFree(d_x2));
+    CHECK_HIP_ERROR(hipFree(d_y));
+
+    return array_y[0];
+}
+
+float binaryOpOnHostTest(float x1, float x2, hiptensorOperator_t op_type)
+{
+    HiptensorBinaryOp op(op_type);
+    float             y;
+    op(y, x1, x2);
     return y;
 }
 
@@ -255,5 +321,40 @@ TEST(UnaryOpTest, HostAndDeviceUnaryOpTest)
     y   = unaryOpOnHostTest(x, HIPTENSOR_OP_FLOOR);
     EXPECT_FLOAT_EQ(y, ref);
     y = unaryOpOnDeviceTest(x, HIPTENSOR_OP_FLOOR);
+    EXPECT_FLOAT_EQ(y, ref);
+}
+
+TEST(BinaryOpTest, HostAndDeviceBinaryOpTest)
+{
+    float x1  = 3.3F;
+    float x2  = 1.2F;
+    float ref = 4.5F; // 3.3 + 1.2
+    float y   = binaryOpOnHostTest(x1, x2, HIPTENSOR_OP_ADD);
+    EXPECT_FLOAT_EQ(y, ref);
+    y = binaryOpOnDeviceTest(x1, x2, HIPTENSOR_OP_ADD);
+    EXPECT_FLOAT_EQ(y, ref);
+
+    x1  = 3.3F;
+    x2  = 1.2F;
+    ref = 3.96F; // 3.3 * 1.2
+    y   = binaryOpOnHostTest(x1, x2, HIPTENSOR_OP_MUL);
+    EXPECT_FLOAT_EQ(y, ref);
+    y = binaryOpOnDeviceTest(x1, x2, HIPTENSOR_OP_MUL);
+    EXPECT_FLOAT_EQ(y, ref);
+
+    x1  = 3.3F;
+    x2  = 1.2F;
+    ref = 3.3F; // max(3.3, 1.2)
+    y   = binaryOpOnHostTest(x1, x2, HIPTENSOR_OP_MAX);
+    EXPECT_FLOAT_EQ(y, ref);
+    y = binaryOpOnDeviceTest(x1, x2, HIPTENSOR_OP_MAX);
+    EXPECT_FLOAT_EQ(y, ref);
+
+    x1  = 3.3F;
+    x2  = 1.2F;
+    ref = 1.2F; // min(3.3, 1.2)
+    y   = binaryOpOnHostTest(x1, x2, HIPTENSOR_OP_MIN);
+    EXPECT_FLOAT_EQ(y, ref);
+    y = binaryOpOnDeviceTest(x1, x2, HIPTENSOR_OP_MIN);
     EXPECT_FLOAT_EQ(y, ref);
 }
