@@ -433,22 +433,21 @@ def generateLogicDataAndSolutions(logicFiles, args, cxxCompiler):
     # Sort masterLibraries to make global soln index values deterministic
     solnReIndex = 0
     masterLibraries = dict(sorted(masterLibraries.items()))
-    for k, v in masterLibraries.items():
-        for _, masterLibrary in masterLibraries.items():
-            for _, sol in masterLibrary.solutions.items():
+    for _, masterLibrary in masterLibraries.items():
+        for _, sol in masterLibrary.solutions.items():
+            sol.index = solnReIndex
+            solnReIndex += 1
+        # Sort masterLibrary to make global soln index values deterministic
+        masterLibrary.lazyLibraries = dict(sorted(masterLibrary.lazyLibraries.items()))
+        for name, lib in masterLibrary.lazyLibraries.items():
+            # Sort solns by the lib logic file they were generated from
+            lib.solutions = {
+                k: lib.solutions[k]
+                for k in sorted(lib.solutions, key=lambda idx: lib.solutions[idx].srcName)
+            }
+            for _, sol in lib.solutions.items():
                 sol.index = solnReIndex
                 solnReIndex += 1
-            # Sort masterLibrary to make global soln index values deterministic
-            masterLibrary.lazyLibraries = dict(sorted(masterLibrary.lazyLibraries.items()))
-            for name, lib in masterLibrary.lazyLibraries.items():
-                # Sort solns by the lib logic file they were generated from
-                lib.solutions = {
-                    k: lib.solutions[k]
-                    for k in sorted(lib.solutions, key=lambda idx: lib.solutions[idx].srcName)
-                }
-                for _, sol in lib.solutions.items():
-                    sol.index = solnReIndex
-                    solnReIndex += 1
 
     if args["GenSolTable"]:
         matchTable = {}
