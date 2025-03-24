@@ -33,7 +33,7 @@
 #include "hash.hpp"
 #include "hiptensor_options.hpp"
 #include "permutation_solution.hpp"
-#include <hiptensor_unary_element_wise_operation.hpp>
+#include <hiptensor_element_wise_operation.hpp>
 
 namespace hiptensor
 {

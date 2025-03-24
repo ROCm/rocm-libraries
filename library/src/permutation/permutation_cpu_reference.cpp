@@ -28,8 +28,7 @@
 #include "permutation_cpu_reference_impl.hpp"
 #include "permutation_cpu_reference_instances.hpp"
 
-hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*           handle,
-                                                const void*                        alpha,
+hiptensorStatus_t hiptensorPermutationReference(const void*                        alpha,
                                                 const void*                        A,
                                                 const hiptensorTensorDescriptor_t* descA,
                                                 const int32_t                      modeA[],
@@ -78,8 +77,7 @@ hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*        
     return HIPTENSOR_STATUS_INTERNAL_ERROR;
 }
 
-hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const hiptensorHandle_t*           handle,
-                                                        const void*                        alpha,
+hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*                        alpha,
                                                         const void*                        A,
                                                         const hiptensorTensorDescriptor_t* descA,
                                                         const int32_t                      modeA[],
@@ -140,8 +138,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const hiptensorHandle_t*
     return HIPTENSOR_STATUS_INTERNAL_ERROR;
 }
 
-hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const hiptensorHandle_t*           handle,
-                                                         const void*                        alpha,
+hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*                        alpha,
                                                          const void*                        A,
                                                          const hiptensorTensorDescriptor_t* descA,
                                                          const int32_t                      modeA[],

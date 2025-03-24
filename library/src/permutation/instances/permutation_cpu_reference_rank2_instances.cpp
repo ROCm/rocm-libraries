@@ -27,7 +27,7 @@
 #include "../device/hiptensor_ck_types.hpp"
 #include "../permutation_cpu_reference_impl.hpp"
 #include "../permutation_cpu_reference_instances.hpp"
-#include <hiptensor_unary_element_wise_operation.hpp>
+#include <hiptensor_element_wise_operation.hpp>
 
 namespace hiptensor
 {

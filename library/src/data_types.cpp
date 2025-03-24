@@ -102,6 +102,35 @@ namespace hiptensor
         }
     }
 
+    hipDataType convertToHipDataType(hiptensorComputeType_t computeType)
+    {
+        switch(computeType)
+        {
+        case HIPTENSOR_COMPUTE_16BF:
+            return HIP_R_16BF;
+        case HIPTENSOR_COMPUTE_16F:
+            return HIP_R_16F;
+        case HIPTENSOR_COMPUTE_32F:
+            return HIP_R_32F;
+        case HIPTENSOR_COMPUTE_64F:
+            return HIP_R_64F;
+        case HIPTENSOR_COMPUTE_8I:
+            return HIP_R_8I;
+        case HIPTENSOR_COMPUTE_8U:
+            return HIP_R_8U;
+        case HIPTENSOR_COMPUTE_32I:
+            return HIP_R_32I;
+        case HIPTENSOR_COMPUTE_32U:
+            return HIP_R_32U;
+        case HIPTENSOR_COMPUTE_C32F:
+            return HIP_C_32F;
+        case HIPTENSOR_COMPUTE_C64F:
+            return HIP_C_64F;
+        default:
+            return HIP_R_32F; // There is no invalid hipDataType value
+        }
+    }
+
     // @cond
     template <>
     ScalarData readVal(void const* value, hiptensorComputeType_t id)

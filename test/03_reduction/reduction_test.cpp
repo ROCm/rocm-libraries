@@ -217,7 +217,7 @@ namespace hiptensor
                     || (acDataType == HIP_R_64F && computeDataType == HIPTENSOR_COMPUTE_64F));
 
         mRunFlag &= checkDevice(acDataType, computeDataType);
-        mRunFlag &= lengths.size() > outputDims.size();
+        mRunFlag &= lengths.size() >= outputDims.size();
 
         if(!mRunFlag)
         {

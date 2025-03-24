@@ -141,10 +141,11 @@ namespace hiptensor
     }
 
 // define a macro since it can convert `paramName` to a string
-#define CheckApiParams(logger, errorCode, paramName)      \
-    if(!paramName)                                        \
-    {                                                     \
-        printErrorMessage(logger, errorCode, #paramName); \
+#define CheckApiParams(checkResult, logger, errorCode, paramName) \
+    if(!paramName)                                                \
+    {                                                             \
+        printErrorMessage(logger, errorCode, #paramName);         \
+        checkResult = errorCode;                                  \
     }
 
 } // namespace hiptensor

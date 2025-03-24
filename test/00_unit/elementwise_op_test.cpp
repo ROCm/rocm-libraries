@@ -27,7 +27,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hiptensor/internal/hiptensor_utility.hpp>
-#include <hiptensor_unary_element_wise_operation.hpp>
+#include <hiptensor_element_wise_operation.hpp>
 #include <iostream>
 
 using ck::tensor_operation::element_wise::HiptensorBinaryOp;

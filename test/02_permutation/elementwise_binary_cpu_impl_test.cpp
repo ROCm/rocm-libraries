@@ -145,8 +145,7 @@ auto elementaryBinaryOpWithCpu(hipDataType inputType,
                                                         outputType,
                                                         HIPTENSOR_OP_IDENTITY));
 
-    hiptensorElementwiseBinaryOpReference(handle,
-                                          &alphaValue,
+    hiptensorElementwiseBinaryOpReference(&alphaValue,
                                           aArray.data(),
                                           &descA,
                                           inMode.data(),

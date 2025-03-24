@@ -123,8 +123,7 @@ auto permuteWithCpu(hipDataType typeA, hipDataType typeB, hipDataType typeComput
     CHECK_HIPTENSOR_ERROR(hiptensorInitTensorDescriptor(
         handle, &descB, nmodeB, extentB.data(), NULL /* stride */, typeB, HIPTENSOR_OP_IDENTITY));
 
-    hiptensorPermutationReference(handle,
-                                  &alphaValue,
+    hiptensorPermutationReference(&alphaValue,
                                   aArray.data(),
                                   &descA,
                                   modeA.data(),

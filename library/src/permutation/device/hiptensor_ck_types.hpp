@@ -33,7 +33,7 @@
 #include <ck/tensor_operation/gpu/device/impl/device_elementwise_dynamic_vector_dims_impl.hpp>
 #include <ck/tensor_operation/gpu/element/combined_element_wise_operation.hpp>
 
-#include <hiptensor_unary_element_wise_operation.hpp>
+#include <hiptensor_element_wise_operation.hpp>
 
 namespace hiptensor
 {

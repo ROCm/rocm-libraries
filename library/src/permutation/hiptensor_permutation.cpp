@@ -65,14 +65,20 @@ hiptensorStatus_t hiptensorPermutation(const hiptensorHandle_t*           handle
 
     logger->logAPITrace("hiptensorPermutation", msg);
 
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, B);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeB);
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, B);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeB);
+
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
 
     constexpr std::array<std::array<hipDataType, 2>, 3> validDataTypes
         = {{// typeA, typeC, typeScalar

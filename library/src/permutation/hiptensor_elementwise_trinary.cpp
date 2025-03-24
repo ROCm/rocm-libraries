@@ -87,22 +87,29 @@ hiptensorStatus_t hiptensorElementwiseTrinary(const hiptensorHandle_t*          
              stream);
 
     logger->logAPITrace("hiptensorElementwiseTrinary", msg);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, beta);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, B);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeB);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, gamma);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, C);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeC);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, D);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
-    CheckApiParams(*logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeD);
+
+    hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, beta);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, B);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descB);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeB);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, gamma);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, C);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeC);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, D);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+    CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeD);
+
+    if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return checkResult;
+    }
 
     constexpr std::array<std::array<hipDataType, 4>, 3> validDataTypes
         = {{// typeA, typeB, typeC, typeScalar
@@ -126,7 +133,7 @@ hiptensorStatus_t hiptensorElementwiseTrinary(const hiptensorHandle_t*          
                  "api-reference.html "
                  "(%s)",
                  hiptensorGetErrorString(errorCode));
-        logger->logError("hiptensorPermutation", msg);
+        logger->logError("hiptensorElementwiseTrinary", msg);
         return errorCode;
     }
 
@@ -220,7 +227,7 @@ hiptensorStatus_t hiptensorElementwiseTrinary(const hiptensorHandle_t*          
                          metrics.mAvgTimeMs,
                          metrics.mTflops,
                          metrics.mBandwidth);
-                logger->logPerformanceTrace("hiptensorPermutation", msg);
+                logger->logPerformanceTrace("hiptensorElementwiseTrinary", msg);
             }
             // Perform permutation without timing
             else
@@ -240,6 +247,6 @@ hiptensorStatus_t hiptensorElementwiseTrinary(const hiptensorHandle_t*          
              sizeof(msg),
              "Selected kernel is unable to solve the problem (%s)",
              hiptensorGetErrorString(errorCode));
-    logger->logError("hiptensorPermutation", msg);
+    logger->logError("hiptensorElementwiseTrinary", msg);
     return errorCode;
 }

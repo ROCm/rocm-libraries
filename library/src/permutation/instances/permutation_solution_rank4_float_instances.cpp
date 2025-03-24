@@ -30,7 +30,7 @@
 // Ensure access to
 #include "../device/hiptensor_ck_types.hpp"
 #include "../device/hiptensor_permutation_scale_instances.hpp"
-#include <hiptensor_unary_element_wise_operation.hpp>
+#include <hiptensor_element_wise_operation.hpp>
 
 namespace hiptensor
 {

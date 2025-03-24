@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "reduction_cpu_reference.hpp"
+#include "../permutation/permutation_cpu_reference.hpp"
 #include "reduction_cpu_reference_impl.hpp"
 #include "reduction_cpu_reference_instances.hpp"
 
@@ -53,6 +54,27 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     {
         // CK does not support f16 or bf16 as compute type
         internalTypeCompute = HIPTENSOR_COMPUTE_32F;
+    }
+
+    if(descA->mLengths.size() == descD->mLengths.size())
+    {
+        // Composable Kernels (CK) does not handle reductions where the input and
+        // output tensors maintain the same rank. For those scenarios, employ
+        // elementwise binary operations.
+        return hiptensorElementwiseBinaryOpReference(alpha,
+                                                     A,
+                                                     descA,
+                                                     modeA,
+                                                     beta,
+                                                     C,
+                                                     descC,
+                                                     modeC,
+                                                     D,
+                                                     descD,
+                                                     modeD,
+                                                     HIPTENSOR_OP_ADD,
+                                                     hiptensor::convertToHipDataType(typeCompute),
+                                                     stream);
     }
 
     auto& instances = hiptensor::ReductionCpuReferenceInstances::instance();

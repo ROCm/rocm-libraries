@@ -471,7 +471,6 @@ namespace hiptensor
                 if(dataType == HIP_R_64F)
                 {
                     CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryOpReference(
-                        handle,
                         &alphaValue,
                         (const double*)resource->hostInput1().get(),
                         &descA,
@@ -498,7 +497,6 @@ namespace hiptensor
                 else if(dataType == HIP_R_32F)
                 {
                     CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryOpReference(
-                        handle,
                         &alphaValue,
                         (const float*)resource->hostInput1().get(),
                         &descA,
@@ -524,7 +522,6 @@ namespace hiptensor
                 else if(dataType == HIP_R_16F)
                 {
                     CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryOpReference(
-                        handle,
                         &alphaValue,
                         (const _Float16*)resource->hostInput1().get(),
                         &descA,

@@ -155,8 +155,7 @@ auto elementaryTrinaryOpWithCpu(hipDataType inputType,
                                                         outputType,
                                                         HIPTENSOR_OP_IDENTITY));
 
-    hiptensorElementwiseTrinaryOpReference(handle,
-                                           &alphaValue,
+    hiptensorElementwiseTrinaryOpReference(&alphaValue,
                                            aArray.data(),
                                            &descA,
                                            inMode.data(),

@@ -99,6 +99,7 @@ namespace hiptensor
 
     // Convert hipDataType to hiptensorComputeType_t
     hiptensorComputeType_t convertToComputeType(hipDataType hipType);
+    hipDataType            convertToHipDataType(hiptensorComputeType_t computeType);
 
     // Read a single value from void pointer, casted to T
     template <typename T>

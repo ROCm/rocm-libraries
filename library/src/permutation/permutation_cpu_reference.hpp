@@ -32,8 +32,7 @@
 
 #include <hiptensor/hiptensor.hpp>
 
-hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*           handle,
-                                                const void*                        alpha,
+hiptensorStatus_t hiptensorPermutationReference(const void*                        alpha,
                                                 const void*                        A,
                                                 const hiptensorTensorDescriptor_t* descA,
                                                 const int32_t                      modeA[],
@@ -43,8 +42,7 @@ hiptensorStatus_t hiptensorPermutationReference(const hiptensorHandle_t*        
                                                 const hipDataType                  typeScalar,
                                                 const hipStream_t                  stream);
 
-hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const hiptensorHandle_t*           handle,
-                                                        const void*                        alpha,
+hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*                        alpha,
                                                         const void*                        A,
                                                         const hiptensorTensorDescriptor_t* descA,
                                                         const int32_t                      modeA[],
@@ -58,8 +56,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const hiptensorHandle_t*
                                                         hiptensorOperator_t                opAC,
                                                         hipDataType typeScalar,
                                                         hipStream_t stream);
-hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const hiptensorHandle_t*           handle,
-                                                         const void*                        alpha,
+hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*                        alpha,
                                                          const void*                        A,
                                                          const hiptensorTensorDescriptor_t* descA,
                                                          const int32_t                      modeA[],

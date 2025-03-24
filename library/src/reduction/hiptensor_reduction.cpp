@@ -77,55 +77,29 @@ namespace
         using hiptensor::Logger;
         auto& logger = Logger::instance();
         char  msg[2048];
-        if(!handle || !alpha || !A || !descA || !modeA || !beta || !descC || !D || !descD)
+
+        hiptensorStatus_t checkResult = HIPTENSOR_STATUS_SUCCESS;
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, handle);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, alpha);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, A);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descA);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeA);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, beta);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, C);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descC);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, D);
+        CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, descD);
+        if(descD->mLengths.size() != 0)
         {
-            auto errorCode         = HIPTENSOR_STATUS_NOT_INITIALIZED;
-            auto printErrorMessage = [&logger, errorCode](const std::string& paramName) {
-                char msg[512];
-                snprintf(msg,
-                         sizeof(msg),
-                         "Initialization Error : %s = nullptr (%s)",
-                         paramName.c_str(),
-                         hiptensorGetErrorString(errorCode));
-                logger->logError("hiptensorReduction", msg);
-            };
-            if(!handle)
-            {
-                printErrorMessage("handle");
-            }
-            if(!alpha)
-            {
-                printErrorMessage("alpha");
-            }
-            if(!A)
-            {
-                printErrorMessage("A");
-            }
-            if(!descA)
-            {
-                printErrorMessage("descA");
-            }
-            if(!modeA)
-            {
-                printErrorMessage("modeA");
-            }
-            if(!beta)
-            {
-                printErrorMessage("beta");
-            }
-            if(!descC)
-            {
-                printErrorMessage("descC");
-            }
-            if(!D)
-            {
-                printErrorMessage("D");
-            }
-            if(!descD)
-            {
-                printErrorMessage("descD");
-            }
-            return errorCode;
+            // modeC and modeD are nullptr if rank of output is 0
+            CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeC);
+            CheckApiParams(checkResult, *logger, HIPTENSOR_STATUS_NOT_INITIALIZED, modeD);
+        }
+        // hipTensor does not use `workspace`. Do not check `workspace`.
+
+        if(checkResult != HIPTENSOR_STATUS_SUCCESS)
+        {
+            return checkResult;
         }
 
         const hiptensor::Hash            hashGenerator;
@@ -196,7 +170,7 @@ hiptensorStatus_t hiptensorReduction(const hiptensorHandle_t*           handle,
     snprintf(msg,
              sizeof(msg),
              "hiptensorReduction: handle=%p, alpha=%p, A=%p, descA=%p, modeA=%p, beta=%p, C=%p, "
-             "descC=%p, modeC=%p, D=%p, descD=%p, modeD=%p, opReduce=%d, typeCompute=%d, "
+             "descC=%p, modeC=%p, D=%p, descD=%p, modeD=%p, opReduce=%s, typeCompute=%s, "
              "workspace=%p, workspaceSize=%lu, stream=%p",
              handle,
              alpha,
@@ -210,8 +184,8 @@ hiptensorStatus_t hiptensorReduction(const hiptensorHandle_t*           handle,
              D,
              descD,
              modeD,
-             (int)opReduce,
-             (int)typeCompute,
+             hiptensor::opTypeToString(opReduce).c_str(),
+             hiptensor::computeTypeToString(typeCompute).c_str(),
              workspace,
              workspaceSize,
              stream);
@@ -237,6 +211,28 @@ hiptensorStatus_t hiptensorReduction(const hiptensorHandle_t*           handle,
        errorCode != HIPTENSOR_STATUS_SUCCESS)
     {
         return errorCode;
+    }
+
+    if(descA->mLengths.size() == descD->mLengths.size())
+    {
+        // Composable Kernels (CK) does not handle reductions where the input and
+        // output tensors maintain the same rank. For those scenarios, employ
+        // elementwise binary operations.
+        return hiptensorElementwiseBinary(handle,
+                                          alpha,
+                                          A,
+                                          descA,
+                                          modeA,
+                                          beta,
+                                          C,
+                                          descC,
+                                          modeC,
+                                          D,
+                                          descD,
+                                          modeD,
+                                          HIPTENSOR_OP_ADD,
+                                          hiptensor::convertToHipDataType(typeCompute),
+                                          stream);
     }
 
     auto& instances = hiptensor::ReductionSolutionInstances::instance();
