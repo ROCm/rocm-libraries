@@ -1,6 +1,6 @@
 .. meta::
-   :description: A wrapper library that allows you to easily port CUDA applications that use the cuRAND library to the HIP layer
-   :keywords: hipRAND, ROCm, library, API, tool
+   :description: hipRAND Python API reference
+   :keywords: hipRAND, ROCm, library, API, tool, Python
 
 .. _python-api:
 

@@ -1,5 +1,5 @@
 .. meta::
-   :description: A wrapper library that allows you to easily port CUDA applications that use the cuRAND library to the HIP layer
+   :description: hipRAND C/C++ API reference
    :keywords: hipRAND, ROCm, library, API, tool
 
 .. _cpp-api:
@@ -10,14 +10,14 @@ C/C++ API reference
 
 This document describes the hipRAND APIs available in C and C++.
 
-Device Functions
+Device functions
 ================
 .. doxygengroup:: hipranddevice
 
-C Host API
+C host API
 ==========
 .. doxygengroup:: hiprandhost
 
-C++ Host API Wrapper
+C++ host API wrapper
 ====================
 .. doxygengroup:: hiprandhostcpp
