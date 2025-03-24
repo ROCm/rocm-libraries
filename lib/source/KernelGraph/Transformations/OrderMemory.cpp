@@ -101,7 +101,7 @@ namespace rocRoller
             }
             catch(RecoverableError&)
             {
-                retval.combine(false, "Invalid control graph!");
+                retval.combine(false, "OrderMemory:Invalid control graph!");
             }
             return retval;
         }

@@ -793,6 +793,16 @@ namespace rocRoller
             return rv;
         }
 
+        void duplicateMacroTile(KernelGraph& graph, int load)
+        {
+            auto original = graph.mapper.get<MacroTile>(load);
+            auto newMacroTile
+                = graph.coordinates.addElement(graph.coordinates.getElement(original));
+            graph.coordinates.addElement(Duplicate(), {newMacroTile}, {original});
+            graph.mapper.disconnect<MacroTile>(load, original);
+            graph.mapper.connect<MacroTile>(load, newMacroTile);
+        }
+
         int duplicateControlNode(KernelGraph& graph, int tag)
         {
             auto op = graph.control.addElement(graph.control.getElement(tag));
@@ -1100,6 +1110,14 @@ namespace rocRoller
                 }
                 k.mapper.disconnect(opTag1, c.coordinate, c.connection);
             }
+        }
+
+        ExpressionPtr tileCeilDivide(ExpressionPtr sdSize, int tileSize)
+        {
+            auto tileSizeExpr = literal(static_cast<uint>(tileSize));
+            auto one          = literal(1u);
+
+            return (sdSize + tileSizeExpr - one) / tileSizeExpr;
         }
 
         bool hasDeallocate(const KernelGraph& graph, int registerTag)

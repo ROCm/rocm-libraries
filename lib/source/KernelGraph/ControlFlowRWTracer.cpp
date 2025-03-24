@@ -234,7 +234,7 @@ namespace rocRoller::KernelGraph
 
             // If there are none, we have a problem.
             AssertRecoverable(!nodes.empty(),
-                              "Invalid control graph!",
+                              "ControlFlowRWTracer:Invalid control graph!",
                               ShowValue(m_graph.control),
                               ShowValue(candidates),
                               ShowValue(m_completedControlNodes));
@@ -415,6 +415,8 @@ namespace rocRoller::KernelGraph
 
         dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
                   .value_or(dst);
+        lds = only(m_graph.coordinates.getOutputNodeIndices(lds, CT::isEdge<CT::View>))
+                  .value_or(lds);
 
         trackRegister(tag, lds, ReadWrite::READ);
         trackConnections(tag, {dst, lds}, ReadWrite::READ);
@@ -472,6 +474,8 @@ namespace rocRoller::KernelGraph
         {
             auto aScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+            aScale = only(m_graph.coordinates.getOutputNodeIndices(aScale, CT::isEdge<CT::Index>))
+                         .value_or(aScale);
             trackRegister(tag, aScale, ReadWrite::READ);
         }
         else if(op.scaleA == Operations::ScaleMode::SingleScale)
@@ -488,6 +492,8 @@ namespace rocRoller::KernelGraph
         {
             auto bScale = m_graph.mapper.get(
                 tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+            bScale = only(m_graph.coordinates.getOutputNodeIndices(bScale, CT::isEdge<CT::Index>))
+                         .value_or(bScale);
             trackRegister(tag, bScale, ReadWrite::READ);
         }
         else if(op.scaleB == Operations::ScaleMode::SingleScale)
@@ -601,6 +607,14 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(WaitZero const& op, int tag) {}
 
-    void ControlFlowRWTracer::operator()(Exchange const& op, int tag) {}
+    void ControlFlowRWTracer::operator()(Exchange const& op, int tag)
+    {
+        auto src = m_graph.mapper.get<MacroTile>(tag);
+        trackRegister(tag, src, ReadWrite::READ);
+
+        auto dst
+            = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+        trackRegister(tag, dst, ReadWrite::READWRITE);
+    }
 
 }

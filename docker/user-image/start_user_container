@@ -235,7 +235,7 @@ def get_amdgpu_args(args):
         arg = var[len(prefix) :].lower()
         if var in os.environ:
             build_args.append(var + "=" + os.environ[var])
-        if hasattr(args, arg):
+        if getattr(args, arg, None) is not None:
             if var in os.environ:
                 raise RuntimeError(
                     f"{var} should not be specified both via environment variable and command-line argument."

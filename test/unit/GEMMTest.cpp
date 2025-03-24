@@ -149,9 +149,9 @@ namespace GEMMDriverTest
 
             auto bpeA = DataTypeInfo::Get(dataTypeA).elementBytes;
             auto bpeB = DataTypeInfo::Get(dataTypeB).elementBytes;
-            AssertFatal(gemm.macM * gemm.macK * bpeA > gemm.waveM * gemm.waveK,
+            AssertFatal(gemm.macM * gemm.macK * bpeA >= gemm.waveM * gemm.waveK,
                         "Not enough elements (A).");
-            AssertFatal(gemm.macN * gemm.macK * bpeB > gemm.waveN * gemm.waveK,
+            AssertFatal(gemm.macN * gemm.macK * bpeB >= gemm.waveN * gemm.waveK,
                         "Not enough elements (B).");
 
             AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
@@ -413,6 +413,7 @@ namespace GEMMDriverTest
             params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
             params->setSplitStoreTileIntoWaveBlocks(gemm.splitStoreTileIntoWaveBlocks);
 
+            params->swizzleScale                  = gemm.swizzleScale;
             params->fuseLoops                     = gemm.fuseLoops;
             params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
@@ -2014,6 +2015,103 @@ namespace GEMMDriverTest
             EXPECT_EQ(mfma_count, f8f6f4_count);
             // All f8f6f4 instructions should use 0b100 (FP4) as input matrix format
             EXPECT_EQ(f8f6f4_count, modifier_count);
+        }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaledGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        for(auto waveK : {64, 128})
+        {
+            int waveM = (waveK == 128) ? 16 : 32;
+            int waveN = (waveK == 128) ? 16 : 32;
+
+            auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+            gemm.macM = 128;
+            gemm.macN = 256;
+            gemm.macK = 128;
+            gemm.m    = 2 * gemm.macM;
+            gemm.n    = 3 * gemm.macN;
+            gemm.k    = 4 * gemm.macK;
+
+            gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+            gemm.workgroupSizeY = 4;
+
+            gemm.loadLDSA = false;
+            gemm.loadLDSB = false;
+
+            gemm.scaleAMode = Operations::ScaleMode::Separate;
+            gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+            gemm.swizzleScale = true;
+
+            for(auto loadLDSScaleA : {false, true})
+            {
+                gemm.loadLDSScaleA = loadLDSScaleA;
+                for(auto loadLDSScaleB : {false, true})
+                {
+                    gemm.loadLDSScaleB = loadLDSScaleB;
+                    for(auto unrollK : {0, 2})
+                    {
+                        gemm.unrollK = unrollK;
+                        basicGEMM<FP8, FP8, float>(gemm);
+
+                        std::string generatedCode = m_context->instructions()->toString();
+                        // when both the scales are loaded directly from buffer into VGPRs
+                        if(!loadLDSScaleA && !loadLDSScaleB)
+                            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+                        // when either scale is loaded via LDS
+                        if(loadLDSScaleA || loadLDSScaleB)
+                            EXPECT_EQ(countSubstring(generatedCode, "ds_read_u8 "), 0);
+                    }
+                }
+            }
+        }
+    }
+
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        for(auto waveK : {64, 128})
+        {
+            int waveM = (waveK == 128) ? 16 : 32;
+            int waveN = (waveK == 128) ? 16 : 32;
+
+            auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+            gemm.macM = 128;
+            gemm.macN = 256;
+            gemm.macK = 128;
+
+            gemm.m = 2 * gemm.macM;
+            gemm.n = 3 * gemm.macN;
+            gemm.k = 4 * gemm.macK;
+
+            gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+            gemm.workgroupSizeY = 4;
+
+            gemm.loadLDSA      = true;
+            gemm.loadLDSB      = true;
+            gemm.loadLDSScaleA = false;
+            gemm.loadLDSScaleB = false;
+
+            gemm.unrollK           = 2;
+            gemm.prefetch          = true;
+            gemm.prefetchInFlight  = 2;
+            gemm.prefetchLDSFactor = 2;
+
+            gemm.scaleAMode = Operations::ScaleMode::Separate;
+            gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+            gemm.swizzleScale = true;
+
+            basicGEMM<FP8, FP8, float>(gemm);
+
+            std::string generatedCode = m_context->instructions()->toString();
+            EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
         }
     }
 

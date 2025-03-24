@@ -360,6 +360,13 @@ namespace rocRoller
                         {
                             if(!hasExistingSetCoordinate(graph, op, coordValue, unrollDimension))
                             {
+                                auto name = getForLoopName(graph, tag);
+                                if(name == rocRoller::XLOOP)
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 0);
+                                else if(name == rocRoller::YLOOP)
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 1);
+                                else if(name == rocRoller::KLOOP)
+                                    graph.mapper.connect<Unroll>(op, unrollDimension, 2);
                                 auto setCoord = replaceWith(graph,
                                                             op,
                                                             graph.control.addElement(SetCoordinate(
@@ -444,6 +451,7 @@ namespace rocRoller
             std::set<int> previousLDSLoads;
             std::set<int> previousStores;
             std::set<int> previousLDSStores;
+            auto          name = getForLoopName(graph, tag);
             for(int i = 0; i < unrollAmount; i++)
             {
                 duplicatedBodies[i]   = connectWithSetCoord(duplicatedBodies[i], i);
@@ -462,6 +470,16 @@ namespace rocRoller
                 previousLDSLoads  = currentLDSLoads;
                 previousStores    = currentStores;
                 previousLDSStores = currentLDSStores;
+
+                currentLDSLoads
+                    = filter(isLoadLDSTile,
+                             graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))
+                          .to<std::set>();
+                for(auto ldsLoad : currentLDSLoads)
+                {
+                    if(name == rocRoller::KLOOP)
+                        graph.mapper.connect<Unroll>(ldsLoad, unrollDimension, 2);
+                }
             }
 
             // If there are any loop carried dependencies, add Sequence nodes

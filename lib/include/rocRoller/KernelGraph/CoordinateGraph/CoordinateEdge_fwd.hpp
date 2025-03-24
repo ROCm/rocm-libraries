@@ -65,12 +65,13 @@ namespace rocRoller
             = (CCoordinateTransformEdge<T> && !std::same_as<CoordinateTransformEdge, T>);
 
         struct DataFlow;
+        struct Index;
         struct Buffer;
         struct Offset;
         struct Stride;
         struct View;
 
-        using DataFlowEdge = std::variant<DataFlow, Duplicate, Buffer, Offset, Stride, View>;
+        using DataFlowEdge = std::variant<DataFlow, Index, Duplicate, Buffer, Offset, Stride, View>;
 
         template <typename T>
         concept CDataFlowEdge = std::constructible_from<DataFlowEdge, T>;

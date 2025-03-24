@@ -1333,6 +1333,8 @@ namespace rocRoller
             co_yield_(Instruction::Comment(concatenate(
                 "GEN: loadMacroTileWAVELDS OP ", tag, " LDS ", ldsTag, " WaveTile ", waveTileTag)));
 
+            ldsTag = only(m_graph->coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<View>))
+                         .value_or(ldsTag);
             // Find the LDS allocation that contains the tile and store
             // the offset of the beginning of the allocation into ldsOffset.
             auto ldsAllocation = m_context->registerTagManager()->getRegister(ldsTag);
@@ -1499,6 +1501,7 @@ namespace rocRoller
                 co_yield loadMacroTileLDS(tag, load, coords);
                 break;
             case MemoryType::WAVE:
+            case MemoryType::WAVE_SWIZZLE:
             {
                 switch(macTile.layoutType)
                 {

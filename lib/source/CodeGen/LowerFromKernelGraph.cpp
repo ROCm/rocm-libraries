@@ -277,6 +277,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Kernel const& edge, Transformer coords)
             {
+                m_context->registerTagManager()->initialize(*m_graph);
+
                 auto scope = std::make_shared<ScopeManager>(m_context, m_graph);
                 m_context->setScopeManager(scope);
 

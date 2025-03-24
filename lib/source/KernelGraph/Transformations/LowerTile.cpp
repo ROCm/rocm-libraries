@@ -74,14 +74,6 @@ namespace rocRoller
             return retval;
         }
 
-        ExpressionPtr tileCeilDivide(ExpressionPtr sdSize, auto tileSize)
-        {
-            auto tileSizeExpr = literal(static_cast<uint>(tileSize));
-            auto one          = literal(1u);
-
-            return (sdSize + tileSizeExpr - one) / tileSizeExpr;
-        }
-
         void setIsTransposedLoad(int tileTag, KernelGraph& graph)
         {
             auto conns = graph.mapper.getCoordinateConnections(tileTag);
@@ -514,7 +506,10 @@ namespace rocRoller
                         graph, iWaveX, iWaveY, lane, vgpr, K, bitsPerElement, wavefrontSize);
                 }
 
-                graph.coordinates.addElement(Tile(), {nWaveX}, {jammedWavetileX, waveX});
+                if(params->swizzleScale)
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
+                else
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {jammedWavetileX, waveX});
             }
             break;
 
@@ -549,7 +544,10 @@ namespace rocRoller
                         graph, iWaveY, iWaveX, lane, vgpr, K, bitsPerElement, wavefrontSize);
                 }
 
-                graph.coordinates.addElement(Tile(), {nWaveY}, {jammedWavetileY, waveY});
+                if(params->swizzleScale)
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
+                else
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {jammedWavetileY, waveY});
             }
             break;
 
@@ -598,9 +596,16 @@ namespace rocRoller
                 graph.coordinates.addElement(Flatten(), {nVblk, iVblk}, {vgpr});
                 graph.coordinates.addElement(Flatten(), {nLblk, iLblk}, {lane});
 
-                graph.coordinates.addElement(Tile(), {nWaveX}, {jammedWavetileX, waveX});
-
-                graph.coordinates.addElement(Tile(), {nWaveY}, {jammedWavetileY, waveY});
+                if(params->swizzleScale)
+                {
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
+                }
+                else
+                {
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {jammedWavetileX, waveX});
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {jammedWavetileY, waveY});
+                }
             }
             break;
 
@@ -946,7 +951,8 @@ namespace rocRoller
                                 int                              iMacX,
                                 int                              iMacY,
                                 int                              wavefrontSize,
-                                std::vector<unsigned int> const& jammedTiles)
+                                std::vector<unsigned int> const& jammedTiles,
+                                CommandParametersPtr             params)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -1016,7 +1022,10 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                graph.coordinates.addElement(Flatten(), {jammedWavetileX, waveX}, {nWaveX});
+                if(params->swizzleScale)
+                    graph.coordinates.addElement(Flatten(), {waveX, jammedWavetileX}, {nWaveX});
+                else
+                    graph.coordinates.addElement(Flatten(), {jammedWavetileX, waveX}, {nWaveX});
             }
             else
             {
@@ -1029,7 +1038,10 @@ namespace rocRoller
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
 
-                graph.coordinates.addElement(Flatten(), {jammedWavetileY, waveY}, {nWaveY});
+                if(params->swizzleScale)
+                    graph.coordinates.addElement(Flatten(), {waveY, jammedWavetileY}, {nWaveY});
+                else
+                    graph.coordinates.addElement(Flatten(), {jammedWavetileY, waveY}, {nWaveY});
             }
             else
             {
@@ -1227,7 +1239,6 @@ namespace rocRoller
                 "The number of elements must be an integer multiple of the number of workitems",
                 ShowValue(numElements),
                 ShowValue(numWorkitems));
-
             auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
@@ -1439,6 +1450,7 @@ namespace rocRoller
                                  int                              macTileTag,
                                  std::vector<int> const&          sdim,
                                  std::vector<unsigned int> const& jammedTiles,
+                                 CommandParametersPtr             params,
                                  ContextPtr                       context)
 
         {
@@ -1448,7 +1460,7 @@ namespace rocRoller
                 = addStoreMacroTileCT(graph, connections, macTileTag, sdim);
 
             addStoreWaveTileCT(
-                graph, connections, macTileTag, iMacX, iMacY, wavefrontSize, jammedTiles);
+                graph, connections, macTileTag, iMacX, iMacY, wavefrontSize, jammedTiles, params);
 
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {userTag});
         }
@@ -1577,9 +1589,11 @@ namespace rocRoller
                     auto tags = graph.coordinates.getOutputNodeIndices<DataFlowEdge>(macTileTag);
                     for(auto tag : tags)
                     {
-                        maybeWaveTileTag = tag;
                         if(graph.coordinates.get<WaveTile>(tag))
+                        {
+                            maybeWaveTileTag = tag;
                             break;
+                        }
                     }
                     AssertFatal(maybeWaveTileTag, "wavetile element not found");
                     auto waveTileTag = *maybeWaveTileTag;
@@ -1867,6 +1881,7 @@ namespace rocRoller
                                         tileTag,
                                         sdims,
                                         wavetilesPerWavefront,
+                                        m_params,
                                         m_context);
                     break;
                 case MemoryType::WAVE_SPLIT:
@@ -1892,7 +1907,7 @@ namespace rocRoller
                                         KernelGraph const&  original,
                                         GraphReindexer&     reindexer,
                                         int                 tag,
-                                        StoreLDSTile const& oload) override
+                                        StoreLDSTile const& ostore) override
             {
                 auto logger = rocRoller::Log::getLogger();
 
@@ -1954,8 +1969,14 @@ namespace rocRoller
                     // currently assumes that epilogue blocks are
                     // serialized.
                     std::vector<uint> jammedTiles = {1, 1};
-                    addStoreWaveTileCT(
-                        graph, connections, tileTag, iMacX, iMacY, wavefrontSize, jammedTiles);
+                    addStoreWaveTileCT(graph,
+                                       connections,
+                                       tileTag,
+                                       iMacX,
+                                       iMacY,
+                                       wavefrontSize,
+                                       jammedTiles,
+                                       m_params);
                 }
 
                 if(useSwappedAccess)

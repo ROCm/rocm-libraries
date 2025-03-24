@@ -285,6 +285,8 @@ namespace rocRoller
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
             getForLoopIncrement(KernelGraph const& graph, int forLoop);
 
+        void duplicateMacroTile(KernelGraph& graph, int tag);
+
         int duplicateControlNode(KernelGraph& graph, int tag);
 
         /**
@@ -551,6 +553,15 @@ namespace rocRoller
         *
         */
         void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph, int opTag1, int opTag2);
+
+        /**
+        * @brief ceil(a/b) = (a+b-1)/b
+        *
+        * @param sdSize SubDimension size
+        * @param tileSize MacroTile size
+        *
+        */
+        Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize);
 
         /**
         * @brief Identifies whether a registerTag has an associated deallocate node.

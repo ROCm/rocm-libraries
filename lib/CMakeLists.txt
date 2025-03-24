@@ -162,6 +162,7 @@ set(rocroller_src
     source/KernelGraph/KernelGraph_serialization.cpp
     source/KernelGraph/LastRWTracer.cpp
     source/KernelGraph/LowerFromCommand.cpp
+    source/KernelGraph/RegisterTagManager.cpp
     source/KernelGraph/Reindexer.cpp
     source/KernelGraph/ScopeManager.cpp
     source/KernelGraph/Utils.cpp
@@ -199,6 +200,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/OrderMemory.cpp
     source/KernelGraph/Transformations/RemoveDuplicates.cpp
     source/KernelGraph/Transformations/Simplify.cpp
+    source/KernelGraph/Transformations/SwizzleScale.cpp
     source/KernelGraph/Transformations/UnrollLoops.cpp
     source/KernelGraph/Transformations/UpdateParameters.cpp
 

@@ -407,12 +407,13 @@ namespace rocRoller
                                 = kgraph.coordinates.get<Unroll>(*maybeUnrollCoord).value();
                             auto unrollSize = getUnsignedInt(evaluate(getSize(unroll)));
 
-                            Log::debug("KernelGraph::AddLDS(): ForLoop {} is a prefetch candidate: "
-                                       "{} {} ({})",
-                                       *maybeForLoop,
-                                       *maybeUnrollCoord,
-                                       unrollSize,
-                                       candidate);
+                            Log::debug(
+                                "KernelGraph::AddPrefetch(): ForLoop {} is a prefetch candidate: "
+                                "{} {} ({})",
+                                *maybeForLoop,
+                                *maybeUnrollCoord,
+                                unrollSize,
+                                candidate);
 
                             rv[*maybeForLoop] = unrollSize;
                         }
@@ -651,13 +652,13 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Order loads before Multiplies; and record direct
-	 * load operations within the segment that need to be ordered.
-	 *
-	 * We can't order direct loads just yet, as the graph might be
-	 * in an invalid state when orderLoadsBeforeMultiplies is
-	 * called.
-	 */
+     * @brief Order loads before Multiplies; and record direct
+     * load operations within the segment that need to be ordered.
+     *
+     * We can't order direct loads just yet, as the graph might be
+     * in an invalid state when orderLoadsBeforeMultiplies is
+     * called.
+     */
         void AddPrefetchVisitor::orderLoadsBeforeMultiplies(KernelGraph& graph, int forLoop, int u)
         {
             auto starts = m_prefetchUnrollBodyStarts[forLoop][u];
@@ -690,6 +691,20 @@ namespace rocRoller
             {
                 auto tileTag     = graph.mapper.get<MacroTile>(loadTag);
                 loadMap[tileTag] = getTopSetCoordinate(graph, loadTag);
+            }
+
+            auto isExchangePredicate = graph.control.isElemType<Exchange>();
+            for(auto exchangeTag : graph.control.findNodes(starts, isExchangePredicate))
+            {
+                auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
+                auto loadTag     = only(graph.control.getInputNodeIndices<Sequence>(exchangeTag));
+                AssertFatal(loadTag.has_value(), "load associated with Exchange not found");
+                auto tileTags
+                    = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Index>)
+                          .to<std::vector>();
+                AssertFatal(!tileTags.empty(), "swizzle indexed tiles not found");
+                for(auto tileTag : tileTags)
+                    loadMap[tileTag] = getTopSetCoordinate(graph, *loadTag);
             }
 
             for(auto multiplyTag : graph.control.findNodes(starts, isMultiplyPredicate))
@@ -1445,7 +1460,8 @@ namespace rocRoller
                            || k.control.get<LoadTiled>(bodyElem)
                            || k.control.get<LoadLDSTile>(bodyElem)
                            || k.control.get<StoreLDSTile>(bodyElem)
-                           || k.control.get<Multiply>(bodyElem) || k.control.get<NOP>(bodyElem))
+                           || k.control.get<Exchange>(bodyElem) || k.control.get<Multiply>(bodyElem)
+                           || k.control.get<NOP>(bodyElem))
                         {
                             continue;
                         }

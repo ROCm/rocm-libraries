@@ -239,10 +239,29 @@ namespace rocRoller
         };
 
         template <typename T, typename IO, typename Context>
-        requires(std::constructible_from<KernelGraph::CoordinateGraph::Edge,
-                                         T>) struct MappingTraits<T, IO, Context>
+        requires(std::constructible_from<KernelGraph::CoordinateGraph::Edge, T>&& T::HasValue
+                 == false) struct MappingTraits<T, IO, Context>
             : public EmptyMappingTraits<T, IO, Context>
         {
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::CoordinateGraph::Index, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::Index& edge, Context& ctx)
+            {
+                iot::mapRequired(io, "index", edge.index);
+            }
+
+            static void mapping(IO& io, KernelGraph::CoordinateGraph::Index& edge)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, edge, ctx);
+            }
         };
 
         template <typename T, typename IO, typename Context>

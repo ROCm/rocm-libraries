@@ -62,6 +62,16 @@ namespace rocRoller
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag)
     {
+        auto merge = getIndex(tag);
+        if(merge)
+        {
+            auto [dst, index] = *merge;
+            AssertFatal(hasRegister(dst), ShowValue(dst));
+
+            auto target = m_registers.at(dst);
+            return target->subset({index});
+        }
+
         AssertFatal(hasRegister(tag), ShowValue(tag));
         return m_registers.at(tag);
     }
@@ -147,6 +157,17 @@ namespace rocRoller
         m_expressions.insert(
             std::pair<int, std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>>(
                 tag, {value, attrs}));
+    }
+
+    inline std::optional<std::pair<int, int>> RegisterTagManager::getIndex(int tag) const
+    {
+        auto iter = m_indexes.find(tag);
+        if(iter != m_indexes.end())
+        {
+            return iter->second;
+        }
+
+        return std::nullopt;
     }
 
     inline void RegisterTagManager::deleteTag(int tag)

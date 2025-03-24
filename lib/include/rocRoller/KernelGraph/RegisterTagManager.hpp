@@ -32,6 +32,7 @@
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 
 namespace rocRoller
@@ -73,6 +74,17 @@ namespace rocRoller
     public:
         RegisterTagManager(ContextPtr context);
         ~RegisterTagManager();
+
+        /**
+         * Copies any necessary info from the kernel graph.
+     * Currently registers Index edges.
+         */
+        void initialize(KernelGraph::KernelGraph const& kgraph);
+
+        /**
+         * Causes `src` to index the register allocation from `dst`.
+         */
+        void addIndex(int src, int dst, int index);
 
         /**
          * @brief Get the Register::Value associated with the provided tag.
@@ -183,11 +195,18 @@ namespace rocRoller
          */
         bool hasExpression(int tag) const;
 
+        /**
+         * If `getIndex(tag)`, then returns the pair <tag, index>.
+         */
+        std::optional<std::pair<int, int>> getIndex(int tag) const;
+
     private:
         std::weak_ptr<Context>            m_context;
         std::map<int, Register::ValuePtr> m_registers;
         std::map<int, std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>>
             m_expressions;
+
+        std::map<int, std::pair<int, int>> m_indexes;
     };
 }
 

@@ -44,16 +44,6 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
-        void duplicateMacroTile(KernelGraph& graph, int load)
-        {
-            auto original = graph.mapper.get<MacroTile>(load);
-            auto newMacroTile
-                = graph.coordinates.addElement(graph.coordinates.getElement(original));
-            graph.coordinates.addElement(Duplicate(), {newMacroTile}, {original});
-            graph.mapper.disconnect<MacroTile>(load, original);
-            graph.mapper.connect<MacroTile>(load, newMacroTile);
-        }
-
         void addConnectionsMultiply(KernelGraph& graph,
                                     int          waveMult,
                                     int          loadTag,
@@ -548,13 +538,21 @@ namespace rocRoller
 
             uint const numWaveTiles = tileA.sizes[1] / waveA.sizes[1];
             auto       smallKUnroll = graph.coordinates.addElement(Unroll(numWaveTiles));
+            graph.mapper.connect<Unroll>(info.loadA.load(), smallKUnroll, 1);
+            graph.mapper.connect<Unroll>(info.loadB.load(), smallKUnroll, 0);
             graph.coordinates.addElement(PassThrough(), {waveTileNumYA}, {smallKUnroll});
             graph.coordinates.addElement(PassThrough(), {waveTileNumXB}, {smallKUnroll});
 
             if(scaleModeA == Operations::ScaleMode::Separate)
+            {
+                graph.mapper.connect<Unroll>(info.loadAScale->load(), smallKUnroll, 1);
                 graph.coordinates.addElement(PassThrough(), {*waveTileNumYAScale}, {smallKUnroll});
+            }
             if(scaleModeB == Operations::ScaleMode::Separate)
+            {
+                graph.mapper.connect<Unroll>(info.loadBScale->load(), smallKUnroll, 0);
                 graph.coordinates.addElement(PassThrough(), {*waveTileNumXBScale}, {smallKUnroll});
+            }
 
             // If the original loads were through LDS, attach their
             // LoadTiled+StoreLDSTile operations to the ForLoop.

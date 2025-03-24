@@ -87,6 +87,32 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(DataFlow);
 
         /**
+         * Index - denotes that the source will index the register
+         * allocation from the dest.
+         */
+        struct Index
+        {
+            int index = -1;
+
+            Index() = default;
+
+            Index(int const index)
+                : index(index)
+            {
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "Index";
+            }
+        };
+
+        /**
          * Buffer - denotes SRD for MUBUF instructions
          */
         RR_EMPTY_STRUCT_WITH_NAME(Buffer);

@@ -74,6 +74,8 @@ struct GEMMProblem
     bool betaInFma                 = true;
     bool literalStrides            = true;
 
+    bool swizzleScale = false;
+
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
     int  prefetchLDSFactor = 0;

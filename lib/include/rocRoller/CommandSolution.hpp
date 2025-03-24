@@ -114,6 +114,8 @@ namespace rocRoller
         bool         fuseLoops = true;
         bool         tailLoops = true;
 
+        bool swizzleScale = false;
+
         bool prefetch          = false;
         int  prefetchInFlight  = 1;
         int  prefetchLDSFactor = 0;
