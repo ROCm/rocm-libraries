@@ -1,6 +1,6 @@
 /* ************************************************************************
  *
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 
 // improve mismatched status reporting
 testing::AssertionResult status_match(rocblas_status expected, rocblas_status status);
+
+void sorted_unique_solutions(std::vector<int>& indices);
 
 // force filter
 void rocblas_client_set_gtest_filter(const char* filter_string);

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <regex>
 #ifdef WIN32
 #include <windows.h>
@@ -44,6 +45,17 @@ testing::AssertionResult status_match(rocblas_status expected, rocblas_status st
     else
         return testing::AssertionFailure() << "got " << rocblas_status_to_string(status)
                                            << " instead of " << rocblas_status_to_string(expected);
+}
+
+void sorted_unique_solutions(std::vector<int>& indices)
+{
+    // default solutions are not unique
+    indices.erase(std::remove(indices.begin(), indices.end(), 0), indices.end());
+    indices.erase(std::remove(indices.begin(), indices.end(), -1), indices.end());
+
+    std::sort(indices.begin(), indices.end());
+    auto itr = std::unique(indices.begin(), indices.end());
+    indices.resize(std::distance(indices.begin(), itr));
 }
 
 void rocblas_client_set_gtest_filter(const char* filter_string)

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,27 +42,14 @@
 /*******************************************************************************
  * runContractionProblem() solves a RocblasContractionProblem                  *
  *******************************************************************************/
-template <typename TiA,
-          typename To,
-          typename Tc,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-// <typename Ti, typename To, typename Tc>
-rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& problem,
-    rocblas_gemm_algo                                            algo = rocblas_gemm_algo_standard,
-    int32_t                                                      solution_index = 0);
-
-template <typename TiA,
-          typename To,
-          typename Tc,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-//template <typename Ti, typename To, typename Tc>
+template <typename TiA, typename To, typename Tc, typename TiB = TiA>
 rocblas_status
-    getAllSolutionsHipBlasLT(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                             rocblas_tensile_get_solution_option                          option,
-                             rocblas_int* list_array,
-                             rocblas_int* list_size);
+    runContractionProblemHipBlasLT(const RocblasContractionProblem<TiA, To, Tc, TiB>& problem,
+                                   rocblas_gemm_algo algo           = rocblas_gemm_algo_standard,
+                                   int32_t           solution_index = 0);
+
+template <typename TiA, typename To, typename Tc, typename TiB = TiA>
+rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                                        rocblas_tensile_get_solution_option                option,
+                                        rocblas_int* list_array,
+                                        rocblas_int* list_size);

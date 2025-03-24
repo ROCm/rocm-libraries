@@ -335,13 +335,8 @@ namespace
     /****************************************************************
      * Construct a Tensile Problem from a RocblasContractionProblem *
      ****************************************************************/
-    template <typename TiA,
-              typename To,
-              typename Tc,
-              typename TiB = TiA,
-              typename TcA = TiA,
-              typename TcB = TiA>
-    auto ConstructTensileProblem(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob)
+    template <typename TiA, typename To, typename Tc, typename TiB = TiA>
+    auto ConstructTensileProblem(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
     {
         // Tensile DataTypes corresponding to rocBLAS data types
         static constexpr Tensile::DataType Tensile_TiA = tensile_datatype<TiA>;
@@ -546,14 +541,11 @@ namespace
     /***************************************************************
      * Construct the inputs to a Tensile ContractionProblem        *
      ***************************************************************/
-    template <typename TiA,
-              typename To  = TiA,
-              typename Tc  = To,
-              typename TiB = TiA,
-              typename TcA = TiA,
-              typename TcB = TiA>
+    template <typename TiA, typename To = TiA, typename Tc = To, typename TiB = TiA>
+    //typename TcA = TiA,
+    //typename TcB = TiA>
     // <typename Ti, typename To, typename Tc>
-    auto GetTensileInputs(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob)
+    auto GetTensileInputs(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
     {
         // Tensile types corresponding to Ti, To, Tc
         using Tensile_TiA = typename rocblas_to_tensile_type<TiA>::tensile_type;
@@ -1086,6 +1078,19 @@ namespace
             rocblas_cerr << msg << std::endl;
     }
 
+    inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
+    {
+        // need to ensure tensile indices not so large as to already be into sign bit
+
+        return -idx - c_rocblas_solutions_reserved - 1; // one based offset negative to zero based
+    }
+
+    inline rocblas_int map_index_tensile_to_rocblas(rocblas_int idx)
+    {
+        return -(idx + 1)
+               - c_rocblas_solutions_reserved; //  zero based to one based offset negative
+    }
+
 } // namespace
 
 inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
@@ -1102,8 +1107,8 @@ inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
     return false;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
-bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob)
+template <typename TiA, typename To, typename Tc, typename TiB> //, typename TcA, typename TcB>
+bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
     bool problemSpecific = prob.batch_A == 0; // Only use hipblaslt for non-batch problems.
@@ -1117,45 +1122,56 @@ bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& p
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
  ******************************************************************************/
-template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
-rocblas_status
-    runContractionProblem(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                          rocblas_gemm_algo                                            algo,
-                          int32_t solution_index)
+template <typename TiA, typename To, typename Tc, typename TiB>
+rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                                     rocblas_gemm_algo                                  algo,
+                                     int32_t solution_index)
 {
     rocblas_status status            = rocblas_status_internal_error;
     bool           hipblaslt_backend = false;
 
-#ifdef BUILD_WITH_HIPBLASLT
-    if(useHipBLASLt(prob))
+    bool solutionBased = algo == rocblas_gemm_algo_solution_index;
+    bool hipBLASLtOnly = false, TensileOnly = false;
+    bool useDefaultSolution = rocblas_default_solution_index(solution_index);
+    if(solutionBased)
     {
-        try
+        hipBLASLtOnly = rocblas_hipblaslt_index(solution_index);
+        TensileOnly   = rocblas_tensile_index(solution_index);
+    }
+
+    if(!TensileOnly)
+    {
+
+#ifdef BUILD_WITH_HIPBLASLT
+        if(useHipBLASLt(prob))
         {
-            rocblas_internal_ostream msg;
-            auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, solution_index);
-
-            if(hipblasltResult == rocblas_status_success
-               || (algo == rocblas_gemm_algo_solution_index && solution_index > 0))
-            {
-
-                status            = hipblasltResult;
-                hipblaslt_backend = true;
-            }
-            else
+            try
             {
                 rocblas_internal_ostream msg;
-                print_once(msg << "\nrocBLAS warning: hipBlasLT failed, falling back to tensile. ");
+                auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, solution_index);
+
+                if(hipblasltResult == rocblas_status_success || (solutionBased && hipBLASLtOnly))
+                {
+
+                    status            = hipblasltResult;
+                    hipblaslt_backend = true;
+                }
+                else
+                {
+                    rocblas_internal_ostream msg;
+                    print_once(msg
+                               << "\nrocBLAS warning: hipBlasLT failed, falling back to tensile. ");
+                }
+            }
+            catch(...)
+            {
+                rocblas_internal_ostream msg;
+                print_once(msg << "\nrocBLAS warning: hipBlasLT exception encountered, falling "
+                                  "back to tensile. ");
             }
         }
-        catch(...)
-        {
-            rocblas_internal_ostream msg;
-            print_once(
-                msg
-                << "\nrocBLAS warning: hipBlasLT exception encountered, falling back to tensile. ");
-        }
-    }
 #endif
+    }
 
     if(!hipblaslt_backend)
     {
@@ -1176,14 +1192,15 @@ rocblas_status
             auto  handle        = prob.handle;
             auto* fitness_query = handle->get_solution_fitness_query();
 
-            if(algo == rocblas_gemm_algo_solution_index && solution_index > 0)
+            if(solutionBased && !useDefaultSolution)
             {
-                solution = library->getSolutionByIndex(solution_index - 1);
+                rocblas_int tensile_idx = map_index_rocblas_to_tensile(solution_index);
+                solution                = library->getSolutionByIndex(tensile_idx);
                 // load solution if not already loaded
                 if(!solution)
                 {
                     library->findAllSolutions(tensile_prob, *hardware);
-                    solution = library->getSolutionByIndex(solution_index - 1);
+                    solution = library->getSolutionByIndex(tensile_idx);
                 }
             }
             else
@@ -1196,7 +1213,7 @@ rocblas_status
 
             if(!solution)
             {
-                if(solution_index > 0)
+                if(!useDefaultSolution)
                 {
                     status = rocblas_status_invalid_value;
                 }
@@ -1306,13 +1323,12 @@ rocblas_status
     return status;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
-rocblas_status
-    getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                        rocblas_tensile_get_solution_option                          option,
-                        rocblas_int*                                                 list_array,
-                        rocblas_int*                                                 list_size,
-                        rocblas_int                                                  arrayIdx)
+template <typename TiA, typename To, typename Tc, typename TiB>
+rocblas_status getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                                   rocblas_tensile_get_solution_option                option,
+                                   rocblas_int*                                       list_array,
+                                   rocblas_int*                                       list_size,
+                                   rocblas_int                                        arrayIdx)
 {
     if(option != CAN_SOLVE && option != MATCHES_TYPE)
         return rocblas_status_invalid_value;
@@ -1369,12 +1385,20 @@ rocblas_status
     return rocblas_status_continue;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
-rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                               rocblas_tensile_get_solution_option                          option,
-                               rocblas_int* list_array,
-                               rocblas_int* list_size)
+template <typename TiA, typename To, typename Tc, typename TiB>
+rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                               rocblas_tensile_get_solution_option                option,
+                               rocblas_int*                                       list_array,
+                               rocblas_int*                                       list_size)
 {
+    if(list_size == nullptr)
+    {
+        return rocblas_status_invalid_pointer;
+    }
+
+    // if source gemm fallback kernel will exist
+    // constexpr bool rocblas_kernel = rocblas_internal_source_gemm<TiA, TiB, Tc, To>();
+
 #ifdef BUILD_WITH_HIPBLASLT
     if(useHipBLASLt(prob))
     {
@@ -1409,11 +1433,7 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB,
             return rocblas_status_invalid_value;
         }
 
-        if(list_size == nullptr)
-        {
-            return rocblas_status_invalid_pointer;
-        }
-        else if(list_array == nullptr)
+        if(list_array == nullptr)
         {
             *list_size = solutions.size();
             status     = rocblas_status_success;
@@ -1423,9 +1443,13 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB,
             auto it = solutions.begin();
             while(added_sols < *list_size && it != solutions.end())
             {
-                list_array[added_sols] = it->get()->index + 1;
+                list_array[added_sols++] = map_index_tensile_to_rocblas(it->get()->index);
                 ++it;
-                ++added_sols;
+            }
+            int i = added_sols;
+            while(i < *list_size)
+            {
+                list_array[i++] = c_rocblas_default_solution;
             }
             status = rocblas_status_success;
         }
@@ -1524,77 +1548,49 @@ template rocblas_status
                           int32_t           solution_index);
 
 //hybrid // Change of f8 parameter convention in order to support existing usage
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_f8,
-                                                                              float,
-                                                                              float,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status
+    runContractionProblem(const RocblasContractionProblem<rocblas_f8, float, float, rocblas_bf8>&,
+                          rocblas_gemm_algo algo,
+                          int32_t           solution_index);
 
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_f8,
-                                                                              rocblas_half,
-                                                                              float,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status runContractionProblem(
+    const RocblasContractionProblem<rocblas_f8, rocblas_half, float, rocblas_bf8>&,
+    rocblas_gemm_algo algo,
+    int32_t           solution_index);
 
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_bf8,
-                                                                              float,
-                                                                              float,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status
+    runContractionProblem(const RocblasContractionProblem<rocblas_bf8, float, float, rocblas_f8>&,
+                          rocblas_gemm_algo algo,
+                          int32_t           solution_index);
 
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_bf8,
-                                                                              rocblas_half,
-                                                                              float,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status runContractionProblem(
+    const RocblasContractionProblem<rocblas_bf8, rocblas_half, float, rocblas_f8>&,
+    rocblas_gemm_algo algo,
+    int32_t           solution_index);
 
 // template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_f8,
 //                                                                               rocblas_f8,
 //                                                                               float,
-//                                                                               rocblas_bf8,
-//                                                                               rocblas_f8,
 //                                                                               rocblas_bf8>&,
 //                                               rocblas_gemm_algo algo,
 //                                               int32_t           solution_index);
 
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_f8,
-                                                                              rocblas_bf8,
-                                                                              float,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status runContractionProblem(
+    const RocblasContractionProblem<rocblas_f8, rocblas_bf8, float, rocblas_bf8>&,
+    rocblas_gemm_algo algo,
+    int32_t           solution_index);
 
 // template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_bf8,
 //                                                                               rocblas_f8,
 //                                                                               float,
-//                                                                               rocblas_f8,
-//                                                                               rocblas_bf8,
 //                                                                               rocblas_f8>&,
 //                                               rocblas_gemm_algo algo,
 //                                               int32_t           solution_index);
 
-template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_bf8,
-                                                                              rocblas_bf8,
-                                                                              float,
-                                                                              rocblas_f8,
-                                                                              rocblas_bf8,
-                                                                              rocblas_f8>&,
-                                              rocblas_gemm_algo algo,
-                                              int32_t           solution_index);
+template rocblas_status runContractionProblem(
+    const RocblasContractionProblem<rocblas_bf8, rocblas_bf8, float, rocblas_f8>&,
+    rocblas_gemm_algo algo,
+    int32_t           solution_index);
 
 // HPA types
 template rocblas_status

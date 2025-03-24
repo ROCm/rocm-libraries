@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,7 @@
  * in this file, without referencing any Tensile-specific identifiers here.  *
  *****************************************************************************/
 
+#include "definitions.hpp"
 #include "handle.hpp"
 #include "tuple_helper.hpp"
 #include <atomic>
@@ -52,17 +53,27 @@ typedef enum
     MATCHES_TYPE,
 } rocblas_tensile_get_solution_option;
 
+inline constexpr bool rocblas_default_solution_index(rocblas_int solution_index)
+{
+    return solution_index == c_rocblas_default_solution || solution_index == -1;
+}
+
+inline constexpr bool rocblas_hipblaslt_index(rocblas_int solution_index)
+{
+    return solution_index > 0;
+}
+
+inline constexpr bool rocblas_tensile_index(rocblas_int solution_index)
+{
+    // coverted to negative 1 based as rocblas index
+    return solution_index < -c_rocblas_solutions_reserved;
+}
+
 /********************************************************************
  * RocblasContractionProblem captures the arguments for a GEMM-like *
  * contraction problem, to be passed to runContractionProblem.      *
  ********************************************************************/
-template <typename TiA,
-          typename To  = TiA,
-          typename Tc  = To,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-//   <typename Ti, typename To = Ti, typename Tc = To>
+template <typename TiA, typename To = TiA, typename Tc = To, typename TiB = TiA>
 struct RocblasContractionProblem
 {
     rocblas_handle     handle;
@@ -263,49 +274,29 @@ struct RocblasContractionProblem
  * function to consolidate with the architecture specific conditions and
  * environment variable state.
 ******************************************************************************/
-template <typename TiA,
-          typename To,
-          typename Tc,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-// <typename Ti, typename To, typename Tc>
-bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& problem);
+template <typename TiA, typename To, typename Tc, typename TiB = TiA>
+bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB>& problem);
 
 /*******************************************************************************
  * runContractionProblem() solves a RocblasContractionProblem                  *
  *******************************************************************************/
-template <typename TiA,
-          typename To,
-          typename Tc,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-// <typename Ti, typename To, typename Tc>
-rocblas_status
-    runContractionProblem(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& problem,
-                          rocblas_gemm_algo algo           = rocblas_gemm_algo_standard,
-                          int32_t           solution_index = 0);
+template <typename TiA, typename To, typename Tc, typename TiB = TiA>
+rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc, TiB>& problem,
+                                     rocblas_gemm_algo algo           = rocblas_gemm_algo_standard,
+                                     int32_t           solution_index = 0);
 
-template <typename TiA, typename To, typename Tc, typename TiB, typename TcA, typename TcB>
-rocblas_status
-    getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                        rocblas_tensile_get_solution_option                          option,
-                        rocblas_int*                                                 list_array,
-                        rocblas_int*                                                 list_size,
-                        rocblas_int                                                  arrayIdx);
+template <typename TiA, typename To, typename Tc, typename TiB>
+rocblas_status getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                                   rocblas_tensile_get_solution_option                option,
+                                   rocblas_int*                                       list_array,
+                                   rocblas_int*                                       list_size,
+                                   rocblas_int                                        arrayIdx);
 
-template <typename TiA,
-          typename To,
-          typename Tc,
-          typename TiB = TiA,
-          typename TcA = TiA,
-          typename TcB = TiA>
-//template <typename Ti, typename To, typename Tc>
-rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB, TcA, TcB>& prob,
-                               rocblas_tensile_get_solution_option                          option,
-                               rocblas_int* list_array,
-                               rocblas_int* list_size);
+template <typename TiA, typename To, typename Tc, typename TiB = TiA>
+rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
+                               rocblas_tensile_get_solution_option                option,
+                               rocblas_int*                                       list_array,
+                               rocblas_int*                                       list_size);
 
 /***********************************************************************************
  * Whether Tensile has been initialized for at least one device (used for testing) *

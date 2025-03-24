@@ -22,9 +22,8 @@
 
 #ifdef BUILD_WITH_TENSILE
 #include "../blas3/Tensile/gemm_tensile.hpp"
-#else
-#include "../../src/src64/blas_ex/rocblas_gemm_ex_64.hpp"
 #endif
+#include "../../src/src64/blas_ex/rocblas_gemm_ex_64.hpp"
 
 #include "../blas2/rocblas_gemv.hpp"
 #include "handle.hpp"
@@ -697,6 +696,9 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
         stride_d = rocblas_stride(ldd) * n;
     }
 
+    bool sourceSolutionBased
+        = algo == rocblas_gemm_algo_solution_index && solution_index == c_rocblas_source_solution;
+
     rocblas_status rb_status = rocblas_status_not_implemented;
 
 #define EX_TYPECASTING_PARM                                                                    \
@@ -705,176 +707,190 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
         algo, solution_index, rocblas_gemm_flags(flags)
 
 #ifdef BUILD_WITH_TENSILE
-
-    if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
-       && c_type == rocblas_datatype_f64_r && d_type == rocblas_datatype_f64_r
-       && compute_type == rocblas_datatype_f64_r)
+    if(!sourceSolutionBased)
     {
-        rb_status = gemm_ex_typecasting<BATCHED, double>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f32_r && b_type == rocblas_datatype_f32_r
-            && c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
-            && compute_type == rocblas_datatype_f32_r)
-    {
-        rb_status = gemm_ex_typecasting<BATCHED, float>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f16_r && b_type == rocblas_datatype_f16_r)
-    {
-        if(c_type == rocblas_datatype_f16_r && d_type == rocblas_datatype_f16_r)
+        if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
+           && c_type == rocblas_datatype_f64_r && d_type == rocblas_datatype_f64_r
+           && compute_type == rocblas_datatype_f64_r)
         {
-            if(compute_type == rocblas_datatype_f16_r)
+            rb_status = gemm_ex_typecasting<BATCHED, double>(EX_TYPECASTING_PARM);
+        }
+        else if(a_type == rocblas_datatype_f32_r && b_type == rocblas_datatype_f32_r
+                && c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
+                && compute_type == rocblas_datatype_f32_r)
+        {
+            rb_status = gemm_ex_typecasting<BATCHED, float>(EX_TYPECASTING_PARM);
+        }
+        else if(a_type == rocblas_datatype_f16_r && b_type == rocblas_datatype_f16_r)
+        {
+            if(c_type == rocblas_datatype_f16_r && d_type == rocblas_datatype_f16_r)
             {
-                rb_status = gemm_ex_typecasting<BATCHED, rocblas_half>(EX_TYPECASTING_PARM);
+                if(compute_type == rocblas_datatype_f16_r)
+                {
+                    rb_status = gemm_ex_typecasting<BATCHED, rocblas_half>(EX_TYPECASTING_PARM);
+                }
+                else if(compute_type == rocblas_datatype_f32_r)
+                {
+                    rb_status = gemm_ex_typecasting<BATCHED, rocblas_half, rocblas_half, float>(
+                        EX_TYPECASTING_PARM);
+                }
             }
-            else if(compute_type == rocblas_datatype_f32_r)
+            else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
+                    && compute_type == rocblas_datatype_f32_r)
             {
-                rb_status = gemm_ex_typecasting<BATCHED, rocblas_half, rocblas_half, float>(
+                rb_status
+                    = gemm_ex_typecasting<BATCHED, rocblas_half, float, float>(EX_TYPECASTING_PARM);
+            }
+        }
+        else if(a_type == rocblas_datatype_bf16_r && b_type == rocblas_datatype_bf16_r
+                && compute_type == rocblas_datatype_f32_r)
+        {
+            if(c_type == rocblas_datatype_bf16_r && d_type == rocblas_datatype_bf16_r)
+            {
+                rb_status = gemm_ex_typecasting<BATCHED, rocblas_bfloat16, rocblas_bfloat16, float>(
+                    EX_TYPECASTING_PARM);
+            }
+            else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r)
+            {
+                rb_status = gemm_ex_typecasting<BATCHED, rocblas_bfloat16, float, float>(
                     EX_TYPECASTING_PARM);
             }
         }
-        else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
-                && compute_type == rocblas_datatype_f32_r)
+        else if(a_type == rocblas_datatype_i8_r && b_type == rocblas_datatype_i8_r
+                && c_type == rocblas_datatype_i32_r && d_type == rocblas_datatype_i32_r
+                && compute_type == rocblas_datatype_i32_r)
         {
-            rb_status
-                = gemm_ex_typecasting<BATCHED, rocblas_half, float, float>(EX_TYPECASTING_PARM);
+            rb_status = gemm_ex_typecasting<BATCHED, int8_t, int32_t>(EX_TYPECASTING_PARM);
         }
-    }
-    else if(a_type == rocblas_datatype_bf16_r && b_type == rocblas_datatype_bf16_r
-            && compute_type == rocblas_datatype_f32_r)
-    {
-        if(c_type == rocblas_datatype_bf16_r && d_type == rocblas_datatype_bf16_r)
+        else if(a_type == rocblas_datatype_f32_c && b_type == rocblas_datatype_f32_c
+                && c_type == rocblas_datatype_f32_c && d_type == rocblas_datatype_f32_c
+                && compute_type == rocblas_datatype_f32_c)
         {
-            rb_status = gemm_ex_typecasting<BATCHED, rocblas_bfloat16, rocblas_bfloat16, float>(
-                EX_TYPECASTING_PARM);
+            rb_status = gemm_ex_typecasting<BATCHED,
+                                            rocblas_float_complex,
+                                            rocblas_float_complex,
+                                            rocblas_float_complex>(EX_TYPECASTING_PARM);
         }
-        else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r)
+        else if(a_type == rocblas_datatype_f64_c && b_type == rocblas_datatype_f64_c
+                && c_type == rocblas_datatype_f64_c && d_type == rocblas_datatype_f64_c
+                && compute_type == rocblas_datatype_f64_c)
         {
-            rb_status
-                = gemm_ex_typecasting<BATCHED, rocblas_bfloat16, float, float>(EX_TYPECASTING_PARM);
+            rb_status = gemm_ex_typecasting<BATCHED,
+                                            rocblas_double_complex,
+                                            rocblas_double_complex,
+                                            rocblas_double_complex>(EX_TYPECASTING_PARM);
         }
+        else
+        {
+            rb_status = rocblas_status_not_implemented;
+        }
+
+        return rb_status;
     }
-    else if(a_type == rocblas_datatype_i8_r && b_type == rocblas_datatype_i8_r
-            && c_type == rocblas_datatype_i32_r && d_type == rocblas_datatype_i32_r
-            && compute_type == rocblas_datatype_i32_r)
+    else
+#endif
     {
-        rb_status = gemm_ex_typecasting<BATCHED, int8_t, int32_t>(EX_TYPECASTING_PARM);
+        sourceSolutionBased = true;
     }
-    else if(a_type == rocblas_datatype_f32_c && b_type == rocblas_datatype_f32_c
-            && c_type == rocblas_datatype_f32_c && d_type == rocblas_datatype_f32_c
-            && compute_type == rocblas_datatype_f32_c)
+    // use source 64 kernels if no tensile
+
+    if(flags & rocblas_gemm_flags_check_solution_index)
     {
-        rb_status = gemm_ex_typecasting<BATCHED,
-                                        rocblas_float_complex,
-                                        rocblas_float_complex,
-                                        rocblas_float_complex>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f64_c && b_type == rocblas_datatype_f64_c
-            && c_type == rocblas_datatype_f64_c && d_type == rocblas_datatype_f64_c
-            && compute_type == rocblas_datatype_f64_c)
-    {
-        rb_status = gemm_ex_typecasting<BATCHED,
-                                        rocblas_double_complex,
-                                        rocblas_double_complex,
-                                        rocblas_double_complex>(EX_TYPECASTING_PARM);
+        return rocblas_status_success;
     }
     else
     {
-        rb_status = rocblas_status_not_implemented;
-    }
-
-    return rb_status;
-
-#else // use source 64 kernels if no tensile
-
-    if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
-       && c_type == rocblas_datatype_f64_r && d_type == rocblas_datatype_f64_r
-       && compute_type == rocblas_datatype_f64_r)
-    {
-        rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, double>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f32_r && b_type == rocblas_datatype_f32_r
-            && c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
-            && compute_type == rocblas_datatype_f32_r)
-    {
-        rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, float>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f16_r && b_type == rocblas_datatype_f16_r)
-    {
-        if(c_type == rocblas_datatype_f16_r && d_type == rocblas_datatype_f16_r)
+        if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
+           && c_type == rocblas_datatype_f64_r && d_type == rocblas_datatype_f64_r
+           && compute_type == rocblas_datatype_f64_r)
         {
-            if(compute_type == rocblas_datatype_f16_r)
+            rb_status
+                = rocblas_internal_gemm_ex_typecasting_64<BATCHED, double>(EX_TYPECASTING_PARM);
+        }
+        else if(a_type == rocblas_datatype_f32_r && b_type == rocblas_datatype_f32_r
+                && c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
+                && compute_type == rocblas_datatype_f32_r)
+        {
+            rb_status
+                = rocblas_internal_gemm_ex_typecasting_64<BATCHED, float>(EX_TYPECASTING_PARM);
+        }
+        else if(a_type == rocblas_datatype_f16_r && b_type == rocblas_datatype_f16_r)
+        {
+            if(c_type == rocblas_datatype_f16_r && d_type == rocblas_datatype_f16_r)
             {
-                rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, rocblas_half>(
-                    EX_TYPECASTING_PARM);
+                if(compute_type == rocblas_datatype_f16_r)
+                {
+                    rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, rocblas_half>(
+                        EX_TYPECASTING_PARM);
+                }
+                else if(compute_type == rocblas_datatype_f32_r)
+                {
+                    rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
+                                                                        rocblas_half,
+                                                                        rocblas_half,
+                                                                        float>(EX_TYPECASTING_PARM);
+                }
             }
-            else if(compute_type == rocblas_datatype_f32_r)
+            else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
+                    && compute_type == rocblas_datatype_f32_r)
+            {
+                rb_status
+                    = rocblas_internal_gemm_ex_typecasting_64<BATCHED, rocblas_half, float, float>(
+                        EX_TYPECASTING_PARM);
+            }
+        }
+        else if(a_type == rocblas_datatype_bf16_r && b_type == rocblas_datatype_bf16_r
+                && compute_type == rocblas_datatype_f32_r)
+        {
+            if(c_type == rocblas_datatype_bf16_r && d_type == rocblas_datatype_bf16_r)
             {
                 rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
-                                                                    rocblas_half,
-                                                                    rocblas_half,
+                                                                    rocblas_bfloat16,
+                                                                    rocblas_bfloat16,
+                                                                    float>(EX_TYPECASTING_PARM);
+            }
+            else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r)
+            {
+                rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
+                                                                    rocblas_bfloat16,
+                                                                    float,
                                                                     float>(EX_TYPECASTING_PARM);
             }
         }
-        else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r
-                && compute_type == rocblas_datatype_f32_r)
+        else if(a_type == rocblas_datatype_i8_r && b_type == rocblas_datatype_i8_r
+                && c_type == rocblas_datatype_i32_r && d_type == rocblas_datatype_i32_r
+                && compute_type == rocblas_datatype_i32_r)
         {
-            rb_status
-                = rocblas_internal_gemm_ex_typecasting_64<BATCHED, rocblas_half, float, float>(
-                    EX_TYPECASTING_PARM);
+            rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, int8_t, int32_t>(
+                EX_TYPECASTING_PARM);
         }
-    }
-    else if(a_type == rocblas_datatype_bf16_r && b_type == rocblas_datatype_bf16_r
-            && compute_type == rocblas_datatype_f32_r)
-    {
-        if(c_type == rocblas_datatype_bf16_r && d_type == rocblas_datatype_bf16_r)
+        else if(a_type == rocblas_datatype_f32_c && b_type == rocblas_datatype_f32_c
+                && c_type == rocblas_datatype_f32_c && d_type == rocblas_datatype_f32_c
+                && compute_type == rocblas_datatype_f32_c)
         {
             rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
-                                                                rocblas_bfloat16,
-                                                                rocblas_bfloat16,
-                                                                float>(EX_TYPECASTING_PARM);
+                                                                rocblas_float_complex,
+                                                                rocblas_float_complex,
+                                                                rocblas_float_complex>(
+                EX_TYPECASTING_PARM);
         }
-        else if(c_type == rocblas_datatype_f32_r && d_type == rocblas_datatype_f32_r)
+        else if(a_type == rocblas_datatype_f64_c && b_type == rocblas_datatype_f64_c
+                && c_type == rocblas_datatype_f64_c && d_type == rocblas_datatype_f64_c
+                && compute_type == rocblas_datatype_f64_c)
         {
-            rb_status
-                = rocblas_internal_gemm_ex_typecasting_64<BATCHED, rocblas_bfloat16, float, float>(
-                    EX_TYPECASTING_PARM);
+            rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
+                                                                rocblas_double_complex,
+                                                                rocblas_double_complex,
+                                                                rocblas_double_complex>(
+                EX_TYPECASTING_PARM);
         }
-    }
-    else if(a_type == rocblas_datatype_i8_r && b_type == rocblas_datatype_i8_r
-            && c_type == rocblas_datatype_i32_r && d_type == rocblas_datatype_i32_r
-            && compute_type == rocblas_datatype_i32_r)
-    {
-        rb_status = rocblas_internal_gemm_ex_typecasting_64<BATCHED, int8_t, int32_t>(
-            EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f32_c && b_type == rocblas_datatype_f32_c
-            && c_type == rocblas_datatype_f32_c && d_type == rocblas_datatype_f32_c
-            && compute_type == rocblas_datatype_f32_c)
-    {
-        rb_status
-            = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
-                                                      rocblas_float_complex,
-                                                      rocblas_float_complex,
-                                                      rocblas_float_complex>(EX_TYPECASTING_PARM);
-    }
-    else if(a_type == rocblas_datatype_f64_c && b_type == rocblas_datatype_f64_c
-            && c_type == rocblas_datatype_f64_c && d_type == rocblas_datatype_f64_c
-            && compute_type == rocblas_datatype_f64_c)
-    {
-        rb_status
-            = rocblas_internal_gemm_ex_typecasting_64<BATCHED,
-                                                      rocblas_double_complex,
-                                                      rocblas_double_complex,
-                                                      rocblas_double_complex>(EX_TYPECASTING_PARM);
-    }
-    else
-    {
-        rb_status = rocblas_status_not_implemented;
+        else
+        {
+            rb_status = rocblas_status_not_implemented;
+        }
     }
 
     return rb_status;
-
-#endif
 }
 
 #undef EX_TYPECASTING_PARM
