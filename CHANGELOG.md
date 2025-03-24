@@ -14,11 +14,16 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 ### Optimized
 
+* Decode session start latency reduction.
 * Bitstream type detection optimization in bitstream reader.
 
 ### Resolved issues
 
 * Fixed a bug in picture files sample "videoDecodePicFiles" that can results in incorrect output frame count.
+
+### Removed
+
+* GetStream() interface call from RocVideoDecoder utility class
 
 ## rocDecode 0.10.0 for ROCm 6.4
 
@@ -37,7 +42,6 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Removed
 
 * FFMPEG executable requirement for the package
-* GetStream() interface call from RocVideoDecoder utility class
 
 ## rocDecode 0.8.0 for ROCm 6.3
 
