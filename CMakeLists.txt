@@ -211,7 +211,7 @@ if(HIP_PLATFORM STREQUAL amd)
   rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocblas-static-dev >= ${rocblas_minimum}" "rocsolver-static-dev >= ${rocsolver_minimum}")
 endif( )
 
-set(hipblas_common_minimum 1.0.0)
+set(hipblas_common_minimum 1.1.0)
 if(BUILD_SHARED_LIBS)
   rocm_package_add_deb_dependencies(COMPONENT devel DEPENDS "hipblas-common-dev >= ${hipblas_common_minimum}")
   rocm_package_add_rpm_dependencies(COMPONENT devel DEPENDS "hipblas-common-devel >= ${hipblas_common_minimum}")
