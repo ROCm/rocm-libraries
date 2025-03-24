@@ -172,7 +172,9 @@ namespace rocsparse
 
                         // Load BSR block from row k into shared memory
                         sdata1[threadIdx.y][threadIdx.x]
-                            = bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)];
+                            = (threadIdx.x < block_dim && threadIdx.y < block_dim)
+                                  ? bsr_val[BSR_IND(k, threadIdx.x, threadIdx.y, dir)]
+                                  : static_cast<T>(0);
 
                         // Make sure all writes to shared memory are visible
                         __threadfence_block();
