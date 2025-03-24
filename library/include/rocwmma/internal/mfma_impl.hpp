@@ -1658,15 +1658,26 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<float8_t, float8_t, float32_t, 16u, 16u, 32u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1678,15 +1689,36 @@ namespace rocwmma
                            32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 32u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         template <typename GfxTarget>
@@ -1698,15 +1730,26 @@ namespace rocwmma
                            8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 8u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<float8_t, float8_t, float32_t, 32u, 32u, 16u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1718,15 +1761,36 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_32x32x16_fp8_fp8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         // bf8
@@ -1739,15 +1803,26 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<bfloat8_t, bfloat8_t, float32_t, 16u, 16u, 32u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1759,15 +1834,36 @@ namespace rocwmma
                            32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 32u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         template <typename GfxTarget>
@@ -1779,15 +1875,26 @@ namespace rocwmma
                            8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 8u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<bfloat8_t, bfloat8_t, float32_t, 32u, 32u, 16u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1799,15 +1906,36 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         // Mixed f8 / bf8
@@ -1820,15 +1948,26 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<float8_t, bfloat8_t, float32_t, 16u, 16u, 32u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1840,15 +1979,36 @@ namespace rocwmma
                            32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 32u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_16x16x32_fp8_bf8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         template <typename GfxTarget>
@@ -1860,15 +2020,26 @@ namespace rocwmma
                            8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 8u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<float8_t, bfloat8_t, float32_t, 32u, 32u, 16u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1880,15 +2051,36 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<float8_fnuz_t,
-                                 bfloat8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_32x32x16_fp8_bf8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         template <typename GfxTarget>
@@ -1900,15 +2092,26 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<bfloat8_t, float8_t, float32_t, 16u, 16u, 32u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1920,15 +2123,36 @@ namespace rocwmma
                            32u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 16u,
-                                 16u,
-                                 32u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x4;
+            using DRegsT = AccRegF32x4;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_16x16x32_bf8_fp8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         template <typename GfxTarget>
@@ -1940,15 +2164,26 @@ namespace rocwmma
                            8u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 8u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x1;
+            using BRegsT = VRegF32x1;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                // Pad with 0s
+                return amdgcn_mfma<bfloat8_t, float8_t, float32_t, 32u, 32u, 16u, GfxTarget>::exec(
+                    concat(regsA, ARegsT{0}),
+                    concat(regsB, BRegsT{0}),
+                    forward<CRegsT const&>(regsC));
+            }
         };
 
         template <typename GfxTarget>
@@ -1960,15 +2195,36 @@ namespace rocwmma
                            16u,
                            GfxTarget,
                            enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
-            : public amdgcn_mfma<bfloat8_fnuz_t,
-                                 float8_fnuz_t,
-                                 float32_t,
-                                 32u,
-                                 32u,
-                                 16u,
-                                 GfxTarget,
-                                 enable_gfx9_t<GfxTarget, (bool)ROCWMMA_ARCH_GFX950>>
         {
+            constexpr static MfmaCtrlFlags Cbsz = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Abid = MfmaCtrlFlags::DEFAULT;
+            constexpr static MfmaCtrlFlags Blgp = MfmaCtrlFlags::DEFAULT;
+
+            // Packed register types
+            using ARegsT = VRegF32x2;
+            using BRegsT = VRegF32x2;
+            using CRegsT = AccRegF32x16;
+            using DRegsT = AccRegF32x16;
+
+            ROCWMMA_DEVICE static inline auto
+                exec(ARegsT const& regsA, BRegsT const& regsB, CRegsT const& regsC) -> DRegsT
+            {
+                using TypeIn = VRegI64x1;
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsA)>),
+                              "Inconsistent data formats");
+                static_assert(sizeof(TypeIn) == sizeof(decay_t<decltype(regsB)>),
+                              "Inconsistent data formats");
+
+                DRegsT result;
+                result.data
+                    = {__builtin_amdgcn_mfma_f32_32x32x16_bf8_fp8(((TypeIn const&)(regsA)).data[0],
+                                                                  ((TypeIn const&)(regsB)).data[0],
+                                                                  regsC.data,
+                                                                  (int)Cbsz,
+                                                                  (int)Abid,
+                                                                  (int)Blgp)};
+                return result;
+            }
         };
 
         // xf32
