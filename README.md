@@ -59,6 +59,12 @@ custom install path by supplying it as an argument. For example:
 ../scripts/build_configs/ipc_single /path/to/install
 ```
 
+If you have built dependencies in a non-standard path (for example using instructions from [Building the Dependencies](#building-the-dependencies)), you may have to set the following variables to find the dependencies:
+
+```
+MPI_ROOT=/path/to/openmpi UCX_ROOT=/path/to/ucx CMAKE_PREFIX_PATH="/path/to/rocm:$CMAKE_PREFIX_PATH" ../script/build_configs/ipc_single /path/to/install
+```
+
 ## Compiling/Linking and Running with rocSHMEM
 
 rocSHMEM is built as a library that can be statically
@@ -168,7 +174,7 @@ However, it is not gauranteed to work and perform optimally on all platforms.
 Configuration options are platform dependent.
 
 ```
-./scripts/install_dependencies.sh
+BUILD_DIR=/path/to/not_rocshmem_src_or_build/dependencies /path/to/rocshmem_src/sripts/install_dependencies.sh
 ```
 
 For more information on OpenMPI-UCX support, please visit:
