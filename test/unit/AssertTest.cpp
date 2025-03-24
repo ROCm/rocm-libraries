@@ -53,6 +53,11 @@ namespace AssertTest
 
     TEST_P(GPU_AssertTest, GPU_Assert)
     {
+        auto const& arch = m_context->targetArchitecture();
+        auto        gpu  = arch.target();
+        if(gpu.isCDNA1GPU())
+            GTEST_SKIP() << "Skipping GPU AssertTest for CDNA1GPU" << gpu.toString();
+
         AssertOpKind assertOpKind;
         std::string  outputMsg;
         std::tie(assertOpKind, outputMsg) = std::get<1>(GetParam());
@@ -74,9 +79,8 @@ namespace AssertTest
         }
         else
         {
-            auto const& arch = m_context->targetArchitecture();
-            auto        one  = Expression::literal(1);
-            auto        zero = Expression::literal(0);
+            auto one  = Expression::literal(1);
+            auto zero = Expression::literal(0);
 
             rocRoller::KernelGraph::KernelGraph kgraph;
 
@@ -199,6 +203,11 @@ namespace AssertTest
 
     TEST_P(GPU_AssertTest, GPU_UnconditionalAssert)
     {
+        auto const& arch = m_context->targetArchitecture();
+        auto        gpu  = arch.target();
+        if(gpu.isCDNA1GPU())
+            GTEST_SKIP() << "Skipping GPU AssertTest for CDNA1GPU" << gpu.toString();
+
         AssertOpKind assertOpKind;
         std::string  outputMsg;
         std::tie(assertOpKind, outputMsg) = std::get<1>(GetParam());

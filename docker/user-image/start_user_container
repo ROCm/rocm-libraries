@@ -35,7 +35,6 @@ import argparse
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
     "gcc": "docker/dockerfile-ubuntu-gcc",
-    "trace": "docker/dockerfile-ubuntu-trace",
 }
 
 
