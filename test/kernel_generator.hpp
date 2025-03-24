@@ -270,8 +270,8 @@ namespace rocwmma
                 KernelGenerator<std::tuple<Next...>, GeneratorImpl>::generate(k);
             };
 
-            if constexpr(contains_type_v<float8_t, KernelParams>
-                         || contains_type_v<bfloat8_t, KernelParams>)
+            if constexpr(contains_type_v<float8_t,
+                                         KernelParams> || contains_type_v<bfloat8_t, KernelParams>)
             {
                 if constexpr(!(bool)ROCWMMA_FP8)
                 {
@@ -302,8 +302,9 @@ namespace rocwmma
                 gen_kernel(kernels);
                 next_kernel(kernels);
             }
-            else if constexpr(contains_type_v<float8_fnuz_t, KernelParams>
-                              || contains_type_v<bfloat8_fnuz_t, KernelParams>)
+            else if constexpr(contains_type_v<
+                                  float8_fnuz_t,
+                                  KernelParams> || contains_type_v<bfloat8_fnuz_t, KernelParams>)
             {
                 if constexpr(!(bool)ROCWMMA_FP8_FNUZ)
                 {
@@ -320,9 +321,7 @@ namespace rocwmma
                     // Only gfx94* devices support f8_fnuz
                     using DeviceInfo = HipDevice;
                     auto arch        = DeviceInfo::instance()->getGcnArch();
-                    if(arch != DeviceInfo::hipGcnArch_t::GFX940
-                       && arch != DeviceInfo::hipGcnArch_t::GFX941
-                       && arch != DeviceInfo::hipGcnArch_t::GFX942)
+                    if(arch != DeviceInfo::hipGcnArch_t::GFX942)
                     {
                         // Current KernelParams have f8_fnuz: skip kernel on host.
                         next_kernel(kernels);

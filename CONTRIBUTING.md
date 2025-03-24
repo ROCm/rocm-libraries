@@ -79,7 +79,7 @@ All new features and fixes should also tie into the rocWMMA [GitHub Issues](http
 Exceptions to these criteria will be handled on a case-by-case basis, and should be discussed via the Issues tab.
 
 ## Code Structure ##
-                                                                                          
+
 The organization of the rocWMMA library is explained in detail in the [Programmers Guide](https://github.com/ROCm/rocWMMA/blob/develop/docs/programmers-guide.rst)
 
 ## Coding Style ##
@@ -203,11 +203,11 @@ rocWMMA has a set of required deliverables for every pull request that are as fo
             - Native Data Types: int8, f16
             - Non-Native Data Types: h16, bf16
 
-		| *Only on gfx90a, gfx940, gfx941 & gfx942. |
-		|-------------------------------------------|
+		| *Only on gfx90a, gfx942 & gfx950. |
+		|-----------------------------------|
 
-		| **Only on gfx940, gfx941 & gfx942. |
-		|------------------------------------|
+		| **Only on gfx942, gfx950 and gfx12. |
+		|-------------------------------------|
 
     - Support for the other rocWMMA fragment parameters as described in ``library/include/rocwmma/rocwmma.hpp`` must also be maintained.
 

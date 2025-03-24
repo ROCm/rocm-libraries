@@ -125,10 +125,10 @@ namespace ROCWMMA_TYPE_TRAITS_IMPL_NAMESPACE
 // 1. Re-enable static assert
 // 2. Give ROCWMMA_FP8_FNUZ value of 1
 
-//static_assert((bool)ROCWMMA_ARCH_GFX94X || (bool)ROCWMMA_ARCH_HOST,
-//              "fp8_fnuz types only supported on gfx94X archs");
+//static_assert((bool)ROCWMMA_ARCH_GFX942 || (bool)ROCWMMA_ARCH_HOST,
+//              "fp8_fnuz types only supported on gfx942 arch");
 
-#define ROCWMMA_FP8_FNUZ (ROCWMMA_ARCH_GFX94X || ROCWMMA_ARCH_HOST)
+#define ROCWMMA_FP8_FNUZ (ROCWMMA_ARCH_GFX942 || ROCWMMA_ARCH_HOST)
 #define ROCWMMA_FP8_FNUZ_VISIBILITY ROCWMMA_HOST_DEVICE
 #else
 #define ROCWMMA_FP8_FNUZ 0

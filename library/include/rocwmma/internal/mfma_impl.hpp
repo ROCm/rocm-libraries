@@ -1793,7 +1793,7 @@ namespace rocwmma
             }
         };
 
-        // bf8_fnuz
+        // bf8
         template <typename GfxTarget>
         struct amdgcn_mfma<bfloat8_t,
                            bfloat8_t,
@@ -1938,7 +1938,7 @@ namespace rocwmma
             }
         };
 
-        // Mixed f8_fnuz / bf8_fnuz
+        // Mixed f8 / bf8
         template <typename GfxTarget>
         struct amdgcn_mfma<float8_t,
                            bfloat8_t,
