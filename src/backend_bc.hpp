@@ -278,7 +278,7 @@ class Backend {
    * rely on the normal inheritance mechanism to tailor behavior for
    * derived backend types.
    */
-  BackendType type{BackendType::GPU_IB_BACKEND};
+  BackendType type{BackendType::RO_BACKEND};
 
   /**
    * @brief Dumps derived class statistics.

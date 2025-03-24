@@ -145,12 +145,9 @@ def determine_algos_from_library_config_type(config):
     if config['algorithms']:
         return config
 
-    gpu_ib = re.match('^[rd]c_', config['library_build_config_type'])
     thread_single = re.match('.*single.*', config['library_build_config_type'])
 
-    if not gpu_ib:
-        config['algorithms'] = reverse_offload_algorithms
-    elif thread_single:
+    if thread_single:
         config['algorithms'] = single_thread_algorithms
     else:
         config['algorithms'] = multi_thread_algorithms

@@ -25,9 +25,7 @@
 
 #include "rocshmem_config.h"  // NOLINT(build/include_subdir)
 #include "backend_type.hpp"
-#ifdef USE_GPU_IB
-#include "gpu_ib/context_ib_host.hpp"
-#elif defined(USE_RO)
+#ifdef USE_RO
 #include "reverse_offload/context_ro_host.hpp"
 #else
 #include "ipc/context_ipc_host.hpp"

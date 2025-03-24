@@ -1,8 +1,6 @@
 #cmakedefine DEBUG
 #cmakedefine PROFILE
-#cmakedefine USE_GPU_IB
 #cmakedefine USE_RO
-#cmakedefine USE_DC
 #cmakedefine USE_IPC
 #cmakedefine USE_THREADS
 #cmakedefine USE_SHARED_CTX

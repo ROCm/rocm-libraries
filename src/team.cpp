@@ -36,10 +36,6 @@ __host__ __device__ Team* get_internal_team(rocshmem_team_t team) {
   return reinterpret_cast<Team*>(team);
 }
 
-GPUIBTeam* get_internal_gpu_ib_team(rocshmem_team_t team) {
-  return reinterpret_cast<GPUIBTeam*>(team);
-}
-
 ROTeam* get_internal_ro_team(rocshmem_team_t team) {
   return reinterpret_cast<ROTeam*>(team);
 }

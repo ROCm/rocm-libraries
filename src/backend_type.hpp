@@ -44,7 +44,7 @@ namespace rocshmem {
  * @note Derived classes which use Backend as a base class must add
  * themselves to this enum class to support static polymorphism.
  */
-enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
+enum class BackendType { RO_BACKEND, IPC_BACKEND };
 
 /**
  * @brief Helper macro for some dispatch calls
@@ -54,10 +54,7 @@ enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
 /**
  * @brief Device static dispatch method call.
  */
-#ifdef USE_GPU_IB
-#define DISPATCH(Func)                     \
-  static_cast<GPUIBContext *>(this)->Func;
-#elif defined(USE_RO)
+#ifdef USE_RO
 #define DISPATCH(Func)                     \
   static_cast<ROContext *>(this)->Func;
 #else
@@ -68,11 +65,7 @@ enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
 /**
  * @brief Device static dispatch method call with a return value.
  */
-#ifdef USE_GPU_IB
-#define DISPATCH_RET(Func)                           \
-  auto ret_val = static_cast<GPUIBContext *>(this)->Func; \
-  return ret_val;
-#elif defined(USE_RO)
+#ifdef USE_RO
 #define DISPATCH_RET(Func)                        \
   auto ret_val = static_cast<ROContext *>(this)->Func; \
   return ret_val;
@@ -85,12 +78,7 @@ enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
 /**
  * @brief Device static dispatch method call with a return type of pointer.
  */
-#ifdef USE_GPU_IB
-#define DISPATCH_RET_PTR(Func)                       \
-  void *ret_val{nullptr};                            \
-  ret_val = static_cast<GPUIBContext *>(this)->Func; \
-  return ret_val;
-#elif defined(USE_RO)
+#ifdef USE_RO
 #define DISPATCH_RET_PTR(Func)                    \
   void *ret_val{nullptr};                         \
   ret_val = static_cast<ROContext *>(this)->Func; \
@@ -109,9 +97,7 @@ enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
  * MPI_THREAD_MULTIPLE (for RMA and AMO operations) and the ordering and
  * threading semantics of collectives in OpenSHMEM match those of MPI.
  */
-#ifdef USE_GPU_IB
-#define HOST_DISPATCH(Func) static_cast<GPUIBHostContext *>(this)->Func;
-#elif defined(USE_RO)
+#ifdef USE_RO
 #define HOST_DISPATCH(Func) static_cast<ROHostContext *>(this)->Func;
 #else
 #define HOST_DISPATCH(Func) static_cast<IPCHostContext *>(this)->Func;
@@ -124,11 +110,7 @@ enum class BackendType { RO_BACKEND, GPU_IB_BACKEND, IPC_BACKEND };
  * threading semantics of collectives in OpenSHMEM match those of MPI.
  */
 
-#ifdef USE_GPU_IB
-#define HOST_DISPATCH_RET(Func)                          \
-  auto ret_val = static_cast<GPUIBHostContext *>(this)->Func; \
-  return ret_val;
-#elif defined(USE_RO)
+#ifdef USE_RO
 #define HOST_DISPATCH_RET(Func)                       \
   auto ret_val = static_cast<ROHostContext *>(this)->Func; \
   return ret_val;

@@ -39,9 +39,7 @@ endif()
 ###############################################################################
 option(DEBUG "Enable debug trace" OFF)
 option(PROFILE "Enable statistics and timing support" OFF)
-option(USE_GPU_IB "Enable GPU_IB conduit." ON)
 option(USE_RO "Enable RO conduit." ON)
-option(USE_DC "Enable IB dynamically connected transport (DC)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
@@ -158,10 +156,6 @@ if (NOT BUILD_TESTS_ONLY)
   find_package(hip REQUIRED)
   find_package(hsa-runtime64 REQUIRED)
 
-  if (USE_GPU_IB)
-    find_package(Ibverbs REQUIRED)
-  endif()
-
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
   set(THREADS_PREFER_PTHREAD_FLAG TRUE)
   find_package(Threads REQUIRED)
@@ -188,20 +182,6 @@ if (NOT BUILD_TESTS_ONLY)
       hip::host
       hsa-runtime64::hsa-runtime64
   )
-
-  if (USE_GPU_IB)
-    target_include_directories(
-      ${PROJECT_NAME}
-      PUBLIC
-        ${IBVERBS_INCLUDE_DIRS}
-    )
-
-    target_link_libraries(
-      ${PROJECT_NAME}
-      PUBLIC
-        ${IBVERBS_LIBRARIES}
-    )
-  endif()
 endif()
 
 ###############################################################################

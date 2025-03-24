@@ -29,14 +29,14 @@ namespace rocshmem {
 
 template <typename T>
 __host__ void ROHostContext::p(T *dest, T value, int pe) {
-  DPRINTF("Function: gpu_ib_host_p\n");
+  DPRINTF("Function: ro_host_p\n");
 
   host_interface->p<T>(dest, value, pe, context_window_info);
 }
 
 template <typename T>
 __host__ T ROHostContext::g(const T *source, int pe) {
-  DPRINTF("Function: gpu_ib_host_g\n");
+  DPRINTF("Function: ro_host_g\n");
 
   return host_interface->g<T>(source, pe, context_window_info);
 }
@@ -44,7 +44,7 @@ __host__ T ROHostContext::g(const T *source, int pe) {
 template <typename T>
 __host__ void ROHostContext::put(T *dest, const T *source, size_t nelems,
                                  int pe) {
-  DPRINTF("Function: gpu_ib_host_put\n");
+  DPRINTF("Function: ro_host_put\n");
 
   host_interface->put<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -52,7 +52,7 @@ __host__ void ROHostContext::put(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::get(T *dest, const T *source, size_t nelems,
                                  int pe) {
-  DPRINTF("Function: gpu_ib_host_get\n");
+  DPRINTF("Function: ro_host_get\n");
 
   host_interface->get<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -60,7 +60,7 @@ __host__ void ROHostContext::get(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::put_nbi(T *dest, const T *source, size_t nelems,
                                      int pe) {
-  DPRINTF("Function: gpu_ib_host_put_nbi\n");
+  DPRINTF("Function: ro_host_put_nbi\n");
 
   host_interface->put_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -68,7 +68,7 @@ __host__ void ROHostContext::put_nbi(T *dest, const T *source, size_t nelems,
 template <typename T>
 __host__ void ROHostContext::get_nbi(T *dest, const T *source, size_t nelems,
                                      int pe) {
-  DPRINTF("Function: gpu_ib_host_get_nbi\n");
+  DPRINTF("Function: ro_host_get_nbi\n");
 
   host_interface->get_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
@@ -107,7 +107,7 @@ __host__ void ROHostContext::broadcast(T *dest, const T *source, int nelems,
                                        int pe_root, int pe_start,
                                        int log_pe_stride, int pe_size,
                                        long *p_sync) {
-  DPRINTF("Function: gpu_ib_host_broadcast\n");
+  DPRINTF("Function: ro_host_broadcast\n");
 
   host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start,
                                log_pe_stride, pe_size, p_sync);

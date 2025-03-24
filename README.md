@@ -7,11 +7,11 @@ code complexity and enables more fine-grained communication/computation
 overlap than traditional host-driven networking.
 rocSHMEM uses a single symmetric heap (SHEAP) that is allocated on GPU memories.
 
-There are currently three backends for rocSHMEM;
-IPC, Reverse Offload (RO), and GPU-IB.
+There are currently two backends for rocSHMEM;
+IPC and Reverse Offload (RO).
 The backends primarily differ in their implementations of intra-kernel networking.
 Currently, only the IPC backend is supported.
-The RO and GPU-IB backends are provided as-is with
+The RO backend is provided as-is with
 no guarantees of support from AMD or AMD Research.
 
 The IPC backend implements communication primitives using load/store operations issued from the GPU.
@@ -20,10 +20,6 @@ The Reverse Offload (RO) backend has the GPU runtime forward rocSHMEM networking
 to the host-side runtime, which calls into a traditional MPI or OpenSHMEM
 implementation. This forwarding of requests is transparent to the
 programmer, who only sees the GPU-side interface.
-
-The GPU InfiniBand (GPU-IB) backend implements a lightweight InfiniBand verbs interface
-on the GPU. The GPU itself is responsible for building commands and ringing
-the doorbell on the NIC to send network commands.
 
 ## Requirements
 

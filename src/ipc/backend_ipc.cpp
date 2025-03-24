@@ -35,7 +35,7 @@ namespace rocshmem {
 
 extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
-rocshmem_team_t get_external_team(GPUIBTeam *team) {
+rocshmem_team_t get_external_team(IPCTeam *team) {
   return reinterpret_cast<rocshmem_team_t>(team);
 }
 
@@ -223,7 +223,7 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
    * Allocate device-side memory for team_world and
    * construct a IPC team in it
    */
-  GPUIBTeam *new_team_obj;
+  IPCTeam *new_team_obj;
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(IPCTeam)));
   new (new_team_obj)
       IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,

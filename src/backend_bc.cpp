@@ -25,9 +25,7 @@
 #include "backend_type.hpp"
 #include "context_incl.hpp"
 
-#ifdef USE_GPU_IB
-#include "gpu_ib/backend_ib.hpp"
-#elif defined(USE_RO)
+#ifdef USE_RO
 #include "reverse_offload/backend_ro.hpp"
 #else
 #include "ipc/backend_ipc.hpp"
@@ -203,9 +201,7 @@ void Backend::reset_stats() {
 }
 
 __device__ bool Backend::create_ctx(int64_t option, rocshmem_ctx_t* ctx) {
-#ifdef USE_GPU_IB
-  return static_cast<GPUIBBackend*>(this)->create_ctx(option, ctx);
-#elif defined(USE_RO)
+#ifdef USE_RO
   return static_cast<ROBackend*>(this)->create_ctx(option, ctx);
 #else
   return static_cast<IPCBackend*>(this)->create_ctx(option, ctx);
@@ -213,9 +209,7 @@ __device__ bool Backend::create_ctx(int64_t option, rocshmem_ctx_t* ctx) {
 }
 
 __device__ void Backend::destroy_ctx(rocshmem_ctx_t* ctx) {
-#ifdef USE_GPU_IB
-  static_cast<GPUIBBackend*>(this)->destroy_ctx(ctx);
-#elif defined(USE_RO)
+#ifdef USE_RO
   static_cast<ROBackend*>(this)->destroy_ctx(ctx);
 #else
   static_cast<IPCBackend*>(this)->destroy_ctx(ctx);

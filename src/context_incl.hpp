@@ -26,10 +26,7 @@
 #include "context.hpp"
 #include "context_tmpl_device.hpp"
 #include "context_tmpl_host.hpp"
-#ifdef USE_GPU_IB
-#include "gpu_ib/context_ib_device.hpp"
-#include "gpu_ib/context_ib_host.hpp"
-#elif defined (USE_RO)
+#ifdef USE_RO
 #include "reverse_offload/context_ro_device.hpp"
 #include "reverse_offload/context_ro_host.hpp"
 #else

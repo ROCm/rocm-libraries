@@ -298,4 +298,4 @@ class IPCContext : public Context {
 
 }  // namespace rocshmem
 
-#endif  // LIBRARY_SRC_GPU_IB_CONTEXT_IB_DEVICE_HPP_
+#endif // LIBRARY_SRC_IPC_CONTEXT_DEVICE_HPP_

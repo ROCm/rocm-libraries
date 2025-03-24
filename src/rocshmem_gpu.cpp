@@ -49,9 +49,7 @@
 #include "templates.hpp"
 #include "util.hpp"
 
-#ifdef USE_GPU_IB
-#include "gpu_ib/context_ib_tmpl_device.hpp"
-#elif defined(USE_RO)
+#ifdef USE_RO
 #include "reverse_offload/context_ro_tmpl_device.hpp"
 #else
 #include "ipc/context_ipc_tmpl_device.hpp"

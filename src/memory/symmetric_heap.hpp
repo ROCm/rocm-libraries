@@ -35,7 +35,7 @@
  * both host access and device access to the memory space.
  *
  * The symmetric heaps are visible to network by registering them as
- * InfiniBand memory regions. Every memory region has a remote key
+ * memory regions. Every memory region has a remote key
  * which needs to be shared across the network (to access the memory
  * region).
  */
