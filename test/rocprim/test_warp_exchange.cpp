@@ -137,7 +137,7 @@ auto warp_exchange_test(T* d_input, T* d_output)
     -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     using warp_exchange_type         = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    constexpr unsigned int num_warps = ::rocprim::device_warp_size() / LogicalWarpSize;
+    constexpr unsigned int num_warps = ::rocprim::arch::wavefront::min_size() / LogicalWarpSize;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
 
     T thread_data[ItemsPerThread];
@@ -167,7 +167,7 @@ auto warp_exchange_test_not_inplace(T* d_input, T* d_output)
     -> std::enable_if_t<common::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     using warp_exchange_type         = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
-    constexpr unsigned int num_warps = ::rocprim::device_warp_size() / LogicalWarpSize;
+    constexpr unsigned int num_warps = ::rocprim::arch::wavefront::min_size() / LogicalWarpSize;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
 
     T thread_data[ItemsPerThread];
@@ -337,7 +337,7 @@ auto warp_exchange_scatter_test(T* d_input, T* d_output, OffsetT* d_ranks)
 {
     using warp_exchange_type = ::rocprim::warp_exchange<T, ItemsPerThread, LogicalWarpSize>;
 
-    constexpr unsigned int num_warps = ::rocprim::device_warp_size() / LogicalWarpSize;
+    constexpr unsigned int num_warps = ::rocprim::arch::wavefront::min_size() / LogicalWarpSize;
     ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[num_warps];
 
     T thread_data[ItemsPerThread];

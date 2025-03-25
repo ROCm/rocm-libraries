@@ -32,6 +32,8 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ### Upcoming changes
 
+* The next major release may change the template parameters of warp and block algorithms.
+
 * The default scan accumulator types for device-level scan algorithms will be changed. This is a breaking change.
 
 Previously, the default accumulator type was set to the input type for inclusive scans and to the initial value type for exclusive scans. These default types could cause unexpected overflow in situations where the input or initial type is smaller than the output type when the user doesn't explicitly set an accumulator type using the `AccType` template parameter.
@@ -55,6 +57,13 @@ The following is the complete list of affected functions and how their default a
 ### Deprecations
 
 * `rocprim::load_cs` and `rocprim::store_cs` are deprecated. Use `rocprim::load_nontemporal` and `rocprim::store_nontemporal` now.
+
+* Due to an upcoming compiler change the following warp size-related symbols will be removed in the next major release and are thus marked as deprecated:
+  * `rocprim::device_warp_size()`
+    * For compile-time constants, this is replaced with `rocprim::arch::wavefront::min_size()` and `rocprim::arch::wavefront::max_size()`. Use this when allocating global or shared memory.
+    * For run-time constants, this is replaced with `rocprim::arch::wavefront::size().`
+  * `rocprim::warp_size()`
+  * `ROCPRIM_WAVEFRONT_SIZE`
 
 ## rocPRIM 3.4.0 for ROCm 6.4.0
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "../../intrinsics.hpp"
 
 #include "../../warp/warp_reduce.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -110,7 +111,7 @@ class block_reduce_raking_reduce
     // Warp reduce, warp_reduce_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
     static constexpr unsigned int warp_size_
-        = detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
 
     static constexpr unsigned int segment_len = ceiling_div(BlockSize, warp_size_);
 

@@ -115,18 +115,16 @@ enum class warp_store_method
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class T,
-    unsigned int ItemsPerThread,
-    unsigned int WarpSize = ::rocprim::device_warp_size(),
-    warp_store_method Method = warp_store_method::warp_store_direct
->
+template<class T,
+         unsigned int      ItemsPerThread,
+         unsigned int      WarpSize = ::rocprim::arch::wavefront::min_size(),
+         warp_store_method Method   = warp_store_method::warp_store_direct>
 class warp_store
 {
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::device_warp_size(),
+        WarpSize <= ::rocprim::arch::wavefront::min_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
 private:
@@ -223,7 +221,7 @@ class warp_store<T, ItemsPerThread, WarpSize, warp_store_method::warp_store_stri
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::device_warp_size(),
+        WarpSize <= ::rocprim::arch::wavefront::min_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
 public:
@@ -269,7 +267,7 @@ class warp_store<T, ItemsPerThread, WarpSize, warp_store_method::warp_store_vect
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::device_warp_size(),
+        WarpSize <= ::rocprim::arch::wavefront::min_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
 public:
@@ -324,7 +322,7 @@ class warp_store<T, ItemsPerThread, WarpSize, warp_store_method::warp_store_tran
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::device_warp_size(),
+        WarpSize <= ::rocprim::arch::wavefront::min_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
 private:

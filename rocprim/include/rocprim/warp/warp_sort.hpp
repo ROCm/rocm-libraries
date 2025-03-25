@@ -47,7 +47,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \par Overview
 /// * \p WarpSize must be power of two.
 /// * \p WarpSize must be equal to or less than the size of hardware warp (see
-/// rocprim::device_warp_size()). If it is less, sort is performed separately within groups
+/// rocprim::arch::wavefront::min_size()). If it is less, sort is performed separately within groups
 /// determined by WarpSize.
 /// For example, if \p WarpSize is 4, hardware warp is 64, sort will be performed in logical
 /// warps grouped like this: `{ {0, 1, 2, 3}, {4, 5, 6, 7 }, ..., {60, 61, 62, 63} }`
@@ -100,11 +100,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class Key,
-    unsigned int WarpSize = device_warp_size(),
-    class Value = empty_type
->
+template<class Key, unsigned int WarpSize = arch::wavefront::min_size(), class Value = empty_type>
 class warp_sort : detail::warp_sort_shuffle<Key, WarpSize, Value>
 {
     using base_type = typename detail::warp_sort_shuffle<Key, WarpSize, Value>;
@@ -137,7 +133,7 @@ public:
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key& thread_key, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(thread_key, compare_function);
     }
@@ -147,7 +143,7 @@ public:
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
@@ -171,7 +167,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(thread_keys, compare_function);
     }
@@ -184,7 +180,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)thread_keys; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
@@ -226,7 +222,7 @@ public:
     auto sort(Key&           thread_key,
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_key, storage, compare_function
@@ -238,7 +234,7 @@ public:
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key&, storage_type&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
@@ -281,7 +277,7 @@ public:
     auto sort(Key (&thread_keys)[ItemsPerThread],
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_keys, storage, compare_function
@@ -297,7 +293,7 @@ public:
     auto sort(Key (&thread_keys)[ItemsPerThread],
               storage_type&,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)thread_keys; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
@@ -322,7 +318,7 @@ public:
     auto sort(Key&           thread_key,
               Value&         thread_value,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_key, thread_value, compare_function
@@ -334,7 +330,7 @@ public:
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key&, Value&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
@@ -360,7 +356,7 @@ public:
     auto sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_keys, thread_values, compare_function
@@ -376,7 +372,7 @@ public:
     auto sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)thread_keys; // disables unused parameter warning
         (void)thread_values; // disables unused parameter warning
@@ -421,7 +417,7 @@ public:
               Value&         thread_value,
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_key, thread_value, storage, compare_function
@@ -433,7 +429,7 @@ public:
     template<class BinaryFunction = ::rocprim::less<Key>, unsigned int FunctionWarpSize = WarpSize>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     auto sort(Key&, Value&, storage_type&, BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
         ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
@@ -478,7 +474,7 @@ public:
               Value (&thread_values)[ItemsPerThread],
               storage_type&  storage,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize <= device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize <= arch::wavefront::min_size()), void>::type
     {
         base_type::sort(
             thread_keys, thread_values, storage, compare_function
@@ -495,7 +491,7 @@ public:
               Value (&thread_values)[ItemsPerThread],
               storage_type&,
               BinaryFunction compare_function = BinaryFunction()) ->
-        typename std::enable_if<(FunctionWarpSize > device_warp_size()), void>::type
+        typename std::enable_if<(FunctionWarpSize > arch::wavefront::min_size()), void>::type
     {
         (void)thread_keys; // disables unused parameter warning
         (void)thread_values; // disables unused parameter warning

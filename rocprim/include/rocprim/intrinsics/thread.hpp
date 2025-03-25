@@ -25,6 +25,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -33,14 +34,15 @@ BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
-/// \brief [DEPRECATED] Returns a number of threads in a hardware warp.
+/// \brief Returns a number of threads in a hardware warp.
 ///
 /// It is constant for a device.
-/// This function is not supported for gfx1030 and newer architectures and will be removed in a future release.
-/// Please use the new host_warp_size() and device_warp_size() functions.
-[[deprecated("Use host_warp_size() or device_warp_size() "
-             "instead.")]] ROCPRIM_HOST_DEVICE inline constexpr unsigned int
-    warp_size()
+///
+/// \warning This function will be removed in a future release.
+[[deprecated(
+    "Use the functions provided in 'rocprim::arch::wavefront' instead.")]]
+ROCPRIM_HOST_DEVICE
+inline constexpr unsigned int warp_size()
 {
     return ROCPRIM_WAVEFRONT_SIZE;
 }
@@ -49,6 +51,10 @@ BEGIN_ROCPRIM_NAMESPACE
 /// At device side this constant is available at compile time.
 ///
 /// It is constant for a device.
+///
+/// \warning This function will be removed in a future release.
+[[deprecated("Use the functions provided in 'rocprim::arch::wavefront' "
+             "instead.")]]
 ROCPRIM_DEVICE ROCPRIM_INLINE
 constexpr unsigned int device_warp_size()
 {
@@ -128,7 +134,7 @@ unsigned int flat_tile_thread_id()
 ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int warp_id()
 {
-    return flat_block_thread_id()/device_warp_size();
+    return flat_block_thread_id() / arch::wavefront::size();
 }
 
 /// \brief Returns warp id in a block (tile), given the flat (linear, 1D) thread identifier in a multidimensional tile (block).
@@ -136,7 +142,7 @@ unsigned int warp_id()
 ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int warp_id(unsigned int flat_id)
 {
-    return flat_id/device_warp_size();
+    return flat_id / arch::wavefront::size();
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -146,7 +152,7 @@ template<unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSiz
 ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int warp_id()
 {
-    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>()/device_warp_size();
+    return flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>() / arch::wavefront::size();
 }
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
@@ -301,7 +307,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_lane_id<device_warp_size()>()
+    unsigned int logical_lane_id<arch::wavefront::min_size()>()
     {
         return lane_id();
     }
@@ -316,7 +322,7 @@ namespace detail
 
     template<>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int logical_warp_id<device_warp_size()>()
+    unsigned int logical_warp_id<arch::wavefront::min_size()>()
     {
         return warp_id();
     }

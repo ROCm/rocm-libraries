@@ -32,6 +32,7 @@
 #include "../../thread/thread_scan.hpp"
 #include "../../type_traits.hpp"
 #include "../../warp/warp_scan.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -155,13 +156,13 @@ struct discontinuity_helper
 /// Custom warp_exchange class with extra check in scatter_to_striped for out-of-bound accesses.
 template<class T,
          unsigned int ItemsPerThread,
-         unsigned int WarpSize = ::rocprim::device_warp_size()>
+         unsigned int WarpSize = ::rocprim::arch::wavefront::min_size()>
 class custom_warp_exchange
 {
     static_assert(::rocprim::detail::is_power_of_two(WarpSize),
                   "Logical warp size must be a power of two.");
     ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
-        WarpSize <= ::rocprim::device_warp_size(),
+        WarpSize <= ::rocprim::arch::wavefront::min_size(),
         "Logical warp size cannot be larger than physical warp size.");
 
     static constexpr unsigned int warp_items = WarpSize * ItemsPerThread;
@@ -432,7 +433,7 @@ private:
 
     // Warp size.
     static constexpr unsigned int warp_size
-        = detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
     // Number of warps in block.
     static constexpr unsigned int warps_no = (BlockSize + warp_size - 1) / warp_size;
 

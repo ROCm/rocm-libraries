@@ -29,8 +29,9 @@
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 
-#include "detail/block_scan_warp_scan.hpp"
 #include "detail/block_scan_reduce_then_scan.hpp"
+#include "detail/block_scan_warp_scan.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -70,10 +71,9 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
     // When BlockSize is less than hardware warp size block_scan_warp_scan performs better than
     // block_scan_reduce_then_scan by specializing for warps
     using type = typename std::conditional<
-                    (BlockSizeX * BlockSizeY * BlockSizeZ <= ::rocprim::device_warp_size()),
-                    block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>,
-                    block_scan_reduce_then_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>
-                 >::type;
+        (BlockSizeX * BlockSizeY * BlockSizeZ <= ::rocprim::arch::wavefront::min_size()),
+        block_scan_warp_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>,
+        block_scan_reduce_then_scan<T, BlockSizeX, BlockSizeY, BlockSizeZ>>::type;
 };
 
 } // end namespace detail
@@ -96,7 +96,7 @@ struct select_block_scan_impl<block_scan_algorithm::reduce_then_scan>
 ///   * \p ItemsPerThread is greater than one,
 ///   * \p T is an arithmetic type,
 ///   * scan operation is simple addition operator, and
-///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::device_warp_size()).
+///   * the number of threads in the block is a multiple of the hardware warp size (see \p rocprim::arch::wavefront::min_size() ).
 /// * block_scan has two alternative implementations: \p block_scan_algorithm::using_warp_scan
 ///   and block_scan_algorithm::reduce_then_scan.
 ///

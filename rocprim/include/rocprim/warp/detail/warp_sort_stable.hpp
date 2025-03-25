@@ -122,7 +122,7 @@ private:
         const auto lane = lane_id();
         const auto warp = warp_id();
 
-        const auto warp_offset     = warp * ItemsPerThread * device_warp_size();
+        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::min_size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
         const auto shared_keys     = &storage.keys[warp_offset];
 
@@ -181,7 +181,7 @@ private:
         const auto lane = lane_id();
         const auto warp = warp_id();
 
-        const auto warp_offset     = warp * ItemsPerThread * device_warp_size();
+        const auto warp_offset     = warp * ItemsPerThread * arch::wavefront::min_size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
         const auto shared_keys     = &storage.keys[warp_offset];
         const auto shared_values   = &storage.values[warp_offset];
@@ -477,7 +477,7 @@ public:
     {
         (void)storage;
 
-        const auto warp_offset     = warp_id() * device_warp_size();
+        const auto warp_offset     = warp_id() * arch::wavefront::min_size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
 
         ROCPRIM_UNROLL
@@ -562,7 +562,7 @@ public:
     {
         (void)storage;
 
-        const auto warp_offset     = warp_id() * device_warp_size();
+        const auto warp_offset     = warp_id() * arch::wavefront::min_size();
         const auto warp_input_size = warp_offset > input_size ? 0 : input_size - warp_offset;
 
         ROCPRIM_UNROLL

@@ -198,8 +198,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
     using vector_type                      = uint4;
     constexpr uint32_t ints_in_vector_type = sizeof(uint4) / sizeof(uint32_t);
 
-    constexpr auto warp_size = rocprim::device_warp_size();
-    const auto     rank      = rocprim::detail::block_thread_id<0>() % warp_size;
+    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
+    const auto     rank      = ::rocprim::detail::block_thread_id<0>() % warp_size;
 
     const uint8_t* src = reinterpret_cast<const uint8_t*>(input_buffer) + offset;
     uint8_t*       dst = reinterpret_cast<uint8_t*>(output_buffer) + offset;
@@ -315,7 +315,7 @@ template<bool IsMemCpy,
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     copy_items(InputIt input_buffer, OutputIt output_buffer, Offset num_items, Offset offset = 0)
 {
-    constexpr auto warp_size = rocprim::device_warp_size();
+    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
     output_buffer += offset;
     input_buffer += offset;
     for(Offset i = threadIdx.x % warp_size; i < num_items; i += warp_size)
@@ -614,7 +614,7 @@ private:
         {
             const uint32_t warp_id = rocprim::warp_id();
             const uint32_t warps_per_block
-                = rocprim::flat_block_size() / rocprim::device_warp_size();
+                = rocprim::flat_block_size() / ::rocprim::arch::wavefront::min_size();
 
             for(buffer_offset_type buffer_offset = warp_id; buffer_offset < num_wlev_buffers;
                 buffer_offset += warps_per_block)

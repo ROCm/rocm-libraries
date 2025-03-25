@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,9 @@ namespace detail
 
 // Returns logical warp id of the last thread in thread's segment
 template<bool HeadSegmented, unsigned int WarpSize, class Flag>
-ROCPRIM_DEVICE ROCPRIM_INLINE auto last_in_warp_segment(Flag flag) ->
-    typename std::enable_if<(WarpSize <= device_warp_size()), unsigned int>::type
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto last_in_warp_segment(Flag flag) ->
+    typename std::enable_if<(WarpSize <= arch::wavefront::min_size()), unsigned int>::type
 {
     // Get flags (now every thread know where the flags are)
     lane_mask_type warp_flags = ::rocprim::ballot(flag);
