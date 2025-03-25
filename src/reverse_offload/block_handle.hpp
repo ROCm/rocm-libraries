@@ -83,7 +83,7 @@ class DefaultBlockHandleProxy {
   ProxyT proxy_{};
 };
 
-using DefaultBlockHandleProxyT = DefaultBlockHandleProxy<HIPAllocator>;
+using DefaultBlockHandleProxyT = DefaultBlockHandleProxy<HIPDefaultFinegrainedAllocator>;
 
 template <typename ALLOCATOR>
 class BlockHandleProxy {
@@ -130,7 +130,7 @@ class BlockHandleProxy {
   size_t num_blocks_{};
 };
 
-using BlockHandleProxyT = BlockHandleProxy<HIPAllocator>;
+using BlockHandleProxyT = BlockHandleProxy<HIPDefaultFinegrainedAllocator>;
 
 }  // namespace rocshmem
 

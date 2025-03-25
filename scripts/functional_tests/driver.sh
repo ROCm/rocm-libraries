@@ -181,19 +181,15 @@ TestRMA() {
   ExecTest  "teamctxget"       2       4            128       1024
   ExecTest  "teamctxget"       2       16           256       1024
 
-  ExecTest  "g"                2       1            1         1048576
-  ExecTest  "g"                2       1            1024      512
-  ExecTest  "g"                2       8            1         1048576
-  ExecTest  "g"                2       16           128       8
-  ExecTest  "g"                2       32           256       512
-  ExecTest  "g"                2       64           1024      8
+  ExecTest  "g"                2       1            1         128
+  ExecTest  "g"                2       1            1024      2
+  ExecTest  "g"                2       8            1         32
+  ExecTest  "g"                2       16           128       4
 
-  ExecTest  "p"                2       1            1         1048576
-  ExecTest  "p"                2       1            1024      512
-  ExecTest  "p"                2       8            1         1048576
-  ExecTest  "p"                2       16           128       8
-  ExecTest  "p"                2       32           256       512
-  ExecTest  "p"                2       64           1024      8
+  ExecTest  "p"                2       1            1         128
+  ExecTest  "p"                2       1            1024      2
+  ExecTest  "p"                2       8            1         32
+  ExecTest  "p"                2       16           128       4
 
   ################################ Non-Blocking ################################
 

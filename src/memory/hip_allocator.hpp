@@ -37,7 +37,8 @@
 #include "memory_allocator.hpp"
 
 // `hipDeviceMallocUncached` was introduced at ROCm 5.5
-#if HIP_VERSION_MAJOR >= 5 && HIP_VERSION_MINOR >= 5
+#if (HIP_VERSION_MAJOR > 5) || \
+    (HIP_VERSION_MAJOR == 5 && HIP_VERSION_MINOR >= 5)
 #define HIP_SUPPORTS_MALLOC_UNCACHED
 #endif
 namespace rocshmem {
