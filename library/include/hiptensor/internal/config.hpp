@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,18 +34,12 @@ namespace hiptensor
 /// Guaranteed symbols:
 /// HIPTENSOR_ARCH_GFX908
 /// HIPTENSOR_ARCH_GFX90a
-/// HIPTENSOR_ARCH_GFX940
-/// HIPTENSOR_ARCH_GFX941
 /// HIPTENSOR_ARCH_GFX942
 /// HIPTENSOR_ARCH_GFX950
 #if defined(__gfx908__)
 #define HIPTENSOR_ARCH_GFX908 __gfx908__
 #elif defined(__gfx90a__)
 #define HIPTENSOR_ARCH_GFX90A __gfx90a__
-#elif defined(__gfx940__)
-#define HIPTENSOR_ARCH_GFX940 __gfx940__
-#elif defined(__gfx941__)
-#define HIPTENSOR_ARCH_GFX941 __gfx941__
 #elif defined(__gfx942__)
 #define HIPTENSOR_ARCH_GFX942 __gfx942__
 #elif defined(__gfx950__)
@@ -59,12 +53,6 @@ namespace hiptensor
 #endif
 #if !defined(HIPTENSOR_ARCH_GFX90A)
 #define HIPTENSOR_ARCH_GFX90A 0
-#endif
-#if !defined(HIPTENSOR_ARCH_GFX940)
-#define HIPTENSOR_ARCH_GFX940 0
-#endif
-#if !defined(HIPTENSOR_ARCH_GFX941)
-#define HIPTENSOR_ARCH_GFX941 0
 #endif
 #if !defined(HIPTENSOR_ARCH_GFX942)
 #define HIPTENSOR_ARCH_GFX942 0

@@ -38,8 +38,6 @@ namespace hiptensor
         {
             GFX908           = 0x908,
             GFX90A           = 0x90A,
-            GFX940           = 0x940,
-            GFX941           = 0x941,
             GFX942           = 0x942,
             GFX950           = 0x950,
             UNSUPPORTED_ARCH = 0x0,

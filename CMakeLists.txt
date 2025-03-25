@@ -195,7 +195,7 @@ if(HIPTENSOR_BUILD_SAMPLES)
 endif()
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "1.5.0" )
+set ( VERSION_STRING "1.6.0" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source

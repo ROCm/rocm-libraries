@@ -18,15 +18,13 @@ List of supported CDNA architectures:
 
 * gfx908
 * gfx90a
-* gfx940
-* gfx941
 * gfx942
 * gfx950
 
 .. note::
-    gfx9 = gfx908, gfx90a, gfx940, gfx941, gfx942, gfx950
+    gfx9 = gfx908, gfx90a, gfx942, gfx950
 
-    gfx940+ = gfx940, gfx941, gfx942, gfx950
+    gfx942+ = gfx942, gfx950
 
 
 Supported data types
@@ -60,7 +58,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 +=====================+==============================+=====================+=====================+
 |                     |     f16 / f16 / f32          |  gfx908             | 2m2n2k (Rank4)      |
 | Contraction         +------------------------------+  gfx90a             |                     |
-| (Scale, bilinear)   |     bf16 / bf16 / f32        |  gfx940+            | 3m3n3k (Rank6)      |
+| (Scale, bilinear)   |     bf16 / bf16 / f32        |  gfx942+            | 3m3n3k (Rank6)      |
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     | 4m4n4k (Rank8)      |
 |                     +------------------------------+                     |                     |
@@ -70,7 +68,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     cf32 / cf32 / cf32       |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx940+            |                     |
+|                     |     f64 / f64 / f64          |  gfx942+            |                     |
 |                     +------------------------------+                     |                     |
 |                     |     f64 / f64 / f32          |                     |                     |
 |                     +------------------------------+                     |                     |
@@ -78,13 +76,13 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / \-           |  gfx908             | Rank2 - Rank6       |
 | Permutation         +------------------------------+  gfx90a             |                     |
-|                     |     f16 / f32 / \-           |  gfx940+            |                     |
+|                     |     f16 / f32 / \-           |  gfx942+            |                     |
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / \-           |                     |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 |                     |     f16 / f16 / f16          |  gfx908             | Rank2 - Rank6       |
 | Reduction           +------------------------------+  gfx90a             |                     |
-|                     |     f16 / f16 / f32          |  gfx940+            |                     |
+|                     |     f16 / f16 / f32          |  gfx942+            |                     |
 |                     +------------------------------+                     |                     |
 |                     |     bf16 / bf16 / bf16       |                     |                     |
 |                     +------------------------------+                     |                     |
@@ -92,7 +90,7 @@ Data Types **<Ti / To / Tc>** = <Input type / Output Type / Compute Type>, where
 |                     +------------------------------+                     |                     |
 |                     |     f32 / f32 / f32          |                     |                     |
 |                     +------------------------------+---------------------+                     |
-|                     |     f64 / f64 / f64          |  gfx940+            |                     |
+|                     |     f64 / f64 / f64          |  gfx942+            |                     |
 +---------------------+------------------------------+---------------------+---------------------+
 
 Limitations
@@ -221,6 +219,24 @@ hiptensorContractionGetWorkspaceSize
 ------------------------------------
 
 .. doxygenfunction::  hiptensorContractionGetWorkspaceSize
+
+Element-wise operations
+=======================
+
+hiptensorPermutation
+----------------------------------
+
+.. doxygenfunction:: hiptensorPermutation
+
+hiptensorElementwiseBinary
+----------------------------------
+
+.. doxygenfunction:: hiptensorElementwiseBinary
+
+hiptensorElementwiseTrinary
+----------------------------------
+
+.. doxygenfunction:: hiptensorElementwiseTrinary
 
 Reduction operations
 ======================

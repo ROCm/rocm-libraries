@@ -123,8 +123,6 @@ inline bool isF32Supported()
 
     return (deviceName.find("gfx908") != std::string::npos)
            || (deviceName.find("gfx90a") != std::string::npos)
-           || (deviceName.find("gfx940") != std::string::npos)
-           || (deviceName.find("gfx941") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos);
 }
@@ -140,8 +138,6 @@ inline bool isF64Supported()
     std::string deviceName(mProps.gcnArchName);
 
     return (deviceName.find("gfx90a") != std::string::npos)
-           || (deviceName.find("gfx940") != std::string::npos)
-           || (deviceName.find("gfx941") != std::string::npos)
            || (deviceName.find("gfx942") != std::string::npos)
            || (deviceName.find("gfx950") != std::string::npos);
 }
