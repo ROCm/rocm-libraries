@@ -367,6 +367,7 @@ NV_IF_TARGET(
                (auto const __step = __ns.count(); assert(__step < numeric_limits<unsigned>::max());
                 asm volatile("nanosleep.u32 %0;" ::"r"((unsigned) __step)
                              :);))
+#endif
 }
 
 #    elif defined(_LIBCUDACXX_HAS_THREAD_API_PTHREAD)
