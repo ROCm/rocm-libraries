@@ -154,7 +154,7 @@ public:
   /**
    * \brief Synchronizes the wrapped stream.
    *
-   * \throws hip::hip_error if synchronization fails.
+   * \throws hip::cuda_error if synchronization fails.
    *
    */
   void wait() const
@@ -165,7 +165,7 @@ public:
   /**
    * \brief Queries if all operations on the wrapped stream have completed.
    *
-   * \throws hip::hip_error if the query fails.
+   * \throws hip::cuda_error if the query fails.
    *
    * \return `true` if all operations have completed, or `false` if not.
    */
@@ -182,7 +182,7 @@ public:
         break;
       default:
         (void)::hipGetLastError(); // Clear CUDA error state
-        ::hip::__throw_hip_error(__result, "Failed to query stream."); // TODO(HIP/AMD): check if exists otherwise throw hip::hip_error{__result, "Failed to query stream."};
+        throw ::hip::__throw_cuda_error(__result, "Failed to query stream.");
     }
     return true;
   }
@@ -190,7 +190,7 @@ public:
   /**
    * \brief Queries the priority of the wrapped stream.
    *
-   * \throws hip::hip_error if the query fails.
+   * \throws hip::cuda_error if the query fails.
    *
    * \return value representing the priority of the wrapped stream.
    */
