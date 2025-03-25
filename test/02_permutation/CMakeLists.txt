@@ -65,7 +65,7 @@ add_hiptensor_test(rank2_elementwise_binary_op_test ${ElementwiseBinaryOpRank2Te
 set (ElementwiseTrinaryOpRank2TestSources ${ElementwiseTrinaryOpCommonSources}
      ${CMAKE_CURRENT_SOURCE_DIR}/rank2_elementwise_trinary_op_test.cpp)
 set (ElementwiseTrinaryOpRank2TestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/trinary_op/rank2_trinary_op_test_params.yaml)
-# add_hiptensor_test(rank2_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank2TestConfig}  ${ElementwiseTrinaryOpRank2TestSources})
+add_hiptensor_test(rank2_elementwise_trinary_op_test ${ElementwiseTrinaryOpRank2TestConfig}  ${ElementwiseTrinaryOpRank2TestSources})
 
 # Rank 3 tests
 set (PermutationRank3TestSources ${PermutationCommonSources}
