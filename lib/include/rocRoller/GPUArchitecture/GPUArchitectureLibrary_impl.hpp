@@ -73,7 +73,7 @@ namespace rocRoller
 
         std::vector<GPUArchitectureTarget> result;
 
-        for(auto target : m_gpuArchitectures)
+        for(auto const& target : m_gpuArchitectures)
         {
             //cppcheck-suppress useStlAlgorithm
             result.push_back(target.first);
@@ -88,7 +88,7 @@ namespace rocRoller
 
         std::vector<GPUArchitectureTarget> result;
 
-        for(auto target : m_gpuArchitectures)
+        for(auto const& target : m_gpuArchitectures)
         {
             if(target.second.HasCapability(GPUCapability::HasMFMA))
                 result.push_back(target.first);
@@ -103,7 +103,7 @@ namespace rocRoller
 
         std::vector<GPUArchitectureTarget> result;
 
-        for(auto target : m_gpuArchitectures)
+        for(auto const& target : m_gpuArchitectures)
         {
             if(target.second.HasCapability(GPUCapability::HasWMMA))
                 result.push_back(target.first);
@@ -117,7 +117,7 @@ namespace rocRoller
         TIMER(t, "GPUArchitectureLibrary::getCDNAISAs");
         std::vector<GPUArchitectureTarget> result;
 
-        for(auto target : m_gpuArchitectures)
+        for(auto const& target : m_gpuArchitectures)
         {
             if((target.first).isCDNAGPU())
                 result.push_back(target.first);

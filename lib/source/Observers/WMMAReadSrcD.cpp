@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,50 +24,51 @@
  *
  *******************************************************************************/
 
-#pragma once
-
-#include <rocRoller/Scheduling/Observers/WaitState/WaitStateObserver.hpp>
+#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAReadSrcD.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
-        /**
-         * @brief 102X rules for WMMA Write Hazards.
-         *
-         * | Arch  | 1st Inst | 2nd Inst            | NOPs |
-         * | ----- | -------- | ------------------- | ---- |
-         * | 120x  | v_wmma*  | v_wmma* read SrcA/B | 1    |
-         *
-         */
-        class WMMAWrite : public WaitStateObserver<WMMAWrite>
+        void WMMAReadSrcD::observeHazard(Instruction const& inst)
         {
-        public:
-            WMMAWrite() {}
-            WMMAWrite(ContextPtr context)
-                : WaitStateObserver<WMMAWrite>(context){};
-
-            constexpr static bool required(const GPUArchitectureTarget& target)
+            if(trigger(inst))
             {
-                return target.isRDNA4GPU();
-            }
+                auto dstD = inst.getDsts().at(0);
+                AssertFatal(dstD != nullptr, "Empty DstD");
 
-            int                   getMaxNops(const Instruction& inst) const;
-            bool                  trigger(const Instruction& inst) const;
-            static constexpr bool writeTrigger()
-            {
-                return true;
+                for(auto const& regId : dstD->getRegisterIds())
+                {
+                    (*m_hazardMap)[regId].push_back(
+                        WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
+                }
             }
-            int         getNops(const Instruction& inst) const;
-            std::string getComment() const
-            {
-                return "WMMA Write Hazard";
-            }
+        }
 
-        private:
-            const int m_maxNops = 1;
+        int WMMAReadSrcD::getMaxNops(Instruction const& inst) const
+        {
+            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
+        }
+
+        bool WMMAReadSrcD::trigger(Instruction const& inst) const
+        {
+            return GPUInstructionInfo::isWMMA(inst.getOpCode());
         };
 
-        static_assert(CWaitStateObserver<WMMAWrite>);
+        int WMMAReadSrcD::getNops(Instruction const& inst) const
+        {
+            if(GPUInstructionInfo::isVALU(inst.getOpCode())
+               && !GPUInstructionInfo::isWMMA(inst.getOpCode()))
+            {
+                std::optional<int> value;
+                // RAW
+                if((value = checkSrcs(inst)))
+                {
+                    return *value;
+                }
+            }
+            return 0;
+        }
     }
 }

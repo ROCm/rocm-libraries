@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,43 +25,49 @@
  *******************************************************************************/
 
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/WMMA/WMMAWriteSrcD.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
-        int WMMAWrite::getMaxNops(const Instruction& inst) const
+        void WMMAWriteSrcD::observeHazard(Instruction const& inst)
         {
-            return m_maxNops;
+            if(trigger(inst))
+            {
+                auto dstD = inst.getDsts().at(0);
+                AssertFatal(dstD != nullptr, "Empty DstD");
+
+                for(auto const& regId : dstD->getRegisterIds())
+                {
+                    (*m_hazardMap)[regId].push_back(
+                        WaitStateHazardCounter(getMaxNops(inst), writeTrigger()));
+                }
+            }
         }
 
-        bool WMMAWrite::trigger(const Instruction& inst) const
+        int WMMAWriteSrcD::getMaxNops(Instruction const& inst) const
+        {
+            return getNopFromLatency(inst.getOpCode(), m_latencyAndNops);
+        }
+
+        bool WMMAWriteSrcD::trigger(Instruction const& inst) const
         {
             return GPUInstructionInfo::isWMMA(inst.getOpCode());
         };
 
-        int WMMAWrite::getNops(const Instruction& inst) const
+        int WMMAWriteSrcD::getNops(Instruction const& inst) const
         {
-            if(GPUInstructionInfo::isWMMA(inst.getOpCode()))
+            if(GPUInstructionInfo::isVALU(inst.getOpCode())
+               && !GPUInstructionInfo::isWMMA(inst.getOpCode()))
             {
-                const auto&        srcs = inst.getSrcs();
                 std::optional<int> value;
-                // SrcA RAW
-                AssertFatal(nullptr != srcs.at(0), "Empty SrcA");
-                if((value = checkRegister(srcs.at(0))))
-                {
-                    return *value;
-                }
-
-                // SrcB RAW
-                AssertFatal(nullptr != srcs.at(1), "Empty SrcB");
-                if((value = checkRegister(srcs.at(1))))
+                // RAW
+                if((value = checkDsts(inst)))
                 {
                     return *value;
                 }
             }
-
             return 0;
         }
     }

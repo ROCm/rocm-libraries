@@ -335,4 +335,55 @@ namespace rocRollerTest
         }
     }
 
+    TEST_F(WMMA1201ObserverTest, WMMAWriteDVALUReadD)
+    {
+        const auto v0 = createRegisters(Register::Type::Vector, DataType::Half, 4);
+        const auto v1 = createRegisters(Register::Type::Vector, DataType::Float, 1, 4);
+        const auto v2 = createRegisters(Register::Type::Vector, DataType::Float, 1);
+
+        // No register overlap should not be a hazard
+        {
+            std::vector<Instruction> insts = {
+                Instruction("v_wmma_f32_16x16x16_f16",
+                            {v1[0]->subset({0, 1})},
+                            {v0[0], v0[1], v1[0]->subset({0, 1})},
+                            {},
+                            ""),
+                Instruction("v_add_f32", {v2[0]}, {v2[0], v1[0]->subset({0})}, {}, ""),
+                Instruction("s_endpgm", {}, {}, {}, ""),
+            };
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 8);
+
+            EXPECT_THAT(8, countSubstring(output(), "v_nop"));
+            clearOutput();
+        }
+    }
+
+    TEST_F(WMMA1201ObserverTest, WMMAWriteDVALUWriteD)
+    {
+        const auto v0 = createRegisters(Register::Type::Vector, DataType::Half, 4);
+        const auto v1 = createRegisters(Register::Type::Vector, DataType::Float, 1, 4);
+        const auto v2 = createRegisters(Register::Type::Vector, DataType::Float, 1);
+
+        // No register overlap should not be a hazard
+        {
+            std::vector<Instruction> insts = {
+                Instruction("v_wmma_f32_16x16x16_f16",
+                            {v1[0]->subset({0, 1})},
+                            {v0[0], v0[1], v1[0]->subset({0, 1})},
+                            {},
+                            ""),
+                Instruction("v_add_f32", {v1[0]->subset({0})}, {v2[0], v2[0]}, {}, ""),
+                Instruction("s_endpgm", {}, {}, {}, ""),
+            };
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1], 8);
+
+            EXPECT_THAT(8, countSubstring(output(), "v_nop"));
+            clearOutput();
+        }
+    }
 }

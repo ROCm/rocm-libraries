@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,41 +33,47 @@ namespace rocRoller
     namespace Scheduling
     {
         /**
-         * @brief 102X rules for WMMA Write Hazards.
+         * @brief 120X rules for WMMA Writes of D
          *
-         * | Arch  | 1st Inst | 2nd Inst            | NOPs |
-         * | ----- | -------- | ------------------- | ---- |
-         * | 120x  | v_wmma*  | v_wmma* read SrcA/B | 1    |
+         * | Arch  | 1st Inst                    | 2nd Inst  | NOPs |
+         * | ----- | --------------------------- | --------- | ---- |
+         * | 120x  | v_wmma* read SrcC (8 pass)  | v_* write | 4    |
+         * | 120x  | v_wmma* read SrcC (16 pass) | v_* write | 8    |
          *
          */
-        class WMMAWrite : public WaitStateObserver<WMMAWrite>
+        class WMMAWriteSrcD : public WaitStateObserver<WMMAWriteSrcD>
         {
         public:
-            WMMAWrite() {}
-            WMMAWrite(ContextPtr context)
-                : WaitStateObserver<WMMAWrite>(context){};
+            WMMAWriteSrcD() {}
+            WMMAWriteSrcD(ContextPtr context)
+                : WaitStateObserver<WMMAWriteSrcD>(context){};
 
-            constexpr static bool required(const GPUArchitectureTarget& target)
+            /**
+             * Overriden as we need to target src C only
+             */
+            void observeHazard(Instruction const& inst) override;
+
+            constexpr static bool required(GPUArchitectureTarget const& target)
             {
                 return target.isRDNA4GPU();
             }
 
-            int                   getMaxNops(const Instruction& inst) const;
-            bool                  trigger(const Instruction& inst) const;
+            int                   getMaxNops(Instruction const& inst) const;
+            bool                  trigger(Instruction const& inst) const;
             static constexpr bool writeTrigger()
             {
                 return true;
             }
-            int         getNops(const Instruction& inst) const;
+            int         getNops(Instruction const& inst) const;
             std::string getComment() const
             {
-                return "WMMA Write Hazard";
+                return "WMMA Write Hazard (VALU)";
             }
 
         private:
-            const int m_maxNops = 1;
+            std::unordered_map<int, int> m_latencyAndNops = {{8, 4}, {16, 8}};
         };
 
-        static_assert(CWaitStateObserver<WMMAWrite>);
+        static_assert(CWaitStateObserver<WMMAWriteSrcD>);
     }
 }

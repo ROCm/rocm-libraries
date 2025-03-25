@@ -1039,6 +1039,7 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf16", 0, {}, 16),
                  rocRoller::GPUInstructionInfo("v_wmma_f16_16x16x16_f16", 0, {}, 16),
                  rocRoller::GPUInstructionInfo("v_wmma_bf16_16x16x16_bf16", 0, {}, 16),
+                 rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_fp8_fp8", 0, {}, 8),
                  rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_fp8_bf8", 0, {}, 8),
                  rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf8_fp8", 0, {}, 8),
                  rocRoller::GPUInstructionInfo("v_wmma_f32_16x16x16_bf8_bf8", 0, {}, 8),

@@ -436,8 +436,7 @@ namespace rocRoller
                 }
             }
         }
-        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU()
-               && m_opcode.rfind("v_wmma", 0) == 0;
+        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU();
     }
 
     inline void Instruction::functionalString(std::ostream& os, LogLevel level) const
@@ -454,14 +453,14 @@ namespace rocRoller
 
         if(m_nopCount > 0)
         {
-            int count = m_nopCount;
             if(requiresVnopForHazard())
             {
-                for(int i = 0; i < count; i++)
+                for(int i = 0; i < m_nopCount; i++)
                     os << "v_nop\n";
             }
             else
             {
+                int count = m_nopCount;
                 while(count > 16)
                 {
                     // s_nop can only handle values from 0 to 0xf
