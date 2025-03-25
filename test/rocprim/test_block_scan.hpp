@@ -716,3 +716,18 @@ typed_test_def(suite_name_array, name_suffix, ExclusiveScanPrefixCallback)
     static_for_input_array<0, 2, T, 5, block_size>::run();
 }
 
+typed_test_def(suite_name_array, name_suffix, ExclusiveScanWithStorage)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 10, block_size>::run();
+}
+
+typed_test_def(suite_name_array, name_suffix, ExclusiveScanReduceWithStorage)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 11, block_size>::run();
+}
