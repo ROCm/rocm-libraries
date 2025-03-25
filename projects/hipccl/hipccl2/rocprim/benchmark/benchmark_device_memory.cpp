@@ -179,7 +179,7 @@ struct operation<atomics_inter_warp_collision, T, ItemsPerThread, BlockSize>
         (void)shared_storage;
         (void)shared_storage_size;
         (void)input;
-        unsigned int index = (threadIdx.x % rocprim::device_warp_size()) * ItemsPerThread
+        unsigned int index = (threadIdx.x % rocprim::arch::wavefront::min_size()) * ItemsPerThread
                              + blockIdx.x * blockDim.x * ItemsPerThread;
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; ++i)

@@ -26,6 +26,7 @@
 
 #include "../functional.hpp"
 #include "../intrinsics.hpp"
+#include "../intrinsics/arch.hpp"
 #include "../types.hpp"
 
 #include "config.hpp"
@@ -88,8 +89,8 @@ class block_exchange
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Select warp size
-    static constexpr unsigned int warp_size =
-        detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+    static constexpr unsigned int warp_size
+        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
     // Number of warps in block
     static constexpr unsigned int warps_no = ::rocprim::detail::ceiling_div(BlockSize, warp_size);
     static constexpr unsigned int banks_no = ::rocprim::detail::get_lds_banks_no();
@@ -656,16 +657,18 @@ public:
     ///     ...
     /// }
     /// \endcode
-    template<unsigned int WarpSize = device_warp_size(), class U, class Offset>
+    template<unsigned int WarpSize = arch::wavefront::min_size(), class U, class Offset>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void scatter_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread],
                                  const Offset (&ranks)[ItemsPerThread],
                                  storage_type& storage)
     {
-        static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= device_warp_size(),
+        static_assert(detail::is_power_of_two(WarpSize) && WarpSize <= arch::wavefront::max_size(),
                       "WarpSize must be a power of two and equal or less"
                       "than the size of hardware warp.");
+        assert(WarpSize <= arch::wavefront::size());
+
         const unsigned int flat_id
             = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
         const unsigned int thread_id     = detail::logical_lane_id<WarpSize>();

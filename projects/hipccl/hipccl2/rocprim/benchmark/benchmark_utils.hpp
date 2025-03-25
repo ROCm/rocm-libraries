@@ -34,6 +34,7 @@
 #include <rocprim/config.hpp>
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp> // partition_config_params
+#include <rocprim/intrinsics/arch.hpp>
 #include <rocprim/intrinsics/thread.hpp>
 #include <rocprim/type_traits.hpp>
 #include <rocprim/type_traits_interface.hpp>

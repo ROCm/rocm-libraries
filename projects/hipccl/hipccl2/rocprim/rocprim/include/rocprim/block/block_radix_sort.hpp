@@ -34,6 +34,7 @@
 #include "block_exchange.hpp"
 #include "block_radix_rank.hpp"
 #include "rocprim/block/config.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -102,10 +103,11 @@ template<class Key,
          unsigned int BlockSizeY = 1,
          unsigned int BlockSizeZ = 1,
          unsigned int RadixBitsPerPass
-         = (BlockSizeX * BlockSizeY * BlockSizeZ) % device_warp_size() == 0 ? 8 /* match */
-                                                                            : 4 /* basic_memoize */,
+         = (BlockSizeX * BlockSizeY * BlockSizeZ) % arch::wavefront::min_size() == 0
+               ? 8 /* match */
+               : 4 /* basic_memoize */,
          block_radix_rank_algorithm RadixRankAlgorithm
-         = (BlockSizeX * BlockSizeY * BlockSizeZ) % device_warp_size() == 0
+         = (BlockSizeX * BlockSizeY * BlockSizeZ) % arch::wavefront::min_size() == 0
                ? block_radix_rank_algorithm::match
                : block_radix_rank_algorithm::basic_memoize,
          block_padding_hint PaddingHint = block_padding_hint::lds_occupancy_bound>
@@ -119,11 +121,10 @@ class block_radix_sort
     static constexpr bool         with_values = !std::is_same<Value, empty_type>::value;
     static constexpr bool warp_striped = RadixRankAlgorithm == block_radix_rank_algorithm::match;
 
-#if __HIP_DEVICE_COMPILE__
-    static_assert(!warp_striped || (BlockSize % device_warp_size()) == 0,
-                  "When using 'block_radix_rank_algorithm::match', the block size should be a "
-                  "multiple of the warp size");
-#endif
+    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(
+        !warp_striped || (BlockSize % ::rocprim::arch::wavefront::min_size()) == 0,
+        "When using 'block_radix_rank_algorithm::match', the block size should be a "
+        "multiple of the warp size");
 
     static constexpr bool is_key_and_value_aligned
         = alignof(Key) == alignof(Value) && sizeof(Key) == sizeof(Value);
@@ -159,6 +160,12 @@ public:
 #else
     using storage_type = storage_type_; // only for Doxygen
 #endif
+
+        ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+    block_radix_sort()
+    {
+        assert(BlockSize % ::rocprim::arch::wavefront::size() == 0);
+    }
 
     /// \brief Performs ascending radix sort over keys partitioned across threads in a block.
     ///
@@ -1060,7 +1067,7 @@ public:
 
 private:
     static constexpr bool use_warp_exchange
-        = device_warp_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
+        = ::rocprim::arch::wavefront::min_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
 
     template<class SortedValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -1126,7 +1133,8 @@ private:
         {
             // This appears to be slower with high large items per thread.
             constexpr bool use_warp_exchange
-                = device_warp_size() % ItemsPerThread == 0 && ItemsPerThread <= 4;
+                = ::rocprim::arch::wavefront::min_size() % ItemsPerThread == 0
+                  && ItemsPerThread <= 4;
             blocked_to_warp_striped(keys,
                                     values,
                                     storage,
