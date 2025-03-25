@@ -64,7 +64,7 @@ private:
   unsigned int __flags_ = cudaHostAllocDefault;
 
   static constexpr unsigned int __available_flags =
-    cudaHostAllocDefault | cudaHostAllocPortable | cudaHostAllocMapped | cudaHostAllocWriteCombined;
+    hipHostAllocDefault | hipHostAllocPortable | hipHostAllocMapped | hipHostAllocWriteCombined;
 
 public:
   constexpr pinned_memory_resource(const unsigned int __flags = cudaHostAllocDefault) noexcept
