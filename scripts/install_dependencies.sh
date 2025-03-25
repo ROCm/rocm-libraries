@@ -35,7 +35,6 @@ git checkout $_UCX_COMMIT_HASH
                             --without-go               \
                             --without-java             \
                             --without-cuda             \
-                            --without-verbs            \
                             --without-knem
 make -j
 make install
@@ -56,7 +55,6 @@ git submodule update --init --recursive
             --with-hwloc=internal        \
             --with-libevent=internal     \
             --without-cuda               \
-            --disable-sphinx             \
             --disable-mpi-fortran        \
             --without-ofi
 make -j

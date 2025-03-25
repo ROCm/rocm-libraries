@@ -10,9 +10,6 @@ rocSHMEM uses a single symmetric heap (SHEAP) that is allocated on GPU memories.
 There are currently two backends for rocSHMEM;
 IPC and Reverse Offload (RO).
 The backends primarily differ in their implementations of intra-kernel networking.
-Currently, only the IPC backend is supported.
-The RO backend is provided as-is with
-no guarantees of support from AMD or AMD Research.
 
 The IPC backend implements communication primitives using load/store operations issued from the GPU.
 
@@ -20,6 +17,8 @@ The Reverse Offload (RO) backend has the GPU runtime forward rocSHMEM networking
 to the host-side runtime, which calls into a traditional MPI or OpenSHMEM
 implementation. This forwarding of requests is transparent to the
 programmer, who only sees the GPU-side interface.
+
+The RO backend is provided as-is with limited support from AMD or AMD Research.
 
 ## Requirements
 
@@ -40,12 +39,20 @@ OpenCL.
 rocSHMEM uses the CMake build system. The CMakeLists file contains
 additional details about library options.
 
-To create an out-of-source build for the IPC backend:
+To create an out-of-source build for the IPC backend for single-node use-cases:
 
 ```
 mkdir build
 cd build
 ../scripts/build_configs/ipc_single
+```
+
+To create an out-of-source build for the RO backend for multi-node use-cases that can also utilize the IPC mechanisms for certain intra-node operations:
+
+```
+mkdir build
+cd build
+../scripts/build_configs/ro_ipc
 ```
 
 The build script passes configuration options to CMake to setup canonical builds.
@@ -111,6 +118,12 @@ rocSHMEM has the following enviroment variables:
 
     ROCSHMEM_RO_DISABLE_IPC (default : 0)
                         Disables IPC support for the reverse offload backend.
+
+    ROCSHMEM_MAX_NUM_CONTEXTS (default : 1024)
+                        Maximum number of contexts used in library
+
+    ROCSHMEM_MAX_NUM_TEAMS (default : 40)
+                        Maximum number of teams supported by the library
 ```
 
 ## Examples
@@ -124,7 +137,7 @@ or to look at the provided example code in the `./example/` directory.
 The examples can be run like so:
 
 ```
-mpirun -np 2 ./build/examples/rocshmem_getmem_test
+mpirun --map-by numa --mca pml ucx --mca osc ucx -np 2 ./build/examples/rocshmem_getmem_test
 ```
 
 ## Tests
@@ -135,7 +148,7 @@ To run the tests, you may use the driver scripts provided in the `./scripts/` di
 
 ```
 # Run Functional Tests
-./scripts/functional_tests/driver.sh ./build/tests/functional_tests/rocshmem_example_driver short <log_directory>
+./scripts/functional_tests/driver.sh ./build/tests/functional_tests/rocshmem_example_driver all <log_directory>
 
 # Run Unit Tests
 ./scripts/unit_tests/driver.sh ./build/tests/unit_tests/rocshmem_unit_tests all
@@ -153,7 +166,7 @@ To build and configure ROCm-Aware UCX (1.17.0 or later), you need to:
 git clone https://github.com/openucx/ucx.git -b v1.17.x
 cd ucx
 ./autogen.sh
-./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --enable-mt
+./configure --prefix=<ucx_install_dir> --with-rocm=<rocm_path> --enable-mt
 make -j 8
 make -j 8 install
 ```
@@ -164,13 +177,21 @@ Then, you need to build Open MPI (5.0.6 or later) with UCX support.
 git clone --recursive https://github.com/open-mpi/ompi.git -b v5.0.x
 cd ompi
 ./autogen.pl
-./configure --prefix=<prefix_dir> --with-rocm=<rocm_path> --with-ucx=<ucx_path>
+./configure --prefix=<ompi_install_dir> --with-rocm=<rocm_path> --with-ucx=<ucx_install_dir>
 make -j 8
 make -j 8 install
 ```
 
+After compiling and installing UCX and Open MPI, please update your PATH and LD_LIBRARY_PATH to point to the installation locations, e.g.
+
+```
+export PATH=<ompi_install_dir>/bin:$PATH
+export LD_LIBRARY_PATH=<ompi_install_dir>/lib:<ucx_install_dir>/lib:$LD_LIBRARY_PATH
+```
+
+
 Alternatively, we have script to install dependencies.
-However, it is not gauranteed to work and perform optimally on all platforms.
+However, it is not guaranteed to work and perform optimally on all platforms.
 Configuration options are platform dependent.
 
 ```
