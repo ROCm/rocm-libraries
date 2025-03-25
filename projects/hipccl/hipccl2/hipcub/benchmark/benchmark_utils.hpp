@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -408,6 +408,14 @@ bool is_warp_size_supported(const unsigned required_warp_size)
 template<unsigned int LogicalWarpSize>
 __device__ constexpr bool device_test_enabled_for_warp_size_v
     = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize;
+
+template<class T>
+__device__
+inline constexpr bool is_power_of_two(const T x)
+{
+    static_assert(std::is_integral<T>::value, "T must be integer type");
+    return (x > 0) && ((x & (x - 1)) == 0);
+}
 
 template<typename Iterator>
 using it_value_t = typename std::iterator_traits<Iterator>::value_type;

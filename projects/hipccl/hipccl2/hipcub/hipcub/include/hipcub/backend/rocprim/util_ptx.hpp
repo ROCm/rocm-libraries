@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -81,8 +81,7 @@ template <int LOGICAL_WARP_THREADS, int /* ARCH */ = 0>
 HIPCUB_DEVICE inline 
 uint64_t WarpMask(unsigned int warp_id) {
     constexpr bool is_pow_of_two = ::rocprim::detail::is_power_of_two(LOGICAL_WARP_THREADS);
-    constexpr bool is_arch_warp =
-        LOGICAL_WARP_THREADS == ::rocprim::device_warp_size();
+    const bool     is_arch_warp  = LOGICAL_WARP_THREADS == ::rocprim::arch::wavefront::size();
 
     uint64_t member_mask = uint64_t(-1) >> (64 - LOGICAL_WARP_THREADS);
 

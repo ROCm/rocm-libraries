@@ -76,6 +76,7 @@
     #define HIPCUB_RUNTIME_FUNCTION __host__
 
     #include <rocprim/device/config_types.hpp>
+    #include <rocprim/intrinsics/arch.hpp>
     #include <rocprim/intrinsics/thread.hpp>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -99,9 +100,11 @@ inline unsigned int host_warp_size_wrapper()
 }
 } // namespace detail
 END_HIPCUB_NAMESPACE
+    #include <rocprim/intrinsics/arch.hpp>
 
     #define HIPCUB_WARP_THREADS ::rocprim::warp_size()
-    #define HIPCUB_DEVICE_WARP_THREADS ::rocprim::device_warp_size()
+    // HIPCUB (and CUB) don't have a method to express min and max warp size.
+    #define HIPCUB_DEVICE_WARP_THREADS ::rocprim::arch::wavefront::max_size()
     #define HIPCUB_HOST_WARP_THREADS ::hipcub::detail::host_warp_size_wrapper()
     #define HIPCUB_ARCH 1 // ignored with rocPRIM backend
 #elif defined(__HIP_PLATFORM_NVIDIA__)
