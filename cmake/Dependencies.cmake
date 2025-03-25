@@ -24,7 +24,7 @@
 #
 ################################################################################
 
-cmake_minimum_required(VERSION 3.18...3.22)
+cmake_minimum_required(VERSION 3.21...3.22)
 
 include(FetchContent)
 
@@ -111,7 +111,7 @@ function(rocroller_add_dependency dep_name)
         return()
     endif()
 
-    if(PARSE_COMPONENTS)
+    if(PARSE_COMPONENTS AND PROJECT_IS_TOP_LEVEL)
         if(COMMAND rocm_package_add_dependencies)
             unset(name_deb)
             unset(name_rpm)
@@ -553,9 +553,11 @@ macro(_pushstate)
     unset(CMAKE_CXX_CPPCHECK)
     unset(CMAKE_CXX_CPPCHECK CACHE)
     _save_var(CMAKE_MESSAGE_INDENT)
+    _save_var(CPACK_GENERATOR)
 endmacro()
 
 macro(_popstate)
+    _restore_var(CPACK_GENERATOR)
     _restore_var(CMAKE_MESSAGE_INDENT)
     _restore_var(CMAKE_CXX_CPPCHECK)
 endmacro()

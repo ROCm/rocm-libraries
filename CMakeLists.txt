@@ -24,7 +24,7 @@
 #
 ################################################################################
 
-cmake_minimum_required(VERSION 3.16...3.22)
+cmake_minimum_required(VERSION 3.21...3.22)
 
 set(ROCROLLER_VERSION "1.0.0")
 set(ROCROLLER_SOVERSION 1)
@@ -242,12 +242,14 @@ configure_file(
 add_subdirectory(GPUArchitectureGenerator)
 add_subdirectory(lib)
 
-rocm_package_add_deb_dependencies(
-    COMPONENT devel DEPENDS liboost-container1.74-dev
-)
-rocm_package_add_rpm_dependencies(
-    COMPONENT devel DEPENDS liboost-container1.74-devel
-)
+if(PROJECT_IS_TOP_LEVEL)
+    rocm_package_add_deb_dependencies(
+        COMPONENT devel DEPENDS liboost-container1.74-dev
+    )
+    rocm_package_add_rpm_dependencies(
+        COMPONENT devel DEPENDS liboost-container1.74-devel
+    )
+endif()
 
 if(BUILD_CLIENTS OR BUILD_TESTING)
     add_subdirectory(test/common)
@@ -261,20 +263,24 @@ if(BUILD_CLIENTS OR BUILD_TESTING)
     set(OPENMP_DEB "libomp-dev")
     set(OPENMP_RPM "libgomp")
 
-    rocm_package_setup_component(clients)
+    if(PROJECT_IS_TOP_LEVEL)
+        rocm_package_setup_component(clients)
+    endif()
 endif()
 
 if(BUILD_TESTING)
     enable_testing()
-    rocm_package_setup_client_component(
-        tests
-        DEPENDS DEB
-                "${OPENMP_DEB}"
-                "libopenblas-dev"
-                RPM
-                "${OPENMP_RPM}"
-                "libopenblas-devel"
-    )
+    if(PROJECT_IS_TOP_LEVEL)
+        rocm_package_setup_client_component(
+            tests
+            DEPENDS DEB
+                    "${OPENMP_DEB}"
+                    "libopenblas-dev"
+                    RPM
+                    "${OPENMP_RPM}"
+                    "libopenblas-devel"
+        )
+    endif()
     add_subdirectory(test)
 endif()
 
@@ -284,65 +290,69 @@ if(BUILD_DOCS)
 endif()
 
 if(BUILD_CLIENTS)
-    rocm_package_setup_client_component(
-        benchmarks DEPENDS DEB "${OPENMP_DEB}" RPM "${OPENMP_RPM}"
-    )
+    if(PROJECT_IS_TOP_LEVEL)
+        rocm_package_setup_client_component(
+            benchmarks DEPENDS DEB "${OPENMP_DEB}" RPM "${OPENMP_RPM}"
+        )
+    endif()
     # Add client directory
     add_subdirectory(client)
 endif()
 
-include(GNUInstallDirs)
+if(PROJECT_IS_TOP_LEVEL)
+    include(GNUInstallDirs)
 
-if(WIN32)
-    set(CPACK_SOURCE_GENERATOR "ZIP")
-    set(CPACK_GENERATOR "ZIP")
-else()
-    set(CPACK_GENERATOR "DEB")
-endif()
-
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-if(WIN32)
-    set(CMAKE_INSTALL_PREFIX
-        "C:/hipSDK"
-        CACHE PATH "Install path" FORCE
-    )
-    set(INSTALL_PREFIX "C:/hipSDK")
-    set(CPACK_SET_DESTDIR FALSE)
-    set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
-    set(CPACK_PACKAGING_INSTALL_PREFIX "")
-    set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-else()
-    if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-        set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+    if(WIN32)
+        set(CPACK_SOURCE_GENERATOR "ZIP")
+        set(CPACK_GENERATOR "ZIP")
+    else()
+        set(CPACK_GENERATOR "DEB")
     endif()
-    set(CPACK_SET_DESTDIR
-        OFF
-        CACHE
-            BOOL
-            "Boolean toggle to make CPack use DESTDIR mechanism when packaging"
+
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+
+    if(WIN32)
+        set(CMAKE_INSTALL_PREFIX
+            "C:/hipSDK"
+            CACHE PATH "Install path" FORCE
+        )
+        set(INSTALL_PREFIX "C:/hipSDK")
+        set(CPACK_SET_DESTDIR FALSE)
+        set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
+        set(CPACK_PACKAGING_INSTALL_PREFIX "")
+        set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+    else()
+        if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
+            set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+        endif()
+        set(CPACK_SET_DESTDIR
+            OFF
+            CACHE
+                BOOL
+                "Boolean toggle to make CPack use DESTDIR mechanism when packaging"
+        )
+    endif()
+
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
+        "\${CPACK_PACKAGING_INSTALL_PREFIX}"
+    )
+
+    set(package_name rocroller)
+
+    rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocm-llvm-dev >= 18.0.0")
+    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocm-llvm-devel >= 18.0.0")
+
+    set(ROCROLLER_CONFIG_DIR
+        "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
+        CACHE PATH "Path placed into ldconfig file"
+    )
+
+    rocm_create_package(
+        NAME ${package_name}
+        DESCRIPTION "A library for generating AMDGPU kernels"
+        MAINTAINER "rocRoller Maintainer <rocroller-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${ROCROLLER_CONFIG_DIR}
     )
 endif()
-
-set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "\${CPACK_PACKAGING_INSTALL_PREFIX}"
-)
-
-set(package_name rocroller)
-
-rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocm-llvm-dev >= 18.0.0")
-rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocm-llvm-devel >= 18.0.0")
-
-set(ROCROLLER_CONFIG_DIR
-    "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-    CACHE PATH "Path placed into ldconfig file"
-)
-
-rocm_create_package(
-    NAME ${package_name}
-    DESCRIPTION "A library for generating AMDGPU kernels"
-    MAINTAINER "rocRoller Maintainer <rocroller-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${ROCROLLER_CONFIG_DIR}
-)
