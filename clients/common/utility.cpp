@@ -233,13 +233,24 @@ hipblaslt_local_handle::hipblaslt_local_handle()
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
-
+    if(arg.tensile_solution_selection_method >= 0)
+    {
+        auto sol_selec_env = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
+        if(sol_selec_env)
+            m_sol_selec_saved_status = std::string(sol_selec_env);
+        m_sol_selec_env_set = true;
+        setenv("TENSILE_SOLUTION_SELECTION_METHOD", std::to_string(arg.tensile_solution_selection_method).c_str(), true);
+    }
     // memory guard control, with multi-threading should not change values across threads
     d_vector_set_pad_length(arg.pad);
 }
 
 hipblaslt_local_handle::~hipblaslt_local_handle()
 {
+    if(m_sol_selec_env_set)
+    {
+        setenv("TENSILE_SOLUTION_SELECTION_METHOD", m_sol_selec_saved_status.c_str(), true);
+    }
     hipblasLtDestroy(m_handle);
 }
 

@@ -318,6 +318,17 @@ Tests:
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
 
+- name: matmul_128_streamk
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: 128
+  N: 128
+  K: 128
+  alpha_beta: *alpha_beta_range
+  transA_transB: *transA_transB_range
+  tensile_solution_selection_method: 2
+
 - name: matmul_256
   category: pre_checkin
   function:
@@ -482,6 +493,22 @@ Tests:
   activation_type: relu
   bias_vector: [0, 1]
   unit_check: 1
+
+- name: matmul_bias_relu_streamk
+  category: pre_checkin
+  function:
+    - matmul: *hpa_half_precision
+    - matmul: *single_precision
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: relu
+  bias_vector: [0, 1]
+  unit_check: 1
+  tensile_solution_selection_method: 2
 
 - name: matmul_bias_gelu
   category: pre_checkin

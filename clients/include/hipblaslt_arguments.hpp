@@ -165,6 +165,7 @@ struct Arguments
     bool print_kernel_info;
 
     bool flush;
+    int tensile_solution_selection_method;
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -258,7 +259,8 @@ struct Arguments
     OPER(wgm_vector) SEP             \
     OPER(print_solution_found) SEP   \
     OPER(print_kernel_info) SEP      \
-    OPER(flush) SEP
+    OPER(flush) SEP                  \
+    OPER(tensile_solution_selection_method) SEP
 
     // clang-format on
 

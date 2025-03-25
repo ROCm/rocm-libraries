@@ -401,6 +401,7 @@ Arguments:
   - print_solution_found: c_bool
   - print_kernel_info: c_bool
   - flush: c_bool
+  - tensile_solution_selection_method: c_int32
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -502,6 +503,7 @@ Defaults:
   print_solution_found: false
   print_kernel_info: false
   flush: false
+  tensile_solution_selection_method: -1
   compute_input_typeA: hipblaslt_datatype_invalid
   compute_input_typeB: hipblaslt_datatype_invalid
   scale_type: hipblaslt_datatype_invalid

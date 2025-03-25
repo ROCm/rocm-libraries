@@ -120,6 +120,8 @@ enum class hipblaslt_batch_type
 class hipblaslt_local_handle
 {
     hipblasLtHandle_t m_handle;
+    std::string    m_sol_selec_saved_status = "";
+    bool           m_sol_selec_env_set{false};
 
 public:
     hipblaslt_local_handle();
