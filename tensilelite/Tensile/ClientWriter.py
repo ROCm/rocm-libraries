@@ -216,7 +216,7 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler):
   import io
   runScriptFile = io.StringIO()
 
-  callCreateLibraryCmd = ROOT_PATH + "/bin/TensileCreateLibrary"
+  callCreateLibraryCmd = ROOT_PATH + "/bin/TensileCreateLibraryPy"
 
   if not globalParameters["LazyLibraryLoading"]:
     callCreateLibraryCmd += " --no-lazy-library-loading"

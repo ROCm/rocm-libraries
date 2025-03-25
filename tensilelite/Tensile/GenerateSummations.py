@@ -49,7 +49,7 @@ def createLibraryForBenchmark(logicPath, libraryPath, currentPath):
     Selection.
     """
 
-    pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibrary")
+    pythonExePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "bin", "TensileCreateLibraryPy")
     args = [pythonExePath, \
         "--new-client-only", "--no-short-file-names", \
         "--architecture=all", "--code-object-version=default", "--library-format=yaml", \
