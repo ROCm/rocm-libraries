@@ -26,10 +26,6 @@ namespace nb = nanobind;
 
 namespace rocisa
 {
-    // Initialize static members
-    rocIsa*        rocIsa::instance = nullptr;
-    std::once_flag rocIsa::initInstanceFlag;
-
     std::string isaToGfx(const nb::tuple& arch)
     {
         return getGfxNameTuple(

@@ -66,14 +66,16 @@ namespace rocisa
     {
     public:
         // Delete copy constructor and assignment operator
-        rocIsa(const rocIsa&)            = delete;
-        rocIsa& operator=(const rocIsa&) = delete;
+        rocIsa(const rocIsa&)             = delete;
+        rocIsa& operator=(const rocIsa&)  = delete;
+        rocIsa(const rocIsa&&)            = delete;
+        rocIsa& operator=(const rocIsa&&) = delete;
 
         // Static method to get the single instance of the class
         static rocIsa& getInstance()
         {
-            std::call_once(initInstanceFlag, &rocIsa::construct);
-            return *instance;
+            static rocIsa instance;
+            return instance;
         }
 
         void init(const nb::tuple& arch, const std::string& assemblerPath, bool debug = false)
@@ -154,23 +156,11 @@ namespace rocisa
         }
 
     private:
-        rocIsa()
-        {
-            // trigger random seed for other components
-            srand(time(NULL));
-        }
-
-        static void construct()
-        {
-            instance = new rocIsa();
-        }
+        rocIsa() = default;
 
         std::mutex                            m_mutex;
         std::map<std::thread::id, KernelInfo> m_threads;
         std::map<IsaVersion, IsaInfo>         m_isainfo;
-
-        static rocIsa*        instance;
-        static std::once_flag initInstanceFlag;
     };
 
     struct Item
