@@ -94,7 +94,7 @@ copyright-date:
       -D GPU_TARGETS="$GPU_TARGETS"
       -D CMAKE_C_COMPILER_LAUNCHER=phc_sccache_c
       -D CMAKE_CXX_COMPILER_LAUNCHER=phc_sccache_cxx
-      -D CMAKE_CXX_STANDARD=14
+      -D CMAKE_CXX_STANDARD=17
       -B $CI_PROJECT_DIR/rocPRIM/build
       -S $CI_PROJECT_DIR/rocPRIM
     - cd $CI_PROJECT_DIR/rocPRIM/build

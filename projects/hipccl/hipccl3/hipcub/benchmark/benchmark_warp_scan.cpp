@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -106,7 +106,8 @@ struct broadcast
     template<class T, unsigned int WarpSize, unsigned int Trials>
     __device__
     static auto run(const T* input, T* output, const T init)
-        -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+        -> std::enable_if_t<(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
+                             && benchmark_utils::is_power_of_two(WarpSize))>
     {
         (void)init;
 
@@ -127,7 +128,8 @@ struct broadcast
     template<class T, unsigned int WarpSize, unsigned int Trials>
     __device__
     static auto run(const T* /*input*/, T* /*output*/, const T /*init*/)
-        -> std::enable_if_t<!benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>>
+        -> std::enable_if_t<!(benchmark_utils::device_test_enabled_for_warp_size_v<WarpSize>
+                              && benchmark_utils::is_power_of_two(WarpSize))>
     {}
 };
 
