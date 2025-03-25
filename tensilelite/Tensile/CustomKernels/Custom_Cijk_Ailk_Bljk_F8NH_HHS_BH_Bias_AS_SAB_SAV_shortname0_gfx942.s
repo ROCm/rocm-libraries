@@ -59,7 +59,6 @@ custom.config:
       UseBias: 1
       Activation: True
       UseScaleAlphaVec: 1
-   MatrixInstruction: [16, 16, 16, 1, 1, 8,1, 4,1]
    1LDSBuffer: 1
    DepthU: 32
    StaggerU: 4

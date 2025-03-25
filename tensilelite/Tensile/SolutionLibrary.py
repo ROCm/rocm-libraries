@@ -23,13 +23,15 @@
 ################################################################################
 
 import itertools
+from typing import Dict
 
 from . import Properties
 from . import Hardware
-from . import Common
 from . import Contractions
 from .SolutionStructs import Solution as OriginalSolution
-from .Common import state
+from Tensile.Common import state, IsaInfo, DepthUConfig
+from Tensile.Common.Architectures import gfxToIsa
+from Tensile.SolutionStructs.Naming import getMinNaming, getNameMin
 
 class SingleSolutionLibrary:
     Tag = "Single"
@@ -300,7 +302,13 @@ class MasterSolutionLibrary:
     def FromOriginalState(cls,
                           origData,
                           origSolutions,
-                          cxxCompiler,
+                          splitGSU: bool,
+                          printSolutionRejectionReason: bool,
+                          printIndexAssignmentInfo: bool,
+                          depthUConfig: DepthUConfig,
+                          assembler,
+                          isaInfoMap: Dict[str, IsaInfo],
+                          lazyLibraryLoading: bool,
                           solutionClass=Contractions.Solution,
                           libraryOrder=None,
                           placeholderName='TensileLibrary'):
@@ -314,7 +322,7 @@ class MasterSolutionLibrary:
             if devicePart == "fallback":
                 pred = Hardware.HardwarePredicate("TruePred")
             else:
-                pred = Hardware.HardwarePredicate.FromHardware(Common.gfxToIsa(devicePart), cuCount)
+                pred = Hardware.HardwarePredicate.FromHardware(gfxToIsa(devicePart), cuCount)
 
             newLib.rows.append({"predicate": pred, "library": library})
 
@@ -397,7 +405,7 @@ class MasterSolutionLibrary:
             else:
                 assert 0 and "Unrecognized LibraryType."
 
-            if Common.globalParameters["LazyLibraryLoading"]:
+            if lazyLibraryLoading:
                 placeholderName += '_' + str(problemType.aType) + str(problemType.bType)
                 placeholderName += '_' + str(problemType.cType) + str(problemType.computeInputType)
                 if problemType.activationType != 'none':
@@ -442,7 +450,7 @@ class MasterSolutionLibrary:
         # end library creation functions
 
         if libraryOrder is None:
-            if Common.globalParameters["LazyLibraryLoading"]:
+            if lazyLibraryLoading:
                 libraryOrder = [
                     hardware, operationIdentifier, performanceMetric, predicates,
                     placeholder, selection
@@ -460,7 +468,13 @@ class MasterSolutionLibrary:
             lazyLibrary, placeholderName = \
                 MasterSolutionLibrary.FromOriginalState(origData,
                                                         origSolutions,
-                                                        cxxCompiler,
+                                                        splitGSU,
+                                                        printSolutionRejectionReason,
+                                                        printIndexAssignmentInfo,
+                                                        depthUConfig,
+                                                        assembler,
+                                                        isaInfoMap,
+                                                        lazyLibraryLoading,
                                                         solutionClass,
                                                         libraryOrder[placeholderIndex:],
                                                         placeholderName)
@@ -468,7 +482,15 @@ class MasterSolutionLibrary:
             origSolutions = []
 
         problemType = Contractions.ProblemType.FromOriginalState(origData["ProblemType"])
-        allSolutions = [solutionClass.FromSolutionStruct(s, cxxCompiler) for s in origSolutions]
+        allSolutions = [solutionClass.FromSolutionStruct(
+                            s,
+                            splitGSU,
+                            printSolutionRejectionReason,
+                            printIndexAssignmentInfo,
+                            depthUConfig,
+                            assembler,
+                            isaInfoMap
+                        ) for s in origSolutions]
         cls.FixSolutionIndices(allSolutions)
 
         # library is constructed in reverse order i.e. bottom-up
@@ -489,8 +511,25 @@ class MasterSolutionLibrary:
         return rv, placeholderName
 
     @classmethod
-    def BenchmarkingLibrary(cls, solutions, cxxCompiler):
-        solutionObjs = list([Contractions.Solution.FromOriginalState(s._state, cxxCompiler) for s in solutions])
+    def BenchmarkingLibrary(
+        cls,
+        solutions,
+        assembler,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        depthUConfig: DepthUConfig,
+        isaInfoMap
+    ):
+        solutionObjs = list([Contractions.Solution.FromOriginalState(
+                                 s._state,
+                                 splitGSU,
+                                 printSolutionRejectionReason,
+                                 printIndexAssignmentInfo,
+                                 depthUConfig,
+                                 assembler,
+                                 isaInfoMap)
+                            for s in solutions])
         cls.FixSolutionIndices(solutionObjs)
 
         predRows = list([{
@@ -519,14 +558,14 @@ class MasterSolutionLibrary:
             rv["version"] = self.version
         return rv
 
-    def applyNaming(self, naming=None):
+    def applyNaming(self, splitGSU: bool, naming=None):
         if naming is None:
             kernels = itertools.chain(s.originalSolution.getKernels() for s in self.solutions.values())
-            naming = OriginalSolution.getMinNaming(kernels)
+            naming = getMinNaming(kernels)
 
         for s in list(self.solutions.values()):
-            s.name = OriginalSolution.getNameMin(s.originalSolution.getKernels()[0], naming)
-            s.kernelName = OriginalSolution.getNameMin(s.originalSolution.getKernels()[0], naming, True)
+            s.name = getNameMin(s.originalSolution.getKernels()[0], naming, splitGSU)
+            s.kernelName = getNameMin(s.originalSolution.getKernels()[0], naming, splitGSU, True)
 
     def remapSolutionIndicesStartingFrom(self, curIndex):
         reIndexMap = {}

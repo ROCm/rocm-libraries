@@ -26,7 +26,8 @@ import os
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import architectureMap, coVersionMap
+from Tensile.Common import coVersionMap
+from Tensile.Common.Architectures import architectureMap
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
 
@@ -201,11 +202,8 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     if args.CmakeCxxCompiler:
         os.environ["CMAKE_CXX_COMPILER"] = args.CmakeCxxCompiler
     arguments["ShortNames"] = args.ShortNames
-    arguments["CodeFromFiles"] = False
     arguments["LogicFormat"] = args.LogicFormat
     arguments["LibraryFormat"] = args.LibraryFormat
-    if args.no_enumerate:
-        arguments["AMDGPUArchPath"] = False
     arguments["CpuThreads"] = args.CpuThreads
     arguments["PrintLevel"] = args.PrintLevel
     arguments["AsmDebug"] = args.AsmDebug

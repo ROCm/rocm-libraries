@@ -34,7 +34,7 @@ from rocisa.enum import *
 from .TensileInstructions import Module, TextBlock, HolderContainer, RegisterContainer, \
                           VCC, EXEC, vgpr, sgpr, Holder, DataType, SNop
 from .TensileInstructions.Instructions import *
-from .Common import printExit, printWarning
+from Tensile.Common.Utilities import printExit, printWarning
 
 from dataclasses import dataclass, field
 

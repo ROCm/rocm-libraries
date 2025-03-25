@@ -61,7 +61,6 @@ custom.config:
       Batched: True
       GroupedGemm: False
       SupportUserArgs: True
-   MatrixInstruction: [16, 16, 16, 1, 1, 4, 16, 4, 1]
    1LDSBuffer: 1
    ScheduleIterAlg: 3
    DepthU: 64

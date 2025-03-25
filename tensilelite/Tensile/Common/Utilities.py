@@ -1,16 +1,76 @@
+################################################################################
+#
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+################################################################################
+
 import functools
 import math
 import os
-import re
 import sys
 import time
+
+from inspect import currentframe, getframeinfo
+from copy import deepcopy
 from enum import Enum
-from typing import List, Tuple
+from pathlib import Path
 
 from Tensile import __version__
 
-from .Architectures import isaToGfx
+_verbosity = 1
 
+def setVerbosity(v: int):
+    global _verbosity
+    _verbosity = v
+
+def getVerbosity():
+    return _verbosity
+
+################################################################################
+# Printing
+# 0 - user wants no printing
+# 1 - user wants limited prints
+# 2 - user wants full prints
+################################################################################
+def print1(message):
+    if getVerbosity() >= 1:
+        print(message)
+        sys.stdout.flush()
+
+
+def print2(message):
+    if getVerbosity() >= 2:
+        print(message)
+        sys.stdout.flush()
+
+
+def printWarning(message):
+    print("Tensile::WARNING: %s" % message)
+    sys.stdout.flush()
+
+
+def printExit(message):
+    print("Tensile::FATAL: %s" % message)
+    sys.stdout.flush()
+    sys.exit(-1)
 
 # get param values from structures.
 def hasParam(name, structure):
@@ -39,62 +99,8 @@ def locateExe(defaultPath, exeName):  # /opt/rocm/bin, hip-clang
         exePath = os.path.join(path, exeName)
         if isExe(exePath):
             return exePath
-    return None
 
-
-def splitArchs(params: dict, fromTensile=False) -> Tuple[List[str], List[str]]:
-    """
-    Splits and processes the architecture strings based on the provided parameters.
-
-    Args:
-        params: A dictionary of global parameters.
-        fromTensile: A flag indicating if the function is called from the context of Tensile.
-
-    Returns:
-        A tuple containing two lists:
-            - archs: A list of architecture strings with ``-`` instead of ``:``
-            - cmdlineArchs: A list of architecture strings that retain ``:`` characters.
-    """
-
-    def isSupported(arch):
-        return (
-            params["AsmCaps"][arch]["SupportedISA"] and params["AsmCaps"][arch]["SupportedSource"]
-        )
-
-    if ";" in params["Architecture"]:
-        wantedArchs = params["Architecture"].split(";")
-    else:
-        wantedArchs = params["Architecture"].split("_")
-    archs = []
-    cmdlineArchs = []
-    if "all" in wantedArchs:
-        for arch in params["SupportedISA"]:
-            if isSupported(arch):
-                if arch in [(9, 0, 6), (9, 0, 8), (9, 0, 10), (9, 4, 2)]:
-                    if arch == (9, 0, 10):
-                        archs += [isaToGfx(arch) + "-xnack+"]
-                        cmdlineArchs += [isaToGfx(arch) + ":xnack+"]
-                    if params["AsanBuild"]:
-                        archs += [isaToGfx(arch) + "-xnack+"]
-                        cmdlineArchs += [isaToGfx(arch) + ":xnack+"]
-                    else:
-                        archs += [isaToGfx(arch) + "-xnack-"]
-                        cmdlineArchs += [isaToGfx(arch) + ":xnack-"]
-                else:
-                    archs += [isaToGfx(arch)]
-                    cmdlineArchs += [isaToGfx(arch)]
-    else:
-        for arch in wantedArchs:
-            archs += [re.sub(":", "-", arch)]
-            cmdlineArchs += [arch]
-
-    # if calling from the context of Tensile we only want the arch associated with the current ISA
-    if fromTensile:
-        gfx = isaToGfx(params["CurrentISA"])
-        archs = set(a for a in archs if gfx in a)
-        cmdlineArchs = set(a for a in cmdlineArchs if gfx in a)
-
-    return archs, cmdlineArchs
+    raise OSError(f"Failed to locate {exeName}")
 
 
 def ensurePath(path):
@@ -103,12 +109,20 @@ def ensurePath(path):
     except FileExistsError:
         pass
     except OSError:
-        printExit('Failed to create directory "%s" ' % (path))
+        raise OSError('Failed to create directory "%s" ' % (path))
     return path
 
 
 def roundUp(f):
     return (int)(math.ceil(f))
+
+
+def elineno():
+    """
+    Return the file name and line number of the caller.
+    """
+    frame = getframeinfo(currentframe().f_back)
+    return f"{Path(frame.filename).name}:{frame.lineno}"
 
 
 ################################################################################
@@ -288,3 +302,10 @@ def ClientExecutionLock(lockPath: str):
     import filelock
 
     return filelock.FileLock(lockPath)
+
+
+def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, defaultDictionary):
+    if key in sourceDictionary:
+        destinationDictionary[key] = deepcopy(sourceDictionary[key])
+    else:
+        destinationDictionary[key] = deepcopy(defaultDictionary[key])

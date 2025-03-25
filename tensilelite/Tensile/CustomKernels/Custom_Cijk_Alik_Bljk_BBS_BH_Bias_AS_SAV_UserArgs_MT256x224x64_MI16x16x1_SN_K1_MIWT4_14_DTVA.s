@@ -62,6 +62,7 @@ custom.config:
       GroupedGemm: False
       SupportUserArgs: True
    MatrixInstruction: [16, 16, 16, 1, 1, 4, 14, 4, 1]
+   WavefrontSize: 64
    1LDSBuffer: 1
    ScheduleIterAlg: 3
    DepthU: 64

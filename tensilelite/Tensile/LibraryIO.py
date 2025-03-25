@@ -23,12 +23,16 @@
 ################################################################################
 
 from .CustomKernels import getCustomKernelConfig
-from .SolutionStructs import Solution, ProblemSizes, ProblemType
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
-from .Common import gfxToIsa, printExit, printWarning, print2, versionIsCompatible, __version__
+from Tensile import __version__
+from Tensile.Common import printExit, printWarning, print2, \
+                           versionIsCompatible, IsaInfo, DepthUConfig
+from Tensile.Common.Architectures import gfxToIsa
+from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Problem import ProblemType
 
-from typing import NamedTuple, List
+from typing import NamedTuple, List, Dict
 import os
 import sys
 
@@ -148,6 +152,8 @@ def writeSolutions(filename, problemSizes, biasTypeArgs, activationArgs, solutio
             if "DataTypeMetadata" in solutionState["ProblemType"]:
                 solutionState["ProblemType"]["DataTypeMetadata"] = \
                     solutionState["ProblemType"]["DataTypeMetadata"].value
+            isa = solutionState["ISA"]
+            solutionState["ISA"] = [isa[0], isa[1], isa[2]]
             solutionStates.append(solutionState)
     # write dictionaries
     with open(filename, "w") as f:
@@ -180,11 +186,13 @@ def read(filename, customizedLoader=False):
     else:
         printExit("Unrecognized read format {}".format(extension))
 
+
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
         data = yaml.load(f, yamlLoader)
     return data
+
 
 def readJson(filename):
     """Reads and returns JSON data from file."""
@@ -192,12 +200,39 @@ def readJson(filename):
         data = json.loads(f.read())
     return data
 
-def parseSolutionsFile(filename, cxxCompiler):
+
+def parseSolutionsFile(
+        filename,
+        assembler,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        depthUConfig: DepthUConfig,
+        isaInfoMap
+    ):
     """Wrapper function to read and parse a solutions file."""
-    return parseSolutionsData(read(filename), filename, cxxCompiler)
+    return parseSolutionsData(
+               read(filename),
+               filename,
+               assembler,
+               splitGSU,
+               printSolutionRejectionReason,
+               printIndexAssignmentInfo,
+               depthUConfig,
+               isaInfoMap
+            )
 
 
-def parseSolutionsData(data, srcFile, cxxCompiler):
+def parseSolutionsData(
+        data,
+        srcFile,
+        assembler,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        depthUConfig: DepthUConfig,
+        isaInfoMap
+    ):
     """Parses problem sizes and solutions from the data of a solutions file."""
     if len(data) < 3:
         printExit("Solution file {} is missing required fields (len = {} < 3" \
@@ -224,7 +259,16 @@ def parseSolutionsData(data, srcFile, cxxCompiler):
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False
-        solutionObject = Solution(solutionState, cxxCompiler, srcFile)
+        solutionObject = Solution(
+                             solutionState,
+                             splitGSU,
+                             printSolutionRejectionReason,
+                             printIndexAssignmentInfo,
+                             depthUConfig,
+                             assembler,
+                             isaInfoMap,
+                             srcFile
+                         )
         solutions.append(solutionObject)
     problemType = solutions[0]["ProblemType"]
     problemSizes = ProblemSizes(problemType, problemSizesConfig)
@@ -240,25 +284,44 @@ class LibraryLogic(NamedTuple):
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
 
-def parseLibraryLogicFile(filename, cxxCompiler, archs=None):
+def parseLibraryLogicFile(
+        filename,
+        assembler,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        depthUConfig: DepthUConfig,
+        isaInfoMap: Dict[str, IsaInfo],
+        lazyLibraryLoading: bool
+    ):
     """Wrapper function to read and parse a library logic file."""
-    return parseLibraryLogicData(read(filename, True), filename, cxxCompiler, archs)
+    return parseLibraryLogicData(
+               read(filename, True),
+               filename,
+               assembler,
+               splitGSU,
+               printSolutionRejectionReason,
+               printIndexAssignmentInfo,
+               depthUConfig,
+               isaInfoMap,
+               lazyLibraryLoading
+           )
 
 
-def parseLibraryLogicData(data, srcFile, cxxCompiler, archs=None):
+def parseLibraryLogicData(
+        data,
+        srcFile,
+        assembler,
+        splitGSU: bool,
+        printSolutionRejectionReason: bool,
+        printIndexAssignmentInfo: bool,
+        depthUConfig: DepthUConfig,
+        isaInfoMap: Dict[str, IsaInfo],
+        lazyLibraryLoading: bool
+    ):
     """Parses the data of a library logic file."""
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
-
-    is_arch_valid = lambda cArch, tArch : (cArch == tArch or cArch == "all")
-    if not (archs is None) and "ArchitectureName" in data:
-        if isinstance(archs, List):
-            if len(archs) > 0 and not archs[0] == "all":
-                if not (any(is_arch_valid(arch.split(":")[0], data["ArchitectureName"]) for arch in archs)):
-                    return LibraryLogic("", "", None, [], [], None, srcFile)
-        elif isinstance(archs, str):
-            if not is_arch_valid(archs.split(":")[0], data["ArchitectureName"]):
-                return LibraryLogic("", "", None, [], [], None, srcFile)
 
     if "CUCount" not in data:
         data["CUCount"] = None
@@ -268,14 +331,12 @@ def parseLibraryLogicData(data, srcFile, cxxCompiler, archs=None):
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
-    problemType = ProblemType(data["ProblemType"])
+    problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo)
 
     # unpack solution
-    def solutionStateToSolution(solutionState, cxxCompiler) -> Solution:
+    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
-        else:
-            solutionState["ISA"] = (0, 0, 0)
         solutionState["CUCount"] = data["CUCount"]
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
@@ -287,10 +348,24 @@ def parseLibraryLogicData(data, srcFile, cxxCompiler, archs=None):
             customConfig = getCustomKernelConfig(solutionState["CustomKernelName"], isp)
             for key, value in customConfig.items():
                 solutionState[key] = value
+
+            if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
+                raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
+
             # The ActivationType setting in YAML is meaningless in customKernel case.
             # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
             solutionState["ProblemType"]["ActivationType"] = problemType["ActivationType"]
-        solutionObject = Solution(solutionState, cxxCompiler, srcFile)
+
+        solutionObject = Solution(
+                             solutionState,
+                             splitGSU,
+                             printSolutionRejectionReason,
+                             printIndexAssignmentInfo,
+                             depthUConfig,
+                             assembler,
+                             isaInfoMap,
+                             srcFile
+                         )
         solutionProblemType = solutionObject["ProblemType"]
         if problemType != solutionProblemType:
             # find the mismatched items in ProblemType
@@ -302,9 +377,19 @@ def parseLibraryLogicData(data, srcFile, cxxCompiler, archs=None):
             printExit(f"ProblemType in library logic file {srcFile} doesn't match solution(idx={solIdx}): \n{results}")
         return solutionObject
 
-    solutions = [solutionStateToSolution(solutionState, cxxCompiler) for solutionState in data["Solutions"]]
+    solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
 
-    newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(data, solutions, cxxCompiler)
+    newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
+        data,
+        solutions,
+        splitGSU,
+        printSolutionRejectionReason,
+        printIndexAssignmentInfo,
+        depthUConfig,
+        assembler,
+        isaInfoMap,
+        lazyLibraryLoading
+    )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
             data.get("ExactLogic"), newLibrary)
@@ -464,6 +549,8 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         if "DataTypeMetadata" in solutionState["ProblemType"]:
             solutionState["ProblemType"]["DataTypeMetadata"] = \
                     solutionState["ProblemType"]["DataTypeMetadata"].value
+        isa = solutionState["ISA"]
+        solutionState["ISA"] = [isa[0], isa[1], isa[2]]
         solutionList.append(solutionState)
 
     if tileSelection:

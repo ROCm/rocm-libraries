@@ -116,8 +116,10 @@ def pytest_collection_modifyitems(items):
     Adds a mark for the root directory name to each test.
     """
     for item in items:
+        
         relpath = item.fspath.relto(testdir)
         components = relpath.split(os.path.sep)
+        # print(f"Items: {item}, Testdir: {testdir}, Components: {components}")
         if len(components) > 0 and len(components[0]) > 0:
             item.add_marker(getattr(pytest.mark, components[0]))
 
@@ -139,8 +141,8 @@ def useGlobalParameters(tensile_args):
             Common.restoreDefaultGlobalParameters()
             if args.CxxCompiler:
                 Common.globalParameters["CxxCompiler"] = args.CxxCompiler
-
-            Common.assignGlobalParameters({})
+            isa = Common.detectGlobalCurrentISA(args.device)
+            Common.assignGlobalParameters({}, isa)
 
             overrideParameters = Tensile.argUpdatedGlobalParameters(args)
             for key, value in overrideParameters.items():

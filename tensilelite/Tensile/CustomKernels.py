@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import CUSTOM_KERNEL_PATH
-from .Common import checkParametersAreValid, validParameters
+from Tensile.Common.ValidParameters import checkParametersAreValid, validParameters, newMIValidParameters
 
 import yaml
 
@@ -65,20 +65,41 @@ def readCustomKernelConfig(name, directory=CUSTOM_KERNEL_PATH):
     except yaml.scanner.ScannerError as e:
         raise RuntimeError("Failed to read configuration for custom kernel: {0}\nDetails:\n{1}".format(name, e))
 
-def getCustomKernelConfig(kernelName, internalSupportParams, directory=CUSTOM_KERNEL_PATH):
+def getCustomKernelConfig(
+    kernelName: str, internalSupportParams: dict, directory: str = CUSTOM_KERNEL_PATH
+) -> dict:
+    """
+    Retrieves and validates the configuration for a custom kernel.
+
+    Args:
+        kernelName: The name of the custom kernel.
+        internalSupportParams: A dictionary of internal support parameters to be merged with the kernel configuration.
+        directory: The directory where custom kernel files are located. Defaults to CUSTOM_KERNEL_PATH.
+
+    Returns:
+        dict: The validated configuration dictionary for the custom kernel.
+
+    Raises:
+        RuntimeError: If the custom kernel configuration is missing required fields or if there is an error reading the configuration.
+    """
     kernelConfig = readCustomKernelConfig(kernelName, directory)
     if "InternalSupportParams" not in kernelConfig:
-        raise RuntimeError("Custom kernel %s config must have KernArgsVersion"%kernelName)
-    else:
-        # CustomKernelConfig must have signature version
-        if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
-            raise RuntimeError("Custom kernel %s config must have KernArgsVersion"%kernelName)
-        for key in internalSupportParams:
-            if key not in kernelConfig["InternalSupportParams"]:
-                kernelConfig["InternalSupportParams"][key] = internalSupportParams[key]
+        raise RuntimeError(f"Custom kernel {kernelName} config must have 'InternalSupportParams'")
+
+    if "KernArgsVersion" not in kernelConfig["InternalSupportParams"]:
+        raise RuntimeError(f"Custom kernel {kernelName} config must have 'KernArgsVersion'")
+
+    kernelIsp = kernelConfig["InternalSupportParams"]
+    for key in internalSupportParams:
+        if key not in kernelIsp:
+            kernelIsp[key] = internalSupportParams[key]
+    
+    validParameters.update(newMIValidParameters)
+
     for k, v in kernelConfig.items():
         if k != "ProblemType":
             checkParametersAreValid((k, [v]), validParameters)
+
     kernelConfig["KernelLanguage"] = "Assembly"
     kernelConfig["CustomKernelName"] = kernelName
 

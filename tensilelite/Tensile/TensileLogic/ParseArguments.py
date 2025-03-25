@@ -23,28 +23,30 @@
 ################################################################################
 
 from argparse import ArgumentParser
-from typing import Any, Dict
 
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
 
-def parseArguments() -> Dict[str, Any]:
+def parseArguments():
     """
     Returns:
         A dictionary containing the keys representing options and their values.
     """
 
     argParser = ArgumentParser(
-        description="TensileValidateLogic runs critical checks to ensure the "
+        description="TensileLogic runs critical checks to ensure the "
         "integrity of the supplied logic files.",
     )
+    argParser.add_argument("LogicPath", help="path to library logic (yaml) files")
 
-    argParser.add_argument("LogicPath", help="Path to LibraryLogic.yaml files.")
     argParser.add_argument(
-        "--check-matrix-instruction",
-        dest="CheckMatrixInstruction",
-        action="store_true",
-        help="Checks that matrix instructions are valid for all target ISAs.",
+        "-v",
+        "--verbose",
+        dest="Verbose",
+        type=int,
+        default=1,
+        choices=[0, 1, 2, 3],
+        help="set print level with `-v 2`",
     )
     argParser.add_argument(
         "--jobs",
@@ -52,14 +54,25 @@ def parseArguments() -> Dict[str, Any]:
         dest="Jobs",
         action="store",
         default=48,
-        help="Number of worker processes to use during validation checks.",
+        help="number of worker processes to use during validation checks",
     )
     argParser.add_argument(
         "--cxx-compiler",
         dest="CxxCompiler",
         action="store",
         default=ToolchainDefaults.CXX_COMPILER,
-        help=f"Default: {ToolchainDefaults.CXX_COMPILER}",
+        help=f"default: {ToolchainDefaults.CXX_COMPILER}",
+    )
+
+    group = argParser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--check-all", dest="CheckAll", action="store_true", help="run all logic file checks"
+    )
+    group.add_argument(
+        "--check-only-custom-kernels",
+        dest="CheckOnlyCustomKernels",
+        action="store_true",
+        help="run logic file checks only on custom kernels",
     )
     args = argParser.parse_args()
 

@@ -22,16 +22,19 @@
 #
 ################################################################################
 
+from typing import Dict
 from copy import deepcopy
+from typing import List
 
 from .KernelWriterBase import KernelWriterBase
 from .TensileInstructions import DataType
 
-from .Common import globalParameters, gfxToIsa, isaToGfx, INDEX_CHARS
+from Tensile.Common.Architectures import isaToGfx
+from Tensile.Common import INDEX_CHARS, IsaInfo
 
 class KernelWriterConversion(KernelWriterBase):
 
-  def __init__(self, state, load_vw):
+  def __init__(self, state, load_vw, supportedArchs: List[tuple], isaInfoMap: Dict[str, IsaInfo]):
     super().__init__()
 
     self.state["ProblemType"] = deepcopy(state["ProblemType"])
@@ -65,6 +68,7 @@ class KernelWriterConversion(KernelWriterBase):
     # derive parameter
     self.language = "HIP"
     self.kernelName = self.getKernelName()
+    self.isaInfoMap = isaInfoMap
     self.datatype = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
     self.int32Str = DataType('int32').toDevice(self.language)
     if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
@@ -80,15 +84,7 @@ class KernelWriterConversion(KernelWriterBase):
     self.tileChar1 = self.indexChars[self.state["ProblemType"]["Index1"]]
 
     # Get supported archs
-    if ";" in globalParameters["Architecture"]:
-      self.supportedArchs = globalParameters["Architecture"].split(";")
-    else:
-      self.supportedArchs = globalParameters["Architecture"].split("_")
-    if "all" in self.supportedArchs:
-      self.supportedArchs = deepcopy(globalParameters['SupportedISA'])
-    else:
-      for idx, arch in enumerate(self.supportedArchs):
-        self.supportedArchs[idx] = gfxToIsa(''.join(map(str, arch)))
+    self.supportedArchs = supportedArchs
 
     self.gsuKernels = [self.state["GlobalSplitU"]]
     if self.state["GenPGRPostKernels"]:
@@ -532,10 +528,9 @@ class KernelWriterConversion(KernelWriterBase):
           if self.num_dword_load > 2:
             kStr += "  float2 accumVec2(accum[2], accum[3]);" + self.endLine
       canPKF32Arch = []
-      for arch in self.supportedArchs:
-        archTuple = tuple(arch)
-        if globalParameters["AsmCaps"][archTuple]['v_pk_add_f32']:
-          canPKF32Arch.append(arch)
+      for isa in self.supportedArchs:
+        if self.isaInfoMap[isa].asmCaps['v_pk_add_f32']: 
+          canPKF32Arch.append(isa)
       defineStr = []
       if len(canPKF32Arch) > 0:
         defineStr = "#if defined(__%s__)"%isaToGfx(canPKF32Arch[0])

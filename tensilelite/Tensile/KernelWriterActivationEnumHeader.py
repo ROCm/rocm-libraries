@@ -22,7 +22,6 @@
 
 from copy import deepcopy
 
-from .Common import globalParameters, CHeader
 from .Activation import ActivationType
 from .KernelWriterBase import KernelWriterBase
 

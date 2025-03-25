@@ -26,25 +26,31 @@ if __name__ == "__main__":
     print("This file can no longer be run as a script.  Run 'Tensile/bin/Tensile' instead.")
     exit(1)
 
-import joblib
 import os
+import subprocess
 import sys
 import argparse
-from .Common import globalParameters, print1, printExit, printWarning, ensurePath, \
-    assignGlobalParameters, restoreDefaultGlobalParameters, HR, __version__, LIBRARY_LOGIC_DIR, \
-    coVersionMap
-from .Toolchain.Assembly import AssemblyToolchain
-from .Toolchain.Source import SourceToolchain
-from .Toolchain.Validators import validateToolchain, ToolchainDefaults
-from .Utilities.Decorators.Profile import profile
-from . import BenchmarkProblems
-from . import ClientWriter
-from . import LibraryIO
-from . import LibraryLogic
+
 from datetime import datetime
 from pathlib import Path
+from typing import Dict
 
-import subprocess
+from Tensile import __version__
+from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, \
+                           LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
+                           makeDepthUConfig, DebugConfig, DepthUConfig, IsaVersion, coVersionMap
+from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
+from Tensile.Common.Capabilities import makeIsaInfoMap
+from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
+                                            restoreDefaultGlobalParameters
+from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
+from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
+from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
+from Tensile.Utilities.Decorators.Profile import profile
+from Tensile import BenchmarkProblems
+from Tensile import ClientWriter
+from Tensile import LibraryIO
+from Tensile import LibraryLogic
 
 ###############################################################################
 # Execute Steps in Config
@@ -60,7 +66,11 @@ def executeStepsInConfig(
         outputPath: Path,
         asmToolchain: AssemblyToolchain,
         srcToolchain: SourceToolchain,
-        cCompiler: str
+        isaInfoMap: Dict[str, IsaInfo],
+        cCompiler: str,
+        debugConfig: DebugConfig,
+        depthUConfig: DepthUConfig,
+        deviceId: int
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -84,8 +94,23 @@ def executeStepsInConfig(
     ##############################################################################
     # Benchmark Problems
     ##############################################################################
+    gfxName = isaToGfx(next(iter(isaInfoMap)))
     if "BenchmarkProblems" in config:
-        BenchmarkProblems.main(config["BenchmarkProblems"], config["UseCache"], asmToolchain, srcToolchain, cCompiler, outputPath, buildTmpPath)
+        BenchmarkProblems.main(
+            config["BenchmarkProblems"],
+            config["UseCache"],
+            asmToolchain,
+            srcToolchain,
+            cCompiler,
+            outputPath,
+            buildTmpPath,
+            config["ShortNames"],
+            debugConfig,
+            depthUConfig,
+            deviceId,
+            gfxName,
+            isaInfoMap,
+        )
         print1("")
 
     ##############################################################################
@@ -102,7 +127,16 @@ def executeStepsInConfig(
                 libraryLogicConfig = config["LibraryLogic"]
             else:
                 libraryLogicConfig = {}
-            LibraryLogic.main(libraryLogicConfig, srcToolchain.compiler, outputPath)
+            LibraryLogic.main(
+                libraryLogicConfig,
+                srcToolchain.compiler,
+                outputPath,
+                debugConfig.splitGSU,
+                debugConfig.printSolutionRejectionReason,
+                debugConfig.printIndexAssignmentInfo,
+                depthUConfig,
+                isaInfoMap,
+            )
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -116,7 +150,16 @@ def executeStepsInConfig(
             libraryClientConfig = config["LibraryClient"]
         else:
             libraryClientConfig = {}
-        ClientWriter.main(libraryClientConfig, srcToolchain.compiler, cCompiler, outputPath)
+        ClientWriter.main(
+            libraryClientConfig,
+            asmToolchain.assembler,
+            cCompiler,
+            isaInfoMap,
+            outputPath,
+            deviceId,
+            gfxName,
+            config["ShortNames"]
+        )
         print1("")
 
 
@@ -135,7 +178,7 @@ def addCommonArguments(argParser):
         value = eval(value)
         return (key, value)
 
-    argParser.add_argument("-d", "--device", dest="device", type=int, \
+    argParser.add_argument("-d", "--device", dest="device", default=0, type=int, \
         help="override which device to benchmark")
     argParser.add_argument("-p", "--platform", dest="platform", type=int, \
         help="override which OpenCL platform to benchmark")
@@ -157,6 +200,8 @@ def addCommonArguments(argParser):
         action="store", default=ToolchainDefaults.ASSEMBLER, help="select which assembler to use")
     argParser.add_argument("--offload-bundler", dest="OffloadBundler", \
         action="store", default=ToolchainDefaults.OFFLOAD_BUNDLER, help="select which offload bundler to use")
+    argParser.add_argument("--device-enumerator", dest="DeviceEnumerator", \
+        action="store", default=ToolchainDefaults.DEVICE_ENUMERATOR, help="select which device enumerator to use")
     argParser.add_argument("--logic-format", dest="LogicFormat", choices=["yaml", "json"], \
         action="store", default="yaml", help="select which logic format to use")
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
@@ -173,9 +218,6 @@ def argUpdatedGlobalParameters(args):
     """
     rv = {}
     # override config with command-line options
-    if args.device:
-        print1("# Command-line override: Device")
-        rv["Device"] = args.device
     if args.platform:
         print1("# Command-line override: Platform")
         rv["Platform"] = args.platform
@@ -185,15 +227,9 @@ def argUpdatedGlobalParameters(args):
     if args.CodeObjectVersion:
         print1("# Command-line override: CodeObjectVersion")
         rv["CodeObjectVersion"] = args.CodeObjectVersion
-    if args.verbose:
-        print1("# Command-line override: PrintLevel")
-        rv["PrintLevel"] = 2
     if args.debug:
         print1("# Command-line override: Debug")
-        rv["PrintLevel"] = 2
         rv["CMakeBuildType"] = "Debug"
-    if args.shortNames:
-        rv["ShortNames"] = True
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
@@ -336,12 +372,13 @@ def Tensile(userArgs):
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
-
     configPaths = args.ConfigFile
     altFormat = args.AlternateFormat
     useCache = args.useCache
     outputPath = Path(ensurePath(os.path.abspath(args.OutputPath)))
     print1(f"#  OutputPath: {str(outputPath)}")
+
+    setVerbosity(2 if (args.debug or args.verbose) else 1)
 
     if altFormat and len(configPaths) > 2:
         printExit("Only 1 or 2 config_files are accepted for the alternate config format: "
@@ -399,7 +436,7 @@ def Tensile(userArgs):
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
 
-    device_id = config["GlobalParameters"].get("Device", globalParameters["Device"])
+    device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
 
     def isRhel8():
@@ -413,9 +450,9 @@ def Tensile(userArgs):
                 """
             )
             return False
-        
+
         dist = distro.linux_distribution()
-        if distro.id() == "rhel" and distro.version()[0] == "8": 
+        if distro.id() == "rhel" and distro.version()[0] == "8":
             printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
             return True
         else:
@@ -436,14 +473,37 @@ def Tensile(userArgs):
         print(f"Successfully retrieve Max frequency: {max_frequency} for device {device_id}")
         store_max_frequency(max_frequency)
 
-    cxxCompiler, cCompiler, assembler, offloadBundler = validateToolchain(args.CxxCompiler, args.CCompiler, args.Assembler, args.OffloadBundler)
-    assignGlobalParameters(config.get("GlobalParameters", {}), cxxCompiler)
+    cxxCompiler, \
+    cCompiler, \
+    offloadBundler, \
+    enumerator = validateToolchain(args.CxxCompiler,
+                                   args.CCompiler,
+                                   args.OffloadBundler,
+                                   ToolchainDefaults.DEVICE_ENUMERATOR)
+    asmToolchain = makeAssemblyToolchain(
+        cxxCompiler,
+        offloadBundler,
+        args.CodeObjectVersion,
+    )
+    srcToolchain = makeSourceToolchain(
+        cxxCompiler,
+        offloadBundler,
+    )
 
-
-    asmToolchain= AssemblyToolchain(assembler, offloadBundler, globalParameters["BuildIdKind"], globalParameters["CodeObjectVersion"])
-    srcToolchain= SourceToolchain(cxxCompiler, offloadBundler, globalParameters["BuildIdKind"], globalParameters["AsanBuild"], globalParameters["SaveTemps"])
+    currentIsa = detectGlobalCurrentISA(device_id, enumerator)
+    if currentIsa == IsaVersion(9,5,0):
+        printWarning("HardwareMonitor currently disabled for gfx950")
+        globalParameters["HardwareMonitor"] = False
+    isaInfoMap = makeIsaInfoMap([currentIsa], cxxCompiler)
+    assignGlobalParameters(config.get("GlobalParameters", {}), isaInfoMap)
 
     overrideParameters = argUpdatedGlobalParameters(args)
+
+    if "ShortNames" not in config:
+      config["ShortNames"] = args.shortNames
+
+    debugConfig = makeDebugConfig(config["GlobalParameters"])
+    depthUConfig = makeDepthUConfig(config["GlobalParameters"])
 
     for key, value in overrideParameters.items():
         print("Overriding {0}={1}".format(key, value))
@@ -452,7 +512,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, cCompiler)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, depthUConfig, device_id)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)

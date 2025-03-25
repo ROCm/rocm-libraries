@@ -25,7 +25,7 @@
 from . import ClientWriter
 from . import LibraryIO
 from .Contractions import ProblemType as ContractionsProblemType
-from .SolutionStructs import ProblemSizes, ProblemType
+from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
 from .Common import globalParameters, print1, printExit, printWarning, assignGlobalParameters, \
         restoreDefaultGlobalParameters, HR, __version__
 from .Tensile import addCommonArguments, argUpdatedGlobalParameters

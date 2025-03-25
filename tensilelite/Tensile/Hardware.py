@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import Properties
-from .Common import isaToGfx
+from Tensile.Common.Architectures import isaToGfx
 import copy
 
 class HardwarePredicate(Properties.Predicate):

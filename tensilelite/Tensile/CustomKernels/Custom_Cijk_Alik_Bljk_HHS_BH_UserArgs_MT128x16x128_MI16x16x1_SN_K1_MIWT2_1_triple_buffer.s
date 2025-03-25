@@ -56,7 +56,6 @@ custom.config:
       TransposeB: 0
       UseBeta: True
       Batched: True
-   MatrixInstruction: [16, 16,16, 1,  1,   2,1,  4,1 ]
    AssertFree0ElementMultiple: 16
    AssertFree1ElementMultiple: 1
    AssertSummationElementMultiple: 128

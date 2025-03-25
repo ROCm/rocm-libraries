@@ -47,15 +47,16 @@ from .TensileInstructions.Instructions import *
 from .TensilePass import getActivationFunctionModuleName, getActivationBranchModuleName
 from .TensileInstructions.Containers import HWRegContainer
 from .Component import Component
-from .KernelWriter import KernelWriter, ConstValues, StateValues, StateVgprs, CodeModules
 from .KernelWriterModules import *
 from .SolutionStructs import isPackedIndex
 from .AsmStoreState import StoreState, VectorDataTypes
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationType
 from .CustomKernels import isCustomKernelConfig
-from .Common import globalParameters, print2, printExit, printWarning, roundUp, ensurePath, INDEX_CHARS, DataDirection, SemanticVersion
-from dataclasses import dataclass
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection
+from Tensile.KernelWriter import KernelWriter
+from Tensile.SolutionStructs.Naming import getKernelFileBase
+from Tensile.Toolchain.Component import Assembler
 
 from math import ceil, log, floor
 from copy import deepcopy
@@ -88,10 +89,41 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Init
   ##############################################################################
-  def __init__(self, kernelMinNaming, kernelSerialNaming, assembler: str, amdClangVersion: SemanticVersion):
-    super(KernelWriterAssembly, self).__init__(kernelMinNaming, kernelSerialNaming, assembler, amdClangVersion)
+  def __init__(
+      self,
+      kernelMinNaming,
+      kernelSerialNaming,
+      assembler: Assembler,
+      debugConfig: DebugConfig,
+    ):
+    super(KernelWriterAssembly, self).__init__(kernelMinNaming, kernelSerialNaming, assembler, debugConfig)
 
-  def getSourceFileString(self, kernel) -> Tuple[int, str]:
+
+  def _getCustomKernelSource(self, useShortNames, kernel, CustomKernelDirectory):
+    kernelName = getKernelFileBase(useShortNames, self.debugConfig.splitGSU, self.kernelMinNaming, self.kernelSerialNaming, kernel)
+    with open(os.path.join(CustomKernelDirectory, (kernelName + ".s"))) as f:
+      rocmVersion = self.assembler.rocm_version
+      if not (rocmVersion.major >= 6 and rocmVersion.patch >= 32650):
+        code = []
+        for line in f.readlines():
+          if "amdhsa_user_sgpr_kernarg_preload" not in line:
+            code.append(line)
+        code = "".join(code)
+      else:
+        code = f.read()
+
+    self.tPA = {}
+    self.tPB = {}
+    self.states.kernel = kernel
+    self.states.language = "ASM"
+    self.states.version = kernel["ISA"]
+
+    return code
+
+
+  def getSourceFileString(self,
+                          kernel,
+                          useShortNames: bool=False) -> Tuple[int, str]:
     assert kernel["KernelLanguage"] == "Assembly"
     # Skip if .o files will have already been built for this file
     if kernel.duplicate:
@@ -99,7 +131,7 @@ class KernelWriterAssembly(KernelWriter):
       return (0, "") # should this be an non zero number
 
     try:
-      code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
+      code = self._getCustomKernelSource(useShortNames, kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
       errcode = 0
     except RuntimeError as e:
       printWarning(f"Failed to generate assembly source code for {kernel}: {e}")
@@ -803,7 +835,7 @@ class KernelWriterAssembly(KernelWriter):
 
     module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
 
-    if globalParameters["DebugKernel"]:
+    if self.debugConfig.debugKernel:
       module.add(RegSet("v", "vgprAddressDbg", \
           self.states.startVgprAddressDbg))
     #module.addComment0("Occu: %u waves/simd" % self.numWavesPerSimd )
@@ -1255,7 +1287,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         msg = "unknown"
 
-      if globalParameters["PrintSolutionRejectionReason"]:
+      if self.debugConfig.printSolutionRejectionReason:
         printWarning("%s overflowed resources.  errorCode=%d, msg=\"%s\", vgprs=%u, sgprs=%u" \
           % (self.states.kernelName, self.states.overflowedResources, msg, \
           self.vgprPool.size(), self.sgprPool.size()))
@@ -1313,7 +1345,7 @@ class KernelWriterAssembly(KernelWriter):
   def getKernelArgLoadModule(self, kernel, sgprStartIdx, numsOfLoad, preloadNum):
     kernelArgs = Module("load arguments")
     kernelArgs.addComment1("Load Kernel Args")
-    if globalParameters["DebugKernel"]:
+    if self.debugConfig.debugKernel:
       kernelArgs.add(self.argLoader.loadKernArg("AddressDbg", "KernArgAddress", dword=2))
     self.argLoader.resetOffset()
     kernelArgs.addModuleAsFlatItems(self.argLoader.loadAllKernArg(sgprStartIdx, "KernArgAddress", numsOfLoad, preloadNum))
@@ -2049,7 +2081,7 @@ class KernelWriterAssembly(KernelWriter):
 
     ########################################
     # Debug Buffer
-    if globalParameters["DebugKernel"]:
+    if self.debugConfig.debugKernel:
       module.addComment1("Debug Buffer")
 
       # nwg0 FIXME use NumWorkGroups0
@@ -4542,7 +4574,7 @@ class KernelWriterAssembly(KernelWriter):
               numVgprValuPackA *= 2
           else:
             numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
-        
+
         vgprBaseA = self.vgprPool.checkOutAligned(numValuA + numVgprValuPackA, 2)
         imodA.add(RegSet("v", "vgprValuA_X0_I0_BASE", vgprBaseA))
         if numVgprValuPackA > 0:
@@ -4618,7 +4650,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Using wider load instructions to improve the GR efficiency in tail loop.
   # If loading size is smaller than a dword(32bit), it will return 0 instead.
-  # Need to call buffer_load_d16 to load the data which is out of boundary. 
+  # Need to call buffer_load_d16 to load the data which is out of boundary.
   ##############################################################################
   def tailLoopGlobalRead(self, kernel, tPA, tPB, doA, doB):
     imod = Module("tailLoopGlobalRead")
@@ -4858,7 +4890,7 @@ class KernelWriterAssembly(KernelWriter):
         if doA and kernel["DirectToLds%s"%tPA["tensorChar"]]:
           imod.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
               comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
-         
+
         imod.add(SCmpEQU32(src0=sgpr(tmpSgprKB), src1=0, \
                            comment="Valid loading size per thread is multiples of 4 bytes"))
 
@@ -5671,7 +5703,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Write bias A, B data to LDS
     if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
-      
+
       tP = tPA if kernel["ProblemType"]["BiasSrc"] == "A" else tPB
       module.add(self.exclasses.biasSumUnroll.storeSumLDS(self, kernel, tP))
 
@@ -7793,17 +7825,17 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         if tP["is_sparse"]:
             globalReadGuardKBody(tP["tpsMetadata"])
-  
+
       if self.db["ConservativeWaitCnt"] & 0x1:
           module.add(SBarrier(comment="debug"))
           module.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=0, comment=""))
           module.add(SBarrier(comment="debug"))
-  
+
       # TODO - can remove one of these m0 restores if A and B both TLU
       if kernel["DirectToLds%s"%tP["tensorChar"]]:
         module.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]), \
             comment="Restore LDS clamp at %u bytes HERE"%(kernel["LdsNumBytes"])))
-  
+
       if not kernel["BufferLoad"]:
         self.vgprPool.checkIn(maxAddrVgpr)
         self.vgprPool.checkIn(bpeVgpr)
@@ -7994,7 +8026,7 @@ class KernelWriterAssembly(KernelWriter):
     tc = tP["tensorChar"]
     problemType = self.states.kernel["ProblemType"]
     imod = StructuredModule("globalReadDo%s_%u"%(tc,mode))
-    if not self.do["GlobalRead%s"%tP["tensorChar"]]: 
+    if not self.do["GlobalRead%s"%tP["tensorChar"]]:
       return imod
 
     # sizeK % LOCAL_DEPTHU
@@ -8157,7 +8189,7 @@ class KernelWriterAssembly(KernelWriter):
                 else:
                   g2lIdxM = i * max(loadWidth * tP["bpeRatio"], 1)
                   destVgpr = destVgprPrefix + "+%u"%((g2lIdx+eccOffset+tP["shiftGR"]) if not tP["isM"] else g2lIdxM)
-                  self.vgprs.globalReadRegisters[tc].append(g2lIdx+eccOffset+tP["shiftGR"] if not tP["isM"] else g2lIdxM) 
+                  self.vgprs.globalReadRegisters[tc].append(g2lIdx+eccOffset+tP["shiftGR"] if not tP["isM"] else g2lIdxM)
                   if tP["isM"]:
                     assert(graIdx <= self.states.m.numVgprG2LAllocated)
 
@@ -10515,7 +10547,7 @@ class KernelWriterAssembly(KernelWriter):
     useBiasBackup      = self.states.useBias
     betasBackup    = betas
     edgesBackup    = edges
-    gsuLimit = 1 if noGSUBranch or globalParameters["SplitGSU"] else 2
+    gsuLimit = 1 if noGSUBranch or self.debugConfig.splitGSU else 2
     if gsuLimit > 1:
       gsuLabel = Label(label=self.labels.getNameInc("GSU"), comment="")
       with self.allocTmpSgpr(1) as tmpSgprGSU:
@@ -12063,7 +12095,7 @@ class KernelWriterAssembly(KernelWriter):
         addrScaleAVec, addrScaleBVec, addrScaleAlphaVec, biasLocalBarrierInit, \
         tmpVgpr, tmpVgprDynamic, cvtVgprStruct, activationSetPCStruct, activationTypeStr, \
         batchElementSgprs, tmpSgpr, codeAccVgprRead, codeMulAlpha, packdata, self, factorDim, \
-        self.amdClangVersion)
+        self.assembler.version)
 
   ##############################################################################
   def openPrefetchGlobalRead2(self, kernel):

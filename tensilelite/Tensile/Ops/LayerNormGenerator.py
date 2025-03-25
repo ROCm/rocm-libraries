@@ -34,8 +34,8 @@ import subprocess
 import collections
 from contextlib import contextmanager
 import Tensile.TensileInstructions as ti
-from Tensile.Common import detectGlobalCurrentISA, restoreDefaultGlobalParameters, \
-    assignGlobalParameters, isaToGfx, gfxToIsa, globalParameters
+from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
+from Tensile.Common.GlobalParameters import assignGlobalParameters, restoreDefaultGlobalParameters
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
@@ -927,8 +927,8 @@ if __name__ == '__main__':
     if any([not i for i in (arch, toolchain_path, isa)]):
         restoreDefaultGlobalParameters()
         assignGlobalParameters({})
-        detectGlobalCurrentISA()
-        isa = globalParameters['CurrentISA']
+        enumerator = validateToolchain(ToolchainDefaults.DEVICE_ENUMERATOR)
+        isa = detectGlobalCurrentISA(0, enumerator)
         arch = isaToGfx(isa)
         toolchain_path = validateToolchain(ToolchainDefaults.CXX_COMPILER)
 

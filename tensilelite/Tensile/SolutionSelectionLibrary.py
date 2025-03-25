@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 #
 ################################################################################
 
-from .SolutionStructs import Solution
+from Tensile.SolutionStructs.Naming import getNameMin
 
 import csv
 
@@ -89,8 +89,9 @@ def updateValidSolutions(validSolutions, analyzerSolutions, solutionMinNaming):
     (validSolution, validSolutionInfo) = validSelectionSolution
     selectionSolutionIndex = solutionsStartIndex + i
     selectionSolutionsIds.add(selectionSolutionIndex)
-    validSolution["SolutionNameMin"] = Solution.getNameMin(validSolution, solutionMinNaming)
-    validSolution["KernelNameMin"]   = Solution.getNameMin(validSolution, solutionMinNaming, True)
+    splitGSU = False # this is a reminder that we need to add this in to the function signature
+    validSolution["SolutionNameMin"] = getNameMin(validSolution, solutionMinNaming, splitGSU)
+    validSolution["KernelNameMin"]   = getNameMin(validSolution, solutionMinNaming, splitGSU, True)
     validSolution["Ideals"] = validSolutionInfo
     selectionSolutions.append(validSolution)
 

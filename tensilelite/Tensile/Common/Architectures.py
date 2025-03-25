@@ -21,9 +21,11 @@
 ################################################################################
 
 import re
-from typing import Optional
+from subprocess import run, PIPE
+from typing import List, Optional
 
 from .Types import IsaVersion
+from .Utilities import locateExe
 
 import rocisa
 
@@ -59,6 +61,50 @@ architectureMap = {
     "gfx1201": "gfx1201",
 }
 
+gfxVariantMap = {
+    "gfx906": ["gfx906:xnack+", "gfx906:xnack-"],
+    "gfx908": ["gfx908:xnack+", "gfx908:xnack-"],
+    "gfx90a": ["gfx90a:xnack+", "gfx90a:xnack-"],
+    "gfx942": ["gfx942:xnack+", "gfx942:xnack-"],
+    "gfx950": ["gfx950:xnack+", "gfx950:xnack-"],
+}
+
+SUPPORTED_ISA = [
+    IsaVersion(8, 0, 3),
+    IsaVersion(9, 0, 0),
+    IsaVersion(9, 0, 6),
+    IsaVersion(9, 0, 8),
+    IsaVersion(9, 0, 10),
+    IsaVersion(9, 4, 2),
+    IsaVersion(9, 5, 0),
+    IsaVersion(10, 1, 0),
+    IsaVersion(10, 1, 1),
+    IsaVersion(10, 1, 2),
+    IsaVersion(10, 3, 0),
+    IsaVersion(11, 0, 0),
+    IsaVersion(11, 0, 1),
+    IsaVersion(11, 0, 2),
+    IsaVersion(12, 0, 0),
+    IsaVersion(12, 0, 1),
+]
+
+
+def isaToGfx(arch: IsaVersion) -> str:
+    """Converts an ISA version to a gfx architecture name.
+
+    Args:
+        arch: An object representing the major, minor, and step version of the ISA.
+
+    Returns:
+        The name of the GPU architecture (e.g., 'gfx906').
+    """
+    # Convert last digit to hex because reasons
+    name = str(arch[0]) + str(arch[1]) + ("%x" % arch[2])
+    return "gfx" + "".join(map(str, name))
+
+
+SUPPORTED_GFX = [isaToGfx(isa) for isa in SUPPORTED_ISA]
+
 
 def gfxToIsa(name: str) -> Optional[IsaVersion]:
     """Extracts the ISA version from a given gfx architecture name.
@@ -81,11 +127,7 @@ def gfxToIsa(name: str) -> Optional[IsaVersion]:
 
     ipart = ipart[:-1]
     major = int(ipart)
-    return tuple((major, minor, step))
-
-
-def isaToGfx(arch: IsaVersion) -> str:
-    return rocisa.isaToGfx(arch)
+    return IsaVersion(major, minor, step)
 
 
 def gfxToSwCodename(gfxName: str) -> Optional[str]:
@@ -105,3 +147,64 @@ def gfxToSwCodename(gfxName: str) -> Optional[str]:
             if gfxName in archKey:
                 return architectureMap[archKey]
             return None
+
+
+def gfxToVariants(gfx: str) -> List[str]:
+    """Retrieves the list of variants for a given gfx architecture name.
+
+    Args:
+        gfx: The name of the GPU architecture (e.g., 'gfx906').
+
+    Returns:
+        List of variants for the GPU architecture.
+    """
+    return gfxVariantMap.get(gfx, [gfx])
+
+
+def cliArchsToIsa(cliArchs: str) -> List[IsaVersion]:
+    """Maps the requested gfx architectures to ISA numbers.
+
+    Args:
+        archs: str of ";" or "_" separated gfx architectures (e.g., gfx1100 or gfx90a;gfx1101).
+
+    Returns:
+        List of tuples
+    """
+    archs = cliArchs.split(";") if ";" in cliArchs else cliArchs.split("_")
+    return SUPPORTED_ISA if "all" in archs else [gfxToIsa(''.join(map(str, arch))) for arch in archs]
+
+
+def _detectGlobalCurrentISA(detectionTool, deviceId: int):
+    """
+    Returns returncode if detection failure
+    """
+    process = run([detectionTool], stdout=PIPE)
+    archList = []
+    for line in process.stdout.decode().split("\n"):
+        arch = gfxToIsa(line.strip())
+        if arch is not None:
+            if arch in SUPPORTED_ISA:
+                print(f"# Detected GPU {deviceId} with ISA: " + isaToGfx(arch))
+                archList.append(arch)
+    if process.returncode:
+        print(f"{detectionTool} exited with code {process.returncode}")
+    return archList[deviceId] if (len(archList) > 0 and process.returncode == 0) else process.returncode
+
+
+def detectGlobalCurrentISA(deviceId: int, enumerator: str):
+    """Returns the ISA version for a given device.
+
+    Given an integer ID for a device, the ISA version tuple
+    of the form (X, Y, Z) is computed using first amdgpu-arch.
+    If amdgpu-arch fails, rocm_agent_enumerator is used.
+
+    Args:
+        deviceID: an integer indicating the device to inspect.
+
+    Raises:
+        Exception if both tools fail to detect ISA.
+    """
+    result = _detectGlobalCurrentISA(enumerator, deviceId)
+    if not isinstance(result, IsaVersion):
+        raise Exception("Failed to detect currect ISA")
+    return result

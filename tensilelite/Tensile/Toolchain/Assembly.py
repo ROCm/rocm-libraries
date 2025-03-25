@@ -24,129 +24,32 @@
 
 import collections
 import math
-import os
-import shlex
 import shutil
 import subprocess
 
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, NamedTuple
 
-from ..Common import globalParameters, print2, ensurePath, SemanticVersion, isaToGfx
-from ..KernelWriterAssembly import KernelWriterAssembly
-from ..Toolchain.Validators import getVersion
+from Tensile.Common import print2
+from Tensile.Common.Architectures import isaToGfx
 from ..SolutionStructs import Solution
 
-class AssemblyToolchain:
-    def __init__(self, assembler: str, bundler: str, buildIdKind: str, coVersion: str):
-        self.assembler = assembler
-        self.assemblerVersion = SemanticVersion(*[int(c) for c in getVersion(assembler).split(".")[:3]])
-        self.bundler = bundler
-        self.buildIdKind = buildIdKind
-        self.coVersion = coVersion
+from .Component import Assembler, Linker, Bundler
 
-    def invoke(self, args: List[str], desc: str=""):
-      """Invokes a subprocess with the provided arguments.
-
-      Args:
-          args: A list of arguments to pass to the subprocess.
-          desc: A description of the subprocess invocation.
-
-      Raises:
-          RuntimeError: If the subprocess invocation fails.
-      """
-      print2(f"{desc}: {' '.join(args)}")
-      try:
-          out = subprocess.check_output(args, stderr=subprocess.STDOUT)
-      except subprocess.CalledProcessError as err:
-          raise RuntimeError(
-              f"Error with {desc}: {err.output}\n"
-              f"Failed command: {' '.join(args)}"
-          )
-      print2(f"Output: {out}")
-      return out
-
-    def assemble(self, srcPath: str, destPath: str, gfx: str, wavefrontSize: int, debug: bool=False):
-      """Assemble an assembly source file into an object file.
-
-      Args:
-          srcPath: The path to the assembly source file.
-          destPath: The destination path for the generated object file.
-          coVersion: The code object version to use.
-          isa: The target GPU architecture in ISA format.
-          wavefrontSize: The wavefront size to use.
-      """
-      launcher = shlex.split(os.environ.get('Tensile_ASM_COMPILER_LAUNCHER', ''))
-      args = [
-          *launcher,
-          self.assembler,
-          "-x", "assembler",
-          "--target=amdgcn-amd-amdhsa",
-          f"-mcode-object-version={self.coVersion}",
-          f"-mcpu={gfx}",
-          "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64"
-          "-g" if debug else "",
-          "-c",
-          "-o", destPath, srcPath
-      ]
-
-      return self.invoke(args, "Assembling assembly source code into object file (.s -> .o)")
-
-    def link(self, srcPaths: List[str], destPath: str):
-        """Links object files into a code object file.
-
-        Args:
-            srcPaths: A list of paths to object files.
-            destPath: A destination path for the generated code object file.
-
-        Raises:
-            RuntimeError: If linker invocation fails.
-        """
-        if os.name == "nt":
-            # Use args file on Windows b/c the command may exceed the limit of 8191 characters
-            with open(Path.cwd() / "clang_args.txt", "wt") as file:
-                file.write(" ".join(objFiles))
-                file.flush()
-            args = [
-                self.assembler,
-                "--target=amdgcn-amd-amdhsa",
-                "-o", destPath, "@clang_args.txt"]
-        else:
-            args = [
-                self.assembler,
-                "--target=amdgcn-amd-amdhsa",
-                "-Xlinker", f"--build-id={self.buildIdKind}",
-                "-o", destPath, *srcPaths
-            ]
-
-        return self.invoke(args, "Linking assembly object files into code object (*.o -> .co)")
-
-    def compress(self, srcPath: str, destPath: str, gfx: str):
-        """Compresses a code object file using the provided bundler.
-
-        Args:
-            srcPath: The source path of the code object file to be compressed.
-            destPath: The destination path for the compressed code object file.
-            gfx: The target GPU architecture.
-
-        Raises:
-            RuntimeError: If compressing the code object file fails.
-        """
-        args = [
-            self.bundler,
-            "--compress",
-            "--type=o",
-            "--bundle-align=4096",
-            f"--targets=host-x86_64-unknown-linux-gnu,hipv4-amdgcn-amd-amdhsa-unknown-{gfx}",
-            "--input=/dev/null",
-            f"--input={srcPath}",
-            f"--output={destPath}",
-        ]
-
-        return self.invoke(args, "Bundling/compressing code object file (.co -> .co)")
+class AssemblyToolchain(NamedTuple):
+   assembler: Assembler
+   linker: Linker
+   bundler: Bundler
 
 
-def _batchObjectFiles(objFiles: List[str], coPathDest: Union[Path, str], maxObjFiles: int=10000) -> List[str]:
+def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kind="sha1"):
+   compiler = Assembler(assembler_path, co_version)
+   linker = Linker(assembler_path, build_id_kind)
+   bundler = Bundler(bundler_path)
+   return AssemblyToolchain(compiler, linker, bundler)
+
+
+def _batchObjectFiles(ldPath: str, objFiles: List[str], coPathDest: Union[Path, str], maxObjFiles: int=10000) -> List[str]:
     numObjFiles = len(objFiles)
 
     if numObjFiles <= maxObjFiles:
@@ -160,7 +63,7 @@ def _batchObjectFiles(objFiles: List[str], coPathDest: Union[Path, str], maxObjF
 
     for batch, filename in zip(batchedObjFiles, newObjFiles):
       if len(batch) > 1:
-        args = [globalParameters["ROCmLdPath"], "-r"] + batch + [ "-o", filename]
+        args = [ldPath, "-r"] + batch + [ "-o", filename]
         print2(f"Linking object files into fewer object files: {' '.join(args)}")
         subprocess.check_call(args)
         newObjFilesOutput.append(filename)
@@ -169,13 +72,15 @@ def _batchObjectFiles(objFiles: List[str], coPathDest: Union[Path, str], maxObjF
 
     return newObjFilesOutput
 
+
 def buildAssemblyCodeObjectFiles(
-      toolchain: AssemblyToolchain,
+      linker: Linker,
+      bundler: Bundler,
+      ldPath: str,
       kernels: List[Solution],
-      writer: KernelWriterAssembly,
       destDir: Union[Path, str],
       asmDir: Union[Path, str],
-      compress: bool=True
+      compress: bool=True,
     ):
     """Builds code object files from assembly files
 
@@ -188,17 +93,12 @@ def buildAssemblyCodeObjectFiles(
         compress: Whether to compress the code object files.
     """
 
-    isAsm = lambda k: k["KernelLanguage"] == "Assembly"
-
     extObj = ".o"
     extCo = ".co"
     extCoRaw = ".co.raw"
 
-    destDir = Path(ensurePath(destDir))
-    asmDir = Path(ensurePath(asmDir))
-
     archKernelMap = collections.defaultdict(list)
-    for k in filter(isAsm, kernels):
+    for k in kernels:
       archKernelMap[tuple(k['ISA'])].append(k)
 
     coFiles = []
@@ -208,20 +108,21 @@ def buildAssemblyCodeObjectFiles(
 
       gfx = isaToGfx(arch)
 
-      objectFiles = [str(asmDir / (writer.getKernelFileBase(k) + extObj)) for k in archKernels if 'codeObjectFile' not in k]
+      objectFiles = [str(asmDir / (k["BaseName"] + extObj)) for k in archKernels if 'codeObjectFile' not in k]
       coFileMap = collections.defaultdict(list)
       if len(objectFiles):
         coFileMap[asmDir / ("TensileLibrary_"+ gfx + extCoRaw)] = objectFiles
       for kernel in archKernels:
         coName = kernel.get("codeObjectFile", None)
         if coName:
-          coFileMap[asmDir / (coName + extCoRaw)].append(str(asmDir / (writer.getKernelFileBase(kernel) + extObj)))
+          coFileMap[asmDir / (coName + extCoRaw)].append(str(asmDir / (kernel["BaseName"] + extObj)))
+
       for coFileRaw, objFiles in coFileMap.items():
-        objFiles = _batchObjectFiles(objFiles, coFileRaw)
-        toolchain.link(objFiles, str(coFileRaw))
+        objFiles = _batchObjectFiles(ldPath, objFiles, coFileRaw)
+        linker(objFiles, str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:
-          toolchain.compress(str(coFileRaw), str(coFile), gfx)
+          bundler.compress(str(coFileRaw), str(coFile), gfx)
         else:
           shutil.move(coFileRaw, coFile)
         coFiles.append(coFile)

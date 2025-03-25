@@ -23,7 +23,7 @@
 from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers
 from rocisa.enum import CvtType, RoundType
 
-from ..Common import globalParameters, DataDirection, SemanticVersion
+from ..Common import DataDirection, SemanticVersion
 from ..Component import GlobalWriteComponents
 from ..SolutionStructs import Solution
 from ..Activation import ActivationModule, ActivationType
