@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef SUPPORT_TEST_MACROS_HPP
 #define SUPPORT_TEST_MACROS_HPP
 
@@ -91,6 +108,12 @@
 #  define TEST_COMPILER_NVHPC_CUDA
 #elif defined(__CUDA__) && defined(_LIBCUDACXX_COMPILER_CLANG)
 #  define TEST_COMPILER_CLANG_CUDA
+#endif
+
+#if defined(__HIPCC__)
+// This is not mutually exclusive with other compilers, as NVCC uses a host
+// compiler.
+# define TEST_COMPILER_HIPCC
 #endif
 
 #if defined(__apple_build_version__)
@@ -255,6 +278,10 @@
 #  define TEST_HAS_NO_EXCEPTIONS
 #endif
 
+#if defined(TEST_COMPILER_HIPCC) || defined(TEST_COMPILER_HIPRTC)
+#define TEST_HAS_NO_EXCEPTIONS
+#endif
+
 #if TEST_HAS_FEATURE(address_sanitizer) || TEST_HAS_FEATURE(memory_sanitizer) || TEST_HAS_FEATURE(thread_sanitizer)
 #  define TEST_HAS_SANITIZERS
 #endif
@@ -412,13 +439,13 @@ inline void DoNotOptimize(Tp const& value)
 #  define _STATIC_MEMBER_IMPL(type) static type v;
 #endif
 
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #  define STATIC_TEST_GLOBAL_VAR static __device__
 #else
 #  define STATIC_TEST_GLOBAL_VAR
 #endif
 
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #  define TEST_ACCESSIBLE __device__
 #else
 #  define TEST_ACCESSIBLE
