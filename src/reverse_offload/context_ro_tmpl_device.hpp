@@ -121,7 +121,7 @@ __device__ int ROContext::reduce(rocshmem_team_t team, T *dest,
   build_queue_element(RO_NET_TEAM_REDUCE, dest, const_cast<T *>(source),
                       nreduce, 0, 0, 0, 0, nullptr, nullptr, team_obj->mpi_comm,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      Op, GetROType<T>::Type);
+                      is_default_ctx, Op, GetROType<T>::Type);
 
   __syncthreads();
   return ROCSHMEM_SUCCESS;
@@ -150,7 +150,7 @@ __device__ void ROContext::p(T *dest, T value, int pe) {
   } else {
     build_queue_element(RO_NET_P, dest, &value, sizeof(T), pe, 0, 0, 0, nullptr,
                         nullptr, (MPI_Comm)NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag());
+                        block_handle, true, get_status_flag(), is_default_ctx);
   }
 }
 
@@ -165,6 +165,9 @@ __device__ T ROContext::g(const T *source, int pe) {
   } else {
     auto dest{get_g_ret_buf()};
     get<T>(reinterpret_cast<T *>(dest), source, 1, pe);
+    if (is_default_ctx) {
+      block_handle->default_ctx_g_ret->enqueue(dest);
+    }
     return *(reinterpret_cast<T *>(dest));
   }
 }
@@ -190,9 +193,12 @@ __device__ T ROContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
                       value, pe, 0, 0, 0,
                       reinterpret_cast<void *>(static_cast<long long>(cond)),
                       nullptr, (MPI_Comm)NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), ROCSHMEM_SUM,
+                      true, get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
                       GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -207,8 +213,11 @@ __device__ T ROContext::amo_fetch_add(void *dst, T value, int pe) {
   build_queue_element(RO_NET_AMO_FOP, dst, reinterpret_cast<T *>(source), value,
                       pe, 0, 0, 0, nullptr, nullptr, (MPI_Comm)NULL,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      ROCSHMEM_SUM, GetROType<T>::Type);
+                      is_default_ctx, ROCSHMEM_SUM, GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -223,8 +232,11 @@ __device__ T ROContext::amo_swap(void *dst, T value, int pe) {
   build_queue_element(RO_NET_AMO_FOP, dst, reinterpret_cast<void *>(source),
                       value, pe, 0, 0, 0, nullptr, nullptr, (MPI_Comm)NULL,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      ROCSHMEM_REPLACE, GetROType<T>::Type);
+                      is_default_ctx, ROCSHMEM_REPLACE, GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -239,8 +251,11 @@ __device__ T ROContext::amo_fetch_and(void *dst, T value, int pe) {
   build_queue_element(RO_NET_AMO_FOP, dst, reinterpret_cast<void *>(source),
                       value, pe, 0, 0, 0, nullptr, nullptr, (MPI_Comm)NULL,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      ROCSHMEM_AND, GetROType<T>::Type);
+                      is_default_ctx, ROCSHMEM_AND, GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -255,8 +270,11 @@ __device__ T ROContext::amo_fetch_or(void *dst, T value, int pe) {
   build_queue_element(RO_NET_AMO_FOP, dst, reinterpret_cast<void *>(source),
                       value, pe, 0, 0, 0, nullptr, nullptr, (MPI_Comm)NULL,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      ROCSHMEM_OR, GetROType<T>::Type);
+                      is_default_ctx, ROCSHMEM_OR, GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -271,8 +289,11 @@ __device__ T ROContext::amo_fetch_xor(void *dst, T value, int pe) {
   build_queue_element(RO_NET_AMO_FOP, dst, reinterpret_cast<void *>(source),
                       value, pe, 0, 0, 0, nullptr, nullptr, (MPI_Comm)NULL,
                       ro_net_win_id, block_handle, true, get_status_flag(),
-                      ROCSHMEM_XOR, GetROType<T>::Type);
+                      is_default_ctx, ROCSHMEM_XOR, GetROType<T>::Type);
   __threadfence();
+  if (is_default_ctx) {
+    block_handle->default_ctx_atomic_ret->enqueue(source);
+  }
   return *source;
 }
 
@@ -294,7 +315,8 @@ __device__ void ROContext::broadcast(rocshmem_team_t team, T *dest,
   build_queue_element(RO_NET_TEAM_BROADCAST, dest, const_cast<T *>(source),
                       nelems, 0, 0, 0, pe_root, nullptr, nullptr,
                       team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                      get_status_flag(), ROCSHMEM_SUM, GetROType<T>::Type);
+                      get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                      GetROType<T>::Type);
 
   __syncthreads();
 }
@@ -312,7 +334,8 @@ __device__ void ROContext::alltoall(rocshmem_team_t team, T *dest,
   build_queue_element(RO_NET_ALLTOALL, dest, const_cast<T *>(source), nelems, 0,
                       0, 0, 0, team_obj->ata_buffer, nullptr,
                       team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                      get_status_flag(), ROCSHMEM_SUM, GetROType<T>::Type);
+                      get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                      GetROType<T>::Type);
 
   __syncthreads();
 }
@@ -330,7 +353,8 @@ __device__ void ROContext::fcollect(rocshmem_team_t team, T *dest,
   build_queue_element(RO_NET_FCOLLECT, dest, const_cast<T *>(source), nelems, 0,
                       0, 0, 0, team_obj->ata_buffer, nullptr,
                       team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                      get_status_flag(), ROCSHMEM_SUM, GetROType<T>::Type);
+                      get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+                      GetROType<T>::Type);
 
   __syncthreads();
 }

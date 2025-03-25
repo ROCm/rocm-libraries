@@ -179,6 +179,11 @@ class ROBackend : public Backend {
   void setup_ctxs();
 
   /**
+   * @brief Allocation and initialization of buffers for default context.
+   */
+  void setup_default_ctx_buffers();
+
+  /**
    * @brief Handle for the transport class object.
    *
    * See the transport class for more details.
@@ -254,14 +259,45 @@ class ROBackend : public Backend {
   FreeListProxy<HIPAllocator, ROContext *> ctx_free_list{};
 
   /**
+   * @brief AtomicWFQueue containing status flag buffers for default context
+   */
+  AtomicWFQueueProxy<HIPAllocator, volatile char*> default_ctx_status_{};
+
+  /**
+   * @brief AtomicWFQueue containing rocshmem_g return buffers for default
+   * context
+   */
+  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_g_ret_buffer_{};
+
+  /**
+   * @brief AtomicWFQueue containing rocshmem return buffers for default
+   * context
+   */
+  AtomicWFQueueProxy<HIPAllocator, uint64_t*> default_ctx_atomic_ret_buffer_{};
+
+  /**
+   * @brief Maximum number of wavefront buffer arrays supported in the default
+   * context.
+   *
+   * This value determines the size of the status flag, rocshmem_g return, and
+   * rocshmem atomic return buffers.
+   */
+  size_t max_wavefront_buffers_{1024};
+
+  /**
    * @brief Holds maximum number of contexts used in library
    */
   size_t maximum_num_contexts_{1024};
 
   /**
    * @brief Holds maximum threads per work-group
-  */
+   */
   int max_wg_size_{};
+
+  /**
+   * @brief Holds wavefront size
+   */
+  int wf_size_{};
 
   /**
    * @brief Holds the queue size for each context
@@ -277,11 +313,13 @@ class ROBackend : public Backend {
    * @brief Return buffer for rocshmem_g API
    */
   RetBufferProxyT g_ret_buffer_;
+  RetBufferProxyT g_ret_buffer_default_ctx_;
 
   /**
    * @brief Return buffer for rocshmem atomic return APIs
    */
   RetBufferProxyT atomic_ret_buffer_;
+  RetBufferProxyT atomic_ret_buffer_default_ctx_;
 
   /**
    * This buffer is used by the GPU to wait on a blocking operation. The initial
@@ -291,6 +329,7 @@ class ROBackend : public Backend {
    * a separate status variable for each work-item in a RO Context
    */
   StatusProxyT status_;
+  StatusProxyT status_default_ctx_;
 };
 
 }  // namespace rocshmem

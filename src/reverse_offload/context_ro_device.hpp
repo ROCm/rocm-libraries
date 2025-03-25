@@ -34,12 +34,12 @@ __device__ void build_queue_element(
     ro_net_cmds type, void *dst, void *src, size_t size, int pe,
     int logPE_stride, int PE_size, int PE_root, void *pWrk, long *pSync,
     MPI_Comm team_comm, int ro_net_win_id, BlockHandle *handle,
-    bool blocking, volatile char *status = nullptr, ROCSHMEM_OP op = ROCSHMEM_SUM,
-    ro_net_types datatype = RO_NET_INT);
+    bool blocking, volatile char *status = nullptr, bool default_ctx = false,
+    ROCSHMEM_OP op = ROCSHMEM_SUM, ro_net_types datatype = RO_NET_INT);
 
 class ROContext : public Context {
  public:
-  __host__ ROContext(Backend *b, size_t block_id = 0);
+  __host__ ROContext(Backend *b, size_t block_id = 0, bool default_ctx = false);
 
   __device__ void threadfence_system();
 
@@ -225,6 +225,8 @@ class ROContext : public Context {
   BlockHandle *block_handle{nullptr};
 
   int ro_net_win_id{-1};
+
+  bool is_default_ctx{false};
 };
 
 }  // namespace rocshmem

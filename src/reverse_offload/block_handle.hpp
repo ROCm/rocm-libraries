@@ -23,12 +23,16 @@
 #ifndef LIBRARY_SRC_REVERSE_OFFLOAD_BLOCK_HANDLE_HPP_
 #define LIBRARY_SRC_REVERSE_OFFLOAD_BLOCK_HANDLE_HPP_
 
+#include "../containers/atomic_wf_queue_impl.hpp"
 #include "../hdp_policy.hpp"
 #include "../ipc_policy.hpp"
 #include "profiler.hpp"
 #include "queue.hpp"
 
 namespace rocshmem {
+
+using AWF_Queue_statusT = AtomicWFQueue<volatile char*, HIPAllocator>;
+using AWF_Queue_ret_buffT = AtomicWFQueue<uint64_t*, HIPAllocator>;
 
 struct BlockHandle {
   ROStats profiler{};
@@ -41,6 +45,9 @@ struct BlockHandle {
   void *g_ret{nullptr};
   void *atomic_ret{nullptr};
   volatile uint64_t lock{};
+  AWF_Queue_statusT *default_ctx_status{nullptr};
+  AWF_Queue_ret_buffT *default_ctx_g_ret{nullptr};
+  AWF_Queue_ret_buffT *default_ctx_atomic_ret{nullptr};
 };
 
 template <typename ALLOCATOR>
@@ -51,7 +58,11 @@ class DefaultBlockHandleProxy {
   DefaultBlockHandleProxy() = default;
 
   DefaultBlockHandleProxy(void *g_ret, void *atomic_ret, Queue *queue,
-                          volatile char *status, size_t num_elems = 1)
+                          volatile char *status,
+                          AWF_Queue_statusT *default_ctx_status,
+                          AWF_Queue_ret_buffT *default_ctx_g_ret,
+                          AWF_Queue_ret_buffT *default_ctx_atomic_ret,
+                          size_t num_elems = 1)
     : proxy_{num_elems} {
 
     // TODO(bpotter): create a default queue for this queue descriptor
@@ -67,6 +78,9 @@ class DefaultBlockHandleProxy {
     block_handle->g_ret = g_ret;
     block_handle->atomic_ret = atomic_ret;
     block_handle->lock = 0;
+    block_handle->default_ctx_status = default_ctx_status;
+    block_handle->default_ctx_g_ret = default_ctx_g_ret;
+    block_handle->default_ctx_atomic_ret = default_ctx_atomic_ret;
   }
 
   DefaultBlockHandleProxy(const DefaultBlockHandleProxy& other) = delete;

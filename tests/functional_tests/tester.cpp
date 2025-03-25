@@ -33,6 +33,7 @@
 #include "amo_bitwise_tester.hpp"
 #include "amo_extended_tester.hpp"
 #include "amo_standard_tester.hpp"
+#include "default_ctx_primitive_tester.hpp"
 #include "barrier_all_tester.hpp"
 #include "empty_tester.hpp"
 #include "ping_all_tester.hpp"
@@ -118,6 +119,26 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
     case PutNBITestType:
       if (rank == 0) std::cout << "Non-Blocking Puts ###" << std::endl;
       testers.push_back(new PrimitiveTester(args));
+      return testers;
+    case DefaultCTXGetTestType:
+      if (rank == 0)
+        std::cout << "Default context Blocking Gets ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
+      return testers;
+    case DefaultCTXGetNBITestType:
+      if (rank == 0)
+        std::cout << "Default context Non-Blocking Gets ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
+      return testers;
+    case DefaultCTXPutTestType:
+      if (rank == 0)
+        std::cout << "Default context Blocking Puts ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
+      return testers;
+    case DefaultCTXPutNBITestType:
+      if (rank == 0)
+        std::cout << "Default context Non-Blocking Puts ###" << std::endl;
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
       return testers;
     case TeamCtxInfraTestType:
       if (rank == 0) std::cout << "Team Ctx Infra test ###" << std::endl;
