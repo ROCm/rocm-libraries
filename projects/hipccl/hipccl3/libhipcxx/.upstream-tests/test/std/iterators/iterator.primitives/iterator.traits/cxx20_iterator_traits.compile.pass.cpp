@@ -139,7 +139,7 @@ struct NoPointerMember
   __host__ __device__ value_type* operator->() const;
 };
 using NoPointerMemberTraits = cuda::std::iterator_traits<NoPointerMember>;
-#if TEST_STD_VER >= 20
+#if TEST_STD_VER >= 2020
 static_assert(cuda::std::same_as<NoPointerMemberTraits::iterator_category, NoPointerMember::iterator_category>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::value_type, NoPointerMember::value_type>);
 static_assert(cuda::std::same_as<NoPointerMemberTraits::difference_type, NoPointerMember::difference_type>);
