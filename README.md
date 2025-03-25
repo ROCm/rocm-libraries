@@ -116,6 +116,15 @@ You can find more information at the following links:
 * [hipblaslt-test](clients/gtest/README.md)
 * [hipblaslt-bench](clients/benchmarks/README.md)
 
+## TensileLite Host Library Tests
+To build and run TensileLite Host Library Tests, use the following commands:
+``` 
+ cd tensilelite && mkdir build && cd build
+ cmake -DTENSILE_DISABLE_CTEST=OFF -DCMAKE_BUILD_TYPE=RelWithDebInfo  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DTensile_ROOT=$(pwd)/../Tensile ../HostLibraryTests
+ make -j
+ ./TensileTests 
+```
+
 ## Contribute
 
 If you want to submit an issue, you can do so on

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1543,6 +1543,21 @@ namespace TensileLite
         , ws(_ws)
         , Synchronizer(_Synchronizer)
         , metadata(_metadata)
+    {
+    }
+
+    ContractionInputs::ContractionInputs(void const*     _a,
+                                         void const*     _b,
+                                         void const*     _c,
+                                         void*           _d,
+                                         ConstantVariant _alpha,
+                                         ConstantVariant _beta)
+        : a(_a)
+        , b(_b)
+        , c(_c)
+        , d(_d)
+        , alpha(_alpha)
+        , beta(_beta)
     {
     }
 } // namespace TensileLite
