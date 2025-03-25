@@ -664,6 +664,34 @@ typed_test_def(suite_name_array, name_suffix, InclusiveScanPrefixCallback)
     static_for_input_array<0, 2, T, 2, block_size>::run();
 }
 
+typed_test_def(suite_name_array, name_suffix, InclusiveScanWithStorage)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 6, block_size>::run();
+}
+typed_test_def(suite_name_array, name_suffix, InclusiveScanWithStorageAndInit)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 7, block_size>::run();
+}
+typed_test_def(suite_name_array, name_suffix, InclusiveScanReduceWithStorage)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 8, block_size>::run();
+}
+typed_test_def(suite_name_array, name_suffix, InclusiveScanReduceWithStorageAndInit)
+{
+    using T = typename TestFixture::input_type;
+    constexpr size_t block_size = TestFixture::block_size;
+
+    static_for_input_array<0, 2, T, 9, block_size>::run();
+}
 typed_test_def(suite_name_array, name_suffix, ExclusiveScan)
 {
     using T = typename TestFixture::input_type;
@@ -687,3 +715,4 @@ typed_test_def(suite_name_array, name_suffix, ExclusiveScanPrefixCallback)
 
     static_for_input_array<0, 2, T, 5, block_size>::run();
 }
+
