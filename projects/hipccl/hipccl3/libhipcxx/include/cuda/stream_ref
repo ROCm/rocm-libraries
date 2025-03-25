@@ -182,7 +182,7 @@ public:
         break;
       default:
         (void)::hipGetLastError(); // Clear CUDA error state
-        throw ::hip::__throw_cuda_error(__result, "Failed to query stream.");
+        ::hip::__throw_cuda_error(__result, "Failed to query stream.");
     }
     return true;
   }
