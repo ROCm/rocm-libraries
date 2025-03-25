@@ -49,8 +49,10 @@ int main(int argc, char* argv[])
     benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_int2    = common::custom_type<int, int>;
-    using custom_double2 = common::custom_type<double, double>;
+    using custom_int2      = common::custom_type<int, int>;
+    using custom_double2   = common::custom_type<double, double>;
+    using huge_float2_1024 = common::custom_huge_type<1024, float, float>;
+    using huge_float2_2048 = common::custom_huge_type<2048, float, float>;
 
     CREATE_BENCHMARK(int)
     CREATE_BENCHMARK(long long)
@@ -62,6 +64,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(custom_double2)
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
+    CREATE_BENCHMARK(huge_float2_1024)
+    CREATE_BENCHMARK(huge_float2_2048)
 
     CREATE_BENCHMARK(int, int)
     CREATE_BENCHMARK(long long, long long)
@@ -73,6 +77,8 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(custom_double2, custom_double2)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)
+    CREATE_BENCHMARK(huge_float2_1024, huge_float2_1024)
+    CREATE_BENCHMARK(huge_float2_2048, huge_float2_2048)
 #endif
 
     executor.run();

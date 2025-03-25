@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,14 +21,17 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_MERGE_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_MERGE_HPP_
 
-#include <type_traits>
 #include <iterator>
+#include <type_traits>
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../config_types.hpp"
+#include "../device_merge_config.hpp"
+#include "device_config_helper.hpp"
 
-#include "../../intrinsics.hpp"
 #include "../../functional.hpp"
+#include "../../intrinsics.hpp"
 #include "../../types.hpp"
 
 #include "../../block/block_store.hpp"
@@ -246,9 +249,33 @@ merge_values(unsigned int flat_id,
     (void) input2_size;
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
+template<class Config, class Key, class Value>
+struct merge_kernel_impl_
+{
+    static constexpr merge_config_params params = device_params<Config>();
+
+    static constexpr unsigned int block_size       = params.kernel_config.block_size;
+    static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    static constexpr unsigned int items_per_block  = block_size * items_per_thread;
+    static constexpr unsigned int input_block_size = block_size * items_per_thread + 1;
+    static constexpr bool         with_values = !std::is_same<Value, ::rocprim::empty_type>::value;
+
+    // Block primitives
+    using keys_store_type
+        = ::rocprim::block_store<Key,
+                                 block_size,
+                                 items_per_thread,
+                                 ::rocprim::block_store_method::block_store_transpose>;
+
+    union storage_type
+    {
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
+        typename detail::raw_storage<Key[input_block_size]> keys_shared;
+        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
+        typename keys_store_type::storage_type keys_store;
+    };
+
+    template<
     class IndexIterator,
     class KeysInputIterator1,
     class KeysInputIterator2,
@@ -258,8 +285,8 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void merge_kernel_impl(IndexIterator indices,
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+void merge(IndexIterator indices,
                        KeysInputIterator1 keys_input1,
                        KeysInputIterator2 keys_input2,
                        KeysOutputIterator keys_output,
@@ -268,77 +295,59 @@ void merge_kernel_impl(IndexIterator indices,
                        ValuesOutputIterator values_output,
                        const size_t input1_size,
                        const size_t input2_size,
-                       BinaryFunction compare_function)
-{
-    using key_type = typename std::iterator_traits<KeysInputIterator1>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator1>::value_type;
-    using keys_store_type = ::rocprim::block_store<
-        key_type, BlockSize, ItemsPerThread,
-        ::rocprim::block_store_method::block_store_transpose
-    >;
-    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    constexpr unsigned int input_block_size = BlockSize * ItemsPerThread + 1;
-
-    ROCPRIM_SHARED_MEMORY union
+                       BinaryFunction compare_function, 
+                       storage_type&           storage)
     {
-        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_WITH_PUSH
-        typename detail::raw_storage<key_type[input_block_size]> keys_shared;
-        ROCPRIM_DETAIL_SUPPRESS_DEPRECATION_POP
-        typename keys_store_type::storage_type keys_store;
-    } storage;
+        Key          input[items_per_thread];
+        unsigned int index[items_per_thread];
 
-    key_type input[ItemsPerThread];
-    unsigned int index[ItemsPerThread];
+        const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
+        const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
+        const unsigned int block_offset        = flat_block_id * items_per_block;
+        const unsigned int count               = input1_size + input2_size;
+        const unsigned int valid_in_last_block = count - block_offset;
+        const bool         is_incomplete_block = valid_in_last_block < items_per_block;
 
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * items_per_block;
-    const unsigned int count = input1_size + input2_size;
-    const unsigned int valid_in_last_block = count - block_offset;
-    const bool         is_incomplete_block = valid_in_last_block < items_per_block;
+        const unsigned int partitions = (count + items_per_block - 1) / items_per_block;
 
-    const unsigned int partitions = (count + items_per_block - 1) / items_per_block;
+        const unsigned int p1 = indices[rocprim::min(flat_block_id, partitions)];
+        const unsigned int p2 = indices[rocprim::min(flat_block_id + 1, partitions)];
 
-    const unsigned int p1 = indices[rocprim::min(flat_block_id, partitions)];
-    const unsigned int p2 = indices[rocprim::min(flat_block_id + 1, partitions)];
+        range_t<> range
+            = compute_range(flat_block_id, input1_size, input2_size, items_per_block, p1, p2);
 
-    range_t<> range
-        = compute_range(flat_block_id, input1_size, input2_size, items_per_block, p1, p2);
+        merge_keys<block_size>(flat_id,
+                               keys_input1,
+                               keys_input2,
+                               input,
+                               index,
+                               storage.keys_shared.get(),
+                               range,
+                               compare_function);
 
-    merge_keys<BlockSize>(
-        flat_id, keys_input1, keys_input2, input, index,
-        storage.keys_shared.get(),
-        range, compare_function
-    );
+        ::rocprim::syncthreads();
 
-    ::rocprim::syncthreads();
+        if(is_incomplete_block) // # elements in last block may not equal items_per_block for the last block
+        {
+            keys_store_type().store(keys_output + block_offset,
+                                    input,
+                                    valid_in_last_block,
+                                    storage.keys_store);
+        }
+        else
+        {
+            keys_store_type().store(keys_output + block_offset, input, storage.keys_store);
+        }
 
-    if(is_incomplete_block) // # elements in last block may not equal items_per_block for the last block
-    {
-        keys_store_type().store(
-            keys_output + block_offset,
-            input,
-            valid_in_last_block,
-            storage.keys_store
-        );
+        merge_values<with_values, block_size>(flat_id,
+                                              values_input1 + range.begin1,
+                                              values_input2 + range.begin2,
+                                              values_output + block_offset,
+                                              index,
+                                              range.count1(),
+                                              range.count2());
     }
-    else
-    {
-        keys_store_type().store(
-            keys_output + block_offset,
-            input,
-            storage.keys_store
-        );
-    }
-
-    merge_values<with_values, BlockSize>(
-        flat_id, values_input1 + range.begin1, values_input2 + range.begin2,
-        values_output + block_offset, index,
-        range.count1(), range.count2()
-    );
-}
+};
 
 } // end of detail namespace
 

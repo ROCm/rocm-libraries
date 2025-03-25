@@ -1469,9 +1469,9 @@ struct default_merge_config_base
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         ::rocprim::max(sizeof(Key), sizeof(Value)), sizeof(int));
 
-    using type = merge_config<limit_block_size<256u,
-                                               rocprim::max(sizeof(Key), sizeof(Value)),
-                                               ROCPRIM_WARP_SIZE_64>::value,
+    using type = merge_config<fallback_block_size<256u,
+                                                  rocprim::max(sizeof(Key), sizeof(Value)),
+                                                  ROCPRIM_WARP_SIZE_64>::value,
                               ::rocprim::max(1u, 10u / item_scale)>;
 };
 
@@ -1481,12 +1481,12 @@ struct default_merge_config_base<Key, empty_type>
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Key), sizeof(int));
 
-    using type
-        = select_type<select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
-                      select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
-                      select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
-                      merge_config<limit_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
-                                   ::rocprim::max(1u, 10u / item_scale)>>;
+    using type = select_type<
+        select_type_case<sizeof(Key) <= 2, merge_config<256, 11>>,
+        select_type_case<sizeof(Key) <= 4, merge_config<256, 10>>,
+        select_type_case<sizeof(Key) <= 8, merge_config<256, 7>>,
+        merge_config<fallback_block_size<256u, sizeof(Key), ROCPRIM_WARP_SIZE_64>::value,
+                     ::rocprim::max(1u, 10u / item_scale)>>;
 };
 
 } // namespace detail
