@@ -478,7 +478,7 @@ struct enable_block_load_store_test
     static constexpr bool value
         = (LoadMethod != rocprim::block_load_method::block_load_warp_transpose
            && StoreMethod != rocprim::block_store_method::block_store_warp_transpose)
-          || BlockSize % rocprim::device_warp_size() == 0;
+          || BlockSize % rocprim::arch::wavefront::min_size() == 0;
 };
 
 struct dummy_load_store

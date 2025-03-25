@@ -27,6 +27,7 @@
 #include "../../detail/various.hpp"
 
 #include "../../intrinsics.hpp"
+#include "../../intrinsics/arch.hpp"
 #include "../../types.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -278,7 +279,7 @@ public:
     {
         (void) storage;
 
-        if(WarpSize == device_warp_size())
+        if(WarpSize == ::rocprim::arch::wavefront::min_size())
         {
             return warp_readlane(input, warp_readfirstlane(src_lane));
         }

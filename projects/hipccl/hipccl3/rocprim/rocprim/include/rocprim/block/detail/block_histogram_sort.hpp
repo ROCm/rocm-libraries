@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -102,7 +102,13 @@ public:
         radix_sort().sort(input, storage_.sort);
         ::rocprim::syncthreads(); // Fix race condition that appeared on Vega10 hardware, storage LDS is reused below.
 
-        ROCPRIM_UNROLL
+        // Due to a compiler bug, it appear that in some cases, the optimizer is
+        // reordering things such that shared memory writes in 'flag_heads()' run
+        // before the loop initialization code completes.
+        //
+        // For now we force unroll by making the iterator depdent on a runtime variable
+        // 'flat_tid'.
+        ROCPRIM_NO_UNROLL
         for(unsigned int offset = 0; offset + flat_tid < Bins; offset += BlockSize)
         {
             storage_.start[offset + flat_tid] = tile_size;

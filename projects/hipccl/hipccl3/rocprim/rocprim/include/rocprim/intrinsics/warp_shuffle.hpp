@@ -119,20 +119,20 @@ T warp_swizzle(const T& input)
 /// \brief Shuffle for any data type.
 ///
 /// Each thread in warp obtains \p input from <tt>src_lane</tt>-th thread
-/// in warp. If \p width is less than device_warp_size() then each subsection of the
+/// in warp. If \p width is less than arch::wavefront::min_size() then each subsection of the
 /// warp behaves as a separate entity with a starting logical lane id of 0.
 /// If \p src_lane is not in [0; \p width) range, the returned value is
 /// equal to \p input passed by the <tt>src_lane modulo width</tt> thread.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param input input to pass to other threads
 /// \param src_lane warp if of a thread whose \p input should be returned
 /// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-T warp_shuffle(const T& input, const int src_lane, const int width = device_warp_size())
+T warp_shuffle(const T& input, const int src_lane, const int width = arch::wavefront::min_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -150,14 +150,16 @@ T warp_shuffle(const T& input, const int src_lane, const int width = device_warp
 /// thread's own \p input is returned.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param input input to pass to other threads
 /// \param delta offset for calculating source lane id
 /// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-T warp_shuffle_up(const T& input, const unsigned int delta, const int width = device_warp_size())
+T warp_shuffle_up(const T&           input,
+                  const unsigned int delta,
+                  const int          width = arch::wavefront::min_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -175,14 +177,16 @@ T warp_shuffle_up(const T& input, const unsigned int delta, const int width = de
 /// thread's own \p input is returned.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param input input to pass to other threads
 /// \param delta offset for calculating source lane id
 /// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-T warp_shuffle_down(const T& input, const unsigned int delta, const int width = device_warp_size())
+T warp_shuffle_down(const T&           input,
+                    const unsigned int delta,
+                    const int          width = arch::wavefront::min_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -199,14 +203,16 @@ T warp_shuffle_down(const T& input, const unsigned int delta, const int width = 
 /// thread in warp.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param input input to pass to other threads
 /// \param lane_mask mask used for calculating source lane id
 /// \param width logical warp width
 template<class T>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-T warp_shuffle_xor(const T& input, const int lane_mask, const int width = device_warp_size())
+T warp_shuffle_xor(const T&  input,
+                   const int lane_mask,
+                   const int width = arch::wavefront::min_size())
 {
     return detail::warp_shuffle_op(
         input,
@@ -227,15 +233,14 @@ namespace detail
 /// Defaults to warp_shuffle_xor.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param v input to pass to other threads
 /// \param mask mask used for calculating source lane id
 /// \param width logical warp width
 template<class V>
-ROCPRIM_DEVICE ROCPRIM_INLINE V warp_swizzle_shuffle(V&        v,
-                                                     const int mask,
-                                                     const int width = device_warp_size())
+ROCPRIM_DEVICE ROCPRIM_INLINE
+V warp_swizzle_shuffle(V& v, const int mask, const int width = arch::wavefront::min_size())
 {
     switch(mask)
     {
@@ -260,15 +265,14 @@ ROCPRIM_DEVICE ROCPRIM_INLINE V warp_swizzle_shuffle(V&        v,
 /// than the logical warp size will wrap around.
 ///
 /// Note: The optional \p width parameter must be a power of 2; results are
-/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+/// undefined if it is not a power of 2, or it is greater than arch::wavefront::min_size().
 ///
 /// \param input input to pass to other threads
 /// \param dst_lane the destination lane to which the value from this thread is written.
 /// \param width logical warp width
 template<typename T>
-ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
-                                             const int dst_lane,
-                                             const int width = device_warp_size())
+ROCPRIM_DEVICE ROCPRIM_INLINE
+T warp_permute(const T& input, const int dst_lane, const int width = arch::wavefront::min_size())
 {
     // The amdgcn intrinsic does not support virtual warp sizes, so in order to support those, manually
     // wrap around the dst_lane within groups of log2(width) bits.
@@ -294,7 +298,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
 /// \brief Broadcast the first lane to all threads.
 ///
 /// Each thread in the warp obtains \p input from the first active thread in a warp.
-/// This function always operates on all <tt>device_warp_size()</tt> threads in the warp.
+/// This function always operates on all <tt>arch::wavefront::min_size()</tt> threads in the warp.
 ///
 /// \remark This operation is significantly faster than \p warp_shuffle.
 ///
@@ -312,7 +316,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_readfirstlane(const T& input)
 /// in the warp. \p src_lane must be the same value for all threads in the warp.
 /// This function does not distinguish between active threads and non-active
 /// threads: all threads must participate in the broadcast. This function also
-/// always operates on all <tt>device_warp_size()</tt> threads in the warp.
+/// always operates on all <tt>arch::wavefront::min_size()</tt> threads in the warp.
 ///
 /// \remark This operation is significantly faster than \p warp_shuffle.
 ///

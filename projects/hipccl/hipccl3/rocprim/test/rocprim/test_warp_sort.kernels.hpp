@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,16 +58,17 @@ template<unsigned int ItemsPerThread,
          unsigned int BlockSize,
          unsigned int LogicalWarpSize,
          class KeyType>
-__global__
-__launch_bounds__(BlockSize)
-auto test_hip_warp_sort(KeyType* device_key_output) -> typename std::
-    enable_if<(ItemsPerThread != 1 && LogicalWarpSize <= ::rocprim::device_warp_size()), void>::type
+__device__
+auto test_hip_warp_sort_impl(KeyType* device_key_output)
+    -> std::enable_if_t<(LogicalWarpSize <= ::rocprim::arch::wavefront::min_size())>
 {
-    const unsigned int lid = threadIdx.x;
+    const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     KeyType keys[ItemsPerThread];
-    ::rocprim::block_load_direct_warp_striped<LogicalWarpSize>(lid, device_key_output + block_offset, keys);
+    ::rocprim::block_load_direct_warp_striped<LogicalWarpSize>(lid,
+                                                               device_key_output + block_offset,
+                                                               keys);
 
     rocprim::warp_sort<KeyType, LogicalWarpSize> wsort;
     wsort.sort(keys);
@@ -79,25 +80,30 @@ template<unsigned int ItemsPerThread,
          unsigned int BlockSize,
          unsigned int LogicalWarpSize,
          class KeyType>
+__device__
+auto test_hip_warp_sort_impl(KeyType*)
+    -> std::enable_if_t<(LogicalWarpSize > ::rocprim::arch::wavefront::min_size())>
+{}
+
+template<unsigned int ItemsPerThread,
+         unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         class KeyType>
 __global__
 __launch_bounds__(BlockSize)
-auto test_hip_warp_sort(KeyType* /*device_key_output*/) -> typename std::
-    enable_if<(ItemsPerThread != 1 && LogicalWarpSize > ::rocprim::device_warp_size()), void>::type
+auto test_hip_warp_sort(KeyType* device_key_output) ->
+    typename std::enable_if<(ItemsPerThread != 1), void>::type
 {
-    // This kernel will never be actually called, the tests are filtered at runtime if the warp size
-    // of the current device is less than the tested LogicalWarpSize
+    test_hip_warp_sort_impl<ItemsPerThread, BlockSize, LogicalWarpSize, KeyType>(device_key_output);
 }
-
 template<unsigned int ItemsPerThread,
          unsigned int BlockSize,
          unsigned int LogicalWarpSize,
          class KeyType,
          class ValueType>
-__global__
-__launch_bounds__(BlockSize)
-auto test_hip_sort_key_value_kernel(KeyType*   device_key_output,
-                                    ValueType* device_value_output) -> typename std::
-    enable_if<(ItemsPerThread != 1 && LogicalWarpSize <= ::rocprim::device_warp_size()), void>::type
+__device__
+auto test_hip_sort_key_value_impl(KeyType* device_key_output, ValueType* device_value_output)
+    -> std::enable_if_t<(LogicalWarpSize <= ::rocprim::arch::wavefront::min_size())>
 {
     const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
@@ -123,14 +129,24 @@ template<unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
          class KeyType,
          class ValueType>
+__device__
+auto test_hip_sort_key_value_impl(KeyType*, ValueType*)
+    -> std::enable_if_t<(LogicalWarpSize > ::rocprim::arch::wavefront::min_size())>
+{}
+
+template<unsigned int ItemsPerThread,
+         unsigned int BlockSize,
+         unsigned int LogicalWarpSize,
+         class KeyType,
+         class ValueType>
 __global__
 __launch_bounds__(BlockSize)
-auto test_hip_sort_key_value_kernel(KeyType* /*device_key_output*/,
-                                    ValueType* /*device_value_output*/) -> typename std::
-    enable_if<(ItemsPerThread != 1 && LogicalWarpSize > ::rocprim::device_warp_size()), void>::type
+auto test_hip_sort_key_value_kernel(KeyType* device_key_output, ValueType* device_value_output) ->
+    typename std::enable_if<(ItemsPerThread != 1), void>::type
 {
-    // This kernel will never be actually called, the tests are filtered at runtime if the warp size
-    // of the current device is less than the tested LogicalWarpSize
+    test_hip_sort_key_value_impl<ItemsPerThread, BlockSize, LogicalWarpSize, KeyType, ValueType>(
+        device_key_output,
+        device_value_output);
 }
 
 #endif // TEST_WARP_SORT_KERNELS_HPP_

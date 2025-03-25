@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -451,7 +451,7 @@ private:
 
     template<unsigned int Size, class BinaryFunction, class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-        typename std::enable_if<(Size <= ::rocprim::device_warp_size())>::type
+    typename std::enable_if<(Size <= ::rocprim::arch::wavefront::min_size())>::type
         sort_power_two(const unsigned int flat_tid,
                        storage_type&      storage,
                        BinaryFunction     compare_function,
@@ -594,14 +594,14 @@ private:
     /// Requires a power of two block size and a power of two items per thread.
     template<unsigned int BS, class BinaryFunction, class... KeyValue>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-        typename std::enable_if<(BS > ::rocprim::device_warp_size())>::type
+    typename std::enable_if<(BS > ::rocprim::arch::wavefront::min_size())>::type
         sort_power_two(const unsigned int flat_tid,
                        storage_type&      storage,
                        BinaryFunction     compare_function,
                        KeyValue&... kv)
     {
-        const auto warp_id_is_even = ((flat_tid / ::rocprim::device_warp_size()) % 2) == 0;
-        ::rocprim::warp_sort<Key, ::rocprim::device_warp_size(), Value> wsort;
+        const auto warp_id_is_even = ((flat_tid / ::rocprim::arch::wavefront::min_size()) % 2) == 0;
+        ::rocprim::warp_sort<Key, ::rocprim::arch::wavefront::min_size(), Value> wsort;
         auto                                                            compare_function2
             = [compare_function, warp_id_is_even](const Key& a, const Key& b) mutable -> bool
         {
@@ -613,19 +613,20 @@ private:
         wsort.sort(kv..., compare_function2);
 
         ROCPRIM_UNROLL
-        for(unsigned int length = ::rocprim::device_warp_size(); length < BS; length *= 2)
+        for(unsigned int length = ::rocprim::arch::wavefront::min_size(); length < BS; length *= 2)
         {
             const bool dir = (flat_tid & (length * 2)) != 0;
             ROCPRIM_UNROLL
-            for(unsigned int k = length; k > ::rocprim::device_warp_size() / 2; k /= 2)
+            for(unsigned int k = length; k > ::rocprim::arch::wavefront::min_size() / 2; k /= 2)
             {
                 copy_to_shared(kv..., flat_tid, storage);
                 swap(kv..., flat_tid, flat_tid ^ k, dir, storage, compare_function);
                 ::rocprim::syncthreads();
             }
 
-            const unsigned int     id = detail::logical_lane_id<::rocprim::device_warp_size()>();
-            constexpr unsigned int s  = ::rocprim::device_warp_size() / 2;
+            const unsigned int id
+                = detail::logical_lane_id<::rocprim::arch::wavefront::min_size()>();
+            constexpr unsigned int s = ::rocprim::arch::wavefront::min_size() / 2;
 
             ROCPRIM_UNROLL
             for(unsigned int k = s; k > 0; k /= 2)

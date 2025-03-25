@@ -46,13 +46,14 @@ class block_scan_reduce_then_scan
 {
     static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
     // Number of items to reduce per thread
-    static constexpr unsigned int thread_reduction_size_ =
-        (BlockSize + ::rocprim::device_warp_size() - 1)/ ::rocprim::device_warp_size();
+    static constexpr unsigned int thread_reduction_size_
+        = (BlockSize + ::rocprim::arch::wavefront::min_size() - 1)
+          / ::rocprim::arch::wavefront::min_size();
 
     // Warp scan, warp_scan_crosslane does not require shared memory (storage), but
     // logical warp size must be a power of two.
-    static constexpr unsigned int warp_size_ =
-        detail::get_min_warp_size(BlockSize, ::rocprim::device_warp_size());
+    static constexpr unsigned int warp_size_
+        = detail::get_min_warp_size(BlockSize, ::rocprim::arch::wavefront::min_size());
     using warp_scan_prefix_type = ::rocprim::detail::warp_scan_crosslane<T, warp_size_>;
 
     // Minimize LDS bank conflicts

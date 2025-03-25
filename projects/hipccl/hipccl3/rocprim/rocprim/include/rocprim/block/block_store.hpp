@@ -498,10 +498,16 @@ private:
     using block_exchange_type = block_exchange<T, BlockSize, ItemsPerThread>;
 
 public:
-    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(BlockSize % ::rocprim::device_warp_size() == 0,
+    ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(BlockSize % ::rocprim::arch::wavefront::min_size() == 0,
                                         "BlockSize must be a multiple of hardware warpsize");
 
     using storage_type = typename block_exchange_type::storage_type;
+
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+    block_store()
+    {
+        assert(BlockSize % ::rocprim::arch::wavefront::size() == 0);
+    }
 
     template<class OutputIterator>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
