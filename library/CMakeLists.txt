@@ -76,6 +76,35 @@ set(HEADER_FILES
   internal/precond/hipsparse_gtsv.h
   # Reorder
   internal/reorder/hipsparse_csrcolor.h
+  # Conversion
+  internal/conversion/hipsparse_bsr2csr.h
+  internal/conversion/hipsparse_coo2csr.h
+  internal/conversion/hipsparse_coosort.h
+  internal/conversion/hipsparse_create_identity_permutation.h
+  internal/conversion/hipsparse_csc2dense.h
+  internal/conversion/hipsparse_cscsort.h
+  internal/conversion/hipsparse_csr2bsr.h
+  internal/conversion/hipsparse_csr2coo.h
+  internal/conversion/hipsparse_csr2csc.h
+  internal/conversion/hipsparse_csr2csr_compress.h
+  internal/conversion/hipsparse_csr2csru.h
+  internal/conversion/hipsparse_csr2dense.h
+  internal/conversion/hipsparse_csr2gebsr.h
+  internal/conversion/hipsparse_csr2hyb.h
+  internal/conversion/hipsparse_csrsort.h
+  internal/conversion/hipsparse_csru2csr.h
+  internal/conversion/hipsparse_dense2csc.h
+  internal/conversion/hipsparse_dense2csr.h
+  internal/conversion/hipsparse_gebsr2csr.h
+  internal/conversion/hipsparse_gebsr2gebsc.h
+  internal/conversion/hipsparse_gebsr2gebsr.h
+  internal/conversion/hipsparse_hyb2csr.h
+  internal/conversion/hipsparse_nnz_compress.h
+  internal/conversion/hipsparse_nnz.h
+  internal/conversion/hipsparse_prune_csr2csr_by_percentage.h
+  internal/conversion/hipsparse_prune_csr2csr.h
+  internal/conversion/hipsparse_prune_dense2csr_by_percentage.h
+  internal/conversion/hipsparse_prune_dense2csr.h
   # Generic
   internal/generic/hipsparse_axpby.h
   internal/generic/hipsparse_dense2sparse.h
