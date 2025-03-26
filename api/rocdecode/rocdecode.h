@@ -573,8 +573,8 @@ typedef struct _RocdecHevcPicParams {
     uint8_t pcm_sample_bit_depth_chroma_minus1;
     uint8_t log2_min_luma_coding_block_size_minus3;
     uint8_t log2_diff_max_min_luma_coding_block_size;
-    uint8_t log2_min_transform_block_size_minus2;
-    uint8_t log2_diff_max_min_transform_block_size;
+    uint8_t log2_min_luma_transform_block_size_minus2;
+    uint8_t log2_diff_max_min_luma_transform_block_size;
     uint8_t log2_min_pcm_luma_coding_block_size_minus3;
     uint8_t log2_diff_max_min_pcm_luma_coding_block_size;
     uint8_t max_transform_hierarchy_depth_intra;

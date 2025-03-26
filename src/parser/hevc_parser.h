@@ -116,9 +116,9 @@ protected:
 
     // Data members of HEVC class
     HevcNalUnitHeader   nal_unit_header_;
-    int32_t             m_active_vps_id_;
-    int32_t             m_active_sps_id_;
-    int32_t             m_active_pps_id_;
+    int32_t             active_vps_id_;
+    int32_t             active_sps_id_;
+    int32_t             active_pps_id_;
     HevcVideoParamSet   vps_list_[MAX_VPS_COUNT];
     HevcSeqParamSet     sps_list_[MAX_SPS_COUNT];
     HevcPicParamSet     pps_list_[MAX_PPS_COUNT];
@@ -132,9 +132,13 @@ protected:
     int first_pic_after_eos_nal_unit_; // to flag the first picture after EOS
     int no_rasl_output_flag_; // NoRaslOutputFlag
 
+    uint32_t max_tb_log2_size_y_; // MaxTbLog2SizeY
+    int ctb_log2_size_y_; // CtbLog2SizeY
     int pic_width_in_ctbs_y_;  // PicWidthInCtbsY
     int pic_height_in_ctbs_y_;  // PicHeightInCtbsY
     int pic_size_in_ctbs_y_;  // PicSizeInCtbsY
+    int sub_width_c_; // SubWidthC
+    int sub_height_c_; // SubHeightC
 
     // DPB
     DecodedPictureBuffer dpb_buffer_;
@@ -170,16 +174,16 @@ protected:
     /*! \brief Function to parse Sequence Parameter Set 
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseSps(uint8_t *nalu, size_t size);
+    ParserResult ParseSps(uint8_t *nalu, size_t size);
 
     /*! \brief Function to parse Picture Parameter Set 
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParsePps(uint8_t *nalu, size_t size);
+    ParserResult ParsePps(uint8_t *nalu, size_t size);
 
     /*! \brief Function to parse Profiles, Tiers and Levels
      * \param [out] ptl A pointer of <tt>HevcProfileTierLevel</tt> for the output from teh parsed stream
@@ -226,19 +230,18 @@ protected:
      * \param [in] size Size of the input stream
      * \param [in] offset Reference to the offset in the input buffer
      * \param [in] sps_ptr Pointer to the current SPS
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *data, size_t size, size_t &offset, HevcSeqParamSet *sps_ptr);
+    ParserResult ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *data, size_t size, size_t &offset, HevcSeqParamSet *sps_ptr);
     
     /*! \brief Function to parse Video Usability Information
-     * \param [out] vui A pointer of <tt>HevcVuiParameters</tt> for the output from the parsed stream
-     * \param [in] max_num_sub_layers_minus1 Input of <tt>uint32_t</tt> - plus 1 specifies the maximum number of temporal sub-layers that may be present
+     * \param [in/out] sps_ptr The pointer to the associated SPS
      * \param [in] data A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
      * \param [in] offset Reference to the offset in the input buffer
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_layers_minus1, uint8_t *data, size_t size, size_t &offset);
+    ParserResult ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *data, size_t size, size_t &offset);
     
     /*! \brief Function to parse Short Term Reference Picture Set
      * \param [in] sps_ptr The pointer to the associated SPS
@@ -258,8 +261,9 @@ protected:
      * \param [in] chroma_array_type ChromaArrayType
      * \param [in] stream_ptr Bit stream pointer
      * \param [in/out] offset Bit offset of the current parsing action
+     * \return <tt>ParserResult</tt>
      */
-    void ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr, int chroma_array_type, uint8_t *stream_ptr, size_t &offset);
+    ParserResult ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr, int chroma_array_type, uint8_t *stream_ptr, size_t &offset);
 
     /*! \brief Function to parse Slice Header
      * \param [in] nalu A pointer of <tt>uint8_t</tt> for the input stream to be parsed

@@ -24,9 +24,10 @@ THE SOFTWARE.
 
 HevcVideoParser::HevcVideoParser() {
     first_pic_after_eos_nal_unit_ = 0;
-    m_active_vps_id_ = -1; 
-    m_active_sps_id_ = -1;
-    m_active_pps_id_ = -1;
+    slice_info_list_.assign(INIT_SLICE_LIST_NUM, {{0}});
+    active_vps_id_ = -1;
+    active_sps_id_ = -1;
+    active_pps_id_ = -1;
     slice_info_list_.assign(INIT_SLICE_LIST_NUM, {{0}});
     slice_param_list_.assign(INIT_SLICE_LIST_NUM, {0});
     memset(&curr_pic_info_, 0, sizeof(HevcPicInfo));
@@ -64,7 +65,7 @@ rocDecStatus HevcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
-            if (FillSeqCallbackFn(&sps_list_[m_active_sps_id_]) != PARSER_OK) {
+            if (FillSeqCallbackFn(&sps_list_[active_sps_id_]) != PARSER_OK) {
                 return ROCDEC_RUNTIME_ERROR;
             }
             new_seq_activated_ = false;
@@ -222,8 +223,8 @@ void HevcVideoParser::SendSeiMsgPayload() {
 
 int HevcVideoParser::SendPicForDecode() {
     int i, j, ref_idx, buf_idx;
-    HevcSeqParamSet *sps_ptr = &sps_list_[m_active_sps_id_];
-    HevcPicParamSet *pps_ptr = &pps_list_[m_active_pps_id_];
+    HevcSeqParamSet *sps_ptr = &sps_list_[active_sps_id_];
+    HevcPicParamSet *pps_ptr = &pps_list_[active_pps_id_];
     dec_pic_params_ = {0};
 
     dec_pic_params_.pic_width = sps_ptr->pic_width_in_luma_samples;
@@ -330,8 +331,8 @@ int HevcVideoParser::SendPicForDecode() {
     pic_param_ptr->pcm_sample_bit_depth_chroma_minus1 = sps_ptr->pcm_sample_bit_depth_chroma_minus1;
     pic_param_ptr->log2_min_luma_coding_block_size_minus3 = sps_ptr->log2_min_luma_coding_block_size_minus3;
     pic_param_ptr->log2_diff_max_min_luma_coding_block_size = sps_ptr->log2_diff_max_min_luma_coding_block_size;
-    pic_param_ptr->log2_min_transform_block_size_minus2 = sps_ptr->log2_min_transform_block_size_minus2;
-    pic_param_ptr->log2_diff_max_min_transform_block_size = sps_ptr->log2_diff_max_min_transform_block_size;
+    pic_param_ptr->log2_min_luma_transform_block_size_minus2 = sps_ptr->log2_min_luma_transform_block_size_minus2;
+    pic_param_ptr->log2_diff_max_min_luma_transform_block_size = sps_ptr->log2_diff_max_min_luma_transform_block_size;
     pic_param_ptr->log2_min_pcm_luma_coding_block_size_minus3 = sps_ptr->log2_min_pcm_luma_coding_block_size_minus3;
     pic_param_ptr->log2_diff_max_min_pcm_luma_coding_block_size = sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size;
     pic_param_ptr->max_transform_hierarchy_depth_intra = sps_ptr->max_transform_hierarchy_depth_intra;
@@ -889,7 +890,6 @@ void HevcVideoParser::SetDefaultScalingList(HevcScalingListData *sl_ptr) {
             sl_ptr->scaling_list[0][matrix_id][i] = default_scaling_list_side_id_0[i];
         }
     }
-
     // sizeId 1..3, matrixId 0..2
     for (size_id = 1; size_id <= 3; size_id++) {
         for (matrix_id = 0; matrix_id <= 2; matrix_id++) {
@@ -898,7 +898,6 @@ void HevcVideoParser::SetDefaultScalingList(HevcScalingListData *sl_ptr) {
             }
         }
     }
-
     // sizeId 1..3, matrixId 3..5
     for (size_id = 1; size_id <= 3; size_id++) {
         for (matrix_id = 3; matrix_id <= 5; matrix_id++) {
@@ -909,12 +908,17 @@ void HevcVideoParser::SetDefaultScalingList(HevcScalingListData *sl_ptr) {
     }
 }
 
-void HevcVideoParser::ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *nalu, size_t size, size_t& offset, HevcSeqParamSet *sps_ptr) {
+ParserResult HevcVideoParser::ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *nalu, size_t size, size_t& offset, HevcSeqParamSet *sps_ptr) {
     for (int size_id = 0; size_id < 4; size_id++) {
         for (int matrix_id = 0; matrix_id < 6; matrix_id += (size_id == 3) ? 3 : 1) {
             sl_ptr->scaling_list_pred_mode_flag[size_id][matrix_id] = Parser::GetBit(nalu, offset);
             if(!sl_ptr->scaling_list_pred_mode_flag[size_id][matrix_id]) {
                 sl_ptr->scaling_list_pred_matrix_id_delta[size_id][matrix_id] = Parser::ExpGolomb::ReadUe(nalu, offset);
+                if (size_id == 3) {
+                    CHECK_ALLOWED_RANGE("scaling_list_pred_matrix_id_delta", sl_ptr->scaling_list_pred_matrix_id_delta[size_id][matrix_id], 0, matrix_id / 3);
+                } else {
+                    CHECK_ALLOWED_RANGE("scaling_list_pred_matrix_id_delta", sl_ptr->scaling_list_pred_matrix_id_delta[size_id][matrix_id], 0, matrix_id);
+                }
                 // If scaling_list_pred_matrix_id_delta is 0, infer from default scaling list. We have filled the scaling
                 // list with default values earlier.
                 if (sl_ptr->scaling_list_pred_matrix_id_delta[size_id][matrix_id]) {
@@ -935,12 +939,14 @@ void HevcVideoParser::ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *na
                 int coef_num = std::min(64, (1 << (4 + (size_id << 1))));
                 if (size_id > 1) {
                     sl_ptr->scaling_list_dc_coef_minus8[size_id - 2][matrix_id] = Parser::ExpGolomb::ReadSe(nalu, offset);
+                    CHECK_ALLOWED_RANGE("scaling_list_dc_coef_minus8", sl_ptr->scaling_list_dc_coef_minus8[size_id - 2][matrix_id], -7, 247);
                     next_coef = sl_ptr->scaling_list_dc_coef_minus8[size_id - 2][matrix_id] + 8;
                     // Record DC coefficient for 16x16 or 32x32
                     sl_ptr->scaling_list_dc_coef[size_id - 2][matrix_id] = next_coef;
                 }
                 for (int i = 0; i < coef_num; i++) {
                     sl_ptr->scaling_list_delta_coef = Parser::ExpGolomb::ReadSe(nalu, offset);
+                    CHECK_ALLOWED_RANGE("scaling_list_delta_coef", sl_ptr->scaling_list_delta_coef, -128, 127);
                     next_coef = (next_coef + sl_ptr->scaling_list_delta_coef + 256) % 256;
                     if (size_id == 0) {
                         sl_ptr->scaling_list[size_id][matrix_id][diag_scan_4x4[i]] = next_coef;
@@ -964,6 +970,7 @@ void HevcVideoParser::ParseScalingList(HevcScalingListData * sl_ptr, uint8_t *na
         sl_ptr->scaling_list_dc_coef[1][4] = sl_ptr->scaling_list_dc_coef[0][4];
         sl_ptr->scaling_list_dc_coef[1][5] = sl_ptr->scaling_list_dc_coef[0][5];
     }
+    return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, HevcShortTermRps *rps, uint32_t st_rps_idx, uint32_t number_short_term_ref_pic_sets, HevcShortTermRps rps_ref[], uint8_t *nalu, size_t /*size*/, size_t& offset) {
@@ -978,11 +985,13 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
     if (rps->inter_ref_pic_set_prediction_flag) {
         if (st_rps_idx == number_short_term_ref_pic_sets) {
             rps->delta_idx_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("delta_idx_minus1", rps->delta_idx_minus1, 0, st_rps_idx - 1);
         } else {
             rps->delta_idx_minus1 = 0;
         }
         rps->delta_rps_sign = Parser::GetBit(nalu, offset);
         rps->abs_delta_rps_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("abs_delta_rps_minus1", rps->abs_delta_rps_minus1, 0, ((1 << 15) - 1));
         int ref_rps_idx = st_rps_idx - (rps->delta_idx_minus1 + 1);  // (7-59)
         int delta_rps = (1 - 2 * rps->delta_rps_sign) * (rps->abs_delta_rps_minus1 + 1);  // (7-60)
 
@@ -1042,12 +1051,14 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
         rps->num_of_delta_pocs = rps->num_negative_pics + rps->num_positive_pics;
     } else {
         rps->num_negative_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("num_negative_pics", rps->num_negative_pics, 0, sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1]);
         rps->num_positive_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("num_positive_pics", rps->num_positive_pics, 0, sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1] - rps->num_negative_pics);
         rps->num_of_delta_pocs = rps->num_negative_pics + rps->num_positive_pics;
-        CHECK_ALLOWED_RANGE("num_of_delta_pocs", rps->num_of_delta_pocs, 0, sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1]);
 
         for (i = 0; i < rps->num_negative_pics; i++) {
             rps->delta_poc_s0_minus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("delta_poc_s0_minus1", rps->delta_poc_s0_minus1[i], 0, ((1 << 15) - 1));
             if (i == 0) {
                 rps->delta_poc_s0[i] = -(rps->delta_poc_s0_minus1[i] + 1);
             } else {
@@ -1058,6 +1069,7 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
 
         for (i = 0; i < rps->num_positive_pics; i++) {
             rps->delta_poc_s1_minus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("delta_poc_s1_minus1", rps->delta_poc_s1_minus1[i], 0, ((1 << 15) - 1));
             if (i == 0) {
                 rps->delta_poc_s1[i] = rps->delta_poc_s1_minus1[i] + 1;
             } else {
@@ -1069,17 +1081,17 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
     return PARSER_OK;
 }
 
-void HevcVideoParser::ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr, int chroma_array_type, uint8_t *stream_ptr, size_t &offset) {
+ParserResult HevcVideoParser::ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr, int chroma_array_type, uint8_t *stream_ptr, size_t &offset) {
     HevcPredWeightTable *pred_weight_table_ptr = &slice_header_ptr->pred_weight_table;
     int chroma_log2_weight_denom; // ChromaLog2WeightDenom
     int i, j;
 
     pred_weight_table_ptr->luma_log2_weight_denom = Parser::ExpGolomb::ReadUe(stream_ptr, offset);
+    CHECK_ALLOWED_RANGE("luma_log2_weight_denom", pred_weight_table_ptr->luma_log2_weight_denom, 0, 7);
     if (chroma_array_type) {
         pred_weight_table_ptr->delta_chroma_log2_weight_denom = Parser::ExpGolomb::ReadSe(stream_ptr, offset);
     }
     chroma_log2_weight_denom = pred_weight_table_ptr->luma_log2_weight_denom + pred_weight_table_ptr->delta_chroma_log2_weight_denom;
-
     for (i = 0; i <= slice_header_ptr->num_ref_idx_l0_active_minus1; i++) {
         pred_weight_table_ptr->luma_weight_l0_flag[i] = Parser::GetBit(stream_ptr, offset);
     }
@@ -1120,11 +1132,13 @@ void HevcVideoParser::ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr,
         for (i = 0; i <= slice_header_ptr->num_ref_idx_l1_active_minus1; i++) {
             if (pred_weight_table_ptr->luma_weight_l1_flag[i]) {
                 pred_weight_table_ptr->delta_luma_weight_l1[i] = Parser::ExpGolomb::ReadSe(stream_ptr, offset);
+                CHECK_ALLOWED_RANGE("delta_luma_weight_l1", pred_weight_table_ptr->delta_luma_weight_l1[i], -128, 127);
                 pred_weight_table_ptr->luma_offset_l1[i] = Parser::ExpGolomb::ReadSe(stream_ptr, offset);
             }
             if (pred_weight_table_ptr->chroma_weight_l1_flag[i]) {
                 for (j = 0; j < 2; j++) {
                     pred_weight_table_ptr->delta_chroma_weight_l1[i][j] = Parser::ExpGolomb::ReadSe(stream_ptr, offset);
+                    CHECK_ALLOWED_RANGE("delta_chroma_weight_l1", pred_weight_table_ptr->delta_chroma_weight_l1[i][j], -128, 127);
                     pred_weight_table_ptr->delta_chroma_offset_l1[i][j] = Parser::ExpGolomb::ReadSe(stream_ptr, offset);
                     pred_weight_table_ptr->chroma_weight_l1[i][j] = (1 << chroma_log2_weight_denom) + pred_weight_table_ptr->delta_chroma_weight_l1[i][j];
                     pred_weight_table_ptr->chroma_offset_l1[i][j] = std::clamp((pred_weight_table_ptr->delta_chroma_offset_l1[i][j] - ((128 * pred_weight_table_ptr->chroma_weight_l1[i][j]) >> chroma_log2_weight_denom) + 128), -128, 127);
@@ -1137,9 +1151,11 @@ void HevcVideoParser::ParsePredWeightTable(HevcSliceSegHeader *slice_header_ptr,
             }
         }
     }
+    return PARSER_OK;
 }
 
-void HevcVideoParser::ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_layers_minus1, uint8_t *nalu, size_t size, size_t &offset) {
+ParserResult HevcVideoParser::ParseVui(HevcSeqParamSet *sps_ptr, uint8_t *nalu, size_t size, size_t &offset) {
+    HevcVuiParameters *vui = &sps_ptr->vui_parameters;
     vui->aspect_ratio_info_present_flag = Parser::GetBit(nalu, offset);
     if (vui->aspect_ratio_info_present_flag) {
         vui->aspect_ratio_idc = Parser::ReadBits(nalu, offset, 8);
@@ -1166,7 +1182,9 @@ void HevcVideoParser::ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_laye
     vui->chroma_loc_info_present_flag = Parser::GetBit(nalu, offset);
     if (vui->chroma_loc_info_present_flag) {
         vui->chroma_sample_loc_type_top_field = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_top_field", vui->chroma_sample_loc_type_top_field, 0, 5);
         vui->chroma_sample_loc_type_bottom_field = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_bottom_field", vui->chroma_sample_loc_type_bottom_field, 0, 5);
     }
     vui->neutral_chroma_indication_flag = Parser::GetBit(nalu, offset);
     vui->field_seq_flag = Parser::GetBit(nalu, offset);
@@ -1175,8 +1193,14 @@ void HevcVideoParser::ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_laye
     if (vui->default_display_window_flag) {
         vui->def_disp_win_left_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         vui->def_disp_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
+        uint32_t left_offset = sps_ptr->conf_win_left_offset + vui->def_disp_win_left_offset;
+        uint32_t right_offset = sps_ptr->conf_win_right_offset + vui->def_disp_win_right_offset;
+        CHECK_ALLOWED_MAX("SubWidthC * (leftOffset + rightOffset)", sub_width_c_ * (left_offset + right_offset), sps_ptr->pic_width_in_luma_samples - 1);
         vui->def_disp_win_top_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         vui->def_disp_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
+        uint32_t top_offset = sps_ptr->conf_win_top_offset + vui->def_disp_win_top_offset;
+        uint32_t bottom_offset = sps_ptr->conf_win_bottom_offset + vui->def_disp_win_bottom_offset;
+        CHECK_ALLOWED_MAX("SubHeightC * (topOffset + bottomOffset)", sub_height_c_ * (top_offset + bottom_offset), sps_ptr->pic_height_in_luma_samples);
     }
     vui->vui_timing_info_present_flag = Parser::GetBit(nalu, offset);
     if (vui->vui_timing_info_present_flag) {
@@ -1188,7 +1212,10 @@ void HevcVideoParser::ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_laye
         }
         vui->vui_hrd_parameters_present_flag = Parser::GetBit(nalu, offset);
         if (vui->vui_hrd_parameters_present_flag) {
-            ParseHrdParameters(&vui->hrd_parameters, 1, max_num_sub_layers_minus1, nalu, size, offset);
+            ParserResult ret;
+            if ((ret = ParseHrdParameters(&vui->hrd_parameters, 1, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset)) != PARSER_OK) {
+                return ret;
+            }
         }
     }
     vui->bitstream_restriction_flag = Parser::GetBit(nalu, offset);
@@ -1197,11 +1224,17 @@ void HevcVideoParser::ParseVui(HevcVuiParameters *vui, uint32_t max_num_sub_laye
         vui->motion_vectors_over_pic_boundaries_flag = Parser::GetBit(nalu, offset);
         vui->restricted_ref_pic_lists_flag = Parser::GetBit(nalu, offset);
         vui->min_spatial_segmentation_idc = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("min_spatial_segmentation_idc", vui->min_spatial_segmentation_idc, 0, 4095);
         vui->max_bytes_per_pic_denom = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("max_bytes_per_pic_denom", vui->max_bytes_per_pic_denom, 0, 16);
         vui->max_bits_per_min_cu_denom = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("max_bits_per_min_cu_denom", vui->max_bits_per_min_cu_denom, 0, 16);
         vui->log2_max_mv_length_horizontal = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("log2_max_mv_length_horizontal", vui->log2_max_mv_length_horizontal, 0, 16);
         vui->log2_max_mv_length_vertical = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("log2_max_mv_length_vertical", vui->log2_max_mv_length_vertical, 0, 15);
     }
+    return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
@@ -1276,7 +1309,8 @@ ParserResult HevcVideoParser::ParseVps(uint8_t *nalu, size_t size) {
     return PARSER_OK;
 }
 
-void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
+ParserResult HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
+    ParserResult ret = PARSER_OK;
     HevcSeqParamSet *sps_ptr = nullptr;
     size_t offset = 0;
 
@@ -1288,6 +1322,7 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     ParsePtl(&ptl, true, max_sub_layer_minus1, nalu, size, offset);
 
     uint32_t sps_id = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("sps_seq_parameter_set_id", sps_id, 0, 15);
     sps_ptr = &sps_list_[sps_id];
 
     memset(sps_ptr, 0, sizeof(HevcSeqParamSet));
@@ -1297,8 +1332,31 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     memcpy (&sps_ptr->profile_tier_level, &ptl, sizeof(ptl));
     sps_ptr->sps_seq_parameter_set_id = sps_id;
     sps_ptr->chroma_format_idc = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("chroma_format_idc", sps_ptr->chroma_format_idc, 0, 3);
     if (sps_ptr->chroma_format_idc == 3) {
         sps_ptr->separate_colour_plane_flag = Parser::GetBit(nalu, offset);
+    }
+    switch (sps_ptr->chroma_format_idc) {
+        case 0: {
+            sub_width_c_ = 1;
+            sub_height_c_ = 1;
+            break;
+        }
+        case 1: {
+            sub_width_c_ = 2;
+            sub_height_c_ = 2;
+            break;
+        }
+        case 2: {
+            sub_width_c_ = 2;
+            sub_height_c_ = 1;
+            break;
+        }
+        case 3: {
+            sub_width_c_ = 1;
+            sub_height_c_ = 1;
+            break;
+        }
     }
     sps_ptr->pic_width_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
     sps_ptr->pic_height_in_luma_samples = Parser::ExpGolomb::ReadUe(nalu, offset);
@@ -1308,15 +1366,28 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         sps_ptr->conf_win_right_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_top_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
         sps_ptr->conf_win_bottom_offset = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_MAX("SubWidthC * (conf_win_left_offset + conf_win_right_offset)", sub_width_c_ * (sps_ptr->conf_win_left_offset + sps_ptr->conf_win_right_offset), sps_ptr->pic_width_in_luma_samples - 1);
+        CHECK_ALLOWED_MAX("SubHeightC * (conf_win_top_offset + conf_win_bottom_offset)", sub_height_c_ * (sps_ptr->conf_win_top_offset + sps_ptr->conf_win_bottom_offset), sps_ptr->pic_width_in_luma_samples - 1);
     }
     sps_ptr->bit_depth_luma_minus8 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    if ( sps_ptr->bit_depth_luma_minus8 != 0 && sps_ptr->bit_depth_luma_minus8 != 2) {
+        ERR("bit_depth_luma_minus8 = " + TOSTR(sps_ptr->bit_depth_luma_minus8) + " is not supported");
+        return PARSER_OUT_OF_RANGE;
+    }
     sps_ptr->bit_depth_chroma_minus8 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    if ( sps_ptr->bit_depth_chroma_minus8 != 0 && sps_ptr->bit_depth_chroma_minus8 != 2) {
+        ERR("bit_depth_chroma_minus8 = " + TOSTR(sps_ptr->bit_depth_chroma_minus8) + " is not supported");
+        return PARSER_OUT_OF_RANGE;
+    }
     sps_ptr->log2_max_pic_order_cnt_lsb_minus4 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("log2_max_pic_order_cnt_lsb_minus4", sps_ptr->log2_max_pic_order_cnt_lsb_minus4, 0, 12);
     sps_ptr->sps_sub_layer_ordering_info_present_flag = Parser::GetBit(nalu, offset);
     for (int i = 0; i <= sps_ptr->sps_max_sub_layers_minus1; i++) {
         if (sps_ptr->sps_sub_layer_ordering_info_present_flag || (i == 0)) {
             sps_ptr->sps_max_dec_pic_buffering_minus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("sps_max_dec_pic_buffering_minus1", sps_ptr->sps_max_dec_pic_buffering_minus1[i], 0, HEVC_MAX_DPB_FRAMES - 1);
             sps_ptr->sps_max_num_reorder_pics[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("sps_max_num_reorder_pics", sps_ptr->sps_max_num_reorder_pics[i], 0, sps_ptr->sps_max_dec_pic_buffering_minus1[i]);
             sps_ptr->sps_max_latency_increase_plus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
         } else {
             sps_ptr->sps_max_dec_pic_buffering_minus1[i] = sps_ptr->sps_max_dec_pic_buffering_minus1[0];
@@ -1325,29 +1396,27 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         }
     }
     sps_ptr->log2_min_luma_coding_block_size_minus3 = Parser::ExpGolomb::ReadUe(nalu, offset);
-
-    int log2_min_cu_size = sps_ptr->log2_min_luma_coding_block_size_minus3 + 3;
-
+    int min_cb_log2_size_y = sps_ptr->log2_min_luma_coding_block_size_minus3 + 3;  // MinCbLog2SizeY
     sps_ptr->log2_diff_max_min_luma_coding_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
-
     int max_cu_depth_delta = sps_ptr->log2_diff_max_min_luma_coding_block_size;
-    sps_ptr->max_cu_width = ( 1<<(log2_min_cu_size + max_cu_depth_delta));
-    sps_ptr->max_cu_height = ( 1<<(log2_min_cu_size + max_cu_depth_delta));
-
-    sps_ptr->log2_min_transform_block_size_minus2 = Parser::ExpGolomb::ReadUe(nalu, offset);
-
-    uint32_t quadtree_tu_log2_min_size = sps_ptr->log2_min_transform_block_size_minus2 + 2;
-    int add_cu_depth = std::max (0, log2_min_cu_size - (int)quadtree_tu_log2_min_size);
+    sps_ptr->max_cu_width = (1 << (min_cb_log2_size_y + max_cu_depth_delta));
+    sps_ptr->max_cu_height = (1 << (min_cb_log2_size_y + max_cu_depth_delta));
+    sps_ptr->log2_min_luma_transform_block_size_minus2 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    uint32_t min_tb_log2_size_y = sps_ptr->log2_min_luma_transform_block_size_minus2 + 2; // MinTbLog2SizeY
+    CHECK_ALLOWED_MAX("min_tb_log2_size_y", min_tb_log2_size_y, min_cb_log2_size_y - 1);
+    int add_cu_depth = std::max(0, min_cb_log2_size_y - (int)min_tb_log2_size_y);
     sps_ptr->max_cu_depth = (max_cu_depth_delta + add_cu_depth);
-
-    sps_ptr->log2_diff_max_min_transform_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
+    sps_ptr->log2_diff_max_min_luma_transform_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
+    max_tb_log2_size_y_ = sps_ptr->log2_min_luma_transform_block_size_minus2 + 2 + sps_ptr->log2_diff_max_min_luma_transform_block_size; // MaxTbLog2SizeY
+    ctb_log2_size_y_ = min_cb_log2_size_y + sps_ptr->log2_diff_max_min_luma_coding_block_size;  // CtbLog2SizeY
+    CHECK_ALLOWED_MAX("max_tb_log2_size_y_", max_tb_log2_size_y_, std::min(ctb_log2_size_y_, 5));
     sps_ptr->max_transform_hierarchy_depth_inter = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("max_transform_hierarchy_depth_inter", sps_ptr->max_transform_hierarchy_depth_inter, 0, ctb_log2_size_y_ - min_tb_log2_size_y);
     sps_ptr->max_transform_hierarchy_depth_intra = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("max_transform_hierarchy_depth_intra", sps_ptr->max_transform_hierarchy_depth_intra, 0, ctb_log2_size_y_ - min_tb_log2_size_y);
 
     // Infer dimensional variables
-    int min_cb_log2_size_y = sps_ptr->log2_min_luma_coding_block_size_minus3 + 3;  // MinCbLog2SizeY
-    int ctb_log2_size_y = min_cb_log2_size_y + sps_ptr->log2_diff_max_min_luma_coding_block_size;  // CtbLog2SizeY
-    int ctb_size_y = 1 << ctb_log2_size_y;  // CtbSizeY
+    int ctb_size_y = 1 << ctb_log2_size_y_;  // CtbSizeY
     pic_width_in_ctbs_y_ = (sps_ptr->pic_width_in_luma_samples + ctb_size_y - 1) / ctb_size_y;  // PicWidthInCtbsY
     pic_height_in_ctbs_y_ = (sps_ptr->pic_height_in_luma_samples + ctb_size_y - 1) / ctb_size_y;  // PicHeightInCtbsY
     pic_size_in_ctbs_y_ = pic_width_in_ctbs_y_ * pic_height_in_ctbs_y_;  // PicSizeInCtbsY
@@ -1356,10 +1425,11 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     if (sps_ptr->scaling_list_enabled_flag) {
         // Set up default values first
         SetDefaultScalingList(&sps_ptr->scaling_list_data);
-
         sps_ptr->sps_scaling_list_data_present_flag = Parser::GetBit(nalu, offset);
         if (sps_ptr->sps_scaling_list_data_present_flag) {
-            ParseScalingList(&sps_ptr->scaling_list_data, nalu, size, offset, sps_ptr);
+            if ((ret = ParseScalingList(&sps_ptr->scaling_list_data, nalu, size, offset, sps_ptr)) != PARSER_OK) {
+                return ret;
+            }
         }
     }
     sps_ptr->amp_enabled_flag = Parser::GetBit(nalu, offset);
@@ -1369,19 +1439,26 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
         sps_ptr->pcm_sample_bit_depth_luma_minus1 = Parser::ReadBits(nalu, offset, 4);
         sps_ptr->pcm_sample_bit_depth_chroma_minus1 = Parser::ReadBits(nalu, offset, 4);
         sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 = Parser::ExpGolomb::ReadUe(nalu, offset);
+        //CHECK_ALLOWED_RANGE("log2_min_pcm_luma_coding_block_size", sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(min_cb_log2_size_y, 5), std::min(ctb_log2_size_y_, 5));
+        if ((sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) < std::min(min_cb_log2_size_y, 5) || (sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) > std::min(ctb_log2_size_y_, 5)) {
+            ERR("log2_min_pcm_luma_coding_block_size = " + TOSTR(sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3) + " not in allowd range: " + TOSTR(std::min(min_cb_log2_size_y, 5)) + ", " + TOSTR(std::min(ctb_log2_size_y_, 5)));
+        }
         sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_MAX("log2_max_ipcm_cb_size_y", sps_ptr->log2_diff_max_min_pcm_luma_coding_block_size + sps_ptr->log2_min_pcm_luma_coding_block_size_minus3 + 3, std::min(ctb_log2_size_y_, 5));
         sps_ptr->pcm_loop_filter_disabled_flag = Parser::GetBit(nalu, offset);
     }
     sps_ptr->num_short_term_ref_pic_sets = Parser::ExpGolomb::ReadUe(nalu, offset);
-    for (int i=0; i<sps_ptr->num_short_term_ref_pic_sets; i++) {
+    CHECK_ALLOWED_RANGE("num_short_term_ref_pic_sets", sps_ptr->num_short_term_ref_pic_sets, 0, 64);
+    for (int i = 0; i < sps_ptr->num_short_term_ref_pic_sets; i++) {
         //short_term_ref_pic_set( i )
-        if (ParseShortTermRefPicSet(sps_ptr, &sps_ptr->st_rps[i], i, sps_ptr->num_short_term_ref_pic_sets, sps_ptr->st_rps, nalu, size, offset) != PARSER_OK) {
-            return;
+        if ((ret = ParseShortTermRefPicSet(sps_ptr, &sps_ptr->st_rps[i], i, sps_ptr->num_short_term_ref_pic_sets, sps_ptr->st_rps, nalu, size, offset)) != PARSER_OK) {
+            return ret;
         }
     }
     sps_ptr->long_term_ref_pics_present_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->long_term_ref_pics_present_flag) {
-        sps_ptr->num_long_term_ref_pics_sps = Parser::ExpGolomb::ReadUe(nalu, offset);  //max is 32
+        sps_ptr->num_long_term_ref_pics_sps = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("num_long_term_ref_pics_sps", sps_ptr->num_long_term_ref_pics_sps, 0, 32);
         sps_ptr->lt_rps.num_of_pics = sps_ptr->num_long_term_ref_pics_sps;
         for (int i=0; i<sps_ptr->num_long_term_ref_pics_sps; i++) {
             //The number of bits used to represent lt_ref_pic_poc_lsb_sps[ i ] is equal to log2_max_pic_order_cnt_lsb_minus4 + 4.
@@ -1396,7 +1473,9 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
     sps_ptr->vui_parameters_present_flag = Parser::GetBit(nalu, offset);
     if (sps_ptr->vui_parameters_present_flag) {
         //vui_parameters()
-        ParseVui(&sps_ptr->vui_parameters, sps_ptr->sps_max_sub_layers_minus1, nalu, size, offset);
+        if((ret = ParseVui(sps_ptr, nalu, size, offset)) != PARSER_OK) {
+            return ret;
+        }
     }
     sps_ptr->sps_extension_flag = Parser::GetBit(nalu, offset);
     sps_ptr->is_received = 1;
@@ -1404,33 +1483,42 @@ void HevcVideoParser::ParseSps(uint8_t *nalu, size_t size) {
 #if DBGINFO
     PrintSps(sps_ptr);
 #endif // DBGINFO
+    return PARSER_OK;
 }
 
-void HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
+ParserResult HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     int i;
     size_t offset = 0;
     uint32_t pps_id = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("pps_pic_parameter_set_id", pps_id, 0, 63);
     HevcPicParamSet *pps_ptr = &pps_list_[pps_id];
     memset(pps_ptr, 0, sizeof(HevcPicParamSet));
 
     pps_ptr->pps_pic_parameter_set_id = pps_id;
     pps_ptr->pps_seq_parameter_set_id = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("pps_seq_parameter_set_id", pps_ptr->pps_seq_parameter_set_id, 0, 15);
     pps_ptr->dependent_slice_segments_enabled_flag = Parser::GetBit(nalu, offset);
     pps_ptr->output_flag_present_flag = Parser::GetBit(nalu, offset);
     pps_ptr->num_extra_slice_header_bits = Parser::ReadBits(nalu, offset, 3);
     pps_ptr->sign_data_hiding_enabled_flag = Parser::GetBit(nalu, offset);
     pps_ptr->cabac_init_present_flag = Parser::GetBit(nalu, offset);
     pps_ptr->num_ref_idx_l0_default_active_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("num_ref_idx_l0_default_active_minus1", pps_ptr->num_ref_idx_l0_default_active_minus1, 0, 14);
     pps_ptr->num_ref_idx_l1_default_active_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("num_ref_idx_l1_default_active_minus1", pps_ptr->num_ref_idx_l1_default_active_minus1, 0, 14);
     pps_ptr->init_qp_minus26 = Parser::ExpGolomb::ReadSe(nalu, offset);
+    CHECK_ALLOWED_RANGE("init_qp_minus26", pps_ptr->init_qp_minus26, static_cast<int>(-(26 + 6 * sps_list_[pps_ptr->pps_seq_parameter_set_id].bit_depth_luma_minus8)), 25);
     pps_ptr->constrained_intra_pred_flag = Parser::GetBit(nalu, offset);
     pps_ptr->transform_skip_enabled_flag = Parser::GetBit(nalu, offset);
     pps_ptr->cu_qp_delta_enabled_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->cu_qp_delta_enabled_flag) {
         pps_ptr->diff_cu_qp_delta_depth = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("diff_cu_qp_delta_depth", pps_ptr->diff_cu_qp_delta_depth, 0, sps_list_[pps_ptr->pps_seq_parameter_set_id].log2_diff_max_min_luma_coding_block_size);
     }
     pps_ptr->pps_cb_qp_offset = Parser::ExpGolomb::ReadSe(nalu, offset);
+    CHECK_ALLOWED_RANGE("pps_cb_qp_offset", pps_ptr->pps_cb_qp_offset, -12, 12);
     pps_ptr->pps_cr_qp_offset = Parser::ExpGolomb::ReadSe(nalu, offset);
+    CHECK_ALLOWED_RANGE("pps_cr_qp_offset", pps_ptr->pps_cr_qp_offset, -12, 12);
     pps_ptr->pps_slice_chroma_qp_offsets_present_flag = Parser::GetBit(nalu, offset);
     pps_ptr->weighted_pred_flag = Parser::GetBit(nalu, offset);
     pps_ptr->weighted_bipred_flag = Parser::GetBit(nalu, offset);
@@ -1439,12 +1527,15 @@ void HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     pps_ptr->entropy_coding_sync_enabled_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->tiles_enabled_flag) {
         pps_ptr->num_tile_columns_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("num_tile_columns_minus1", pps_ptr->num_tile_columns_minus1, 0, pic_width_in_ctbs_y_ - 1);
         pps_ptr->num_tile_rows_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("num_tile_rows_minus1", pps_ptr->num_tile_rows_minus1, 0, pic_height_in_ctbs_y_ - 1);
         pps_ptr->uniform_spacing_flag = Parser::GetBit(nalu, offset);
         if (!pps_ptr->uniform_spacing_flag) {
             int temp_size = pic_width_in_ctbs_y_; // PicWidthInCtbsY
             for (i = 0; i < pps_ptr->num_tile_columns_minus1; i++) {
                 pps_ptr->column_width_minus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+                CHECK_ALLOWED_RANGE("column_width_minus1", pps_ptr->column_width_minus1[i], 0, pic_width_in_ctbs_y_ - 1);
                 temp_size -= pps_ptr->column_width_minus1[i] + 1;
             }
             pps_ptr->column_width_minus1[i] = temp_size - 1; // last column at num_tile_columns_minus1
@@ -1452,6 +1543,7 @@ void HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
             temp_size = pic_height_in_ctbs_y_; // PicHeightInCtbsY
             for (i = 0; i < pps_ptr->num_tile_rows_minus1; i++) {
                 pps_ptr->row_height_minus1[i] = Parser::ExpGolomb::ReadUe(nalu, offset);
+                CHECK_ALLOWED_RANGE("row_height_minus1", pps_ptr->row_height_minus1[i], 0, pic_height_in_ctbs_y_ - 1);
                 temp_size -= pps_ptr->row_height_minus1[i] + 1;
             }
             pps_ptr->row_height_minus1[i] = temp_size - 1;  // last row at num_tile_rows_minus1
@@ -1477,20 +1569,25 @@ void HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
         pps_ptr->pps_deblocking_filter_disabled_flag = Parser::GetBit(nalu, offset);
         if (!pps_ptr->pps_deblocking_filter_disabled_flag) {
             pps_ptr->pps_beta_offset_div2 = Parser::ExpGolomb::ReadSe(nalu, offset);
+            CHECK_ALLOWED_RANGE("pps_beta_offset_div2", pps_ptr->pps_beta_offset_div2, -6, 6);
             pps_ptr->pps_tc_offset_div2 = Parser::ExpGolomb::ReadSe(nalu, offset);
+            CHECK_ALLOWED_RANGE("pps_tc_offset_div2", pps_ptr->pps_tc_offset_div2, -6, 6);
         }
     }
     pps_ptr->pps_scaling_list_data_present_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->pps_scaling_list_data_present_flag) {
         // Set up default values first
         SetDefaultScalingList(&pps_ptr->scaling_list_data);
-
-        ParseScalingList(&pps_ptr->scaling_list_data, nalu, size, offset, &sps_list_[pps_ptr->pps_seq_parameter_set_id]);
+        ParserResult ret;
+        if ((ret = ParseScalingList(&pps_ptr->scaling_list_data, nalu, size, offset, &sps_list_[pps_ptr->pps_seq_parameter_set_id])) != PARSER_OK) {
+            return ret;
+        }
     } else {
         pps_ptr->scaling_list_data = sps_list_[pps_ptr->pps_seq_parameter_set_id].scaling_list_data;
     }
     pps_ptr->lists_modification_present_flag = Parser::GetBit(nalu, offset);
     pps_ptr->log2_parallel_merge_level_minus2 = Parser::ExpGolomb::ReadUe(nalu, offset);
+    CHECK_ALLOWED_RANGE("log2_parallel_merge_level_minus2", pps_ptr->log2_parallel_merge_level_minus2, 0, ctb_log2_size_y_ - 2);
     pps_ptr->slice_segment_header_extension_present_flag = Parser::GetBit(nalu, offset);
     pps_ptr->pps_extension_present_flag = Parser::GetBit(nalu, offset);
     if (pps_ptr->pps_extension_present_flag) {
@@ -1503,26 +1600,34 @@ void HevcVideoParser::ParsePps(uint8_t *nalu, size_t size) {
     if (pps_ptr->pps_range_extension_flag) {
         if (pps_ptr->transform_skip_enabled_flag) {
             pps_ptr->log2_max_transform_skip_block_size_minus2 = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_MAX("log2_max_transform_skip_block_size_minus2", pps_ptr->log2_max_transform_skip_block_size_minus2, max_tb_log2_size_y_ - 2);
         }
         pps_ptr->cross_component_prediction_enabled_flag = Parser::GetBit(nalu, offset);
         pps_ptr->chroma_qp_offset_list_enabled_flag = Parser::GetBit(nalu, offset);
         if (pps_ptr->chroma_qp_offset_list_enabled_flag) {
             pps_ptr->diff_cu_chroma_qp_offset_depth = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("diff_cu_chroma_qp_offset_depth", pps_ptr->diff_cu_chroma_qp_offset_depth, 0, sps_list_[pps_ptr->pps_seq_parameter_set_id].log2_diff_max_min_luma_coding_block_size);
             pps_ptr->chroma_qp_offset_list_len_minus1 = Parser::ExpGolomb::ReadUe(nalu, offset);
+            CHECK_ALLOWED_RANGE("chroma_qp_offset_list_len_minus1", pps_ptr->chroma_qp_offset_list_len_minus1, 0, 5);
             for (int i = 0; i <= pps_ptr->chroma_qp_offset_list_len_minus1; i++) {
                 pps_ptr->cb_qp_offset_list[i] = Parser::ExpGolomb::ReadSe(nalu, offset);
+                CHECK_ALLOWED_RANGE("cb_qp_offset_list", pps_ptr->cb_qp_offset_list[i], -12, 12);
                 pps_ptr->cr_qp_offset_list[i] = Parser::ExpGolomb::ReadSe(nalu, offset);
+                CHECK_ALLOWED_RANGE("cr_qp_offset_list", pps_ptr->cr_qp_offset_list[i], -12, 12);
             }
         }
         pps_ptr->log2_sao_offset_scale_luma = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("log2_sao_offset_scale_luma", pps_ptr->log2_sao_offset_scale_luma, 0, std::max(0, static_cast<int>(sps_list_[pps_ptr->pps_seq_parameter_set_id].bit_depth_luma_minus8 - 2)));
+        CHECK_ALLOWED_RANGE("log2_sao_offset_scale_luma", pps_ptr->log2_sao_offset_scale_luma, 0, std::max(0, static_cast<int>(sps_list_[pps_ptr->pps_seq_parameter_set_id].bit_depth_luma_minus8 - 2)));
         pps_ptr->log2_sao_offset_scale_chroma = Parser::ExpGolomb::ReadUe(nalu, offset);
+        CHECK_ALLOWED_RANGE("log2_sao_offset_scale_chroma", pps_ptr->log2_sao_offset_scale_chroma, 0, std::max(0, static_cast<int>(sps_list_[pps_ptr->pps_seq_parameter_set_id].bit_depth_chroma_minus8 - 2)));
     }
 
     pps_ptr->is_received = 1;
-
 #if DBGINFO
     PrintPps(pps_ptr);
 #endif // DBGINFO
+    return PARSER_OK;
 }
 
 ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcSliceSegHeader *p_slice_header) {
@@ -1541,29 +1646,32 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     // Set active VPS, SPS and PPS for the current slice
     int32_t active_pps_id = Parser::ExpGolomb::ReadUe(nalu, offset);
     CHECK_ALLOWED_MAX("active_pps_id", active_pps_id, (MAX_PPS_COUNT - 1));
-    m_active_pps_id_ = active_pps_id;
-    temp_sh.slice_pic_parameter_set_id = p_slice_header->slice_pic_parameter_set_id = m_active_pps_id_;
-    pps_ptr = &pps_list_[m_active_pps_id_];
-    if ( pps_ptr->is_received == 0) {
+    if (pps_list_[active_pps_id].is_received == 0) {
         ERR("Empty PPS is referred.");
         return PARSER_WRONG_STATE;
     }
-    if (m_active_sps_id_ != pps_ptr->pps_seq_parameter_set_id) {
-        m_active_sps_id_ = pps_ptr->pps_seq_parameter_set_id;
-        sps_ptr = &sps_list_[m_active_sps_id_];
-        new_seq_activated_ = true;
-    }
+    active_pps_id_ = active_pps_id;
+    pps_ptr = &pps_list_[active_pps_id_];
+    temp_sh.slice_pic_parameter_set_id = p_slice_header->slice_pic_parameter_set_id = active_pps_id_;
 
-    sps_ptr = &sps_list_[m_active_sps_id_];
-    if (sps_ptr->is_received == 0) {
+    int32_t active_sps_id = pps_ptr->pps_seq_parameter_set_id;
+    if (sps_list_[active_sps_id].is_received == 0) {
         ERR("Empty SPS is referred.");
         return PARSER_WRONG_STATE;
     }
-    m_active_vps_id_ = sps_ptr->sps_video_parameter_set_id;
-    if (vps_list_[m_active_vps_id_].is_received == 0) {
+    if (active_sps_id_ != active_sps_id) {
+        active_sps_id_ = active_sps_id;
+        sps_ptr = &sps_list_[active_sps_id_];
+        new_seq_activated_ = true;
+    }
+    sps_ptr = &sps_list_[active_sps_id_];
+
+    int active_vps_id = sps_ptr->sps_video_parameter_set_id;
+    if (vps_list_[active_vps_id].is_received == 0) {
         ERR("Empty VPS is referred.");
         return PARSER_WRONG_STATE;
     }
+    active_vps_id_ = active_vps_id;
 
     // Check video dimension change
     if (pic_width_ != sps_ptr->pic_width_in_luma_samples || pic_height_ != sps_ptr->pic_height_in_luma_samples) {
@@ -1589,9 +1697,9 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
 
     // Set frame rate if available
     if (new_seq_activated_) {
-        if (vps_list_[m_active_vps_id_].vps_timing_info_present_flag) {
-            frame_rate_.numerator = vps_list_[m_active_vps_id_].vps_time_scale;
-            frame_rate_.denominator = vps_list_[m_active_vps_id_].vps_num_units_in_tick;
+        if (vps_list_[active_vps_id_].vps_timing_info_present_flag) {
+            frame_rate_.numerator = vps_list_[active_vps_id_].vps_time_scale;
+            frame_rate_.denominator = vps_list_[active_vps_id_].vps_num_units_in_tick;
         } else if (sps_ptr->vui_parameters.vui_timing_info_present_flag) {
             frame_rate_.numerator = sps_ptr->vui_parameters.vui_time_scale;
             frame_rate_.denominator = sps_ptr->vui_parameters.vui_num_units_in_tick;
@@ -1657,12 +1765,10 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
             if (sps_ptr->long_term_ref_pics_present_flag) {
                 if (sps_ptr->num_long_term_ref_pics_sps > 0) {
                     p_slice_header->num_long_term_sps = Parser::ExpGolomb::ReadUe(nalu, offset);
+                    CHECK_ALLOWED_RANGE("num_long_term_sps", p_slice_header->num_long_term_sps, 0, sps_ptr->num_long_term_ref_pics_sps);
                 }
                 p_slice_header->num_long_term_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
-                if (p_slice_header->num_long_term_pics > 16) {
-                    ERR("Parsed Value exceeds allowed max");
-                    return PARSER_OUT_OF_RANGE;
-                }
+                CHECK_ALLOWED_MAX("num_long_term_pics", p_slice_header->num_long_term_pics, HEVC_MAX_DPB_FRAMES - 1);
 
                 int bits_for_ltrp_in_sps = 0;
                 while (sps_ptr->num_long_term_ref_pics_sps > (1 << bits_for_ltrp_in_sps)) {
@@ -1801,10 +1907,12 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
             }
 
             if ((pps_ptr->weighted_pred_flag && p_slice_header->slice_type == HEVC_SLICE_TYPE_P) || (pps_ptr->weighted_bipred_flag && p_slice_header->slice_type == HEVC_SLICE_TYPE_B)) {
-                ParsePredWeightTable(p_slice_header, chroma_array_type, nalu, offset);
+                ParserResult ret;
+                if ((ret = ParsePredWeightTable(p_slice_header, chroma_array_type, nalu, offset)) != PARSER_OK) {
+                    return ret;
+                }
             }
             p_slice_header->five_minus_max_num_merge_cand = Parser::ExpGolomb::ReadUe(nalu, offset);
-            //CHECK_ALLOWED_MAX("five_minus_max_num_merge_cand", p_slice_header->five_minus_max_num_merge_cand, 4);
         }
 
         p_slice_header->slice_qp_delta = Parser::ExpGolomb::ReadSe(nalu, offset);
@@ -1928,7 +2036,7 @@ void HevcVideoParser::CalculateCurrPoc() {
         curr_pic_info_.prev_poc_msb = 0;
         curr_pic_info_.slice_pic_order_cnt_lsb = 0;
     } else {
-        int max_poc_lsb = 1 << (sps_list_[m_active_sps_id_].log2_max_pic_order_cnt_lsb_minus4 + 4);  // MaxPicOrderCntLsb
+        int max_poc_lsb = 1 << (sps_list_[active_sps_id_].log2_max_pic_order_cnt_lsb_minus4 + 4);  // MaxPicOrderCntLsb
         int poc_msb;  // PicOrderCntMsb
         // If the current picture is an IRAP picture with NoRaslOutputFlag equal to 1, PicOrderCntMsb is set equal to 0.
         if (IsIrapPic(&slice_nal_unit_header_) && no_rasl_output_flag_ == 1) {
@@ -1956,7 +2064,7 @@ void HevcVideoParser::DecodeRps() {
     int i, j, k;
     int curr_delta_poc_msb_present_flag[HEVC_MAX_NUM_REF_PICS] = {0}; // CurrDeltaPocMsbPresentFlag
     int foll_delta_poc_msb_present_flag[HEVC_MAX_NUM_REF_PICS] = {0}; // FollDeltaPocMsbPresentFlag
-    int max_poc_lsb = 1 << (sps_list_[m_active_sps_id_].log2_max_pic_order_cnt_lsb_minus4 + 4);  // MaxPicOrderCntLsb
+    int max_poc_lsb = 1 << (sps_list_[active_sps_id_].log2_max_pic_order_cnt_lsb_minus4 + 4);  // MaxPicOrderCntLsb
     HevcSliceSegHeader *p_slice_header = &slice_info_list_[0].slice_header;
 
     // When the current picture is an IRAP picture with NoRaslOutputFlag equal to 1, all reference pictures with
@@ -2235,7 +2343,7 @@ int HevcVideoParser::MarkOutputPictures() {
             }
         }
 
-        HevcSeqParamSet *sps_ptr = &sps_list_[m_active_sps_id_];
+        HevcSeqParamSet *sps_ptr = &sps_list_[active_sps_id_];
         uint32_t highest_tid = sps_ptr->sps_max_sub_layers_minus1; // HighestTid
         uint32_t max_num_reorder_pics = sps_ptr->sps_max_num_reorder_pics[highest_tid];
         uint32_t max_dec_pic_buffering = sps_ptr->sps_max_dec_pic_buffering_minus1[highest_tid] + 1;
@@ -2320,7 +2428,7 @@ ParserResult HevcVideoParser::FindFreeInDpbAndMark() {
     decode_buffer_pool_[curr_pic_info_.dec_buf_idx].pic_order_cnt = curr_pic_info_.pic_order_cnt;
     decode_buffer_pool_[curr_pic_info_.dec_buf_idx].pts = curr_pts_;
 
-    HevcSeqParamSet *sps_ptr = &sps_list_[m_active_sps_id_];
+    HevcSeqParamSet *sps_ptr = &sps_list_[active_sps_id_];
     uint32_t highest_tid = sps_ptr->sps_max_sub_layers_minus1; // HighestTid
     uint32_t max_num_reorder_pics = sps_ptr->sps_max_num_reorder_pics[highest_tid];
 
@@ -2487,8 +2595,8 @@ void HevcVideoParser::PrintSps(HevcSeqParamSet *sps_ptr) {
     MSG("");
     MSG("log2_min_luma_coding_block_size_minus3    = " <<  sps_ptr->log2_min_luma_coding_block_size_minus3);
     MSG("log2_diff_max_min_luma_coding_block_size  = " <<  sps_ptr->log2_diff_max_min_luma_coding_block_size);
-    MSG("log2_min_transform_block_size_minus2      = " <<  sps_ptr->log2_min_transform_block_size_minus2);
-    MSG("log2_diff_max_min_transform_block_size    = " <<  sps_ptr->log2_diff_max_min_transform_block_size);
+    MSG("log2_min_luma_transform_block_size_minus2      = " <<  sps_ptr->log2_min_luma_transform_block_size_minus2);
+    MSG("log2_diff_max_min_luma_transform_block_size    = " <<  sps_ptr->log2_diff_max_min_luma_transform_block_size);
     MSG("max_transform_hierarchy_depth_inter       = " <<  sps_ptr->max_transform_hierarchy_depth_inter);
     MSG("max_transform_hierarchy_depth_intra       = " <<  sps_ptr->max_transform_hierarchy_depth_intra);
     MSG("scaling_list_enabled_flag                 = " <<  sps_ptr->scaling_list_enabled_flag);
