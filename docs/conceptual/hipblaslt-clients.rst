@@ -132,3 +132,39 @@ For more information, run the command with the ``--help`` option. The output of 
    --flush                            Flush icache, only works for gemm.
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
+
+
+Building clients with prebuilt libraries
+========================================
+
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by adding the ``-n``/``--client-only`` option to the install script. For example, ``./install.sh -c -a gfx942 -n`` will build the clients and host code, but will not build Tensile libraries.
+
+.. note::
+
+   For backwards compatibility, ``--no-tensile`` may be used as an alias for ``-n``/``--client-only``.
+
+Internally, this passes the ``-DTensile_SKIP_BUILD=ON`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through the install script, the same effect can be achieved with the following steps:
+
+.. code-block:: bash
+
+   mkdir build && cd build
+   cmake [other options]
+       -DBUILD_CLIENTS_SAMPLES=ON
+       -DBUILD_CLIENTS_TESTS=ON
+       -DBUILD_CLIENTS_BENCHMARKS=ON
+       -DTensile_SKIP_BUILD=ON ..
+   make
+
+To run the clients with existing Tensile libraries, you must set the environment variable ``HIPBLASLT_TENSILE_LIBPATH`` to the path of the Tensile libraries. For example, if the Tensile libraries are in ``/mnt/build/release/Tensile/library/``, you would run the clients as follows:
+
+.. code-block:: bash
+
+   HIPBLASLT_TENSILE_LIBPATH=/mnt/build/release/Tensile/library/ ./hipblaslt-test
+
+If ``HIPBLASLT_TENSILE_LIBPATH`` is not set, the clients will attempt to find the libraries in ``/opt/rocm/lib``. If libraries cannot be found in that location, the following diagnostics will be printed:
+
+.. code-block:: bash
+
+   rocblaslt info: HIPBLASLT_TENSILE_LIBPATH not set. Using /opt/rocm/lib
+
+   rocblaslt error: Cannot read /mnt/build/release/library/../Tensile/library/TensileLibrary_lazy_gfx90a.dat: No such file or directory

@@ -22,7 +22,6 @@
 # ########################################################################
 
 # Set up Tensile Dependency
-if( BUILD_WITH_TENSILE )
   # If we want to build a shared rocblaslt lib, force Tensile to build as a static lib to absorb into rocblaslt
   if( BUILD_SHARED_LIBS )
     set( ROCBLASLT_SHARED_LIBS ON )
@@ -101,7 +100,9 @@ if( BUILD_WITH_TENSILE )
   set_target_properties( TensileHost PROPERTIES C_VISIBILITY_PRESET hidden)
 
   # Tensile host depends on libs build target
-  add_dependencies( TensileHost TENSILE_LIBRARY_TARGET )
+  if(NOT Tensile_SKIP_BUILD)
+    add_dependencies( TensileHost TENSILE_LIBRARY_TARGET )
+  endif()
 
   if( ROCBLASLT_SHARED_LIBS )
     set( BUILD_SHARED_LIBS ON )
@@ -134,8 +135,6 @@ endif()
   set( Tensile_INC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile
   )
-
-endif( ) # BUILD_WITH_TENSILE
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/CompileSourceKernel.cmake)
 

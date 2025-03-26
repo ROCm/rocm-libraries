@@ -109,13 +109,13 @@ function(TensileCreateLibraryCmake
     ${Tensile_RUNTIME_LANGUAGE}
     )
 
-  #string( REPLACE ";" " " Tensile_CREATE_COMMAND "${Tensile_CREATE_COMMAND}")
-  message(STATUS "Tensile_CREATE_COMMAND: ${Tensile_CREATE_COMMAND}")
-
   # execute python command
-  if($ENV{TENSILE_SKIP_LIBRARY})
-    message(STATUS "Skipping build of ${Tensile_OUTPUT_PATH}")
+  if(Tensile_SKIP_BUILD)
+    message(STATUS "Skipping TensileCreateLibrary")
   else()
+    #string( REPLACE ";" " " Tensile_CREATE_COMMAND "${Tensile_CREATE_COMMAND}")
+    message(STATUS "Tensile_CREATE_COMMAND: ${Tensile_CREATE_COMMAND}")
+
     if (WIN32)
       set(CommandLine ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${Tensile_CREATE_COMMAND})
     else()

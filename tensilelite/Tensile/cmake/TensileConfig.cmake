@@ -216,10 +216,9 @@ function(TensileCreateLibraryFiles
       set(Tensile_EMBED_LIBRARY_SOURCE "${Tensile_OUTPUT_PATH}/library/${Tensile_EMBED_LIBRARY}.cpp")
   endif()
 
-  if($ENV{TENSILE_SKIP_LIBRARY})
+  if(Tensile_SKIP_BUILD)
       message(STATUS "Skipping build of ${Tensile_OUTPUT_PATH}")
   else()
-
       if(NOT Tensile_VAR_PREFIX)
           set(Tensile_VAR_PREFIX TENSILE)
       endif()
