@@ -54,7 +54,13 @@ set(HEADER_FILES
   internal/level2/hipsparse_csrmv.h
   internal/level2/hipsparse_csrsv.h
   internal/level2/hipsparse_gemvi.h
-  internal/level2/hipsparse_hybmv.h)
+  internal/level2/hipsparse_hybmv.h
+  #Level3
+  internal/level3/hipsparse_bsrmm.h
+  internal/level3/hipsparse_bsrsm.h
+  internal/level3/hipsparse_csrmm.h
+  internal/level3/hipsparse_csrsm.h
+  internal/level3/hipsparse_gemmi.h)
 
 foreach( file_i ${HEADER_FILES})
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
