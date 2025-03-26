@@ -2255,6 +2255,9 @@ class Solution(collections.abc.Mapping):
         reject(state, "dot2 kernel requires LocalSplitU = 1")
       if state["ProblemType"]["Sparse"]:
         reject(state, "dot2 kernel does not support sparse gemm")
+      # TODO: Need to fix WS address calculation of MT<16x16 cases
+      if state["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+        reject(state, "dot2 kernel does not support MBSK")
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["NumLoadsCoalescedMetadata"] = 1

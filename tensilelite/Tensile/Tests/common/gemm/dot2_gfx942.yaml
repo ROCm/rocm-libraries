@@ -61,7 +61,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - ScheduleIterAlg: [1]
         - ScheduleLocalWrite: [1]
       BenchmarkJoinParameters:
@@ -126,7 +126,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1,2]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
-        - GlobalSplitUAlgorithm: ["MultipleBufferSingleKernel"]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - ScheduleIterAlg: [1]
         - ScheduleLocalWrite: [1]
       BenchmarkJoinParameters:
