@@ -291,7 +291,6 @@ TEST_F(InstructionTest, Classifications)
 
 TEST_F(InstructionTest, Special)
 {
-    // This pattern is used in the GuidePosts
     auto inst = Instruction("s_waitcnt", {}, {}, {"lgkmcnt(1)"}, "");
     m_context->schedule(inst);
 

@@ -24,14 +24,9 @@
 #
 ################################################################################
 
-
-option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." ON)
-option(ROCROLLER_TESTS_SKIP_SLOW
-       "Skip slow tests (currently only Python tests)" ON
-)
+option(ROCROLLER_TESTS_SKIP_SLOW "Skip slow tests (currently only Python tests)" ON)
 
 if(CODE_COVERAGE)
-    set(ROCROLLER_TESTS_SKIP_GUIDEPOSTS ON)
     set(ROCROLLER_TESTS_SKIP_SLOW OFF)
 endif()
 
@@ -133,18 +128,6 @@ set(
     unit/StreamTest.cpp
     unit/EnumToStringTest.cpp
 )
-
-if(NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
-    list(
-        APPEND
-        rocRollerTests_SOURCES
-        unit/GemmGuidePost/GemmGuidePost.cpp
-        unit/GemmGuidePost/GemmGuidePost_Minimal.cpp
-        unit/GemmGuidePost/GemmGuidePost_Optimized.cpp
-        unit/GemmGuidePost/HGemmGuidePost_Minimal.cpp
-        unit/GemmGuidePost/HGemmGuidePost_Optimized.cpp
-    )
-endif()
 
 add_executable(rocRollerTests ${rocRollerTests_SOURCES})
 
