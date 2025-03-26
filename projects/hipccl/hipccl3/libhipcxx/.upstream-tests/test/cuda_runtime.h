@@ -295,3 +295,22 @@ __device__ inline int __FFS<uint64_t>(uint64_t v) {
 #ifndef cudaStreamQuery
 #  define cudaStreamQuery hipStreamQuery
 #endif
+
+#ifndef cudaHostAllocDefault
+#  define cudaHostAllocDefault hipHostAllocDefault
+#endif
+#ifndef cudaHostAllocPortable
+#  define cudaHostAllocPortable hipHostAllocPortable
+#endif
+#ifndef cudaHostAllocMapped
+#  define cudaHostAllocMapped hipHostAllocMapped
+#endif
+#ifndef cudaHostAllocWriteCombined
+#  define cudaHostAllocWriteCombined hipHostAllocWriteCombined
+#endif
+#ifndef cudaMemAttachGlobal
+#  define cudaMemAttachGlobal hipMemAttachGlobal
+#endif
+#ifndef cudaMemAttachHost
+#  define cudaMemAttachHost hipMemAttachHost
+#endif

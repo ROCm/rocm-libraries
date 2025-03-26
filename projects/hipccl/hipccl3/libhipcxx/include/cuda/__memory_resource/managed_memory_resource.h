@@ -60,12 +60,12 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 class managed_memory_resource
 {
 private:
-  unsigned int __flags_ = cudaMemAttachGlobal;
+  unsigned int __flags_ = hipMemAttachGlobal;
 
-  static constexpr unsigned int __available_flags = cudaMemAttachGlobal | cudaMemAttachHost;
+  static constexpr unsigned int __available_flags = hipMemAttachGlobal | hipMemAttachHost;
 
 public:
-  constexpr managed_memory_resource(const unsigned int __flags = cudaMemAttachGlobal) noexcept
+  constexpr managed_memory_resource(const unsigned int __flags = hipMemAttachGlobal) noexcept
       : __flags_(__flags & __available_flags)
   {
     _LIBCUDACXX_ASSERT(__flags_ == __flags, "Unexpected flags passed to managed_memory_resource");

@@ -61,13 +61,13 @@ _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR
 class pinned_memory_resource
 {
 private:
-  unsigned int __flags_ = cudaHostAllocDefault;
+  unsigned int __flags_ = hipHostAllocDefault;
 
   static constexpr unsigned int __available_flags =
     hipHostAllocDefault | hipHostAllocPortable | hipHostAllocMapped | hipHostAllocWriteCombined;
 
 public:
-  constexpr pinned_memory_resource(const unsigned int __flags = cudaHostAllocDefault) noexcept
+  constexpr pinned_memory_resource(const unsigned int __flags = hipHostAllocDefault) noexcept
       : __flags_(__flags & __available_flags)
   {
     _LIBCUDACXX_ASSERT(__flags_ == __flags, "Unexpected flags passed to pinned_memory_resource");
