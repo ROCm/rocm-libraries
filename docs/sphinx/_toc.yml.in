@@ -19,6 +19,7 @@ subtrees:
     - entries:
       - file: reference/intro.rst
       - file: reference/types.rst
+      - file: reference/precision.rst
       - file: reference/auxiliary.rst
       - file: reference/lapack.rst
       - file: reference/lapacklike.rst

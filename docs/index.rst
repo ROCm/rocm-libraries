@@ -35,6 +35,7 @@ The rocSOLVER documentation is structured as follows:
 
     * :ref:`intro`
     * :ref:`rocsolver-types`
+    * :ref:`rocsolver-precision-support`
     * :ref:`rocsolver_auxiliary_functions`
     * :ref:`lapackfunc`
     * :ref:`lapack-like`
