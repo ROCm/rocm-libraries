@@ -41,10 +41,10 @@ List of supported input and output types:
   :name: supported-input-output-types
 
   *
-    - Input/Output Types
-    - Library Data Type
-    - AMD Supports
-    - CUDA Supports
+    - Input/output types
+    - Library data type
+    - AMD supports
+    - CUDA supports
   *
     - int8
     - HIP_R_8I
@@ -62,7 +62,7 @@ List of supported input and output types:
     - ✅
   *
     - int16
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
@@ -82,7 +82,7 @@ List of supported input and output types:
     - ✅
   *
     - tensorfloat32
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
@@ -92,7 +92,7 @@ List of supported input and output types:
     - ✅
   *
     - float64
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
 
@@ -106,28 +106,28 @@ List of supported accumulator types:
   :name: supported-accumulator-types
 
   *
-    - Accumulator Types
-    - Library Data Type
-    - AMD Supports
-    - CUDA Supports
+    - Accumulator types
+    - Library data type
+    - AMD supports
+    - CUDA supports
   *
     - int8
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
     - float8
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
     - bfloat8
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
     - int16
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
@@ -137,7 +137,7 @@ List of supported accumulator types:
     - ✅
   *
     - bfloat16
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
@@ -147,7 +147,7 @@ List of supported accumulator types:
     - ✅
   *
     - tensorfloat32
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
   *
@@ -157,17 +157,17 @@ List of supported accumulator types:
     - ✅
   *
     - float64
-    - Not Supported
+    - Not supported
     - ❌
     - ❌
 
 Supported compute types
 ================================
 
-List of supported compute types at specific input and output types:
+List of supported compute types for specific input and output types:
 
 .. csv-table::
-    :header: "Input A/B", "Input C", "Output D", "Compute type", "Backend", "Support LLVM target for HIP Backend"
+    :header: "Input A/B", "Input C", "Output D", "Compute type", "Backend", "Support LLVM target for HIP backend"
 
     "HIP_R_32F", "HIP_R_32F", "HIP_R_32F", "HIPSPARSELT_COMPUTE_32F", "CUDA", ""
     "HIP_R_16F", "HIP_R_16F", "HIP_R_16F", "HIPSPARSELT_COMPUTE_32F", "HIP / CUDA", "gfx942, gfx950"
