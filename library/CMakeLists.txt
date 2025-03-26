@@ -47,7 +47,7 @@ set(HEADER_FILES
   internal/level1/hipsparse_gthrz.h
   internal/level1/hipsparse_roti.h
   internal/level1/hipsparse_sctr.h
-  #Level2
+  # Level2
   internal/level2/hipsparse_bsrmv.h
   internal/level2/hipsparse_bsrsv.h
   internal/level2/hipsparse_bsrxmv.h
@@ -55,12 +55,15 @@ set(HEADER_FILES
   internal/level2/hipsparse_csrsv.h
   internal/level2/hipsparse_gemvi.h
   internal/level2/hipsparse_hybmv.h
-  #Level3
+  # Level3
   internal/level3/hipsparse_bsrmm.h
   internal/level3/hipsparse_bsrsm.h
   internal/level3/hipsparse_csrmm.h
   internal/level3/hipsparse_csrsm.h
-  internal/level3/hipsparse_gemmi.h)
+  internal/level3/hipsparse_gemmi.h
+  # Extra
+  internal/extra/hipsparse_csrgeam.h
+  internal/extra/hipsparse_csrgemm.h)
 
 foreach( file_i ${HEADER_FILES})
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
@@ -71,6 +74,15 @@ endforeach()
 set(hipsparse_headers_public
   include/hipsparse.h
   ${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-version.h)
+
+set(HEADER_FILES 
+    internal/extra/hipsparse_csrgeam.h
+    internal/extra/hipsparse_csrgemm.h)
+
+foreach( file_i ${HEADER_FILES})
+  configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
+    "${PROJECT_BINARY_DIR}/include/hipsparse/${file_i}" COPYONLY)
+endforeach()
 
 source_group("Header Files\\Public" FILES ${hipsparse_headers_public})
 
