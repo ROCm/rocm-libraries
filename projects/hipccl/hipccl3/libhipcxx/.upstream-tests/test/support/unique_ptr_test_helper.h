@@ -6,6 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef TEST_SUPPORT_UNIQUE_PTR_TEST_HELPER_H
 #define TEST_SUPPORT_UNIQUE_PTR_TEST_HELPER_H
 
@@ -143,8 +160,9 @@ __host__ __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_a
   checkNumIncompleteTypeAlive(0);
 }
 
+// TODO(HIP/AMD): add __CCL_DEVICE to is_incomplete_test_anchor asap
 #define INCOMPLETE_TEST_EPILOGUE()                                            \
-  _LIBCUDACXX_DEVICE int is_incomplete_test_anchor = is_incomplete_test();    \
+  int is_incomplete_test_anchor = is_incomplete_test();                       \
                                                                               \
   STATIC_TEST_GLOBAL_VAR int IncompleteType_count = 0;                        \
   struct IncompleteType                                                       \
@@ -185,8 +203,9 @@ __host__ __device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_a
 #  pragma GCC diagnostic ignored "-Wvariadic-macros"
 #endif
 
+// TODO(HIP/AMD): add constexpr to is_incomplete_test if required (and possible) 
 #define DEFINE_AND_RUN_IS_INCOMPLETE_TEST(...)                  \
-  __host__ __device__ static constexpr int is_incomplete_test() \
+  __host__ __device__ static int is_incomplete_test()           \
   {                                                             \
     __VA_ARGS__ return 0;                                       \
   }                                                             \
