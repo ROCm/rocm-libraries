@@ -314,3 +314,13 @@ __device__ inline int __FFS<uint64_t>(uint64_t v) {
 #ifndef cudaMemAttachHost
 #  define cudaMemAttachHost hipMemAttachHost
 #endif
+
+#ifndef HIPRT_CB
+#  define HIPRT_CB
+#endif
+#ifndef CUDART_CB
+#  define CUDART_CB HIPRT_CB
+#endif
+#ifndef cudaStreamAddCallback
+#  define cudaStreamAddCallback hipStreamAddCallback
+#endif
