@@ -188,14 +188,11 @@ rocsparse_status rocsparse::csr2csc_template(rocsparse_handle     handle,
     // Quick return if possible
     if(m == 0 || n == 0 || nnz == 0)
     {
-        return rocsparse_status_success;
-    }
-
-    if(nnz == 0)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            rocsparse::valset(handle, n + 1, static_cast<I>(idx_base), csc_col_ptr));
-
+        if(nnz == 0 && csc_col_ptr != nullptr)
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::valset(handle, n + 1, static_cast<I>(idx_base), csc_col_ptr));
+        }
         return rocsparse_status_success;
     }
 

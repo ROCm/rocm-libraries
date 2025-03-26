@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -109,7 +109,7 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *
 *      // Create descriptor
 *      rocsparse_sparse_to_sparse_descr descr;
-*      rocsparse_sparse_to_sparse_create_descr(&descr, source, target,  rocsparse_sparse_to_sparse_alg_default);
+*      rocsparse_create_sparse_to_sparse_descr(&descr, source, target,  rocsparse_sparse_to_sparse_alg_default);
 *
 *      // Analysis phase
 *      rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, rocsparse_sparse_to_sparse_stage_analysis, &buffer_size);

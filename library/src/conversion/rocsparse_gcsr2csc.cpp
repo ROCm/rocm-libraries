@@ -279,28 +279,29 @@ rocsparse_status rocsparse::spmat_csr2csc(rocsparse_handle            handle,
                                   source_->data_type != target_->data_type);
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gcsr2csc(
-        handle,
-        source_->rows,
-        source_->cols,
-        source_->nnz,
-        //
-        source_->data_type,
-        source_->row_type,
-        source_->col_type,
-        //
-        source_->const_val_data,
-        source_->const_row_data,
-        source_->const_col_data,
-        //
-        target_->val_data,
-        target_->row_data,
-        target_->col_data,
-        //
-        (target_->val_data != nullptr && source_->val_data != nullptr) ? rocsparse_action_numeric
-                                                                       : rocsparse_action_symbolic,
-        source_->idx_base,
-        buffer_));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::gcsr2csc(handle,
+                            source_->rows,
+                            source_->cols,
+                            source_->nnz,
+                            //
+                            source_->data_type,
+                            source_->row_type,
+                            source_->col_type,
+                            //
+                            source_->const_val_data,
+                            source_->const_row_data,
+                            source_->const_col_data,
+                            //
+                            target_->val_data,
+                            target_->row_data,
+                            target_->col_data,
+                            //
+                            (target_->val_data != nullptr && source_->const_val_data != nullptr)
+                                ? rocsparse_action_numeric
+                                : rocsparse_action_symbolic,
+                            source_->idx_base,
+                            buffer_));
 
     return rocsparse_status_success;
 }
