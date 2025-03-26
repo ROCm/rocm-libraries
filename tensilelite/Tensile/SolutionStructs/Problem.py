@@ -1029,7 +1029,7 @@ class ProblemType(Mapping):
       if self["Gradient"]:
         name += "_Grad%s"%self["DataTypeE"].toChar()
       else:
-        name += "_Aux%s"%self["DataTypeE"].toChar() # Not showing aux types
+        name += "_Aux%s"%self["DataTypeE"].toChar()
     if self["OutputAmaxD"]:
       name += "_AmaxD"
     if self["Sparse"]:

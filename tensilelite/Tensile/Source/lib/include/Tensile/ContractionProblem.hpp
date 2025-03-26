@@ -692,6 +692,7 @@ namespace TensileLite
                   std::vector<size_t> const& strides,
                   bool                       isOutput = false)
         {
+            m_auxType = type;
             if(type != DataType::None && m_useE)
             {
                 // Currently only supports offset = 0
@@ -980,19 +981,23 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        bool swizzleTensorA() const {
+        bool swizzleTensorA() const
+        {
             return m_swizzleTensorA;
         }
 
-        bool swizzleTensorB() const {
+        bool swizzleTensorB() const
+        {
             return m_swizzleTensorB;
         }
 
-        void setSwizzleTensorA(bool swizzle) {
+        void setSwizzleTensorA(bool swizzle)
+        {
             m_swizzleTensorA = swizzle;
         }
 
-        void setSwizzleTensorB(bool swizzle) {
+        void setSwizzleTensorB(bool swizzle)
+        {
             m_swizzleTensorB = swizzle;
         }
 
@@ -1030,6 +1035,10 @@ namespace TensileLite
         TensorDescriptor const& d() const
         {
             return m_tensors[ContractionProblemGemm::TENSOR::D];
+        }
+        TensorDescriptor const& e() const
+        {
+            return m_tensors[ContractionProblemGemm::TENSOR::E];
         }
         TensorDescriptor const& compressed() const
         {
@@ -1204,6 +1213,7 @@ namespace TensileLite
         bool           m_eligibleForPK           = true;
         bool           m_useGradient             = false;
         bool           m_useE                    = false;
+        DataType       m_auxType                 = DataType::None;
         bool           m_outputAmaxD             = false;
         bool           m_swizzleTensorA          = false;
         bool           m_swizzleTensorB          = false;
@@ -1298,6 +1308,7 @@ namespace TensileLite
                           void const*          _b,
                           void const*          _c,
                           void*                _d,
+                          void*                _e,
                           void const* const*   _batchA,
                           void const* const*   _batchB,
                           void const* const*   _batchC,

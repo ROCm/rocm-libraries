@@ -546,6 +546,7 @@ Arguments:
   - c_equal_d: c_bool
   - HMM: c_bool
   - use_e: c_bool
+  - aux_type: hipDataType
   - gradient: c_bool
   - norm_check_assert: c_bool
   - swizzle_a: c_bool
@@ -641,6 +642,7 @@ Defaults:
   bias_type: default
   bias_source: d
   use_e: false
+  aux_type: hipblaslt_datatype_invalid
   gradient: false
   bias_vector: false
   scaleA: none

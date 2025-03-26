@@ -178,7 +178,7 @@ namespace TensileLite
                                                         double                  beta)
     {
         TensileLite::ContractionProblemGemm::FreeIndices free(2);
-        BoundIndex                                   bound;
+        BoundIndex                                       bound;
 
         free[0].isA = true;
         free[0].i = free[0].c = free[0].d = 0;
@@ -1414,21 +1414,21 @@ namespace TensileLite
 
         // The ContractionProblemGemm
         TensileLite::ContractionProblemGemm problem{a,
-                                                b,
-                                                c,
-                                                d,
-                                                e,
-                                                bias,
-                                                scaleA,
-                                                scaleB,
-                                                scaleC,
-                                                scaleD,
-                                                scaleAlpha,
-                                                freeIndex,
-                                                batchIndex,
-                                                boundIndex,
-                                                beta,
-                                                maxWorkspaceBytes};
+                                                    b,
+                                                    c,
+                                                    d,
+                                                    e,
+                                                    bias,
+                                                    scaleA,
+                                                    scaleB,
+                                                    scaleC,
+                                                    scaleD,
+                                                    scaleAlpha,
+                                                    freeIndex,
+                                                    batchIndex,
+                                                    boundIndex,
+                                                    beta,
+                                                    maxWorkspaceBytes};
 
         problem.setComputeInputType(typeComputeInput);
         problem.setAlphaType(typeAlpha);
@@ -1448,7 +1448,7 @@ namespace TensileLite
         // set bias mode
         if(useBias)
         {
-            DataType                                biasType = biasDataTypeWhiteList[0];
+            DataType                                    biasType = biasDataTypeWhiteList[0];
             TensileLite::ContractionProblemGemm::TENSOR biasSrc
                 = static_cast<TensileLite::ContractionProblemGemm::TENSOR>(biasSrcWhiteList[0]);
             problem.setBias(biasType, 1, 0, useGradient, biasSrc);
@@ -1511,6 +1511,7 @@ namespace TensileLite
                                          void const*          _b,
                                          void const*          _c,
                                          void*                _d,
+                                         void*                _e,
                                          void const* const*   _batchA,
                                          void const* const*   _batchB,
                                          void const* const*   _batchC,
@@ -1529,6 +1530,7 @@ namespace TensileLite
         , b(_b)
         , c(_c)
         , d(_d)
+        , e(_e)
         , batchA(_batchA)
         , batchB(_batchB)
         , batchC(_batchC)

@@ -60,6 +60,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     int64_t m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
         batch_stride_d, batch_stride_e;
     hipDataType            bias_type;
+    hipDataType            aux_type;
     hipDataType            type_a, type_b, type_c, type_d;
     rocblaslt_compute_type compute_type;
     void *                 bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
@@ -98,6 +99,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                                            bias_type,
                                                            scaleAlphaVec,
                                                            E,
+                                                           aux_type,
                                                            gradient,
                                                            compute_type,
                                                            swizzleA,
@@ -206,6 +208,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->scaleBBlockRowSize,
                                         matmul_descr->scaleBBlockColSize,
                                         bias_type,
+                                        aux_type,
                                         epilogue,
                                         amaxD,
                                         workspace,
@@ -237,6 +240,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle         h
     int64_t m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
         batch_stride_d, batch_stride_e;
     hipDataType            bias_type;
+    hipDataType            aux_type;
     hipDataType            type_a, type_b, type_c, type_d;
     rocblaslt_compute_type compute_type;
     void *                 bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
@@ -275,6 +279,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle         h
                                                            bias_type,
                                                            scaleAlphaVec,
                                                            E,
+                                                           aux_type,
                                                            gradient,
                                                            compute_type,
                                                            swizzleA,
@@ -363,6 +368,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle         h
                                         matmul_descr->scaleBBlockRowSize,
                                         matmul_descr->scaleBBlockColSize,
                                         bias_type,
+                                        aux_type,
                                         epilogue,
                                         amaxD,
                                         nullptr,
@@ -409,6 +415,7 @@ rocblaslt_status
     std::vector<const void*>            scaleE_vec;
     std::vector<const void*>            scaleAlpha_vec;
     std::vector<hipDataType>            bias_type_vec;
+    std::vector<hipDataType>            aux_type_vec;
     std::vector<rocblaslt_epilogue>     epilogue_vec;
     std::vector<int64_t>                m_vec, n_vec, k_vec;
     std::vector<int64_t>                lda_vec, batch_stride_a_vec, num_batches_a_vec;
@@ -485,6 +492,7 @@ rocblaslt_status
 
         void*              bias = nullptr;
         hipDataType        bias_type;
+        hipDataType        aux_type;
         void*              scaleAlphaVec = nullptr;
         void*              E             = nullptr;
         int64_t            lde, batch_stride_e;
@@ -498,6 +506,7 @@ rocblaslt_status
                                                       matD[i]->type,
                                                       matmul_descr[i]->bias_type,
                                                       matmul_descr[i]->e,
+                                                      matmul_descr[i]->aux_type,
                                                       matmul_descr[i]->lde,
                                                       matmul_descr[i]->stride_e,
                                                       matmul_descr[i]->bias,
@@ -510,6 +519,7 @@ rocblaslt_status
                                                       matmul_descr[i]->scaleBBlockRowSize,
                                                       matmul_descr[i]->scaleBBlockColSize,
                                                       E,
+                                                      aux_type,
                                                       lde,
                                                       batch_stride_e,
                                                       bias,
@@ -539,6 +549,7 @@ rocblaslt_status
                                   compute_type});
 
         bias_type_vec.push_back(bias_type);
+        aux_type_vec.push_back(aux_type);
         epilogue_vec.push_back(epilogue);
         bias_vec.push_back(bias);
         scaleA_vec.push_back(matmul_descr[i]->scaleA);
@@ -655,6 +666,7 @@ rocblaslt_status
                                                        matmul_descr[i]->scaleBBlockRowSize,
                                                        matmul_descr[i]->scaleBBlockColSize,
                                                        bias_type_vec[i],
+                                                       aux_type_vec[i],
                                                        epilogue_vec[i],
                                                        amaxD_vec[i],
                                                        nullptr,
@@ -877,6 +889,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
     void *      bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
     int64_t     lde = 0, batch_stride_e = 0;
     hipDataType bias_type = HIPBLASLT_DATATYPE_INVALID;
+    hipDataType aux_type  = HIPBLASLT_DATATYPE_INVALID;
     bool        gradient  = false;
 
     if(status == rocblaslt_status_continue)
@@ -890,6 +903,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                 problemtype.type_d,
                 rocEpilogue.bias_data_type,
                 inputs.aux,
+                rocEpilogue.aux_data_type,
                 rocEpilogue.aux_ld,
                 rocEpilogue.aux_stride,
                 inputs.bias,
@@ -902,6 +916,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                 0, /* scaleBBlockRowSize */
                 0, /* scaleBBlockColSize */
                 E,
+                aux_type,
                 lde,
                 batch_stride_e,
                 bias,
@@ -918,6 +933,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                 problemtype.type_d,
                 rocEpilogue.bias_data_type,
                 inputs.aux,
+                rocEpilogue.aux_data_type,
                 rocEpilogue.aux_ld,
                 rocEpilogue.aux_stride,
                 inputs.bias,
@@ -931,6 +947,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
                 0, /* scaleBBlockRowSize */
                 0, /* scaleBBlockColSize */
                 E,
+                aux_type,
                 lde,
                 batch_stride_e,
                 bias,
@@ -1015,6 +1032,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
             0, /* scaleBBlockRowSize */
             0, /* scaleBBlockColSize */
             bias_type,
+            aux_type,
             epilogue,
             amaxD,
             nullptr,
@@ -1081,6 +1099,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
             0, /* scaleBBlockRowSize */
             0, /* scaleBBlockColSize */
             bias_type,
+            aux_type,
             epilogue,
             amaxD,
             nullptr,
@@ -1257,6 +1276,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
     std::vector<const void*>        scaleE_vec;
     std::vector<const void*>        scaleAlpha_vec;
     std::vector<hipDataType>        bias_type_vec;
+    std::vector<hipDataType>        aux_type_vec;
     std::vector<rocblaslt_epilogue> epilogue_vec;
 
     std::vector<int64_t> lde_vec, batch_stride_e_vec, num_batches_e_vec;
@@ -1295,6 +1315,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
 
         void*       bias = nullptr;
         hipDataType bias_type;
+        hipDataType aux_type;
         void*       scaleAlphaVec = nullptr;
         void*       E             = nullptr;
         int64_t     lde, batch_stride_e;
@@ -1314,6 +1335,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                     problemtype[iIdx2].type_d,
                     rocEpilogue[iIdx].bias_data_type,
                     inputs[i].aux,
+                    rocEpilogue[iIdx].aux_data_type,
                     rocEpilogue[iIdx].aux_ld,
                     rocEpilogue[iIdx].aux_stride,
                     inputs[i].bias,
@@ -1326,6 +1348,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                     0, /* scaleBBlockRowSize */
                     0, /* scaleBBlockColSize */
                     E,
+                    aux_type,
                     lde,
                     batch_stride_e,
                     bias,
@@ -1342,6 +1365,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                     problemtype[iIdx2].type_d,
                     rocEpilogue[iIdx].bias_data_type,
                     inputs[i].aux,
+                    rocEpilogue[iIdx].aux_data_type,
                     rocEpilogue[iIdx].aux_ld,
                     rocEpilogue[iIdx].aux_stride,
                     inputs[i].bias,
@@ -1357,6 +1381,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                     0, /* scaleBBlockRowSize */
                     0, /* scaleBBlockColSize */
                     E,
+                    aux_type,
                     lde,
                     batch_stride_e,
                     bias,
@@ -1380,6 +1405,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
         }
 
         bias_type_vec.push_back(bias_type);
+        aux_type_vec.push_back(aux_type);
         epilogue_vec.push_back(epilogue);
         bias_vec.push_back(bias);
         scaleA_vec.push_back(inputs[i].scaleA);
@@ -1468,6 +1494,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                 0, /* scaleBBlockRowSize */
                 0, /* scaleBBlockColSize */
                 bias_type_vec[i],
+                aux_type_vec[i],
                 epilogue_vec[i],
                 amaxD_vec[i],
                 nullptr,
@@ -1535,6 +1562,7 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                             0, /* scaleBBlockRowSize */
                                             0, /* scaleBBlockColSize */
                                             bias_type_vec[i],
+                                            aux_type_vec[i],
                                             epilogue_vec[i],
                                             amaxD_vec[i],
                                             nullptr,

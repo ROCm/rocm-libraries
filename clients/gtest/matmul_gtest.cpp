@@ -105,6 +105,8 @@ namespace
                     if(arg.use_e)
                     {
                         name << "_AUX";
+                        if(arg.aux_type != HIPBLASLT_DATATYPE_INVALID)
+                            name << "_" << hip_datatype_to_string(arg.aux_type);
                     }
                 }
 

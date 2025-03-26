@@ -63,6 +63,7 @@ add_executable( sample_hipblaslt_gemm_swizzle_a 26_gemm_swizzle_a/sample_hipblas
 add_executable( sample_hipblaslt_gemm_bias_swizzle_a_ext 26_gemm_swizzle_a/sample_hipblaslt_gemm_bias_swizzle_a_ext.cpp)
 add_executable( sample_hipblaslt_weight_swizzle_padding 26_gemm_swizzle_a/sample_hipblaslt_weight_swizzle_padding.cpp)
 add_executable( sample_hipblaslt_gemm_swish_bias 27_gemm_swish_bias/sample_hipblaslt_gemm_swish_bias.cpp)
+add_executable( sample_hipblaslt_fp8_gemm_gelu_aux_bias 28_fp8_gemm_gelu_aux_bias/sample_hipblaslt_fp8_gemm_gelu_aux_bias.cpp)
 
 
 set(samples sample_hipblaslt_gemm
@@ -105,7 +106,8 @@ set(samples sample_hipblaslt_gemm
             sample_hipblaslt_gemm_swizzle_a
             sample_hipblaslt_gemm_bias_swizzle_a_ext
             sample_hipblaslt_weight_swizzle_padding
-            sample_hipblaslt_gemm_swish_bias)
+            sample_hipblaslt_gemm_swish_bias
+            sample_hipblaslt_fp8_gemm_gelu_aux_bias)
 
 set( sample_list_all ${samples})
 

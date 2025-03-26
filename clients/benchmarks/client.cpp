@@ -192,10 +192,11 @@ int run_bench_test(Arguments&         arg,
                     return type;
             };
 
-            arg.a_type = convertF8Type(arg.a_type);
-            arg.b_type = convertF8Type(arg.b_type);
-            arg.c_type = convertF8Type(arg.c_type);
-            arg.d_type = convertF8Type(arg.d_type);
+            arg.a_type   = convertF8Type(arg.a_type);
+            arg.b_type   = convertF8Type(arg.b_type);
+            arg.c_type   = convertF8Type(arg.c_type);
+            arg.d_type   = convertF8Type(arg.d_type);
+            arg.aux_type = convertF8Type(arg.aux_type);
         }
     }
 #endif
@@ -287,6 +288,7 @@ try
     std::string initialization;
     std::string filter;
     std::string activation_type;
+    std::string aux_type;
     int         scaleAFormat;
     int         scaleBFormat;
     int         scaleCFormat;
@@ -550,6 +552,10 @@ try
         ("use_e",
          bool_switch(&arg.use_e)->default_value(false),
          "Apply AUX output/ gradient input")
+
+        ("aux_type",
+         value<std::string>(&aux_type), "Used with --use_e. Precision of AUX output (matrix E)."
+	 "Options: f16_r, default (same with D type)")
 
         ("gradient",
          bool_switch(&arg.gradient)->default_value(false),
@@ -877,6 +883,14 @@ try
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    if(!(aux_type == "" || aux_type == "default" || arg.use_e))
+        hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;
+
+    arg.aux_type
+        = (aux_type == "" || aux_type == "default") ? arg.d_type : string_to_hip_datatype(aux_type);
+    if(arg.aux_type == HIPBLASLT_DATATYPE_INVALID)
+        throw std::invalid_argument("Invalid value for --aux_type " + aux_type);
 
     if(arg.swizzle_a
        && (arg.transA != 'T' || arg.transB != 'N'

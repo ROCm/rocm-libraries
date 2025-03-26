@@ -160,9 +160,10 @@ struct _rocblaslt_matmul_desc
     void*       amaxD     = nullptr;
     hipDataType bias_type = HIPBLASLT_DATATYPE_INVALID;
     // E
-    void*   e        = nullptr;
-    int64_t lde      = 0;
-    int64_t stride_e = 0;
+    void*       e        = nullptr;
+    hipDataType aux_type = HIPBLASLT_DATATYPE_INVALID;
+    int64_t     lde      = 0;
+    int64_t     stride_e = 0;
     //
     rocblaslt_compute_type compute_type;
     rocblaslt_compute_type compute_type_original;
@@ -203,6 +204,7 @@ struct _rocblaslt_matmul_desc
         this->amaxD                 = src.amaxD;
         this->bias_type             = src.bias_type;
         this->e                     = src.e;
+        this->aux_type              = src.aux_type;
         this->lde                   = src.lde;
         this->stride_e              = src.stride_e;
         this->compute_type          = src.compute_type;

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -2292,6 +2292,50 @@ namespace TensileLite
                 {
                     return debugEvalCmp(
                         problem, stream, "prob", problem.useE(), "==", "sol", value);
+                }
+            };
+
+            struct DataTypeEEqual : public Predicate_CRTP<DataTypeEEqual, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                DataType value;
+
+                DataTypeEEqual() = default;
+                DataTypeEEqual(DataType value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "DataTypeE";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    if(problem.useE())
+                    {
+                        return problem.e().dataType() == value;
+                    }
+                    return true;
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(), "(e:", value);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    debugEvalCmp(
+                        problem, stream, "prob_e", problem.e().dataType(), "==", "sol_e", value);
+                    return rv;
                 }
             };
 

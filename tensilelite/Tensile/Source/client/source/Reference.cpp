@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -170,7 +170,21 @@ namespace TensileLite
         }
 
         template <typename T, typename Accumulator>
-        typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type
+        typename std::enable_if<
+            std::is_same<Float8, T>::value || std::is_same<Float8_fnuz, T>::value
+                || std::is_same<BFloat8, T>::value || std::is_same<BFloat8_fnuz, T>::value,
+            T>::type
+            SaturateCast(Accumulator val)
+        {
+            return static_cast<T>(static_cast<Half>(val));
+        }
+
+        template <typename T, typename Accumulator>
+        typename std::enable_if<!std::is_same<int8_t, T>::value && !std::is_same<Float8, T>::value
+                                    && !std::is_same<Float8_fnuz, T>::value
+                                    && !std::is_same<BFloat8, T>::value
+                                    && !std::is_same<BFloat8_fnuz, T>::value,
+                                T>::type
             SaturateCast(Accumulator val)
         {
             return static_cast<T>(val);
@@ -282,10 +296,13 @@ namespace TensileLite
                                        || std::is_same<float, Accumulator>::value
                                        || std::is_same<double, Accumulator>::value
                                        || std::is_same<BFloat16, Accumulator>::value
+                                       || std::is_same<Float8, Accumulator>::value
+                                       || std::is_same<BFloat8, Accumulator>::value
+                                       || std::is_same<Float8_fnuz, Accumulator>::value
+                                       || std::is_same<BFloat8_fnuz, Accumulator>::value
                                        || std::is_same<int32_t, Accumulator>::value
                                        || std::is_same<int8_t, Accumulator>::value,
-                                   bool>
-                  = true>
+                                   bool> = true>
         void SetValue(DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -326,14 +343,34 @@ namespace TensileLite
                 typedPtr[pos] = SaturateCast<int8_t>(src);
             }
             break;
+            case DataType::Float8:
+            {
+                auto typedPtr = static_cast<Float8*>(dstPtr);
+                typedPtr[pos] = SaturateCast<Float8>(src);
+            }
+            break;
+            case DataType::BFloat8:
+            {
+                auto typedPtr = static_cast<BFloat8*>(dstPtr);
+                typedPtr[pos] = SaturateCast<BFloat8>(src);
+            }
+            break;
+            case DataType::Float8_fnuz:
+            {
+                auto typedPtr = static_cast<Float8_fnuz*>(dstPtr);
+                typedPtr[pos] = SaturateCast<Float8_fnuz>(src);
+            }
+            break;
+            case DataType::BFloat8_fnuz:
+            {
+                auto typedPtr = static_cast<BFloat8_fnuz*>(dstPtr);
+                typedPtr[pos] = SaturateCast<BFloat8_fnuz>(src);
+            }
+            break;
             case DataType::XFloat32:
             case DataType::ComplexFloat:
             case DataType::ComplexDouble:
             case DataType::Int8x4:
-            case DataType::Float8:
-            case DataType::BFloat8:
-            case DataType::Float8_fnuz:
-            case DataType::BFloat8_fnuz:
             case DataType::Count:
             case DataType::Float8BFloat8:
             case DataType::BFloat8Float8:
@@ -353,8 +390,7 @@ namespace TensileLite
                                        && !std::is_same<BFloat8, Accumulator>::value
                                        && !std::is_same<Float8_fnuz, Accumulator>::value
                                        && !std::is_same<BFloat8_fnuz, Accumulator>::value,
-                                   bool>
-                  = true>
+                                   bool> = true>
         void SetValue(DataType dataType, Accumulator& src, void* dstPtr, size_t pos)
         {
             switch(dataType)
@@ -399,7 +435,7 @@ namespace TensileLite
             // Only cast to float in BFloat16
             constexpr bool needCast = std::is_same<BFloat16, T>();
             using castT             = std::conditional_t<needCast, float, T>;
-            const auto isForAll = activationType == ActivationType::All
+            const auto isForAll     = activationType == ActivationType::All
                                   || activationType == ActivationType::Hipblaslt_all;
             auto new_type = isForAll ? activationType2 : activationType;
             if(new_type == ActivationType::Abs)
@@ -482,7 +518,10 @@ namespace TensileLite
             else if(new_type == ActivationType::Swish)
             {
                 auto castedVal = static_cast<castT>(val);
-                return static_cast<T>(castedVal / (1.f + static_cast<castT>(exp(-multiply<castT>(castedVal, static_cast<castT>(args[0]))))));
+                return static_cast<T>(castedVal
+                                      / (1.f
+                                         + static_cast<castT>(exp(-multiply<castT>(
+                                             castedVal, static_cast<castT>(args[0]))))));
             }
             return val;
         }
@@ -495,8 +534,8 @@ namespace TensileLite
                        ActivationType activationType2,
                        std::vector<T> args)
         {
-            const auto isForAll = activationType == ActivationType::All ||
-                                  activationType == ActivationType::Hipblaslt_all;
+            const auto isForAll = activationType == ActivationType::All
+                                  || activationType == ActivationType::Hipblaslt_all;
             auto new_type = isForAll ? activationType2 : activationType;
             if(new_type == ActivationType::Abs)
             {
@@ -547,9 +586,9 @@ namespace TensileLite
                     || std::is_same<double, Input>::value || std::is_same<BFloat16, Input>::value
                     || std::is_same<int32_t, Input>::value || std::is_same<int8_t, Input>::value
                     || std::is_same<Float8, Input>::value || std::is_same<BFloat8, Input>::value
-                    || std::is_same<Float8_fnuz, Input>::value || std::is_same<BFloat8_fnuz, Input>::value,
-                bool>
-            = true>
+                    || std::is_same<Float8_fnuz, Input>::value
+                    || std::is_same<BFloat8_fnuz, Input>::value,
+                bool> = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -566,7 +605,7 @@ namespace TensileLite
             // For 2D bias reduction, d batch = 1
             if((tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2)
             {
-omp_set_num_threads(MAX_OMP_THREADS);
+                omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for
                 for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
                     bNum += validationStride)
@@ -614,9 +653,9 @@ omp_set_num_threads(MAX_OMP_THREADS);
                     && !std::is_same<double, Input>::value && !std::is_same<BFloat16, Input>::value
                     && !std::is_same<int32_t, Input>::value && !std::is_same<int8_t, Input>::value
                     && !std::is_same<Float8, Input>::value && !std::is_same<BFloat8, Input>::value
-                    && !std::is_same<Float8_fnuz, Input>::value && !std::is_same<BFloat8_fnuz, Input>::value,
-                bool>
-            = true>
+                    && !std::is_same<Float8_fnuz, Input>::value
+                    && !std::is_same<BFloat8_fnuz, Input>::value,
+                bool> = true>
         std::string ReductionCPU(TensorDescriptor const&  biasTensor,
                                  TensorDescriptor const&  tensor,
                                  void const*              src,
@@ -719,7 +758,7 @@ omp_set_num_threads(MAX_OMP_THREADS);
                                            && !std::is_same<Accumulator, std::complex<float>>();
 
             // gemm
-omp_set_num_threads(MAX_OMP_THREADS);
+            omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for
             for(size_t dNum = 0; dNum < d.totalLogicalElements(); dNum += validationStrideGemm)
             {
@@ -810,29 +849,32 @@ omp_set_num_threads(MAX_OMP_THREADS);
                                          && sizeof(typename Inputs::BType)
                                                 > sizeof(typename Inputs::ComputeInputType))
                             {
-                                if constexpr (std::is_same<Float8BFloat8,
-                                                typename Inputs::ComputeInputType>::value)
+                                if constexpr(std::is_same<Float8BFloat8,
+                                                          typename Inputs::ComputeInputType>::value)
                                 {
                                     auto aValCast = static_cast<TensileLite::Float8>(aVal);
                                     auto bValCast = static_cast<TensileLite::BFloat8>(bVal);
                                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                                 }
-                                else if constexpr (std::is_same<BFloat8Float8,
-                                                     typename Inputs::ComputeInputType>::value)
+                                else if constexpr(std::is_same<
+                                                      BFloat8Float8,
+                                                      typename Inputs::ComputeInputType>::value)
                                 {
                                     auto aValCast = static_cast<TensileLite::BFloat8>(aVal);
                                     auto bValCast = static_cast<TensileLite::Float8>(bVal);
                                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                                 }
-                                else if constexpr (std::is_same<Float8BFloat8_fnuz,
-                                                typename Inputs::ComputeInputType>::value)
+                                else if constexpr(std::is_same<
+                                                      Float8BFloat8_fnuz,
+                                                      typename Inputs::ComputeInputType>::value)
                                 {
                                     auto aValCast = static_cast<TensileLite::Float8_fnuz>(aVal);
                                     auto bValCast = static_cast<TensileLite::BFloat8_fnuz>(bVal);
                                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                                 }
-                                else if constexpr (std::is_same<BFloat8Float8_fnuz,
-                                                     typename Inputs::ComputeInputType>::value)
+                                else if constexpr(std::is_same<
+                                                      BFloat8Float8_fnuz,
+                                                      typename Inputs::ComputeInputType>::value)
                                 {
                                     auto aValCast = static_cast<TensileLite::BFloat8_fnuz>(aVal);
                                     auto bValCast = static_cast<TensileLite::Float8_fnuz>(bVal);
@@ -1029,7 +1071,7 @@ omp_set_num_threads(MAX_OMP_THREADS);
                                          actArgs);
                 }
 
-omp_set_num_threads(MAX_OMP_THREADS);
+                omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp critical
                 {
                     if constexpr(notCmplxAmaxD)
@@ -1149,12 +1191,12 @@ omp_set_num_threads(MAX_OMP_THREADS);
             }
 
             return TensileLite::GemmTypeId(problem.a().dataType(),
-                                       problem.b().dataType(),
-                                       problem.c().dataType(),
-                                       problem.d().dataType(),
-                                       alphaType,
-                                       betaType,
-                                       problem.computeInputType());
+                                           problem.b().dataType(),
+                                           problem.c().dataType(),
+                                           problem.d().dataType(),
+                                           alphaType,
+                                           betaType,
+                                           problem.computeInputType());
         }
 
         template <typename Problem, typename Inputs>

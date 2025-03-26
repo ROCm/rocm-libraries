@@ -315,6 +315,7 @@ inline rocblaslt_status
                                   const hipDataType&        d_type,
                                   const hipDataType&        original_bias_type,
                                   const void*               e_ptr,
+                                  const hipDataType&        original_aux_type,
                                   const int64_t&            original_lde,
                                   const int64_t&            original_stride_e,
                                   const void*               original_bias,
@@ -327,6 +328,7 @@ inline rocblaslt_status
                                   const uint32_t scaleBBlockRowSize,
                                   const uint32_t scaleBBlockColSize,
                                   void*&         E,
+                                  hipDataType&   aux_type,
                                   int64_t&       lde,
                                   int64_t&       batch_stride_e,
                                   void*&         bias,
@@ -361,6 +363,7 @@ inline rocblaslt_status
             status = rocblaslt_status_invalid_pointer;
         E = (void*)e_ptr;
     }
+    aux_type       = original_aux_type;
     lde            = original_lde > 0 ? original_lde : num_rows_e;
     batch_stride_e = original_stride_e > 0 ? original_stride_e : original_lde * num_cols_e;
     if(E != nullptr && ((lde < num_rows_e) || (batch_stride_e < (num_cols_e * num_rows_e))))
@@ -423,6 +426,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                     hipDataType&                bias_type,
                                                     void*&                      scaleAlphaVec,
                                                     void*&                      E,
+                                                    hipDataType&                aux_type,
                                                     bool&                       gradient,
                                                     rocblaslt_compute_type&     compute_type,
                                                     bool                        swizzleA,
@@ -505,6 +509,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          matD->type,
                                                          matmul_descr->bias_type,
                                                          matmul_descr->e,
+                                                         matmul_descr->aux_type,
                                                          matmul_descr->lde,
                                                          matmul_descr->stride_e,
                                                          matmul_descr->bias,
@@ -517,6 +522,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          matmul_descr->scaleBBlockRowSize,
                                                          matmul_descr->scaleBBlockColSize,
                                                          E,
+                                                         aux_type,
                                                          lde,
                                                          batch_stride_e,
                                                          bias,

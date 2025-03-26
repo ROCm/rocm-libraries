@@ -151,6 +151,7 @@ struct Arguments
     bool                     c_equal_d;
     bool                     HMM;
     bool                     use_e;
+    hipDataType              aux_type;
     bool                     gradient;
     bool                     norm_check_assert;
     bool                     swizzle_a;
@@ -257,6 +258,7 @@ struct Arguments
     OPER(c_equal_d) SEP              \
     OPER(HMM) SEP                    \
     OPER(use_e) SEP                  \
+    OPER(aux_type) SEP               \
     OPER(gradient) SEP               \
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \

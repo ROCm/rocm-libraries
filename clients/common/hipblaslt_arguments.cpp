@@ -117,6 +117,7 @@ void Arguments::init()
     c_equal_d         = false;
     HMM               = false;
     use_e             = false;
+    aux_type          = HIPBLASLT_DATATYPE_INVALID;
     gradient          = false;
     norm_check_assert = true;
 

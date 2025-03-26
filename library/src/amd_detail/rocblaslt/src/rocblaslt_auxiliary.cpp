@@ -290,6 +290,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     int64_t     m, n, k, lda, ldb, ldc, ldd, lde, batch_stride_a, batch_stride_b, batch_stride_c,
         batch_stride_d, batch_stride_e;
     hipDataType            bias_type;
+    hipDataType            aux_type;
     hipDataType            a_type, b_type, c_type, d_type;
     rocblaslt_compute_type compute_type;
     void *                 bias = nullptr, *scaleAlphaVec = nullptr, *e = nullptr;
@@ -335,6 +336,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                                            bias_type,
                                                            scaleAlphaVec,
                                                            e,
+                                                           aux_type,
                                                            gradient,
                                                            compute_type,
                                                            swizzleA,
@@ -419,6 +421,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         matmul_descr->scaleBBlockRowSize,
                                         matmul_descr->scaleBBlockColSize,
                                         bias_type,
+                                        aux_type,
                                         epilogue,
                                         amaxD,
                                         nullptr,
@@ -1156,6 +1159,15 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE:
+                if(sizeof(int32_t) <= sizeInBytes)
+                    memcpy(&matmulDesc->aux_type, buf, sizeof(int32_t));
+                else
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
                 if(sizeof(int32_t) <= sizeInBytes)
                 {
@@ -1394,6 +1406,16 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->amaxD, sizeof(void*));
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matmulDesc->aux_type, sizeof(int32_t));
                 break;
             case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
                 if(sizeWritten)

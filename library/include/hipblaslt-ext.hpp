@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -91,10 +91,10 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT GemmPreferenceV2();
         HIPBLASLT_EXPORT ~GemmPreferenceV2();
 
-        HIPBLASLT_EXPORT GemmPreferenceV2(const GemmPreferenceV2& pref);
+        HIPBLASLT_EXPORT                   GemmPreferenceV2(const GemmPreferenceV2& pref);
         HIPBLASLT_EXPORT GemmPreferenceV2& operator=(const GemmPreferenceV2& pref);
 
-        HIPBLASLT_EXPORT GemmPreferenceV2(GemmPreferenceV2&& pref);
+        HIPBLASLT_EXPORT                   GemmPreferenceV2(GemmPreferenceV2&& pref);
         HIPBLASLT_EXPORT GemmPreferenceV2& operator=(GemmPreferenceV2&& pref);
 
         /*! \ingroup library_module
@@ -152,10 +152,10 @@ namespace hipblaslt_ext
                                            hipblasComputeType_t typeCompute);
         HIPBLASLT_EXPORT ~GemmProblemTypeV2();
 
-        HIPBLASLT_EXPORT GemmProblemTypeV2(const GemmProblemTypeV2& type);
+        HIPBLASLT_EXPORT                    GemmProblemTypeV2(const GemmProblemTypeV2& type);
         HIPBLASLT_EXPORT GemmProblemTypeV2& operator=(const GemmProblemTypeV2& type);
 
-        HIPBLASLT_EXPORT GemmProblemTypeV2(GemmProblemTypeV2&& type);
+        HIPBLASLT_EXPORT                    GemmProblemTypeV2(GemmProblemTypeV2&& type);
         HIPBLASLT_EXPORT GemmProblemTypeV2& operator=(GemmProblemTypeV2&& type);
 
         HIPBLASLT_EXPORT void setOpA(hipblasOperation_t op); //!< Set the A martix transpose.
@@ -192,6 +192,8 @@ namespace hipblaslt_ext
             = HIPBLASLT_EPILOGUE_DEFAULT; //!< The mode of epilogue. Default is gemm.
         hipDataType bias_data_type
             = HIPBLASLT_DATATYPE_INVALID; //!< The bias datatype. Only works if mode is set to bias related epilogues.
+        hipDataType aux_data_type
+            = HIPBLASLT_DATATYPE_INVALID; //!< The aux datatype. Only works if mode is set to aux related epilogues.
         int aux_ld
             = 0; //!< The aux leading dimension. Only works if mode is set to aux related epilogues.
         int aux_stride
@@ -209,10 +211,10 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT GemmEpilogueV2();
         HIPBLASLT_EXPORT ~GemmEpilogueV2();
 
-        HIPBLASLT_EXPORT GemmEpilogueV2(const GemmEpilogueV2& epilogue);
+        HIPBLASLT_EXPORT                 GemmEpilogueV2(const GemmEpilogueV2& epilogue);
         HIPBLASLT_EXPORT GemmEpilogueV2& operator=(const GemmEpilogueV2& epilogue);
 
-        HIPBLASLT_EXPORT GemmEpilogueV2(GemmEpilogueV2&& epilogue);
+        HIPBLASLT_EXPORT                 GemmEpilogueV2(GemmEpilogueV2&& epilogue);
         HIPBLASLT_EXPORT GemmEpilogueV2& operator=(GemmEpilogueV2&& epilogue);
 
         HIPBLASLT_EXPORT void
@@ -220,6 +222,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setBiasDataType(
             hipDataType
                 biasDataType); //!< Set the bias datatype. Only works if mode is set to bias related epilogues.
+        HIPBLASLT_EXPORT void setAuxDataType(
+            hipDataType
+                auxDataType); //!< Set the aux datatype. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT void setAuxLeadingDimension(
             int auxLeadingDimension); //!< Set the aux leading dimension. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT void setAuxBatchStride(
@@ -233,6 +238,8 @@ namespace hipblaslt_ext
                                      getMode() const; //!< The mode of epilogue. Default is gemm.
         HIPBLASLT_EXPORT hipDataType getBiasDataType()
             const; //!< The bias datatype. Only works if mode is set to bias related epilogues.
+        HIPBLASLT_EXPORT hipDataType getAuxDataType()
+            const; //!< The aux datatype. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT int getAuxLeadingDimension()
             const; //!< The aux leading dimension. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT int getAuxBatchStride()
@@ -261,10 +268,10 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT GemmTuningV2();
         HIPBLASLT_EXPORT ~GemmTuningV2();
 
-        HIPBLASLT_EXPORT GemmTuningV2(const GemmTuningV2& tuning);
+        HIPBLASLT_EXPORT               GemmTuningV2(const GemmTuningV2& tuning);
         HIPBLASLT_EXPORT GemmTuningV2& operator=(const GemmTuningV2& tuning);
 
-        HIPBLASLT_EXPORT GemmTuningV2(GemmTuningV2&& tuning);
+        HIPBLASLT_EXPORT               GemmTuningV2(GemmTuningV2&& tuning);
         HIPBLASLT_EXPORT GemmTuningV2& operator=(GemmTuningV2&& tuning);
 
         HIPBLASLT_EXPORT void setSplitK(
@@ -317,10 +324,10 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT GemmInputsV2();
         HIPBLASLT_EXPORT ~GemmInputsV2();
 
-        HIPBLASLT_EXPORT GemmInputsV2(const GemmInputsV2& input);
+        HIPBLASLT_EXPORT               GemmInputsV2(const GemmInputsV2& input);
         HIPBLASLT_EXPORT GemmInputsV2& operator=(const GemmInputsV2& input);
 
-        HIPBLASLT_EXPORT GemmInputsV2(GemmInputsV2&& input);
+        HIPBLASLT_EXPORT               GemmInputsV2(GemmInputsV2&& input);
         HIPBLASLT_EXPORT GemmInputsV2& operator=(GemmInputsV2&& input);
 
         HIPBLASLT_EXPORT void setA(const void* a); //!< Set the a matrix input pointer.
@@ -418,8 +425,8 @@ namespace hipblaslt_ext
     {
     public:
         HIPBLASLT_EXPORT virtual ~GemmInstance(){};
-        HIPBLASLT_EXPORT GemmInstance(const GemmInstance& rhs) = delete;
-        HIPBLASLT_EXPORT GemmInstance& operator=(const GemmInstance& rhs) = delete;
+        HIPBLASLT_EXPORT               GemmInstance(const GemmInstance& rhs) = delete;
+        HIPBLASLT_EXPORT GemmInstance& operator=(const GemmInstance& rhs)    = delete;
         HIPBLASLT_EXPORT               GemmInstance(GemmInstance&& rhs) noexcept;
         HIPBLASLT_EXPORT GemmInstance& operator=(GemmInstance&& rhs) noexcept;
 
@@ -764,10 +771,10 @@ namespace hipblaslt_ext
                                        void*                   D,
                                        hipblasLtMatrixLayout_t matD);
 
-        HIPBLASLT_EXPORT Gemm(const Gemm&) = delete;
-        HIPBLASLT_EXPORT Gemm(Gemm&&) noexcept;
+        HIPBLASLT_EXPORT       Gemm(const Gemm&) = delete;
+        HIPBLASLT_EXPORT       Gemm(Gemm&&) noexcept;
         HIPBLASLT_EXPORT Gemm& operator=(const Gemm&) = delete;
-        HIPBLASLT_EXPORT Gemm& operator               =(Gemm&&) noexcept;
+        HIPBLASLT_EXPORT Gemm& operator=(Gemm&&) noexcept;
 
         /*! \ingroup library_module
         *  \brief Sets the problem for a gemm problem. (Deprecated)
@@ -1020,10 +1027,10 @@ namespace hipblaslt_ext
                                               hipDataType          typeC,
                                               hipDataType          typeD,
                                               hipblasComputeType_t typeCompute);
-        HIPBLASLT_EXPORT GroupedGemm(const GroupedGemm&) = delete;
-        HIPBLASLT_EXPORT GroupedGemm(GroupedGemm&&) noexcept;
+        HIPBLASLT_EXPORT              GroupedGemm(const GroupedGemm&) = delete;
+        HIPBLASLT_EXPORT              GroupedGemm(GroupedGemm&&) noexcept;
         HIPBLASLT_EXPORT GroupedGemm& operator=(const GroupedGemm&) = delete;
-        HIPBLASLT_EXPORT GroupedGemm& operator                      =(GroupedGemm&&) noexcept;
+        HIPBLASLT_EXPORT GroupedGemm& operator=(GroupedGemm&&) noexcept;
 
         /*! \ingroup library_module
         *  \brief Constructor that sets the grouped gemm problem from hipblasLt structures

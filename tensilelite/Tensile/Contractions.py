@@ -377,6 +377,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("UseGradient", value=self.useGradient))
             predicates.append(ProblemPredicate("UseBias", value=self.useBias))
             predicates.append(ProblemPredicate("UseE", value=self.useE))
+            predicates.append(ProblemPredicate("DataTypeE", value=self.eType))
             predicates.append(ProblemPredicate("StridedBatched", value=self.stridedBatched))
             predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
             predicates.append(ProblemPredicate("UseScaleAB", value=self.useScaleAB))
@@ -676,13 +677,13 @@ class Solution:
         isaInfoMap: Dict[str, IsaInfo]
     ):
         return cls.FromOriginalState(
-                   solution._state, 
-                   splitGSU, 
-                   printSolutionRejectionReason, 
-                   printIndexAssignmentInfo, 
+                   solution._state,
+                   splitGSU,
+                   printSolutionRejectionReason,
+                   printIndexAssignmentInfo,
                    depthUConfig,
-                   assembler, 
-                   isaInfoMap, 
+                   assembler,
+                   isaInfoMap,
                    solution.srcName
                )
 

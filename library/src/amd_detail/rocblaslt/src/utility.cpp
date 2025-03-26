@@ -219,6 +219,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_POINTER_MODE";
     case ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER:
         return "MATMUL_DESC_AMAX_D_POINTER";
+    case ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE:
+        return "MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE";
     case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT:
         return "MATMUL_DESC_A_SCALE_POINTER_VEC";
     case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT:
@@ -333,15 +335,42 @@ std::string rocblaslt_matrix_layout_to_string(rocblaslt_matrix_layout mat)
 }
 std::string rocblaslt_matmul_desc_to_string(rocblaslt_matmul_desc matmul_desc)
 {
-    std::string format = matmul_desc->bias_type == HIPBLASLT_DATATYPE_INVALID
-                             ? "[computeType=%s scaleType=%s transA=%s transB=%s "
-                               "epilogue=%s biasPointer=0x%x]\0"
-                             : "[computeType=%s scaleType=%s transA=%s transB=%s "
-                               "epilogue=%s biasPointer=0x%x biasType=%s]\0";
+    std::stringstream ss;
+    ss << "[computeType=%s scaleType=%s transA=%s transB=%s epilogue=%s biasPointer=0x%x";
+    if(is_e_enabled(matmul_desc->epilogue))
+    {
+        ss << " epilogueAuxPointer=0x%x epilogueAuxLd=" << matmul_desc->lde;
+        if(matmul_desc->aux_type != HIPBLASLT_DATATYPE_INVALID)
+            ss << " epilogueAuxDataType=" << hipDataType_to_string(matmul_desc->aux_type);
+    }
+    if(matmul_desc->bias_type != HIPBLASLT_DATATYPE_INVALID)
+        ss << " biasType=%s";
+    ss << "]";
+    std::string format = ss.str();
 
     std::unique_ptr<char[]> buf(new char[255]);
 
     if(matmul_desc->bias_type == HIPBLASLT_DATATYPE_INVALID)
+        if(is_e_enabled(matmul_desc->epilogue))
+            std::sprintf(buf.get(),
+                         format.c_str(),
+                         rocblaslt_compute_type_to_string(matmul_desc->compute_type),
+                         hipDataType_to_string(matmul_desc->scale_type),
+                         hipblasOperation_to_string(matmul_desc->op_A),
+                         hipblasOperation_to_string(matmul_desc->op_B),
+                         rocblaslt_epilogue_to_string(matmul_desc->epilogue),
+                         matmul_desc->bias,
+                         matmul_desc->e);
+        else
+            std::sprintf(buf.get(),
+                         format.c_str(),
+                         rocblaslt_compute_type_to_string(matmul_desc->compute_type),
+                         hipDataType_to_string(matmul_desc->scale_type),
+                         hipblasOperation_to_string(matmul_desc->op_A),
+                         hipblasOperation_to_string(matmul_desc->op_B),
+                         rocblaslt_epilogue_to_string(matmul_desc->epilogue),
+                         matmul_desc->bias);
+    else if(is_e_enabled(matmul_desc->epilogue))
         std::sprintf(buf.get(),
                      format.c_str(),
                      rocblaslt_compute_type_to_string(matmul_desc->compute_type),
@@ -349,7 +378,9 @@ std::string rocblaslt_matmul_desc_to_string(rocblaslt_matmul_desc matmul_desc)
                      hipblasOperation_to_string(matmul_desc->op_A),
                      hipblasOperation_to_string(matmul_desc->op_B),
                      rocblaslt_epilogue_to_string(matmul_desc->epilogue),
-                     matmul_desc->bias);
+                     matmul_desc->bias,
+                     matmul_desc->e,
+                     hipDataType_to_string(matmul_desc->bias_type));
     else
         std::sprintf(buf.get(),
                      format.c_str(),

@@ -130,6 +130,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          size_t                 scaleBBlockRowSize,
                                                          size_t                 scaleBBlockColSize,
                                                          hipDataType            bias_type,
+                                                         hipDataType            aux_type,
                                                          rocblaslt_epilogue     epilogue,
                                                          void*                  amaxD,
                                                          void*                  workspace,
@@ -193,6 +194,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , scaleBBlockRowSize(scaleBBlockRowSize)
     , scaleBBlockColSize(scaleBBlockColSize)
     , bias_type(bias_type)
+    , aux_type(aux_type)
     , epilogue(epilogue)
     , amaxD(amaxD)
     , workspace(workspace)
@@ -238,6 +240,11 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
         else
         {
             this->bias_type = this->d_type;
+        }
+
+        if(this->aux_type == HIPBLASLT_DATATYPE_INVALID)
+        {
+            this->aux_type = this->d_type;
         }
 
         if(this->trans_a == HIPBLAS_OP_C)
@@ -773,6 +780,8 @@ namespace
             hipDataType_to_bench_string(tensile2HipType(problem.alphaType())),
             "--bias_type",
             hipDataType_to_bench_string(tensile2HipType(problem.bias().dataType())),
+            "--aux_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.e().dataType())),
             problem.getParams().gsu() ? "--splitk" : "",
             problem.getParams().gsu() ? std::to_string(problem.getParams().gsu()) : "",
             problem.getParams().wgm() ? "--wgm" : "",
@@ -873,6 +882,8 @@ namespace
                     hipDataType_to_bench_string(tensile2HipType(problem.alphaType())),
                     "bias_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.bias().dataType())),
+                    "aux_type",
+                    hipDataType_to_bench_string(tensile2HipType(problem.e().dataType())),
                     "compute_type",
                     tensileComputeInputType_to_profile_string(problem.computeType(),
                                                               problem.f32XdlMathOp(),
@@ -962,6 +973,8 @@ namespace
                     hipDataType_to_bench_string(tensile2HipType(problem.alphaType())),
                     "bias_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.bias().dataType())),
+                    "aux_type",
+                    hipDataType_to_bench_string(tensile2HipType(problem.e().dataType())),
                     "compute_type",
                     tensileComputeInputType_to_profile_string(problem.computeType(),
                                                               problem.f32XdlMathOp(),
@@ -1077,6 +1090,8 @@ namespace
             hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].alphaType())),
             "--bias_type",
             hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].bias().dataType())),
+            "--aux_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].e().dataType())),
             problem.gemms[0].getParams().gsu() ? "--splitk" : "",
             problem.gemms[0].getParams().gsu() ? std::to_string(problem.gemms[0].getParams().gsu())
                                                : "",
@@ -1225,6 +1240,8 @@ namespace
             hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].alphaType())),
             "bias_type",
             hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].bias().dataType())),
+            "aux_type",
+            hipDataType_to_bench_string(tensile2HipType(problem.gemms[0].e().dataType())),
             "compute_type",
             tensileComputeInputType_to_profile_string(problem.gemms[0].computeType(),
                                                       problem.gemms[0].f32XdlMathOp(),
@@ -1408,8 +1425,9 @@ namespace
         if(is_e_enabled(prob.epilogue))
         {
             bool isOutput = prob.gradient ? false : true;
+            auto aux_type = hipDataType_to_tensile_type(prob.aux_type);
             tensileProblem.setUseE(true);
-            tensileProblem.setE(d_type,
+            tensileProblem.setE(aux_type,
                                 {prob.m, prob.n, prob.batch_count},
                                 {prob.row_stride_e, prob.col_stride_e, prob.batch_stride_e},
                                 isOutput);
@@ -1623,8 +1641,9 @@ namespace
         if(is_e_enabled(prob.epilogue))
         {
             bool isOutput = prob.gradient ? false : true;
+            auto aux_type = hipDataType_to_tensile_type(prob.aux_type);
             tensileProblem.setUseE(true);
-            tensileProblem.setE(d_type,
+            tensileProblem.setE(aux_type,
                                 {prob.m, prob.n, prob.batch_count},
                                 {prob.row_stride_e, prob.col_stride_e, prob.batch_stride_e},
                                 isOutput);
