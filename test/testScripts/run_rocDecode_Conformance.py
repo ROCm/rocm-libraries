@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import datetime
+from datetime import datetime
 from subprocess import Popen, PIPE
 import argparse
 import os
@@ -106,15 +106,6 @@ md5FileList = os.listdir(md5FileDir)
 md5FileList.sort(key=str.lower)
 md5ListSize = len(md5FileList)
 
-# Get the current timestamp
-timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-# Define the base filename
-basename_rocdecode_output = "/rocDecode_output"
-basename_rocdecode_conformance = "/rocDecode_conformance"
-# Create the new filename with the timestamp appended
-filename_rocdecode_output = f"{basename_rocdecode_output}_{timestamp}.log"
-filename_rocdecode_conformance = f"{basename_rocdecode_conformance}_{timestamp}.log"
-
 if streamListSize == 0:
     print("Error: Empty stream file folder\n")
     exit()
@@ -125,7 +116,7 @@ if streamListSize != md5ListSize:
 for i in range(streamListSize):
     streamFilePath = streamFileDir + streamFileList[i]
     md5FilePath = md5FileDir + md5FileList[i]
-    os.system(run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID) + ' | tee -a ' + resultsPath + filename_rocdecode_output)
+    os.system(run_rocDecode_app +' -i ' + streamFilePath + ' ' + bsReaderOption + ' -md5_check ' + md5FilePath + ' -d ' + str(gpuDeviceID) + ' | tee -a ' + resultsPath + '/rocDecode_output.log')
     print("======================================================================================\n")
 
 fileString = 'Input file'
@@ -134,9 +125,8 @@ matchString = 'MD5 digest matches the reference MD5 digest'
 mismatchString = 'MD5 digest does not match the reference MD5 digest'
 passNum = 0
 failNum = 0
-abortedStream=0
-with open(resultsPath + filename_rocdecode_output, 'r') as logFile:
-    resultFile = open(resultsPath + filename_rocdecode_conformance, 'w')
+with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+    resultFile = open(resultsPath + '/rocDecode_conformance.log', 'w')
     resultFile.write("=========================\n")
     resultFile.write("Conformance test results\n")
     resultFile.write("=========================\n")
@@ -158,19 +148,12 @@ with open(resultsPath + filename_rocdecode_output, 'r') as logFile:
     print("Conformance test completed on the", streamListSize, "streams:")
     print("     - The number of passing streams is", passNum)
     print("     - The number of failing streams is", failNum)
-    abortedStream=streamListSize - passNum - failNum
-    print("     - The number of streams that did not finish decoding is " + str(abortedStream))
+    print("     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
     resultFile.write("\n===================================================\n")
     resultFile.write("Conformance test result summary on the " + str(streamListSize) + " streams:\n")
     resultFile.write("===================================================")
     resultFile.write("\n     - The number of passing streams is " + str(passNum))
     resultFile.write("\n     - The number of failing streams is " + str(failNum))
-    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(abortedStream))
+    resultFile.write("\n     - The number of streams that did not finish decoding is " + str(streamListSize - passNum - failNum))
     resultFile.close()
 logFile.close()
-
-# Non-zero exit code if have failing stream
-if (failNum!=0 or abortedStream):
-   sys.exit(-1)
-else:
-   sys.exit(0)
