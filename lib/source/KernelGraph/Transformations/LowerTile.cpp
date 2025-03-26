@@ -148,10 +148,10 @@ namespace rocRoller
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
             auto sdimY     = sdim[1];
-            auto numTilesX = tileCeilDivide(graph.coordinates.get<SubDimension>(sdim[0])->size,
+            auto numTilesX = tileCeilDivide(graph.coordinates.get<SubDimension>(sdimX)->size,
                                             macTile.sizes[0]);
 
-            auto numTilesY = tileCeilDivide(graph.coordinates.get<SubDimension>(sdim[1])->size,
+            auto numTilesY = tileCeilDivide(graph.coordinates.get<SubDimension>(sdimY)->size,
                                             macTile.sizes[1]);
 
             connections.push_back(DC<SubDimension>(sdimX, 0));
@@ -169,6 +169,32 @@ namespace rocRoller
             graph.coordinates.addElement(Tile(), {sdimY}, {nMacY, iMacY});
 
             return {nMacX, iMacX, nMacY, iMacY};
+        }
+
+        std::tuple<int, int, int> addLoad1DMacroTileCT(KernelGraph&                     graph,
+                                                       std::vector<DeferredConnection>& connections,
+                                                       int                              macTileTag,
+                                                       std::vector<int> const&          sdim)
+        {
+            auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto sdimX     = sdim[0];
+            auto sdimY     = sdim[1];
+            auto numTilesX = tileCeilDivide(graph.coordinates.get<SubDimension>(sdimX)->size,
+                                            macTile.sizes[0]);
+
+            connections.push_back(DC<SubDimension>(sdimX, 0));
+            connections.push_back(DC<SubDimension>(sdimY, 1));
+
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, numTilesX));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
+
+            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
+
+            graph.coordinates.addElement(Tile(), {sdimX}, {nMacX, iMacX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {iMacY});
+
+            return {nMacX, iMacX, iMacY};
         }
 
         /**
@@ -940,6 +966,32 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {nMacY, iMacY}, {sdim[1]});
 
             return {nMacX, iMacX, nMacY, iMacY};
+        }
+
+        std::tuple<int, int, int>
+            addStore1DMacroTileCT(KernelGraph&                     graph,
+                                  std::vector<DeferredConnection>& connections,
+                                  int                              macTileTag,
+                                  std::vector<int> const&          sdim,
+                                  std::vector<unsigned int> const& jammedTiles)
+        {
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto sdimX   = sdim[0];
+            auto sdimY   = sdim[1];
+
+            connections.push_back(DC<SubDimension>(sdimX, 0));
+            connections.push_back(DC<SubDimension>(sdimY, 1));
+
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, nullptr));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0, jammedTiles[0]));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1, jammedTiles[1]));
+
+            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
+
+            graph.coordinates.addElement(Flatten(), {nMacX, iMacX}, {sdimX});
+            graph.coordinates.addElement(PassThrough(), {iMacY}, {sdimY});
+
+            return {nMacX, iMacX, iMacY};
         }
 
         /**

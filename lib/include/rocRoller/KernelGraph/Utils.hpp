@@ -425,6 +425,16 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles = {1, 1});
 
         /**
+         * @brief Store version of addLoad1DMacroTileCT.
+         */
+        std::tuple<int, int, int>
+            addStore1DMacroTileCT(KernelGraph&                     graph,
+                                  std::vector<DeferredConnection>& connections,
+                                  int                              macTileTag,
+                                  std::vector<int> const&          sdim,
+                                  std::vector<unsigned int> const& jammedTiles = {1, 1});
+
+        /**
          * @brief Add coordinate-transforms for tiling two
          * SubDimension coordinates into macro number/index
          * coordinates.
@@ -443,6 +453,27 @@ namespace rocRoller
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
                                std::vector<int> const&          sdim);
+
+        /**
+         * @brief Add coordinate-transforms for tiling the X
+         * SubDimension coordinate into macro number/index
+         * coordinates. No tiling is done on the Y SubDimension
+         * coordinate, instead it is passed through to a macro
+         * index coordinate only.
+         *
+         * The geometry of the tiling is taken from the MacroTile
+         * associated with `macTileTag`.
+         *
+         * Required (deferred) connections are appended to
+         * `connections`.
+         *
+         * @return Tuple of: row MacroTileNumber, row MacroTileIndex,
+         * column MacroTileIndex.
+         */
+        std::tuple<int, int, int> addLoad1DMacroTileCT(KernelGraph&                     graph,
+                                                       std::vector<DeferredConnection>& connections,
+                                                       int                              macTileTag,
+                                                       std::vector<int> const&          sdim);
 
         /**
          * @brief Add coordinate-transforms for loading a ThreadTile
