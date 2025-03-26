@@ -63,7 +63,17 @@ set(HEADER_FILES
   internal/level3/hipsparse_gemmi.h
   # Extra
   internal/extra/hipsparse_csrgeam.h
-  internal/extra/hipsparse_csrgemm.h)
+  internal/extra/hipsparse_csrgemm.h
+  # Precond
+  internal/precond/hipsparse_bsric0.h
+  internal/precond/hipsparse_bsrilu0.h
+  internal/precond/hipsparse_csric0.h
+  internal/precond/hipsparse_csrilu0.h
+  internal/precond/hipsparse_gpsv_interleaved_batch.h
+  internal/precond/hipsparse_gtsv_interleaved_batch.h
+  internal/precond/hipsparse_gtsv_nopivot.h
+  internal/precond/hipsparse_gtsv_strided_batch.h
+  internal/precond/hipsparse_gtsv.h)
 
 foreach( file_i ${HEADER_FILES})
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
