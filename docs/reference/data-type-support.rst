@@ -111,7 +111,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
 
         *
           - :ref:`Rot <rocblas_rot>`, :ref:`Rotg <rocblas_rotg>`
-          - Applies a Givens rotation matrix.
+          - Applies and generates a Givens rotation matrix.
           - ❌
           - ❌
           - ✅
@@ -119,7 +119,7 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
 
         *
           - :ref:`Rotm <rocblas_rotm>`, :ref:`Rotmg <rocblas_rotmg>`
-          - Applies a modified Givens rotation matrix.
+          - Applies and generates a modified Givens rotation matrix.
           - ❌
           - ❌
           - ✅
@@ -186,13 +186,13 @@ Level-1 functions perform scalar, vector, and vector-vector operations.
 
         *
           - :ref:`Rot <rocblas_rot>`, :ref:`Rotg <rocblas_rotg>`
-          - Applies a Givens rotation matrix.
+          - Applies and generates a Givens rotation matrix.
           - ✅
           - ✅
 
         *
           - :ref:`Rotm <rocblas_rotm>`, :ref:`Rotmg <rocblas_rotmg>`
-          - Applies a modified Givens rotation matrix.
+          - Applies and generates a modified Givens rotation matrix.
           - ❌
           - ❌
 
@@ -253,6 +253,14 @@ Level-2 functions perform matrix-vector operations.
           - ❌
           - ✅
           - ✅
+
+        *
+          - :ref:`GERU and GERC <rocblas_ger>`
+          - Generalized rank-1 update for unconjugated or conjugated complex numbers: :math:`A = \alpha x y^T + A`
+          - ❌
+          - ❌
+          - ❌
+          - ❌
 
         *
           - :ref:`SBMV <rocblas_sbmv>`, :ref:`SPMV <rocblas_spmv>`
@@ -373,8 +381,14 @@ Level-2 functions perform matrix-vector operations.
         *
           - :ref:`GER <rocblas_ger>`
           - Generalized rank-1 update: :math:`A = \alpha x y^T + A`
+          - ❌
+          - ❌
+
+        *
+          - :ref:`GERU and GERC <rocblas_ger>`
+          - Generalized rank-1 update for unconjugated or conjugated complex numbers: :math:`A = \alpha x y^T + A`
           - ✅
-          - ✅
+          - ✅          
 
         *
           - :ref:`SBMV <rocblas_sbmv>`, :ref:`SPMV <rocblas_spmv>`
@@ -544,14 +558,6 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ✅
           - ✅
 
-        * 
-          - :ref:`GEMM kernel name <rocblas_gemm_kernel_name>`
-          - Retrieve the kernel name used for GEMM operations.
-          - ✅
-          - ❌
-          - ✅
-          - ✅
-
 
   .. tab-item:: Complex types
     :sync: complex-type
@@ -624,20 +630,12 @@ libraries for Level-3 GEMMs (matrix matrix multiplication).
           - ❌
           - ❌
 
-        * 
-          - :ref:`GEMM kernel name <rocblas_gemm_kernel_name>`
-          - Retrieve the kernel name used for GEMM operations.
-          - ✅
-          - ✅
-
 
 Extensions
 ==========
 
-The extension function data type support is listed for every function separately on
-the :ref:`Extensions reference page <extension>`. ``float8`` support is
-available as an experimental implementation. For more information, see
-:ref:`GEMM_ex3 <rocblas_gemm_ex3>`.
+The extension function data type support is listed for every function separately
+on the :ref:`Extensions reference page <extension>`. 
 
 .. rubric:: Footnotes
 
