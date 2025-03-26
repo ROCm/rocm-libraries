@@ -48,6 +48,7 @@ namespace hiptensor
         using BetaT       = double;
         using OutputDimsT = std::vector<std::size_t>;
         using OperatorT   = hiptensorOperator_t;
+        using RangesT     = std::vector<std::size_t>;
 
     public:
         std::vector<DataTypesT>& dataTypes()
@@ -85,6 +86,16 @@ namespace hiptensor
             return mBetas;
         }
 
+        std::vector<RangesT>& problemRanges()
+        {
+            return mProblemRanges;
+        }
+
+        std::vector<RangesT>& problemRandRanges()
+        {
+            return mProblemRandRanges;
+        }
+
         void printParams()
         {
             std::cout << "DataTypes: " << mDataTypes << "\n"
@@ -93,7 +104,8 @@ namespace hiptensor
                       << "Operators: " << mOperators << "\n"
                       << "Alphas: " << mAlphas << "\n"
                       << "Betas: " << mBetas << "\n"
-                      << "OutputDims: " << mOutputDims << "\n";
+                      << "OutputDims: " << mOutputDims << "\n"
+                      << "ProblemRanges: " << mProblemRanges << "\n";
         }
 
     private:
@@ -105,6 +117,8 @@ namespace hiptensor
         std::vector<BetaT>       mBetas;
         std::vector<OperatorT>   mOperators;
         std::vector<OutputDimsT> mOutputDims;
+        std::vector<RangesT>     mProblemRanges;
+        std::vector<RangesT>     mProblemRandRanges;
     };
 
 } // namespace hiptensor

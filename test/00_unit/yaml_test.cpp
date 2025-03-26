@@ -57,6 +57,7 @@ namespace hiptensor
         using ModesT   = std::vector<std::vector<int32_t>>;
         using AlphaT   = std::vector<double>;
         using BetaT    = std::vector<double>;
+        using RangesT   = std::vector<std::size_t>;
 
         //Data types of input and output tensors
         std::vector<DataTypesT>    mDataTypes;
@@ -69,6 +70,8 @@ namespace hiptensor
         std::vector<ModesT>        mProblemModes;
         std::vector<AlphaT>        mAlphas;
         std::vector<BetaT>         mBetas;
+        std::vector<RangesT>       mProblemRanges;
+        std::vector<RangesT>       mProblemRandRanges;
     };
 }
 
@@ -105,6 +108,8 @@ int main(int argc, char* argv[])
     yee.mProblemStrides = {{}};
     yee.mAlphas         = {{0}, {1}, {1}};
     yee.mBetas          = {{2}, {2}, {2}};
+    yee.mProblemRanges = {{2, 1024, 2}, {2, 2048, 2, 16}};
+    yee.mProblemRandRanges = {{2, 1024, 16}};
 
     struct TmpFileWrapper
     {

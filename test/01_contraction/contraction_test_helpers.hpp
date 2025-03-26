@@ -30,6 +30,7 @@
 #include <gtest/gtest.h>
 
 #include "hiptensor_options.hpp"
+#include "hiptensor_length_generation.hpp"
 #include "llvm/yaml_parser.hpp"
 
 #ifdef HIPTENSOR_TEST_YAML_INCLUDE
@@ -71,6 +72,51 @@ auto inline load_config_params()
 auto inline load_combined_config_params()
 {
     auto testParams = load_config_params();
+
+    // Append sizes generated from lower/upper/step parameters to problemLengths
+    if(!testParams.problemRanges().empty())
+    {
+        uint32_t rank = testParams.problemModes()[0][0].size() / 2;
+
+        for (int i = 0; i < testParams.problemRanges().size(); i++)
+        {
+            auto ranges = testParams.problemRanges()[i];
+            std::size_t lower = ranges[0];
+            std::size_t upper = ranges[1];
+            std::size_t step  = ranges[2];
+            std::size_t maxElements = 134217728;
+
+            std::size_t totalSizes = 0;
+            if (ranges.size() == 4)
+            {
+                totalSizes = ranges[3];
+            }
+            std::vector<std::vector<std::vector<std::size_t>>> generatedLengths;
+            hiptensor::generate3DLengths(generatedLengths, lower, upper, step, rank, maxElements, totalSizes);
+            testParams.problemLengths().insert(testParams.problemLengths().end(),
+                                            generatedLengths.begin(), generatedLengths.end());
+        }
+    }
+    // Append sizes generated randomly from [lower, upper] to problemLengths
+    if(!testParams.problemRandRanges().empty())
+    {
+        uint32_t rank = testParams.problemModes()[0][0].size() / 2;
+
+        for (int i = 0; i < testParams.problemRandRanges().size(); i++)
+        {
+            auto ranges = testParams.problemRandRanges()[i];
+            std::size_t lower = ranges[0];
+            std::size_t upper = ranges[1];
+            std::size_t totalSizes = ranges[2];
+            std::size_t maxElements = 134217728;
+
+            std::vector<std::vector<std::vector<std::size_t>>> generatedRandLengths;
+            hiptensor::generate3DLengths(generatedRandLengths, lower, upper, upper, rank, maxElements, totalSizes, true);
+            testParams.problemLengths().insert(testParams.problemLengths().end(),
+                                            generatedRandLengths.begin(), generatedRandLengths.end());
+        }
+    }
+
     return ::testing::Combine(::testing::ValuesIn(testParams.dataTypes()),
                               ::testing::ValuesIn(testParams.algorithms()),
                               ::testing::ValuesIn(testParams.operators()),

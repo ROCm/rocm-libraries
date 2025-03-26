@@ -14,20 +14,17 @@ Operators:
   - HIPTENSOR_OP_IDENTITY
 Worksize Prefs:
   - HIPTENSOR_WORKSPACE_RECOMMENDED
-  - HIPTENSOR_WORKSPACE_MIN
-  - HIPTENSOR_WORKSPACE_MAX
 Alphas:
   - [0]
-  - [1]
   - [1]
 Betas:
   - [2]
   - [0]
-  - [2]
 Lengths:
-  - [[66, 66], [66, 66], [66, 66]]
-  - [[256, 111], [64, 111], [256, 64]]
-  - [[3, 55], [71, 55], [3, 71]]
+  - [[2, 2], [2, 2], [2, 2]]
+Ranges:
+  - [2, 8196, 2]
+Random Ranges:
 Strides:
   - []
 Modes:

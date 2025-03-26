@@ -28,6 +28,7 @@
 #define HIPTENSOR_HASH_HPP
 
 #include <functional>
+#include <vector>
 
 namespace hiptensor
 {
@@ -42,7 +43,7 @@ namespace hiptensor
         std::size_t operator()(Ts const&... ts) const
         {
             std::size_t seed = 0;
-            operator()(seed, ts...);
+                        operator()(seed, ts...);
             return seed;
         }
 
@@ -54,6 +55,15 @@ namespace hiptensor
             if constexpr(sizeof...(ts) > 0)
             {
                 operator()(seed, ts...);
+            }
+        }
+
+        template <typename T>
+        void operator()(std::size_t& seed, std::vector<T> const& vec) const
+        {
+            for(const auto& element : vec)
+            {
+                operator()(seed, element);
             }
         }
 

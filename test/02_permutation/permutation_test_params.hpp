@@ -49,6 +49,7 @@ namespace hiptensor
         using GammaT        = double;
         using PermutedDimsT = std::vector<std::size_t>;
         using OperatorT     = std::vector<hiptensorOperator_t>;
+        using RangesT       = std::vector<std::size_t>;
 
     public:
         std::vector<DataTypesT>& dataTypes()
@@ -91,6 +92,16 @@ namespace hiptensor
             return mGammas;
         }
 
+        std::vector<RangesT>& problemRanges()
+        {
+            return mProblemRanges;
+        }
+
+        std::vector<RangesT>& problemRandRanges()
+        {
+            return mProblemRandRanges;
+        }
+
         void printParams()
         {
             std::cout << "DataTypes: " << mDataTypes << "\n"
@@ -100,7 +111,8 @@ namespace hiptensor
                       << "Alphas: " << mAlphas << "\n"
                       << "Betas: " << mBetas << "\n"
                       << "Gammas: " << mGammas << "\n"
-                      << "PermutedDims: " << mPermutedDims << "\n";
+                      << "PermutedDims: " << mPermutedDims << "\n"
+                      << "ProblemRanges: " << mProblemRanges << "\n";
         }
 
     private:
@@ -113,6 +125,8 @@ namespace hiptensor
         std::vector<GammaT>        mGammas;
         std::vector<OperatorT>     mOperators;
         std::vector<PermutedDimsT> mPermutedDims;
+        std::vector<RangesT>       mProblemRanges;
+        std::vector<RangesT>       mProblemRandRanges;
     };
 
 } // namespace hiptensor

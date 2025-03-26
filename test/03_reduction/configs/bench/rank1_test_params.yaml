@@ -15,6 +15,9 @@ Betas:
 Lengths:
   - [ 13 ]
   - [ 6 ]
+Ranges:
+  - [2, 8192, 2]
+Random Ranges:
 Operators:
   - HIPTENSOR_OP_ADD
   - HIPTENSOR_OP_MUL

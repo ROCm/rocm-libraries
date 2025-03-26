@@ -1,0 +1,118 @@
+---
+Log Level:
+  # Constrain the logger output based on the following available levels:
+    # HIPTENSOR_LOG_LEVEL_OFF - No logging
+    # HIPTENSOR_LOG_LEVEL_ERROR - Log errors
+    # HIPTENSOR_LOG_LEVEL_PERF_TRACE - Log performance messages
+    # HIPTENSOR_LOG_LEVEL_PERF_HINT - Log performance hints
+    # HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE - Log selection messages
+    # HIPTENSOR_LOG_LEVEL_API_TRACE - Log a trace of API calls
+
+  # Example:
+[ HIPTENSOR_LOG_LEVEL_ERROR, HIPTENSOR_LOG_LEVEL_PERF_TRACE, HIPTENSOR_LOG_LEVEL_HEURISTICS_TRACE ]
+Tensor Data Types:
+  # Data types for tensorA, tensorB, tensorD, tensorE, typeCompute
+  # Supported type combinations are:
+    # - [ HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_32F ]
+    # - [ HIP_R_16BF, HIP_R_16BF, HIP_R_16BF, HIP_R_16BF, HIP_R_32F ]
+    # - [ HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_32F ]
+    # - [ HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_16F ]
+    # - [ HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_16BF ]
+    # - [ HIP_R_64F, HIP_R_64F, HIP_R_64F, HIP_R_64F, HIP_R_64F ]
+    # - [ HIP_R_64F, HIP_R_64F, HIP_R_64F, HIP_R_64F, HIP_R_32F ]
+    # - [ HIP_C_32F, HIP_C_32F, HIP_C_32F, HIP_C_32F, HIP_C_32F ]
+    # - [ HIP_C_64F, HIP_C_64F, HIP_C_64F, HIP_C_64F, HIP_C_64F ]
+
+  # Example:
+  - [ HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_32F, HIP_R_16F ]
+Algorithm Types:
+  # Algorithms for selecting tensor contraction kernels:
+    # HIPTENSOR_ALGO_ACTOR_CRITIC - Uses novel actor-critic selection model
+    # HIPTENSOR_ALGO_DEFAULT - Lets the internal heuristic choose
+    # HIPTENSOR_ALGO_DEFAULT_PATIENT - Uses the more accurate and time-consuming model
+
+  # Example:
+  - HIPTENSOR_ALGO_DEFAULT
+Operators:
+  # Element-wise operations to be performed
+  # Supported operations are:
+  # Unary:
+    # HIPTENSOR_OP_IDENTITY - Identity operator
+    # HIPTENSOR_OP_SQRT - Square root operator
+  # Binary:
+    # HIPTENSOR_OP_ADD - Addition operator
+    # HIPTENSOR_OP_MUL - Multiplication operator
+    # HIPTENSOR_OP_MAX - Maximum operator
+    # HIPTENSOR_OP_MIN - Minimum operator
+  # Internal
+    # HIPTENSOR_OP_UNKNOWN - Reserved for internal use
+
+  # Example:
+  - HIPTENSOR_OP_IDENTITY
+Worksize Prefs:
+  # Workspace size selection:
+    # HIPTENSOR_WORKSPACE_MIN - At least one algorithm will be available
+    # HIPTENSOR_WORKSPACE_RECOMMENDED - The most suitable algorithm will be available
+    # HIPTENSOR_WORKSPACE_MAX - All algorithms will be available
+
+  # Example:
+  - HIPTENSOR_WORKSPACE_RECOMMENDED
+Alphas:
+  # Scaling parameter for A*B of data type 'typeCompute'
+
+  # Example:
+  - [1]
+Betas:
+  # Scaling parameter for C of data type 'typeCompute'
+  # Not used for scalar contractions
+
+  # Example:
+  - [2]
+Lengths:
+  # Lengths for each tensor dimension are given as [[LengthsA], [LengthsB], [LengthsD/E]]
+  # For the default mode configuration lengths are arranged as:
+    # [m0...mN, k0...kN], [n0...nN, k0...kN], [m0...mN, n0...nN]
+  # for [tensorA], [tensorB], [tensorD/E]
+
+  # Example:
+  - [[16, 16, 128, 128], [32, 32, 128, 128], [16, 16, 32, 32]]
+Ranges:
+  # Generate tensor lengths from a range of set values:
+    # [lower bound, upper bound, step size/num sizes, optional: total lengths]
+  # Values are created as:
+    # for (val = lower; val <= upper; val *= step)
+  # Lengths generated from Ranges and Random Ranges are appended to lengths given in Lengths
+
+  # Examples:
+  # Generate all possible length combinations of 2, 4, 8, 16 for m0...mN, n0...nN, k0...kN for rank N
+  - [2, 16, 2]
+
+  # Generate 16 total lengths with each dim randombly chosen from set = [2, 4, 8, 16]
+  - [2, 16, 2, 16]
+Random Ranges:
+  # Randomly generate tensor lengths from a range of values:
+    # [lower bound, upper bound, total lengths]
+  # Values are randomly chosen from the range [lower, upper]
+
+  # Example:
+  # Generate 100 total lengths with each dim with each dim randomly chosen from range [2, 16]
+  - [2, 16, 100]
+Strides:
+  # Custom strides can be given for each tensor as [[StridesA], [StridesB], [StridesD/E]]
+    # Custom strides must match the provided lengths and are incompatible with range-based generation.
+    # For each tensor, stride[i] denotes the displacement (stride) between two consecutive
+    # elements in the ith-mode. If stride is NULL, generalized packed column-major memory
+    # layout is assumed (i.e., the strides increase monotonically from left to right).
+  # Default strides are constructed for each tensor when no strides are given
+    # See information on HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR
+
+  # Example:
+  - []
+Modes:
+  # Modes to be utilized for each tensor as [[ModesA], [ModesB], [ModesD/E]]
+  # For tensorA, ModesA[i] corresponds to LengthsA[i] and StridesA[i]
+  # Modes that only appear in ModesA/B but not in ModesD/E are reduced (contracted).
+
+  # Example:
+  - [[0, 1, 4, 5], [2, 3, 4, 5], [0, 1, 2, 3]]
+...
