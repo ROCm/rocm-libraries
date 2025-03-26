@@ -3,6 +3,25 @@
 Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
+## (Unreleased) hipSPARSE 3.3.0
+
+### Added
+
+Add the `int8`, `int32`, and `float16` data types to `hipDataTypeToHCCDataType` so that sparse matrix descriptors can be used with them.
+
+### Changed
+
+* Switch to defaulting to C++17 when building hipSPARSE from source. Previously hipSPARSE was using C++14 by default.
+
+### Resolved issues
+
+* Fixed a compilation [issue](https://github.com/ROCm/hipSPARSE/issues/555) related to using `std::filesystem` and C++14.
+* Fixed the empty clients-common package by moving the `hipsparse_clientmatrices.cmake` and `hipsparse_mtx2csr` files to it.
+
+### Known issues
+
+* In `hipsparseSpSM_solve()`, the external buffer is passed as a parameter. This does not match the NVIDIA CUDA cuSPARSE API. This extra external buffer parameter will be removed in a future release. For now, this extra parameter can be ignored and nullptr passed because it is unused internally by `hipsparseSpSM_solve()`.
+
 ## hipSPARSE 3.2.0 for ROCm 6.4.0
 
 ### Added
