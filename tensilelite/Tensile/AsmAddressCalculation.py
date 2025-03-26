@@ -20,9 +20,7 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.code import Module
-from rocisa.container import EXEC, VCC, vgpr, sgpr
-from .TensileInstructions import log2
+from .TensileInstructions import Module, EXEC, vgpr, sgpr, log2, Label
 from .TensileInstructions.Instructions import *
 from .Common import INDEX_CHARS, DataDirection
 

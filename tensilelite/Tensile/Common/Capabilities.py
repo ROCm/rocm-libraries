@@ -23,7 +23,6 @@
 ################################################################################
 
 import subprocess
-import rocisa
 
 from functools import lru_cache
 from typing import List, Dict
@@ -266,12 +265,10 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
         A map of ISA versions to capabilities.
     """
     isaInfoMap = {}
-    ti = rocisa.rocIsa.getInstance()
     for v in targetIsas:
-        ti.init(v, cxxCompiler, False)
-        asmCaps = ti.getIsaInfo(v).asmCaps
-        archCaps = ti.getIsaInfo(v).archCaps
-        regCaps = ti.getIsaInfo(v).regCaps
-        asmBugs = ti.getIsaInfo(v).asmBugs
+        asmCaps = initAsmCaps(v, cxxCompiler, False)
+        archCaps = initArchCaps(v)
+        regCaps = initRegisterCaps(v, archCaps)
+        asmBugs = initAsmBugs(asmCaps)
         isaInfoMap[v] = IsaInfo(asmCaps, archCaps, regCaps, asmBugs)
     return isaInfoMap

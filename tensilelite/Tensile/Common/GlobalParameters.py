@@ -23,7 +23,6 @@
 ################################################################################
 
 import itertools
-import rocisa
 import math
 import os.path
 import subprocess

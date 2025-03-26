@@ -30,7 +30,6 @@ from ..Common import print2
 from ..Component import Component
 from ..AsmStoreState import StoreState, VectorDataTypes
 import abc
-
 from copy import deepcopy
 
 class XCCMapping(Component):
@@ -221,7 +220,7 @@ class StreamK(Component):
         # skip tail loop if StreamK WG not processing final iteration
         # Check if tile finished
         module.add(SCmpLtU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
-        module.add(SCMovB32(dst=loopCounter, src=0, comment="This WG not completing tile"))
+        module.add(SCMovB32(dst=loopCounter, src=hex(0), comment="This WG not completing tile"))
 
         return module
 
@@ -252,7 +251,7 @@ class StreamK(Component):
             else:
                 with writer.allocTmpSgpr(4) as tmpSgpr1:
                     module.add(scalarStaticDivideAndRemainder(qReg=tmpSgpr, rReg=tmpSgpr+1, dReg=("SizesSum+%u" % unrollIdx), divisor=kernel["DepthU"], tmpSgprRes=tmpSgpr1, doRemainder=2))
-            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
+            module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=hex(0), comment="numIter%s == 0"%loopChar ))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=0, src1=1, comment="check if size uses tail loop"))
             module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Check if WG processes final iteration of tile"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=0, comment="this WG runs tail loop"))
@@ -302,7 +301,7 @@ class StreamK(Component):
 
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
+            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="get flag"))
 
             module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag load"))
             if kernel["DebugStreamK"] & 2 == 0:
@@ -316,7 +315,7 @@ class StreamK(Component):
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
             # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
+            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="reset flag"))
             module.add(skipFlagReset)
             writer.sgprPool.checkIn(tmpSgpr)
 
@@ -617,7 +616,7 @@ class StreamK(Component):
                 module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
                 module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
+                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=1), comment="set flag"))
                 module.add(skipFlagSet)
             module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -694,8 +693,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
-                        # module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
+                        module.add(replaceHolder(codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
+                        # module.add(replaceHolder(self.codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -1186,8 +1185,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprRead.popFirstItem())
+                        module.add(replaceHolder(codeAccVgprRead.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        # tempStr = str(codeAccVgprRead.items().pop(0))
                         # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
@@ -1431,8 +1430,8 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprWrite.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprWrite.popFirstItem())
+                        module.add(replaceHolder(codeAccVgprWrite.items().pop(0), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
+                        # tempStr = str(codeAccVgprWrite.items().pop(0))
                         # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
@@ -1448,7 +1447,7 @@ class StreamK(Component):
         #     # Note - TODO- CheckStoreC also won't work for StoreRemap
         #     kStr += inst("s_waitcnt", "vmcnt(0)", "CheckStoreC, wait for stores to complete" )
         #     if self.archCaps["SeparateVscnt"]:
-        #         kStr += inst("s_waitcnt_vscnt", -2, "0", "writes")
+        #         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
         #     for elementIdx in range(0, len(batchElements)):
         #         addr = ss.elementAddr[elementIdx].addrDVgpr
         #         sumIdx = ss.elementSumIdx[elementIdx]
@@ -1479,7 +1478,7 @@ class StreamK(Component):
         #                                 addr0, addr1, soffset=0, offset=0, extraFields="", dtlNoDestVgpr=False).toStr()
         #     kStr += inst("s_waitcnt", "vmcnt(0)", "CheckStoreC, wait for stores to complete" )
         #     if self.archCaps["SeparateVscnt"]:
-        #         kStr += inst("s_waitcnt_vscnt", -2, "0", "writes")
+        #         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
 
         #     # Add checks for expected values:
         #     kStr += inst("s_mov_b32", sgpr(tmpS01), self.db["CheckStoreC"], "expected value")

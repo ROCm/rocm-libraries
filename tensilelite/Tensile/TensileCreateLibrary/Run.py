@@ -22,8 +22,6 @@
 #
 ################################################################################
 
-import rocisa
-
 import functools
 import glob
 import itertools
@@ -65,6 +63,7 @@ from Tensile.KernelWriterBase import (
 )
 from Tensile.SolutionLibrary import MasterSolutionLibrary
 from Tensile.SolutionStructs import Solution
+from Tensile.TensileInstructions import TensileInstructions
 from Tensile.Toolchain.Assembly import makeAssemblyToolchain, buildAssemblyCodeObjectFiles
 from Tensile.Toolchain.Source import makeSourceToolchain, SourceToolchain, buildSourceCodeObjectFiles
 from Tensile.Toolchain.Validators import (
@@ -245,7 +244,7 @@ def writeSolutionsAndKernels(
     assert numKernels == numAsmKernels, "Only assembly kernels are supported in TensileLite"
     asmIter = zip(
         itertools.repeat(kernelWriterAssembly),
-        itertools.repeat(rocisa.rocIsa.getInstance().getData()),
+        itertools.repeat(TensileInstructions()),
         itertools.repeat(useShortNames),
         itertools.repeat(splitGSU),
         itertools.repeat(kernelMinNaming),
@@ -345,7 +344,7 @@ def writeSolutionsAndKernelsTCL(
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
         kernelWriterAssembly,
-        rocisa.rocIsa.getInstance().getData(),
+        TensileInstructions(),
         useShortNames,
         splitGSU,
         kernelMinNaming,

@@ -59,12 +59,12 @@ function(TensileCreateLibraryCmake
   message(STATUS "Tensile_LIBRARY_FORMAT      from TensileCreateLibraryCmake : ${Tensile_LIBRARY_FORMAT}")
   message(STATUS "Tensile_CPU_THREADS         from TensileCreateLibraryCmake : ${Tensile_CPU_THREADS}")
 
-  #execute_process(COMMAND chmod 755 ${Tensile_ROOT}/bin/TensileCreateLibraryPy)
+  #execute_process(COMMAND chmod 755 ${Tensile_ROOT}/bin/TensileCreateLibrary)
   #execute_process(COMMAND chmod 755 ${Tensile_ROOT}/bin/Tensile)
-  file(COPY ${Tensile_ROOT}/bin/TensileCreateLibraryPy DESTINATION ${Tensile_ROOT}/bin FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+  file(COPY ${Tensile_ROOT}/bin/TensileCreateLibrary DESTINATION ${Tensile_ROOT}/bin FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
   file(COPY ${Tensile_ROOT}/bin/Tensile DESTINATION ${Tensile_ROOT}/bin FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 
-  set(Tensile_CREATE_COMMAND "${Tensile_ROOT}/bin/TensileCreateLibraryPy")
+  set(Tensile_CREATE_COMMAND "${Tensile_ROOT}/bin/TensileCreateLibrary")
 
   set(Tensile_SOURCE_PATH "${PROJECT_BINARY_DIR}/Tensile")
   message(STATUS "Tensile_SOURCE_PATH=${Tensile_SOURCE_PATH}")

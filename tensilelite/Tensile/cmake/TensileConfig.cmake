@@ -121,9 +121,9 @@ function(TensileCreateLibraryFiles
 
   # Parse incoming options
   if(Tensile_TENSILE_ROOT)
-    set(Script "${Tensile_TENSILE_ROOT}/bin/TensileCreateLibraryPy")
+    set(Script "${Tensile_TENSILE_ROOT}/bin/TensileCreateLibrary")
   else()
-    set(Script "${Tensile_ROOT}/bin/TensileCreateLibraryPy")
+    set(Script "${Tensile_ROOT}/bin/TensileCreateLibrary")
   endif()
 
   message(STATUS "Tensile script: ${Script}")
@@ -209,7 +209,7 @@ function(TensileCreateLibraryFiles
     set(Options ${Options} "--build-id=${Tensile_BUILD_ID}")
   endif()
 
-  set(CommandLine PYTHONPATH=$ENV{PYTHONPATH} ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${Script} ${Options} ${Tensile_LOGIC_PATH} ${Tensile_OUTPUT_PATH} HIP)
+  set(CommandLine ${VIRTUALENV_BIN_DIR}/${VIRTUALENV_PYTHON_EXENAME} ${Script} ${Options} ${Tensile_LOGIC_PATH} ${Tensile_OUTPUT_PATH} HIP)
   message(STATUS "Tensile_CREATE_COMMAND: ${CommandLine}")
 
   if(Tensile_EMBED_LIBRARY)
@@ -275,7 +275,7 @@ function(TensileCreateExtOpLibraries OutputFolder ArchStr)
     COMMAND ${CMAKE_COMMAND} -E rm -rf ${build_tmp_dir}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${build_tmp_dir}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${OutputFolder}
-    COMMAND PYTHONPATH=$ENV{PYTHONPATH} bash "${script}" "\"${Archs}\"" "${build_tmp_dir}" "${VIRTUALENV_HOME_DIR}" "${Tensile_BUILD_ID}"
+    COMMAND bash "${script}" "\"${Archs}\"" "${build_tmp_dir}" "${VIRTUALENV_HOME_DIR}" "${Tensile_BUILD_ID}"
     COMMAND ${CMAKE_COMMAND} -E copy ${ext_op_library_path} ${build_tmp_dir}/extop_*.co ${OutputFolder}
   )
 

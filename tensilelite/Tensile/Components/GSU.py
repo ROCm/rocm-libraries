@@ -20,15 +20,12 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa import countInstruction
 from ..TensileInstructions import Module, Label, RegisterPoolResource, SAddU32, SAddCU32, SCmpEQU32, SCBranchSCC1, \
     scalarUInt32DivideAndRemainder, SMovB32, SMulI32, SBranch, SMovB64, SLShiftRightB32, sgpr, log2, \
-    SCmpLtU32, SCMovB32, SSubU32, SLShiftLeftB64, SCBranchSCC0, Instruction, SCmpLgU32, \
+    SCmpLtU32, SCMovB32, SSubU32, SLShiftLeftB64, SCBranchSCC0, fastdeepcopy, Instruction, SCmpLgU32, \
     SCSelectB32, SAndB32
 from ..Component import Component
 import abc
-
-from copy import deepcopy
 
 class GSU(Component):
     """
@@ -440,11 +437,11 @@ class GSUOn(GSU):
                 deepCopyPack = pack
               else:
                 # deepCopy packCode for OptNLL noLoadLoop
-                deepCopyPack = deepcopy(pack)
+                deepCopyPack = fastdeepcopy(pack)
               noLoadLoopModules.add(writer.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=True, isNGLL=False, pack=deepCopyPack, NLLindex=NLLindex, NLLnum=NLLnum))
               writer.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
-            acclen = countInstruction(noLoadLoopModules)
+            acclen = noLoadLoopModules.countType(Instruction)
         kernel["GlobalSplitU"] = gsuBackup
         kernel["_GlobalAccumulation"] = gsuAccumBackup
         writer.states.bpeCexternal = bpeCexternalBackup
@@ -473,7 +470,7 @@ class GSUOn(GSU):
             module.add(SCBranchSCC1(labelName=gsucLabel.getLabelName(), comment="branch if GSUC == 1"))
             # if GSU numIter=0 if gsuSumIdx != numIterPerWgRemainder
             module.add(SCmpLgU32(src0=sgpr("GSUSumIdx"), src1=sgpr("GSUSumIdx+1"), comment="gsuSumIdx == numIterPerWgRemainder"))
-            module.add(SCMovB32(dst=loopCounter, src=0, comment="numIter=0 if gsuSimIdx != numIterPerWgRemainder"))
+            module.add(SCMovB32(dst=loopCounter, src=hex(0), comment="numIter=0 if gsuSimIdx != numIterPerWgRemainder"))
             module.add(SBranch(gsucLabelEnd.getLabelName()))
             module.add(gsucLabel)
             # calculate the lastWg
@@ -490,7 +487,7 @@ class GSUOn(GSU):
                                     comment="lastWg = (quotient==0) ? numIterPerWgRemainder : GSU-1"))
             # if GSU numIter=0 if gsuSumIdx != lastWg
             module.add(SCmpLgU32(src0=sgpr("GSUSumIdx"), src1=sgpr(tmpSgpr), comment="gsuSumIdx == lastWg"))
-            module.add(SCMovB32(dst=loopCounter, src=0, comment="numIter=0 if gsuSumIdx != lastWg"))
+            module.add(SCMovB32(dst=loopCounter, src=hex(0), comment="numIter=0 if gsuSumIdx != lastWg"))
             module.add(gsucLabelEnd)
 
         return module

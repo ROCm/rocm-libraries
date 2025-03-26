@@ -22,10 +22,10 @@
 #
 ################################################################################
 
-from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
 from ..Common import DataDirection
 from ..TensileInstructions import SignatureBase
+from ..TensileInstructions import SignatureValueKind as SVK
 from ..Activation import ActivationType
 
 from math import ceil
@@ -129,10 +129,10 @@ class SignatureDefault(Signature):
                                     kernArgsVersion=kernel["InternalSupportParams"]["KernArgsVersion"],
                                     codeObjectVersion=kernel["CodeObjectVersion"],
                                     groupSegmentSize=group_segment_size,
-                                    sgprWorkGroup=(1, 1, sgprWgZ),
+                                    sgprWorkGroup=[1, 1, sgprWgZ],
                                     vgprWorkItem=0,
                                     flatWorkGroupSize=(kernel["NumThreads"]),
-                                    preloadKernArgs=bool(kernel["PreloadKernArgs"]))
+                                    preloadKernArgs=kernel["PreloadKernArgs"])
 
        # General Argument info
         signature.addArg(   "Gemm info", SVK.SIG_VALUE, "u32")
@@ -142,6 +142,7 @@ class SignatureDefault(Signature):
         # When modify the size, please also update TENSILE_COMMON_KERNEL_ARGS_SIZE in ContractionSolution.hpp
         userArgumentsInfo.commonArgsNum += 4
         userArgumentsInfo.commonArgsSize = userArgumentsInfo.commonArgsNum * writer.states.bpr
+
 
         srcValueTypeA = getSrcValueType(kernel, True)
         srcValueTypeB = getSrcValueType(kernel, False)

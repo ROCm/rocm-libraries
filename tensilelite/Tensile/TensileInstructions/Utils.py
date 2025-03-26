@@ -20,20 +20,77 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.enum import InstType
-from rocisa.container import vgpr, sgpr, accvgpr, mgpr, Holder
-from rocisa.instruction import Instruction, SWaitCnt
-
 from .Code import Module
 from .Containers import HolderContainer, RegisterContainer, RegName
 from .DataType import DataType
+from .Enums import InstType
 from .Formatting import printAssert, printExit
+from .Instructions import Instruction, SWaitCnt
 
 from functools import lru_cache
 from math import log
 from typing import Tuple
 import random
 import string
+
+########################################
+# Format GPRs
+########################################
+
+def _gpr(*args):
+    gprType = args[0]
+    args = args[1]
+    if isinstance(args[0], Holder):
+        idx  = args[0].idx
+        name = args[0].name
+        if len(args) == 1:
+            return HolderContainer(gprType, name, idx, 1)
+        elif len(args) == 2:
+            return HolderContainer(gprType, name, idx, args[1])
+    elif isinstance(args[0], int):
+        if len(args) == 1:
+            return RegisterContainer(gprType, None, args[0], 1)
+        elif len(args) == 2:
+            return RegisterContainer(gprType, None, args[0], args[1])
+    elif isinstance(args[0], str):
+        name = _generateRegName(args[0])
+        if len(args) == 1:
+            return RegisterContainer(gprType, name, None, 1)
+        elif len(args) == 2:
+            return RegisterContainer(gprType, name, None, args[1])
+    else:
+        printAssert("Unknown %sgpr name or index"%gprType)
+
+def vgpr(*args):
+    return _gpr("v", args)
+
+def sgpr(*args):
+    return _gpr("s", args)
+
+def accvgpr(*args):
+    return _gpr("acc", args)
+
+def mgpr(*args):
+    return _gpr("m", args)
+
+@lru_cache(maxsize=None)
+def _generateRegName(rawText):
+    splitTxt = rawText.split("+")
+    offsets = []
+    if len(splitTxt) > 1:
+        for arg in splitTxt[1:]:
+            offsets.append(int(arg))
+    return RegName(splitTxt[0], offsets)
+
+class Holder:
+    def __init__(self, idx=None, name=None):
+        if name:
+            self.name = _generateRegName(name)
+            assert(idx == None)
+        else:
+            self.name = name
+            assert(name == None)
+        self.idx    = idx
 
 ########################################
 # mfma
@@ -73,6 +130,57 @@ def dataTypeToMfmaInstTypePair(dataType: DataType, sourceSwap: bool) -> Tuple[In
     miInInstType = dataTypeNameAbbrevToInstType(miInTypeStr, sourceSwap) # v_mfma_[...xK]<InType>
     miOutInstType = dataTypeNameAbbrevToInstType(dataType.MIOutputTypeNameAbbrev()) # v_mfma_<OutType>..
     return miInInstType, miOutInstType
+
+########################################
+# Label Manager
+########################################
+
+def magicGenerator(chars=(string.ascii_uppercase + string.digits)):
+    return ''.join(random.choice(chars) for _ in range(16))
+
+class LabelManager():
+    def __init__(self):
+        self.labelDict = dict()
+
+    def addName(self, name):
+        if name not in self.labelDict:
+            self.labelDict[name] = 0
+        else:
+            self.labelDict[name] += 1
+
+    def getUniqueName(self):
+        name = magicGenerator()
+        while 1:
+            if name not in self.labelDict:
+                break
+            name = magicGenerator()
+        return self.getName(name)
+
+    def getUniqueNamePrefix(self, prefix):
+        name = prefix + "_" + magicGenerator()
+        while 1:
+            if name not in self.labelDict:
+                break
+            name = prefix + "_" + magicGenerator()
+        return self.getName(name)
+
+    def getName(self, name):
+        if name not in self.labelDict:
+            self.labelDict[name] = 0
+        return name + "_" + str(self.labelDict[name])
+
+    def getNameInc(self, name):
+        self.addName(name)
+        if self.labelDict[name] == 0:
+            return name
+        return name + "_" + str(self.labelDict[name])
+
+    def getNameIndex(self, name, index):
+        if name not in self.labelDict:
+            printExit("You have to add a label first to get a label name with specific index.")
+        if index > self.labelDict[name]:
+            printExit("The index %u exceeded. (> %u)"%(index, self.labelDict[name]))
+        return name + "_" + str(index)
 
 ########################################
 # Math

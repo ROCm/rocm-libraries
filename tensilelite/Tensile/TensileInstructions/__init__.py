@@ -31,6 +31,7 @@ from .Base import *
 from .Code import *
 from .Containers import *
 from .DataType import *
+from .Enums import *
 from .ExtInstructions import *
 from .Formatting import *
 from .Instructions import *

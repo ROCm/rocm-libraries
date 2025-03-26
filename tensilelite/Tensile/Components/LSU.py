@@ -20,7 +20,6 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.container import DSModifiers
 from ..TensileInstructions import Module, Label, RegisterPoolResource, SCmpEQU32, \
     SMovB32, log2, ceilDivide, SCBranchSCC0, Instruction, \
     SAndB32, RegSet, vectorStaticDivide

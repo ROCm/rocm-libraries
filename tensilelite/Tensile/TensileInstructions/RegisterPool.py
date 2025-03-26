@@ -22,9 +22,9 @@
 #
 ################################################################################
 
-from rocisa.instruction import SMovB32, VMovB32
 from .Code import Module
 from .Formatting import print2, printExit, printWarning
+from .Instructions import SMovB32, VMovB32
 from .Utils import vgpr, sgpr, roundUpToNearestMultiple
 
 from contextlib import contextmanager

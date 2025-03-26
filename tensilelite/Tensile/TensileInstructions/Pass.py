@@ -20,15 +20,13 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-from rocisa.instruction import BranchInstruction, CommonInstruction, Instruction, \
-                          CompositeInstruction, MacroInstruction, \
-                          ReadWriteInstruction, SEndpgm, SMovB32, \
-                          _SWaitCnt, _SWaitCntVscnt, SSleep, SBarrier, SNop
-
 from .Base import Item
 from .Code import KernelBody, Label, Macro, Module, RegSet, TextBlock
 from .Containers import RegisterContainer
-
+from .Instructions import BranchInstruction, CommonInstruction, Instruction, \
+                          CompositeInstruction, MacroInstruction, \
+                          ReadWriteInstruction, SEndpgm, SMovB32, \
+                          _SWaitCnt, _SWaitCntVscnt, SSleep, SBarrier, SNop
 from .Formatting import slash50
 
 from dataclasses import dataclass, field
@@ -42,12 +40,13 @@ class TensileInstructionsPassOptions:
 
 def TensileInstructionsPass(kernelBody: KernelBody, \
     options: TensileInstructionsPassOptions):
-    assignDict = getAssignmentDict(kernelBody.body)
-    compositeToInstruction(kernelBody.body)
+    module = kernelBody.body
+    assignDict = getAssignmentDict(module)
+    compositeToInstruction(module)
     if options.doOpt():
         maxVgpr = kernelBody.totalVgprs
         maxSgpr = kernelBody.totalSgprs
-        graph = buildGraph(kernelBody.body, maxVgpr, maxSgpr, assignDict)
+        graph = buildGraph(module, maxVgpr, maxSgpr, assignDict)
         if options.removeDupAssign:
             removeDuplicateAssignment(graph)
 
