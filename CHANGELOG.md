@@ -11,15 +11,28 @@ Documentation for rocSPARSE is available at
 * Adds half float mixed precision to `rocsparse_spmm` where A and B use float16 and C and the compute type use float
 * Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 * Added support for gfx950
+* Add ROC-TX instrumentation that can be enabled when compiling rocSPARSE from source.
+
+### Changed
+
+* Switch to defaulting to C++17 when building rocSPARSE from source. Previously rocSPARSE was using C++14 by default.
 
 ### Optimized
 
 * Reduced the number of template instantiations in the library to further reduce the shared library binary size and improve compile times
+* Allow SpGEMM routines to use more shared memory when available. This can speed up performance for matrices with a large number of intermediate products.
+* Use of the `rocsparse_spmv_alg_csr_adaptive` or `rocsparse_spmv_alg_csr_default` algorithms in `rocsparse_spmv` to perform transposed sparse matrix multiplication (`C=alpha*A^T*x+beta*y`) resulted in unnecessary analysis on A and needless slowdown during the analysis phase. This has been fixed by skipping the analysis when performing the transposed sparse matrix multiplication.
 * Improved the user documentation
+
+### Resolved issues
+* Fixed a memory access fault in the `rocsparse_Xbsrilu0` routines.
+* Fixed failures that could occur in `rocsparse_Xbsrsm_solve` or `rocsparse_spsm` with BSR format when using host pointer mode.
+* Fixed ASAN compilation failures
 
 ### Upcoming changes
 
 * Deprecated `rocsparse_spmv_alg_csr_stream` algorithm. Users should use the `rocsparse_spmv_alg_csr_rowsplit` algorithm going forward.
+* Deprecated the `rocsparse_itilu0_alg_sync_split_fusion` algorithm. Users should use one of `rocsparse_itilu0_alg_async_inplace`, `rocsparse_itilu0_alg_async_split`, or `rocsparse_itilu0_alg_sync_split` going forward.
 
 ## rocSPARSE 3.4.0 for ROCm 6.4.0
 
@@ -81,7 +94,7 @@ Documentation for rocSPARSE is available at
 
 * Fixed the `csrmm` merge path algorithm so that diagonal is clamped to the correct range.
 * Fixed a race condition in `bsrgemm` that could on rare occasions cause incorrect results.
-* Fixed an issue in `hyb2csr` where the CSR row pointer array was not being properly filled when `n=0`, `coo_nnz=0`, or `ell_nnz=0`. 
+* Fixed an issue in `hyb2csr` where the CSR row pointer array was not being properly filled when `n=0`, `coo_nnz=0`, or `ell_nnz=0`.
 * Fixed scaling in `rocsparse_Xhybmv` when only performing `y=beta*y`, for example, where `alpha==0` in `y=alpha*Ax+beta*y`.
 * Fixed `rocsparse_Xgemmi` failures when the y grid dimension is too large. This occured when n >= 65536.
 
