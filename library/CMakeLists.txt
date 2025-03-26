@@ -73,7 +73,9 @@ set(HEADER_FILES
   internal/precond/hipsparse_gtsv_interleaved_batch.h
   internal/precond/hipsparse_gtsv_nopivot.h
   internal/precond/hipsparse_gtsv_strided_batch.h
-  internal/precond/hipsparse_gtsv.h)
+  internal/precond/hipsparse_gtsv.h
+  # Reorder
+  internal/reorder/hipsparse_csrcolor.h)
 
 foreach( file_i ${HEADER_FILES})
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
