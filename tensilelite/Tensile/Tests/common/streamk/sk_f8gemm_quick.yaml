@@ -1,28 +1,31 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
 
 GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: False
   KernelTime: False
-  DataInitTypeA: 21
-  DataInitTypeB: 21
-  DataInitTypeC: 21
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  DataInitTypeBias: 21
+  DataInitTypeBias: 3
   DataInitTypeScaleA: 2
   DataInitTypeScaleB: 2
   DataInitTypeScaleC: 1
   DataInitTypeScaleD: 2
   DataInitTypeScaleAlphaVec: 21
   MaxWorkspaceSize: 134217728
+  DeviceLDS: 163840
+  MaxLDS: 163840
+  PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
-  - # F8NSS NN
+  - # F8SS NN
     -
       OperationType: GEMM
-      DataType: F8N
+      DataType: F8
       # DataTypeA: F8
       # DataTypeB: h
       DestDataType: S
@@ -48,7 +51,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -57,8 +60,9 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
@@ -96,10 +100,10 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # F8NSS NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # F8SS NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
     -
       OperationType: GEMM
-      DataType: F8N
+      DataType: F8
       # DataTypeA: F8
       # DataTypeB: h
       DestDataType: S
@@ -125,7 +129,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -134,12 +138,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -173,10 +179,10 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # F8NHS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # F8HS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
     -
       OperationType: GEMM
-      DataType: F8N
+      DataType: F8
       # DataTypeA: F8
       # DataTypeB: h
       DestDataType: h
@@ -202,7 +208,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -211,12 +217,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -226,6 +234,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - UseSgprForGRO: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadB: [1]
@@ -250,13 +259,13 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # F8NF8NS TT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # F8F8S TT ScaleAB=Vector ScaleCD ScaleAlpha Bias
     - # ProblemType
       OperationType: GEMM
-      DataType: F8N
+      DataType: F8
       # DataTypeA: F8
       # DataTypeB: h
-      DestDataType: F8N
+      DestDataType: F8
       ComputeDataType: S
       HighPrecisionAccumulate: True
       TransposeA: 1
@@ -279,7 +288,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -288,12 +297,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -327,10 +338,10 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # B8NSS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # B8SS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
     -
       OperationType: GEMM
-      DataType: B8N
+      DataType: B8
       # DataTypeA: F8
       # DataTypeB: h
       DestDataType: S
@@ -356,7 +367,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -365,12 +376,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -380,6 +393,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - UseSgprForGRO: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadB: [1]
@@ -404,11 +418,11 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # F8NH_F8NSS NN
+  - # F8H_F8SS NN
     -
       OperationType: GEMM
-      DataType: F8N
-      DataTypeA: F8N
+      DataType: F8
+      DataTypeA: F8
       DataTypeB: h
       DestDataType: S
       ComputeDataType: S
@@ -433,7 +447,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -442,12 +456,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -481,13 +497,13 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # F8NF8NS_SR NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # F8F8S_SR NT ScaleAB=Vector ScaleCD ScaleAlpha Bias
     -
       OperationType: GEMM
-      DataType: F8N
+      DataType: F8
       # DataTypeA: F8
       # DataTypeB: h
-      DestDataType: F8N
+      DestDataType: F8
       ComputeDataType: S
       HighPrecisionAccumulate: True
       TransposeA: 0
@@ -511,7 +527,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -520,12 +536,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -559,10 +577,10 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
 
-  - # B8F8NBS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
+  - # B8F8BS TN ScaleAB=Vector ScaleCD ScaleAlpha Bias
     - # ProblemType
       OperationType: GEMM
-      DataType: B8F8N
+      DataType: B8F8
       # DataTypeA: F8
       # DataTypeB: h
       DestDataType: b
@@ -588,7 +606,7 @@ BenchmarkProblems:
         - 1LDSBuffer: [-1]
         # - AssertFree0ElementMultiple: [1]
         - ClusterLocalRead: [1]
-        - DepthU: [ 64 ]
+        - DepthU: [ 128 ]
         - ExpandPointerSwap: [1]
         - GlobalReadPerMfma: [1]
         - GlobalReadVectorWidthA: [4]
@@ -597,12 +615,14 @@ BenchmarkProblems:
         # - GlobalSplitUAlgorithm: ["MultipleBuffer"]
         - InnerUnroll: [1]
         - MatrixInstruction:
-          # - [16,16,32, 1, 1, 1,1, 2,2]  # 16x16
-          - [16,16,32, 1, 1, 2,2, 2,2]  # 16x16
+          - [16,16,32, 1, 1, 2,2, 2,2]
+          - [16,16,128, 1, 1, 2,2, 2,2]
+          - [32,32,64,1, 1, 1,1, 2,2]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
+        - LocalReadVectorWidth: [8]
         - LocalWritePerMfma: [-1]
         - NumElementsPerBatchStore: [0]
         - PrefetchGlobalRead: [2]
@@ -612,6 +632,7 @@ BenchmarkProblems:
         - StorePriorityOpt: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
+        - UseSgprForGRO: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadB: [1]
