@@ -119,7 +119,12 @@ set(HEADER_FILES
   internal/generic/hipsparse_spmv.h
   internal/generic/hipsparse_spsm.h
   internal/generic/hipsparse_spsv.h
-  internal/generic/hipsparse_spvv.h)
+  internal/generic/hipsparse_spvv.h
+  # Auxiliary
+  hipsparse-types.h
+  hipsparse-auxiliary.h
+  hipsparse-generic-types.h
+  hipsparse-generic-auxiliary.h)
 
 foreach( file_i ${HEADER_FILES})
   configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/${file_i}"
