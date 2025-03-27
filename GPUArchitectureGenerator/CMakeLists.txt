@@ -26,6 +26,16 @@
 
 # ArchitectureGenerator
 
+set(ROCROLLER_ASSEMBLER_PATH "" CACHE STRING "Path to assembler (defaults to ROCM_PATH/bin/amdclang++)")
+
+if ("${ROCROLLER_ASSEMBLER_PATH}" STREQUAL "")
+    if("${ROCM_PATH}" STREQUAL "")
+        set(ROCROLLER_ASSEMBLER_PATH "/opt/rocm/bin/amdclang++")
+    else()
+        set(ROCROLLER_ASSEMBLER_PATH "${ROCM_PATH}/bin/amdclang++")
+    endif()
+endif()
+
 # Not visible to library users, so not necessary to use system packages
 rocroller_add_dependency(
     isa_spec_manager HASH 1c6fcc8072c7a94ceedb734cf06fd8a08487c4b3
@@ -120,12 +130,18 @@ if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
         OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
         COMMAND
             GPUArchitectureGenerator
-            ${ARCH_FILE_DIR}/split_yamls/GPUArchitecture_def.yaml -Y --split --xml_dir
+            ${ARCH_FILE_DIR}/split_yamls/GPUArchitecture_def.yaml
+            ${ROCROLLER_ASSEMBLER_PATH}
+            -Y
+            --split
+            --xml_dir
             ${mrisa_xml_SOURCE_DIR}
         COMMAND
             GPUArchitectureGenerator
-            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml -Y --xml_dir
-            ${mrisa_xml_SOURCE_DIR}
+            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+            ${ROCROLLER_ASSEMBLER_PATH}
+            -Y
+            --xml_dir ${mrisa_xml_SOURCE_DIR}
         DEPENDS ${INTERNAL_MRISA_TARGETS}
     )
 
@@ -141,7 +157,9 @@ else()
         OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
         COMMAND
             GPUArchitectureGenerator
-            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml -Y ${YAML_ARGS}
+            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+            ${ROCROLLER_ASSEMBLER_PATH}
+            -Y ${YAML_ARGS}
         DEPENDS "${YAML_FILES}"
     )
 
@@ -152,6 +170,7 @@ add_custom_command(
     COMMAND
         GPUArchitectureGenerator
         ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
+        ${ROCROLLER_ASSEMBLER_PATH}
         --yaml ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
     DEPENDS ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
 )

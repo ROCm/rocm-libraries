@@ -128,6 +128,11 @@ namespace rocRoller
         }
 
         std::string assemblerPath = Settings::getInstance()->get(Settings::SubprocessAssemblerPath);
+        if(assemblerPath.empty())
+        {
+            std::string rocmPath = Settings::getInstance()->get(Settings::ROCMPath);
+            assemblerPath        = rocmPath + "/bin/amdclang++";
+        }
 
         {
 

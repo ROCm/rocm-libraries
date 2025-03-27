@@ -242,14 +242,6 @@ configure_file(
 add_subdirectory(GPUArchitectureGenerator)
 add_subdirectory(lib)
 
-if(PROJECT_IS_TOP_LEVEL)
-    rocm_package_add_deb_dependencies(
-        COMPONENT devel DEPENDS liboost-container1.74-dev
-    )
-    rocm_package_add_rpm_dependencies(
-        COMPONENT devel DEPENDS liboost-container1.74-devel
-    )
-endif()
 
 if(BUILD_CLIENTS OR BUILD_TESTING)
     add_subdirectory(test/common)

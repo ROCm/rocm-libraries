@@ -50,6 +50,7 @@ set(_rocroller_all_local_deps
 )
 # Dependencies where we never look for a local version
 set(_rocroller_all_remote_deps
+    boost
     fmt
     yaml-cpp
     isa_spec_manager
@@ -352,6 +353,23 @@ function(_fetch_mrisa_xml VERSION HASH)
     )
 endfunction()
 set(mrisa_xml_EXPORT_VARS mrisa_xml_SOURCE_DIR)
+
+function(_fetch_boost VERSION HASH)
+    _determine_git_tag("boost-" "boost-1.81.0")
+    FetchContent_Declare(
+        boost
+        URL https://github.com/boostorg/boost/releases/download/${GIT_TAG}/${GIT_TAG}.tar.gz
+    )
+    _save_var(BUILD_TESTING)
+    set(BUILD_TESTING OFF)
+    _save_var(BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_MakeAvailable(boost)
+    _restore_var(BUILD_SHARED_LIBS)
+    _restore_var(BUILD_TESTING)
+    _exclude_from_all(${boost_SOURCE_DIR})
+    _mark_targets_as_system(${boost_SOURCE_DIR})
+endfunction()
 
 function(_fetch_cmrc VERSION HASH)
     _determine_git_tag("" master)
