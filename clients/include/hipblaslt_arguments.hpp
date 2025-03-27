@@ -137,6 +137,7 @@ struct Arguments
     float                     activation_arg2; // upperbound when activation type is relu
 
     hipDataType              bias_type;
+    hipDataType              aux_type;
     hipblaslt_bias_source    bias_source;
     bool                     bias_vector;
     hipblaslt_scaling_format scaleA;
@@ -151,7 +152,6 @@ struct Arguments
     bool                     c_equal_d;
     bool                     HMM;
     bool                     use_e;
-    hipDataType              aux_type;
     bool                     gradient;
     bool                     norm_check_assert;
     bool                     swizzle_a;
@@ -244,6 +244,7 @@ struct Arguments
     OPER(activation_arg1) SEP        \
     OPER(activation_arg2) SEP        \
     OPER(bias_type) SEP              \
+    OPER(aux_type) SEP               \
     OPER(bias_source) SEP            \
     OPER(bias_vector) SEP            \
     OPER(scaleA) SEP                 \
@@ -258,7 +259,6 @@ struct Arguments
     OPER(c_equal_d) SEP              \
     OPER(HMM) SEP                    \
     OPER(use_e) SEP                  \
-    OPER(aux_type) SEP               \
     OPER(gradient) SEP               \
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
