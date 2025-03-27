@@ -224,7 +224,6 @@ namespace TensileLite
                             << "grid size: " << g << ", runtime: " << runtime
                             << ", iters_per_cta: " << iters_per_cta << ", fixup_peers: "
                             << fixup_peers
-                            // << ", cache_penalty: " << cache_penalty
                             << ", m: " << m << ", n: " << n << ", k: " << k << ", a: " << a
                             << ", b: " << b << ", c: " << c << ", d: " << d << std::endl;
 
@@ -893,7 +892,7 @@ namespace TensileLite
         {
             uint32_t magicShift;
             args.template append<uint32_t>("magicNumberProblemNumGroupTiles0",
-                                     magicNumber(2, problemNumGroupTiles.x, &magicShift));
+                                           magicNumber(2, problemNumGroupTiles.x, &magicShift));
             args.template append<uint32_t>("magicShiftProblemNumGroupTiles0", magicShift);
         }
 
@@ -919,9 +918,9 @@ namespace TensileLite
             magicNumProblemNumGroupTiles0By1
                 = magicNumber(2, numGroupTiles0x1, &magicShiftProblemNumGroupTiles0By1);
             args.template append<uint32_t>("magicNumProblemNumGroupTiles0By1",
-                                     magicNumProblemNumGroupTiles0By1);
+                                           magicNumProblemNumGroupTiles0By1);
             args.template append<uint32_t>("magicShiftProblemNumGroupTiles0By1",
-                                     magicShiftProblemNumGroupTiles0By1);
+                                           magicShiftProblemNumGroupTiles0By1);
 
             args.template append<uint32_t>("totalIters", totalIters);
             if(sizeMapping.streamK == 1) // Basic SK
@@ -1274,8 +1273,8 @@ namespace TensileLite
         if(gsu > 0)
             rv.numWorkGroups.y *= gsu;
 
-        size_t skGrid    = 0;
-        auto   tiles     = problem.getNumTiles(sizeMapping);
+        size_t skGrid = 0;
+        auto   tiles  = problem.getNumTiles(sizeMapping);
         if(sizeMapping.streamK != 0 || sizeMapping.persistentKernel != 0)
         {
             AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
@@ -1326,7 +1325,8 @@ namespace TensileLite
             kernelArgs<T_Debug, false>(
                 1, 0, rv.args, getNumWorkGroups(rv), &hardware, problem.getParams());
         }
-        singleCallArgs<T_Debug, true>(problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args);
+        singleCallArgs<T_Debug, true>(
+            problem, inputs, 0, &hardware, problemNumGroupTiles, rv.numWorkGroups, rv.args);
 
         if(sizeMapping.globalAccumulation == 3)
         {
@@ -1457,8 +1457,13 @@ namespace TensileLite
             for(int idx = 0; idx < problems.size(); idx++)
             {
                 auto problem = problems[idx];
-                singleCallArgs<T_Debug, false>(
-                    problem, inputs.grouped[idx], workspaceOffsetInByte, nullptr, rv.numWorkGroups, rv.numWorkGroups, h_args);
+                singleCallArgs<T_Debug, false>(problem,
+                                               inputs.grouped[idx],
+                                               workspaceOffsetInByte,
+                                               nullptr,
+                                               rv.numWorkGroups,
+                                               rv.numWorkGroups,
+                                               h_args);
 
                 if(sizeMapping.globalAccumulation == 3)
                 {
@@ -3186,8 +3191,8 @@ namespace TensileLite
         // Architecture dependent.
         else if(pAMDGPU->skDynamicGrid == 3)
         {
-            size_t x = 1;
-            size_t y = 1;
+            size_t x     = 1;
+            size_t y     = 1;
             size_t batch = 1;
             for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
             {
@@ -3211,6 +3216,30 @@ namespace TensileLite
                                                      batch,
                                                      1,
                                                      cuCount);
+        }
+
+        // Fix Stream-K algorithm to function like a Data-parallel schedule
+        // where grid size is equal to the number of output tiles.
+        else if(pAMDGPU->skDynamicGrid == 4)
+        {
+            size_t x     = 1;
+            size_t y     = 1;
+            size_t batch = 1;
+            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
+            {
+                x *= problem.freeSizeA(i);
+            }
+            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
+            {
+                y *= problem.freeSizeB(i);
+            }
+            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
+            {
+                batch *= problem.batchSize(i);
+            }
+
+            return streamk::number_of_output_tiles(
+                sizeMapping.macroTile.x, sizeMapping.macroTile.y, x, y, batch);
         }
 
         // Limit the CUs Stream-K is launched on either max or the specified,
