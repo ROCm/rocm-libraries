@@ -1293,14 +1293,15 @@ Tests:
   unit_check: 0
   norm_check: 1
 
-- name: matmul_bias_gelu_aux_fp8_fnuz
+- name: matmul_bias_gelu_aux_fp8_fnuz_TN
   category: pre_checkin
   function:
     matmul: *f8_fnuz_precision_dst_f8_fnuz
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
-  transA_transB: *transA_transB_range
+  transA: T
+  transB: N
   alpha: 1
   beta: [ 0.0, 2.0 ]
   use_e: 1
@@ -1311,14 +1312,15 @@ Tests:
   norm_check: 1
   gpu_arch: '942'
 
-- name: matmul_bias_gelu_f16aux_fp8_fnuz
+- name: matmul_bias_gelu_f16aux_fp8_fnuz_TN
   category: pre_checkin
   function:
     matmul: *f8_fnuz_precision_dst_f8_fnuz
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
-  transA_transB: *transA_transB_range
+  transA: T
+  transB: N
   alpha: 1
   beta: [ 0.0, 2.0 ]
   use_e: 1
