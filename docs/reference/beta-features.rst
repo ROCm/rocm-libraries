@@ -23,6 +23,8 @@ rocblas_gemm_ex_get_solutions + batched, strided_batched
 .. doxygenfunction:: rocblas_gemm_batched_ex_get_solutions_by_type
 .. doxygenfunction:: rocblas_gemm_strided_batched_ex_get_solutions
 
+.. _rocblas_gemm_ex3:
+
 rocblas_gemm_ex3 + batched, strided_batched
 =========================================================
 

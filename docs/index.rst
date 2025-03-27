@@ -41,6 +41,7 @@ The rocBLAS public repository is located at `<https://github.com/ROCm/rocBLAS>`_
 
   .. grid-item-card:: Reference
 
+    * :ref:`data-types-support`
     * :ref:`api-reference-guide`
 
 To contribute to the documentation, see `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
