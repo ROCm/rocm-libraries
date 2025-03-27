@@ -155,6 +155,12 @@ void rocshmem_env_config_init(void) {
   if (NULL != env_value) {
     rocshmem_env_config.ro_disable_ipc = atoi(env_value);
   }
+
+  env_value = getenv("ROCSHMEM_RO_PROGRESS_DELAY");
+  if (nullptr != env_value) {
+    rocshmem_env_config.ro_progress_delay = atoi(env_value);
+  }
+
 }
 
 }  // namespace rocshmem

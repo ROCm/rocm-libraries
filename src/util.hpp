@@ -271,6 +271,7 @@ uint64_t wallClk_freq_mhz();
 
 struct rocshmem_env_config_t {
   int ro_disable_ipc = 0;
+  int ro_progress_delay = 3;
 };
 extern struct rocshmem_env_config_t rocshmem_env_config;
 

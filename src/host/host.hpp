@@ -341,7 +341,7 @@ class HostInterface {
   /**
    * @brief Max number of contexts for the application
    */
-  int max_num_ctxs_{40};
+  int max_num_ctxs_{1};
 
   /**
    * @brief Pool of HostContexWindowInfos
