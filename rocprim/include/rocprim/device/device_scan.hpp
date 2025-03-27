@@ -48,6 +48,7 @@ namespace detail
 
 // Single kernel scan (performs scan on one thread block only)
 template<bool Exclusive,
+         bool UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -82,11 +83,11 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  
     block_load_type().load(input, values, input_size, *(input), storage.load);
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-    single_scan_block_scan<Exclusive, block_scan_type>(values, // input
-                                                       values, // output
-                                                       initial_value,
-                                                       storage.scan,
-                                                       scan_op);
+    single_scan_block_scan<Exclusive, UseInitialValue, block_scan_type>(values, // input
+                                                                        values, // output
+                                                                        initial_value,
+                                                                        storage.scan,
+                                                                        scan_op);
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
     // Save values into output array
@@ -94,6 +95,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  
 }
 
 template<bool Exclusive,
+         bool UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -107,17 +109,19 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block
                        OutputIterator      output,
                        BinaryFunction      scan_op)
 {
-    single_scan_kernel_impl<Exclusive, Config>(input,
-                                               size,
-                                               static_cast<AccType>(get_input_value(initial_value)),
-                                               output,
-                                               scan_op);
+    single_scan_kernel_impl<Exclusive, UseInitialValue, Config>(
+        input,
+        size,
+        static_cast<AccType>(get_input_value(initial_value)),
+        output,
+        scan_op);
 }
 
 // Single pass (look-back kernels)
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
+         bool                      UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -125,21 +129,20 @@ template<lookback_scan_determinism Determinism,
          class InitValueType,
          class AccType,
          class LookBackScanState>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    lookback_scan_kernel(InputIterator       input,
-                         OutputIterator      output,
-                         const size_t        size,
-                         const InitValueType initial_value,
-                         BinaryFunction      scan_op,
-                         LookBackScanState   lookback_scan_state,
-                         const unsigned int  number_of_blocks,
-                         AccType*            previous_last_element = nullptr,
-                         AccType*            new_last_element      = nullptr,
-                         bool                override_first_value  = false,
-                         bool                save_last_value       = false)
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    lookback_scan_kernel(InputIterator      input,
+                         OutputIterator     output,
+                         const size_t       size,
+                         InitValueType      initial_value,
+                         BinaryFunction     scan_op,
+                         LookBackScanState  lookback_scan_state,
+                         const unsigned int number_of_blocks,
+                         AccType*           previous_last_element = nullptr,
+                         AccType*           new_last_element      = nullptr,
+                         bool               override_first_value  = false,
+                         bool               save_last_value       = false)
 {
-    lookback_scan_kernel_impl<Determinism, Exclusive, Config>(
+    lookback_scan_kernel_impl<Determinism, Exclusive, UseInitialValue, Config>(
         input,
         output,
         size,
@@ -155,6 +158,7 @@ ROCPRIM_KERNEL
 
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
+         bool                      UseInitialValue,
          class Config,
          class InputIterator,
          class OutputIterator,
@@ -317,6 +321,7 @@ inline auto scan_impl(void*               temporary_storage,
                 {
                     lookback_scan_kernel<Determinism,
                                          Exclusive,
+                                         UseInitialValue,
                                          config,
                                          InputIterator,
                                          OutputIterator,
@@ -362,6 +367,7 @@ inline auto scan_impl(void*               temporary_storage,
         }
 
         single_scan_kernel<Exclusive, // flag for exclusive scan operation
+                           UseInitialValue,
                            config,
                            InputIterator,
                            OutputIterator,
@@ -508,6 +514,7 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
     // input_type() is a dummy initial value (not used)
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              false,
+                             false,
                              Config,
                              InputIterator,
                              OutputIterator,
@@ -518,6 +525,163 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
                                       input,
                                       output,
                                       AccType{},
+                                      size,
+                                      scan_op,
+                                      stream,
+                                      debug_synchronous);
+}
+
+/// \brief Seeded parallel inclusive scan primitive for device level.
+///
+/// inclusive_scan function performs a device-wide inclusive prefix scan operation
+/// using binary \p scan_op operator.
+///
+/// \par Overview
+/// * Supports non-commutative scan operators. However, a scan operator should be
+/// associative.
+/// * When used with non-associative functions (e.g. floating point arithmetic operations):
+///    - the results may be non-deterministic and/or vary in precision,
+///    - and bit-wise reproducibility is not guaranteed, that is, results from multiple runs
+///      using the same input values on the same device may not be bit-wise identical.
+///   If deterministic behavior is required, Use \link deterministic_inclusive_scan()
+///   rocprim::deterministic_inclusive_scan \endlink instead.
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * By default, the input type is used for accumulation. A custom type
+/// can be specified using the \p AccType type parameter, see the example below.
+///
+/// \tparam Config [optional] Configuration of the primitive, must be `default_config` or `scan_config`.
+/// \tparam InputIterator random-access iterator type of the input range. Must meet the
+/// requirements of a C++ InputIterator concept. It can be a simple pointer type.
+/// \tparam OutputIterator random-access iterator type of the output range. Must meet the
+/// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam InitValueType type of the initial value.
+/// \tparam BinaryFunction type of binary function used for scan. Default type
+/// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
+/// \tparam AccType accumulator type used to propagate the scanned values. Default type
+/// is value type of the input iterator.
+///
+/// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the scan operation.
+/// \param [in,out] storage_size reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input iterator to the first element in the range to scan.
+/// \param [out] output iterator to the first element in the output range. It can be
+/// same as \p input.
+/// \param [in] initial_value initial value to start the scan.
+/// A rocpim::future_value may be passed to use a value that will be later computed.
+/// \param [in] size number of element in the input range.
+/// \param [in] scan_op binary operation function object that will be used for scan.
+/// The signature of the function should be equivalent to the following:
+/// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the objects passed to it.
+/// Default is BinaryFunction().
+/// \param [in] stream [optional] HIP stream object. Default is \p 0 (default stream).
+/// \param [in] debug_synchronous [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. Default value is \p false.
+///
+/// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
+/// type \p hipError_t.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level inclusive sum operation is performed on an array of
+/// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s).
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;    // e.g., 8
+/// short * input;        // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output;         // empty array of 8 elements
+/// int initial_value;    // e.g. 10
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, initial_value, input_size, rocprim::plus<int>()
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform scan
+/// rocprim::inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, initial_value, input_size, rocprim::plus<int>()
+/// );
+/// // output: [11, 13, 16, 20, 25, 31, 38, 46]
+/// \endcode
+///
+/// The same example as above, but now a custom accumulator type is specified.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// size_t input_size;
+/// short * input;
+/// int * output;
+/// int initial_value;
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+///
+/// rocprim::inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, output, initial_value, input_size, rocprim::plus<int>()
+/// );
+///
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // Use type parameter to set custom accumulator type
+/// rocprim::inclusive_scan<rocprim::default_config,
+///                         short*,
+///                         int*,
+///                         rocprim::plus<int>,
+///                         int>(temporary_storage_ptr,
+///                              temporary_storage_size_bytes,
+///                              input_iterator,
+///                              output,
+///                              initial_value
+///                              input_size,
+///                              rocprim::plus<int>());
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
+         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+inline hipError_t inclusive_scan(void*               temporary_storage,
+                                 size_t&             storage_size,
+                                 InputIterator       input,
+                                 OutputIterator      output,
+                                 const InitValueType initial_value,
+                                 const size_t        size,
+                                 BinaryFunction      scan_op           = BinaryFunction(),
+                                 const hipStream_t   stream            = 0,
+                                 bool                debug_synchronous = false)
+{
+    // input_type() is a dummy initial value (not used)
+    return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
+                             false,
+                             true,
+                             Config,
+                             InputIterator,
+                             OutputIterator,
+                             AccType,
+                             BinaryFunction,
+                             AccType>(temporary_storage,
+                                      storage_size,
+                                      input,
+                                      output,
+                                      initial_value,
                                       size,
                                       scan_op,
                                       stream,
@@ -548,6 +712,7 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 {
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              false,
+                             false,
                              Config,
                              InputIterator,
                              OutputIterator,
@@ -558,6 +723,49 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
                                       input,
                                       output,
                                       AccType{},
+                                      size,
+                                      scan_op,
+                                      stream,
+                                      debug_synchronous);
+}
+
+/// \brief Seeded bitwise-reproducible parallel inclusive scan primitive for device level.
+///
+/// This function behaves the same as <tt>inclusive_scan()</tt>, except that unlike
+/// <tt>inclusive_scan()</tt>, it provides run-to-run deterministic behavior for
+/// non-associative scan operators like floating point arithmetic operations.
+/// Refer to the documentation for \link inclusive_scan() rocprim::inclusive_scan \endlink
+/// for a detailed description of this function.
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
+         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+inline hipError_t deterministic_inclusive_scan(void*             temporary_storage,
+                                               size_t&           storage_size,
+                                               InputIterator     input,
+                                               OutputIterator    output,
+                                               InitValueType     initial_value,
+                                               const size_t      size,
+                                               BinaryFunction    scan_op = BinaryFunction(),
+                                               const hipStream_t stream  = 0,
+                                               bool              debug_synchronous = false)
+{
+    return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
+                             false,
+                             true,
+                             Config,
+                             InputIterator,
+                             OutputIterator,
+                             AccType,
+                             BinaryFunction,
+                             AccType>(temporary_storage,
+                                      storage_size,
+                                      input,
+                                      output,
+                                      initial_value,
                                       size,
                                       scan_op,
                                       stream,
@@ -674,6 +882,7 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
 {
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              true,
+                             true,
                              Config,
                              InputIterator,
                              OutputIterator,
@@ -715,6 +924,7 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
                                                bool                debug_synchronous = false)
 {
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
+                             true,
                              true,
                              Config,
                              InputIterator,

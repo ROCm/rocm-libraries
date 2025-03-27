@@ -98,7 +98,8 @@ template<class InputType,
          bool UseIdentityIteratorIfSupported = false,
          typename ConfigHelper               = default_config_helper,
          bool UseGraphs                      = false,
-         bool Deterministic                  = false>
+         bool Deterministic                  = false,
+         bool UseInitialValue                = false>
 struct DeviceScanParams
 {
     using input_type                            = InputType;
@@ -108,6 +109,7 @@ struct DeviceScanParams
     using config_helper                         = ConfigHelper;
     static constexpr bool use_graphs            = UseGraphs;
     static constexpr bool deterministic         = Deterministic;
+    static constexpr bool use_initial_value     = UseInitialValue;
 };
 
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
@@ -178,6 +180,7 @@ public:
     using config_helper                         = typename Params::config_helper;
     bool use_graphs                             = Params::use_graphs;
     static constexpr bool deterministic                          = Params::deterministic;
+    bool                  use_initial_value                      = Params::use_initial_value;
 };
 
 using RocprimDeviceScanTestsParams = ::testing::Types<
@@ -247,7 +250,72 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5>>,
     DeviceScanParams<test_utils::custom_test_array_type<int, 10>>,
     // With graphs
-    DeviceScanParams<int, int, rocprim::plus<int>, false, default_config_helper, true>>;
+    DeviceScanParams<int, int, rocprim::plus<int>, false, default_config_helper, true>,
+    // With initial values
+    DeviceScanParams<int,
+                     int,
+                     rocprim::plus<int>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<int,
+                     int,
+                     rocprim::maximum<int>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<int,
+                     int,
+                     rocprim::minimum<int>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<float,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<rocprim::half,
+                     rocprim::half,
+                     rocprim::minimum<rocprim::half>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<rocprim::half,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<rocprim::bfloat16,
+                     rocprim::bfloat16,
+                     rocprim::minimum<rocprim::bfloat16>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>,
+    DeviceScanParams<rocprim::bfloat16,
+                     float,
+                     rocprim::plus<float>,
+                     false,
+                     size_limit_config_helper<524288>,
+                     false,
+                     true,
+                     true>>;
 
 // use float for accumulation of bfloat16 and half inputs if operator is plus
 template <typename input_type, typename input_op_type> struct accum_type {
@@ -406,10 +474,26 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            test_utils::host_inclusive_scan(
-                input.begin(), input.end(),
-                expected.begin(), scan_op
-            );
+            acc_type       initial_value;
+            if(TestFixture::use_initial_value)
+            {
+                initial_value = test_utils::get_random_value<acc_type>(1, 10, seed_value);
+                test_utils::host_inclusive_scan(input.begin(),
+                                                input.end(),
+                                                expected.begin(),
+                                                scan_op,
+                                                initial_value);
+            }
+            else
+            {
+                test_utils::host_inclusive_scan(input.begin(),
+                                                input.end(),
+                                                expected.begin(),
+                                                scan_op);
+            }
+            SCOPED_TRACE(TestFixture::use_initial_value
+                             ? (testing::Message() << "with initial_value = " << initial_value)
+                             : (testing::Message() << "without initial_value"));
 
             auto input_iterator
                 = rocprim::make_transform_iterator(d_input.get(),
@@ -417,15 +501,31 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                nullptr,
-                temp_storage_size_bytes,
-                input_iterator,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                input.size(),
-                scan_op,
-                stream,
-                TestFixture::debug_synchronous)));
+            if(TestFixture::use_initial_value)
+            {
+                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
+                    nullptr,
+                    temp_storage_size_bytes,
+                    input_iterator,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                    initial_value,
+                    input.size(),
+                    scan_op,
+                    stream,
+                    TestFixture::debug_synchronous)));
+            }
+            else
+            {
+                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
+                    nullptr,
+                    temp_storage_size_bytes,
+                    input_iterator,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                    input.size(),
+                    scan_op,
+                    stream,
+                    TestFixture::debug_synchronous)));
+            }
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -440,15 +540,31 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             }
 
             // Run
-            HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
-                d_temp_storage.get(),
-                temp_storage_size_bytes,
-                input_iterator,
-                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
-                input.size(),
-                scan_op,
-                stream,
-                TestFixture::debug_synchronous)));
+            if(TestFixture::use_initial_value)
+            {
+                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
+                    d_temp_storage.get(),
+                    temp_storage_size_bytes,
+                    input_iterator,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                    initial_value,
+                    input.size(),
+                    scan_op,
+                    stream,
+                    TestFixture::debug_synchronous)));
+            }
+            else
+            {
+                HIP_CHECK((invoke_inclusive_scan<deterministic, Config>(
+                    d_temp_storage.get(),
+                    temp_storage_size_bytes,
+                    input_iterator,
+                    test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output.get()),
+                    input.size(),
+                    scan_op,
+                    stream,
+                    TestFixture::debug_synchronous)));
+            }
 
             if(TestFixture::use_graphs)
             {
@@ -983,7 +1099,7 @@ public:
     // clang-format on
 };
 
-template<bool UseGraphs = false>
+template<bool UseGraphs = false, bool UseInitialValue = false>
 void testLargeIndicesInclusiveScan()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -1022,15 +1138,32 @@ void testLargeIndicesInclusiveScan()
             OutputIterator output_it{d_output.get(), size - 1};
 
             // Get temporary array size
+            size_t initial_value = 0;
             size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::inclusive_scan(nullptr,
-                                              temp_storage_size_bytes,
-                                              input_begin,
-                                              output_it,
-                                              size,
-                                              ::rocprim::plus<T>(),
-                                              stream,
-                                              debug_synchronous));
+            if constexpr(UseInitialValue)
+            {
+                initial_value = test_utils::get_random_value<size_t>(0, 10000, seed_value);
+                HIP_CHECK(rocprim::inclusive_scan(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_begin,
+                                                  output_it,
+                                                  initial_value,
+                                                  size,
+                                                  ::rocprim::plus<T>(),
+                                                  stream,
+                                                  debug_synchronous));
+            }
+            else
+            {
+                HIP_CHECK(rocprim::inclusive_scan(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_begin,
+                                                  output_it,
+                                                  size,
+                                                  ::rocprim::plus<T>(),
+                                                  stream,
+                                                  debug_synchronous));
+            }
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -1045,14 +1178,32 @@ void testLargeIndicesInclusiveScan()
             }
 
             // Run
-            HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),
-                                              temp_storage_size_bytes,
-                                              input_begin,
-                                              output_it,
-                                              size,
-                                              ::rocprim::plus<T>(),
-                                              stream,
-                                              debug_synchronous));
+            if constexpr(UseInitialValue)
+            {
+                HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_begin,
+                                                  output_it,
+                                                  initial_value,
+                                                  size,
+                                                  ::rocprim::plus<T>(),
+                                                  stream,
+                                                  debug_synchronous));
+            }
+            else
+            {
+                HIP_CHECK(rocprim::inclusive_scan(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_begin,
+                                                  output_it,
+                                                  size,
+                                                  ::rocprim::plus<T>(),
+                                                  stream,
+                                                  debug_synchronous));
+            }
+            SCOPED_TRACE(UseInitialValue
+                             ? (testing::Message() << "with initial_value = " << initial_value)
+                             : (testing::Message() << "without initial_value"));
 
             if(UseGraphs)
             {
@@ -1069,8 +1220,10 @@ void testLargeIndicesInclusiveScan()
             // The division is not integer division but either (size) or (2n + size - 1) has to be even.
             const T multiplicand_1 = size;
             const T multiplicand_2 = 2 * (*input_begin) + size - 1;
-            const T expected_output = (multiplicand_1 % 2 == 0) ? multiplicand_1 / 2 * multiplicand_2
-                : multiplicand_1 * (multiplicand_2 / 2);
+            const T expected_output
+                = ((multiplicand_1 % 2 == 0) ? multiplicand_1 / 2 * multiplicand_2
+                                             : multiplicand_1 * (multiplicand_2 / 2))
+                  + initial_value;
 
             ASSERT_EQ(output, expected_output);
 
@@ -1095,6 +1248,16 @@ TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
     testLargeIndicesInclusiveScan<true>();
+}
+
+TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
+{
+    testLargeIndicesInclusiveScan<false, true>();
+}
+
+TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
+{
+    testLargeIndicesInclusiveScan<true, true>();
 }
 
 template<bool UseGraphs = false>

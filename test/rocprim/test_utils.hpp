@@ -46,15 +46,16 @@
 #include "test_utils_get_random_data.hpp"
 #include "test_utils_hipgraphs.hpp"
 
-#include <cstddef>
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/intrinsics/thread.hpp>
 #include <rocprim/types.hpp>
 
+#include <cstddef>
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <stdint.h>
 #include <type_traits>
 
@@ -253,13 +254,17 @@ OutputIt host_exclusive_segmented_scan_headflags(InputIt first, InputIt last, Fl
     return ++d_first;
 }
 
-template<class InputIt, class OutputIt, class BinaryOperation, class acc_type>
-OutputIt host_inclusive_scan_impl(InputIt first, InputIt last,
-                             OutputIt d_first, BinaryOperation op, acc_type)
+template<bool UseInitialValue = false,
+         class InputIt,
+         class OutputIt,
+         class BinaryOperation,
+         class acc_type>
+OutputIt host_inclusive_scan_impl(
+    InputIt first, InputIt last, OutputIt d_first, BinaryOperation op, acc_type initial_value)
 {
     if (first == last) return d_first;
 
-    acc_type sum = *first;
+    acc_type sum = UseInitialValue ? op(initial_value, *first) : static_cast<acc_type>(*first);
     *d_first = sum;
 
     while (++first != last) {
@@ -275,6 +280,13 @@ OutputIt host_inclusive_scan(InputIt first, InputIt last,
 {
     using acc_type = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIt>::value_type, BinaryOperation>;
     return host_inclusive_scan_impl(first, last, d_first, op, acc_type{});
+}
+
+template<class InputIt, class OutputIt, class BinaryOperation, class InitValueType>
+OutputIt host_inclusive_scan(
+    InputIt first, InputIt last, OutputIt d_first, BinaryOperation op, InitValueType initial_value)
+{
+    return host_inclusive_scan_impl<true>(first, last, d_first, op, initial_value);
 }
 
 template<class InputIt, class OutputIt, class T,

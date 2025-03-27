@@ -139,24 +139,43 @@ ROCPRIM_KERNEL
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    template <bool Exclusive,
-              class BlockScan,
-              class T,
-              unsigned int ItemsPerThread,
-              class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto
-        lookback_block_scan(T (&values)[ItemsPerThread],
-                            T /* initial_value */,
-                            T&                                reduction,
-                            typename BlockScan::storage_type& storage,
-                            BinaryFunction scan_op) -> typename std::enable_if<!Exclusive>::type
-    {
-        BlockScan().inclusive_scan(values, // input
-                                   values, // output
-                                   reduction,
-                                   storage,
-                                   scan_op);
-    }
+template<bool Exclusive,
+         class BlockScan,
+         class T,
+         unsigned int ItemsPerThread,
+         class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         T&                                reduction,
+                         typename BlockScan::storage_type& storage,
+                         BinaryFunction scan_op) -> typename std::enable_if<!Exclusive>::type
+{
+    BlockScan().inclusive_scan(values, // input
+                               values, // output
+                               reduction,
+                               storage,
+                               scan_op);
+}
+
+template<bool Exclusive,
+         class BlockScan,
+         class T,
+         unsigned int ItemsPerThread,
+         class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+auto lookback_block_scan(T (&values)[ItemsPerThread],
+                         T                                 initial_value,
+                         T&                                reduction,
+                         typename BlockScan::storage_type& storage,
+                         BinaryFunction scan_op) -> typename std::enable_if<!Exclusive>::type
+{
+    BlockScan().inclusive_scan(values, // input
+                               initial_value,
+                               values, // output
+                               reduction,
+                               storage,
+                               scan_op);
+}
 
     template <bool Exclusive,
               class BlockScan,
