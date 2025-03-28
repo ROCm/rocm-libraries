@@ -307,7 +307,7 @@ rocroller_add_dependency(libdivide VERSION 5.1)
 target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:libdivide>)
 
 rocroller_add_dependency(boost)
-target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:Boost::multi_index>)
+target_link_libraries(rocroller PUBLIC $<BUILD_INTERFACE:Boost::multi_index>)
 
 # LLVM has RTTI disabled by default and ROCm's LLVM also has RTTI disabled.
 # RTTI is enabled for rocRoller, except for the compilation units below.
