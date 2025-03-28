@@ -3,6 +3,20 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## (Unreleased) rocBLAS 5.0.0
+
+### Added
+
+### Changed
+
+### Removed
+
+* `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
+
+### Optimized
+
+### Resolved issues
+
 ## (Unreleased) rocBLAS 4.5.0
 
 ### Added
@@ -681,3 +695,4 @@ rocBLAS documentation is available at
 When using the install.sh script for "all" GPU Targets, which is the default, you must first set an environment variable `HCC_AMDGPU_TARGET` listing the GPU targets, e.g.  `HCC_AMDGPU_TARGET=gfx803,gfx900,gfx906,gfx908`
 If building for a specific architecture(s) using the  `-a` | --architecture flag, you should also set the environment variable `HCC_AMDGPU_TARGET` to match.
 Mismatching the environment variable to the `-a` flag architectures creates builds that may result in `SEGFAULTS` when running on GPUs which weren't specified.
+
