@@ -108,6 +108,7 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
+                               ${composable_kernel_INCLUDES}
                                ${PROJECT_SOURCE_DIR}/library/include
                                ${PROJECT_SOURCE_DIR}/library/src/include
                                ${PROJECT_SOURCE_DIR}/library/src

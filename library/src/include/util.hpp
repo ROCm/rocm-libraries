@@ -27,6 +27,8 @@
 #ifndef HIPTENSOR_SRC_UTIL_HPP
 #define HIPTENSOR_SRC_UTIL_HPP
 
+#include <ck/utility/data_type.hpp>
+#include <ck/utility/tuple.hpp>
 #include <hiptensor/hiptensor.hpp>
 #include <logger.hpp>
 #include <type_traits>
@@ -121,7 +123,9 @@ namespace hiptensor
         logger.logError("hiptensorPermutation", msg);
     };
 
-    // static_for
+    /** @name static_for
+     *  @{
+     */
     template <size_t N, typename Func, size_t... I>
     constexpr void static_for_impl(Func&& func, std::index_sequence<I...>)
     {
@@ -133,12 +137,49 @@ namespace hiptensor
     {
         static_for_impl<N>(std::forward<Func>(func), std::make_index_sequence<N>{});
     }
+    /** @} */
 
     template <typename T, typename U, size_t N>
     void convertVectorToCkArray(std::vector<T> const& v, std::array<U, N>& a)
     {
         std::copy_n(v.begin(), N, a.begin());
     }
+
+    /** @name CK type tuple to hiptensor type tuple transform functions
+	 *  @{
+	 *
+	 *  ck::Tuple<ck::bhalf, float> => ck::Tuple<bfloat16_t, float>
+	 */
+    // Primary template for the type transformer
+    template <typename T>
+    struct CkTypeTupleToHiptensorTypeTupleTransformer
+    {
+        using type = T;
+    };
+
+    // Specialization to transform ck::bhalf_t to bf16
+    template <>
+    struct CkTypeTupleToHiptensorTypeTupleTransformer<ck::bhalf_t>
+    {
+        using type = bfloat16_t;
+    };
+
+    // Recursive template to transform each tuple type
+    template <typename Tuple, typename = std::make_index_sequence<Tuple::Size()>>
+    struct TupleCkTypeTupleToHiptensorTypeTupleTransformer;
+
+    template <typename Tuple, size_t... Indices>
+    struct TupleCkTypeTupleToHiptensorTypeTupleTransformer<Tuple, std::index_sequence<Indices...>>
+    {
+        using type = ck::Tuple<typename CkTypeTupleToHiptensorTypeTupleTransformer<
+            ck::tuple_element_t<Indices, Tuple>>::type...>;
+    };
+
+    // Convenient type alias for easier usage
+    template <typename Tuple>
+    using tuple_ck_type_tuple_to_hiptensor_type_tuple_t =
+        typename TupleCkTypeTupleToHiptensorTypeTupleTransformer<Tuple>::type;
+    /** @} */
 
 // define a macro since it can convert `paramName` to a string
 #define CheckApiParams(checkResult, logger, errorCode, paramName) \

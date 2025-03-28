@@ -225,6 +225,14 @@ namespace ck
                     y = static_cast<float>(tempY);
                 }
 
+                __host__ __device__ void operator()(bhalf_t& y, const bhalf_t& x) const
+                {
+                    float tempX = ck::type_convert<float, bhalf_t>(x);
+                    float tempY;
+                    float_ops[op_type](tempY, tempX);
+                    y = type_convert<bhalf_t, float>(tempY);
+                }
+
             public:
                 hiptensorOperator_t               op_type     = HIPTENSOR_OP_IDENTITY;
                 static constexpr FloatFunctionPtr float_ops[] = {
@@ -386,6 +394,16 @@ namespace ck
                     float tempY;
                     this->operator()(tempY, tempX1, tempX2);
                     y = static_cast<float>(tempY);
+                }
+
+                __host__ __device__ void
+                    operator()(bhalf_t& y, const bhalf_t& x1, const bhalf_t& x2) const
+                {
+                    float tempX1 = type_convert<float, bhalf_t>(x1);
+                    float tempX2 = type_convert<float, bhalf_t>(x2);
+                    float tempY;
+                    this->operator()(tempY, tempX1, tempX2);
+                    y = type_convert<bhalf_t, float>(tempY);
                 }
 
             public:

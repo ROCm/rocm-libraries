@@ -96,9 +96,12 @@ hiptensorStatus_t hiptensorElementwiseBinary(const hiptensorHandle_t*           
         return checkResult;
     }
 
-    constexpr std::array<std::array<hipDataType, 3>, 3> validDataTypes
+    constexpr std::array<std::array<hipDataType, 3>, 6> validDataTypes
         = {{// typeA, typeC, typeScalar
             {HIP_R_16F, HIP_R_16F, HIP_R_16F},
+            {HIP_R_16F, HIP_R_16F, HIP_R_32F},
+            {HIP_R_16BF, HIP_R_16BF, HIP_R_16BF},
+            {HIP_R_16BF, HIP_R_16BF, HIP_R_32F},
             {HIP_R_32F, HIP_R_32F, HIP_R_32F},
             {HIP_R_64F, HIP_R_64F, HIP_R_64F}}};
 

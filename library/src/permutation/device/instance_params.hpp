@@ -29,6 +29,7 @@
 #include "../permutation_types.hpp"
 #include "data_types.hpp"
 #include "hash.hpp"
+#include "util.hpp"
 
 namespace std
 {
@@ -53,10 +54,12 @@ namespace ck::tensor_operation::device::instance
     template <typename DataTypeTuple>
     inline auto convertTypeTupleToHipDataTypeVector()
     {
+        using HiptensorDataTypeTuple
+            = hiptensor::tuple_ck_type_tuple_to_hiptensor_type_tuple_t<DataTypeTuple>;
         std::vector<hipDataType> hipDataTypeVector;
-        ck::static_for<0, DataTypeTuple::Size(), 1>{}([&hipDataTypeVector](auto i) {
+        ck::static_for<0, HiptensorDataTypeTuple::Size(), 1>{}([&hipDataTypeVector](auto i) {
             hipDataTypeVector.push_back(
-                hiptensor::HipDataType_v<typename ck::tuple_element_t<i, DataTypeTuple>>);
+                hiptensor::HipDataType_v<typename ck::tuple_element_t<i, HiptensorDataTypeTuple>>);
         });
         return hipDataTypeVector;
     }

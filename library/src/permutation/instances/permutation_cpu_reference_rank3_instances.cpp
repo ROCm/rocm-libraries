@@ -45,6 +45,11 @@ namespace hiptensor
                                                       CkPermutationUnaryCombinedOp,
                                                       3>());
 
+        registerSolutions(enumerateReferenceSolutions<ck::Tuple<ck::bhalf_t>,
+                                                      ck::Tuple<ck::bhalf_t>,
+                                                      CkPermutationUnaryCombinedOp,
+                                                      3>());
+
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<double, double>,
                                                       ck::Tuple<double>,
                                                       CkBinaryWithUnaryCombinedOp,
@@ -57,6 +62,11 @@ namespace hiptensor
 
         registerSolutions(enumerateReferenceSolutions<ck::Tuple<ck::half_t, ck::half_t>,
                                                       ck::Tuple<ck::half_t>,
+                                                      CkBinaryWithUnaryCombinedOp,
+                                                      3>());
+
+        registerSolutions(enumerateReferenceSolutions<ck::Tuple<ck::bhalf_t, ck::bhalf_t>,
+                                                      ck::Tuple<ck::bhalf_t>,
                                                       CkBinaryWithUnaryCombinedOp,
                                                       3>());
 
@@ -74,5 +84,11 @@ namespace hiptensor
                                                       ck::Tuple<ck::half_t>,
                                                       CkTrinaryWithUnaryCombinedOp,
                                                       3>());
+
+        registerSolutions(
+            enumerateReferenceSolutions<ck::Tuple<ck::bhalf_t, ck::bhalf_t, ck::bhalf_t>,
+                                        ck::Tuple<ck::bhalf_t>,
+                                        CkTrinaryWithUnaryCombinedOp,
+                                        3>());
     }
 } // namespace hiptensor

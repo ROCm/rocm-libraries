@@ -29,6 +29,7 @@
 
 // clang-format off
 // Include order needs to be preserved
+#include <optional>
 #include <hip/library_types.h>
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
@@ -98,8 +99,8 @@ namespace hiptensor
     uint32_t hipDataTypeSize(hipDataType id);
 
     // Convert hipDataType to hiptensorComputeType_t
-    hiptensorComputeType_t convertToComputeType(hipDataType hipType);
-    hipDataType            convertToHipDataType(hiptensorComputeType_t computeType);
+    hiptensorComputeType_t     convertToComputeType(hipDataType hipType);
+    std::optional<hipDataType> convertToHipDataType(hiptensorComputeType_t computeType);
 
     // Read a single value from void pointer, casted to T
     template <typename T>

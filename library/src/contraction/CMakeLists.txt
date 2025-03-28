@@ -24,10 +24,6 @@
  #
  ###############################################################################
 
-# Don't link to consume ck instances, however will customize and create our own.
-# Make the ck includes visible so we can build instances.
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_contraction_operations INTERFACE_INCLUDE_DIRECTORIES)
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
 set(HIPTENSOR_CONTRACTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_contraction.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_cpu_reference.cpp
@@ -39,6 +35,5 @@ set(HIPTENSOR_CONTRACTION_SOURCES
 )
 
 add_hiptensor_component(hiptensor_contraction ${HIPTENSOR_CONTRACTION_SOURCES})
-target_include_directories(hiptensor_contraction PRIVATE ${composable_kernel_INCLUDES})
 
 add_subdirectory(device)

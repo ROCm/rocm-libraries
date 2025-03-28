@@ -43,6 +43,12 @@ function(add_hiptensor_component COMPONENT_NAME COMPONENT_SOURCES)
     target_link_options(${COMPONENT_NAME} PRIVATE ${CLANG_DRIVER_MODE})
     set_target_properties(${COMPONENT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(${COMPONENT_NAME} PRIVATE hip::device)
+
+    # Don't link to consume ck instances, however will customize and create our own.
+    # Make the ck includes visible so we can build instances.
+    get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(${COMPONENT_NAME} PRIVATE ${composable_kernel_INCLUDES})
+
     # Use offload compress flag if it is supported
     if(BUILD_OFFLOAD_COMPRESS AND CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
         target_compile_options(${COMPONENT_NAME} PRIVATE "--offload-compress" )

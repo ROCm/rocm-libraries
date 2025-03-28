@@ -24,10 +24,6 @@
  #
  ###############################################################################
 
-# Don't link to consume ck instances, however will customize and create our own.
-# Make the ck includes visible so we can build instances.
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_reduction_operations INTERFACE_INCLUDE_DIRECTORIES)
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
 set(HIPTENSOR_REDUCTION_SOURCES
    ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_reduction.cpp
    ${CMAKE_CURRENT_SOURCE_DIR}/reduction_cpu_reference.cpp
@@ -122,4 +118,3 @@ set(HIPTENSOR_REDUCTION_SOURCES
 )
 
 add_hiptensor_component(hiptensor_reduction ${HIPTENSOR_REDUCTION_SOURCES})
-target_include_directories(hiptensor_reduction PRIVATE ${composable_kernel_INCLUDES})

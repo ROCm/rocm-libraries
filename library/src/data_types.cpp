@@ -102,7 +102,7 @@ namespace hiptensor
         }
     }
 
-    hipDataType convertToHipDataType(hiptensorComputeType_t computeType)
+    std::optional<hipDataType> convertToHipDataType(hiptensorComputeType_t computeType)
     {
         switch(computeType)
         {
@@ -127,7 +127,7 @@ namespace hiptensor
         case HIPTENSOR_COMPUTE_C64F:
             return HIP_C_64F;
         default:
-            return HIP_R_32F; // There is no invalid hipDataType value
+            return {}; // There is no invalid hipDataType value
         }
     }
 

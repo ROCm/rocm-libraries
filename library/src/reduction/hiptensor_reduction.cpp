@@ -231,7 +231,7 @@ hiptensorStatus_t hiptensorReduction(const hiptensorHandle_t*           handle,
                                           descD,
                                           modeD,
                                           HIPTENSOR_OP_ADD,
-                                          hiptensor::convertToHipDataType(typeCompute),
+                                          *hiptensor::convertToHipDataType(typeCompute),
                                           stream);
     }
 

@@ -36,6 +36,7 @@
 #include "data_types.hpp"
 #include "device/hiptensor_permutation_scale_instances.hpp"
 #include "meta_traits.hpp"
+#include <hiptensor/internal/native_types.hpp>
 
 namespace hiptensor
 {
@@ -80,8 +81,17 @@ namespace hiptensor
         constexpr static ElementwiseInstanceType_t InstanceType
             = ElementwiseInstanceType_t::ELEMENTWISE_BINARY_OP;
 
-        using InDataT  = InDataTypeTuple;
-        using OutDataT = OutDataTypeTuple;
+        /*
+         * CK does not use hip_bfloat16, instead it use ushort(ck::bhalf_t) for cuda bhalf_t type.
+         * What we want here is that we can use ck::bhalf_t with ck instances and use hip_bfloat16
+         * with hiptensor classes.
+         *
+         * When creating a solution, ck::bhalf_t was passed in to create ck instance.
+         * When registering the solution, MetaTraits will returen hip_bfloat16 to create key.
+         */
+        // using InDataT  = InDataTypeTuple;
+        using InDataT  = tuple_ck_type_tuple_to_hiptensor_type_tuple_t<InDataTypeTuple>;
+        using OutDataT = tuple_ck_type_tuple_to_hiptensor_type_tuple_t<OutDataTypeTuple>;
 
         using AOp  = Aop;
         using COp  = Cop;

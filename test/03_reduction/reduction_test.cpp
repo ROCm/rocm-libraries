@@ -201,7 +201,7 @@ namespace hiptensor
         auto op         = std::get<6>(param);
 
         EXPECT_TRUE((lengths.size() > 0) && (lengths.size() <= 6));
-        EXPECT_TRUE((outputDims.size() >= 0) && (outputDims.size() < 6));
+        EXPECT_TRUE((outputDims.size() >= 0) && (outputDims.size() <= 6));
 
         EXPECT_TRUE((op == HIPTENSOR_OP_ADD) || (op == HIPTENSOR_OP_MUL) || (op == HIPTENSOR_OP_MAX)
                     || (op == HIPTENSOR_OP_MIN));
