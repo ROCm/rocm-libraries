@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -54,7 +54,7 @@ const size_t DEFAULT_BYTES = 1024 * 1024 * 128 * 4;
 
 #define CREATE_BENCHMARK(T)                                            \
     {                                                                  \
-        const device_transform_benchmark<T, false> instance{};         \
+        const device_transform_benchmark<T, true> instance{};          \
         REGISTER_BENCHMARK(benchmarks, bytes, seed, stream, instance); \
     }
 

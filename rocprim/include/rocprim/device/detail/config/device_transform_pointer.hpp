@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,8 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_HPP_
-#define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_HPP_
+#ifndef ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_POINTER_HPP_
+#define ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_POINTER_HPP_
 
 #include "../../../config.hpp"
 #include "../../../type_traits.hpp"
@@ -42,689 +42,567 @@ namespace detail
 {
 
 template<unsigned int arch, class data_type, class enable = void>
-struct default_transform_config : default_transform_config_base<data_type>::type
+struct default_transform_pointer_config : default_transform_pointer_config_base<data_type>::type
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 4>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<1024, 1>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 4>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<256, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1030),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<128, 2>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 1>
+    : transform_pointer_config<512, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<1024, 2>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 1>
+    : transform_pointer_config<512, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 16>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<1024, 2>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx1100),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<1024, 4>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<1024, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 2>
-{};
-
-// Based on value_type = float
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<512, 1>
-{};
-
-// Based on value_type = rocprim::half
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<512, 2>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 2>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<512, 1>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<512, 2>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1200),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<256, 4>
-{};
-
-// Based on value_type = double
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<64, 2>
-{};
-
-// Based on value_type = float
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<512, 4>
-{};
-
-// Based on value_type = rocprim::half
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<512, 2>
-{};
-
-// Based on value_type = int64_t
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<1024, 2>
-{};
-
-// Based on value_type = int
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 4>
-{};
-
-// Based on value_type = short
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<1024, 8>
-{};
-
-// Based on value_type = int8_t
-template<class value_type>
-struct default_transform_config<
-    static_cast<unsigned int>(target_arch::gfx1201),
-    value_type,
-    std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<256, 4>
-{};
-
-// Based on value_type = double
-template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 2>
+    : transform_pointer_config<1024, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<512, 4>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<512, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 1>
+    : transform_pointer_config<512, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 2>
+    : transform_pointer_config<1024, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<512, 4>
+    : transform_pointer_config<1024, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx906),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<64, 16>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<512, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<128, 2>
+    : transform_pointer_config<128, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<128, 4>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<128, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<128, 2>
+    : transform_pointer_config<128, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<128, 4>
+    : transform_pointer_config<128, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx908),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<128, 8>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<128, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<256, 2>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 2>
+    : transform_pointer_config<1024, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<64, 8>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<1024, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<1024, 1>
+    : transform_pointer_config<1024, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<256, 2>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<1024, 2>
+    : transform_pointer_config<1024, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<64, 8>
+    : transform_pointer_config<1024, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx90a),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<64, 16>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<1024, 16, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<128, 2>
+    : transform_pointer_config<128, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<128, 4>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<128, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<128, 1>
+    : transform_pointer_config<128, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<128, 2>
+    : transform_pointer_config<128, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<128, 4>
+    : transform_pointer_config<128, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_default>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::unknown),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<128, 8>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<128, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = double
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<512, 4>
+    : transform_pointer_config<1024, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = float
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 4>
+    : transform_pointer_config<256, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::half
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 2))>> : transform_config<256, 8>
+                      && (sizeof(value_type) <= 2))>>
+    : transform_pointer_config<256, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = rocprim::int128_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 16) && (sizeof(value_type) > 8))>>
-    : transform_config<256, 1>
+    : transform_pointer_config<256, 1, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int64_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 8) && (sizeof(value_type) > 4))>>
-    : transform_config<256, 2>
+    : transform_pointer_config<256, 2, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 4) && (sizeof(value_type) > 2))>>
-    : transform_config<256, 4>
+    : transform_pointer_config<256, 4, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = short
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
                       && (sizeof(value_type) <= 2) && (sizeof(value_type) > 1))>>
-    : transform_config<256, 8>
+    : transform_pointer_config<256, 8, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 // Based on value_type = int8_t
 template<class value_type>
-struct default_transform_config<
+struct default_transform_pointer_config<
     static_cast<unsigned int>(target_arch::gfx942),
     value_type,
     std::enable_if_t<(!bool(rocprim::is_floating_point<value_type>::value)
-                      && (sizeof(value_type) <= 1))>> : transform_config<1024, 8>
+                      && (sizeof(value_type) <= 1))>>
+    : transform_pointer_config<256, 16, ROCPRIM_GRID_SIZE_LIMIT, ::rocprim::load_nontemporal>
 {};
 
 } // end namespace detail
@@ -734,4 +612,4 @@ END_ROCPRIM_NAMESPACE
 /// @}
 // end of group primitivesmodule_deviceconfigs
 
-#endif // ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_HPP_
+#endif // ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TRANSFORM_POINTER_HPP_

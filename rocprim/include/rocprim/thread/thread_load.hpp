@@ -154,10 +154,12 @@ std::enable_if_t<CacheLoadModifier == load_ca || CacheLoadModifier == load_defau
                      || CacheLoadModifier == load_ldg,
                  T> thread_load(T* ptr)
 {
-    alignas(Alignment) T result;
-    detail::thread_fused_copy<T, T, Alignment>(&result,
-                                               ptr,
-                                               [](auto& dst, const auto& src) { dst = src; });
+    using decay_type = typename std::remove_const_t<T>;
+    alignas(Alignment) decay_type result;
+    detail::thread_fused_copy<decay_type, T, Alignment>(&result,
+                                                        ptr,
+                                                        [](auto& dst, const auto& src)
+                                                        { dst = src; });
     return result;
 }
 
@@ -187,14 +189,16 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 std::enable_if_t<CacheLoadModifier == load_volatile || CacheLoadModifier == load_cv, T>
     thread_load(T* ptr)
 {
-    alignas(Alignment) T result;
-    detail::thread_fused_copy<T, T, Alignment>(&result,
-                                               ptr,
-                                               [](auto& dst, const auto& src)
-                                               {
-                                                   using U = std::remove_reference_t<decltype(src)>;
-                                                   dst     = *static_cast<const volatile U*>(&src);
-                                               });
+    using decay_type = typename std::remove_const_t<T>;
+    alignas(Alignment) decay_type result;
+    detail::thread_fused_copy<decay_type, T, Alignment>(
+        &result,
+        ptr,
+        [](auto& dst, const auto& src)
+        {
+            using U = std::remove_reference_t<decltype(src)>;
+            dst     = *static_cast<const volatile U*>(&src);
+        });
     return result;
 }
 
@@ -214,11 +218,12 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 std::enable_if_t<CacheLoadModifier == load_nontemporal, T> thread_load(T* ptr)
 {
 #if __has_builtin(__builtin_nontemporal_load)
-    alignas(Alignment) T result;
-    detail::thread_fused_copy<T, T, Alignment>(&result,
-                                               ptr,
-                                               [](auto& dst, const auto& src)
-                                               { dst = __builtin_nontemporal_load(&src); });
+    using decay_type = typename std::remove_const_t<T>;
+    alignas(Alignment) decay_type result;
+    detail::thread_fused_copy<decay_type, T, Alignment>(
+        &result,
+        ptr,
+        [](auto& dst, const auto& src) { dst = __builtin_nontemporal_load(&src); });
     return result;
 #else
     return thread_load(ptr);

@@ -33,6 +33,8 @@ This is a complete list of affected functions and how their default accumulator 
 * Removed `radix_sort.hpp`
 * Added virtual shared memory as a fallback option in `rocprim::device_merge` when it exceeds shared memory capacity, similar to `rocprim::device_select`, `rocprim::device_partition`, and `rocprim::device_merge_sort`, which already include this feature.
 * Added initial value support to device level inclusive scans.
+* Made new optimization for `device_transform` when the input and output are pointers.
+* Added `LoadType` to `transform_config`, which is used for the `device_transform` when the input and output are pointers.
 
 ### Removed
 

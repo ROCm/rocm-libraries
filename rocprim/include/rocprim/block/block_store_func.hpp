@@ -29,6 +29,8 @@
 #include "../types.hpp"
 #include "rocprim/intrinsics/arch.hpp"
 
+#include "../thread/thread_store.hpp"
+
 /// \addtogroup blockmodule
 /// @{
 
@@ -384,6 +386,47 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
             thread_iter[offset] = items[item];
         }
     }
+}
+
+template<class V               = rocprim::uint128_t,
+         unsigned int WarpSize = arch::wavefront::min_size(),
+         class T,
+         class U,
+         unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto block_store_direct_blocked_cast(unsigned int flat_id,
+                                     T*           block_output,
+                                     U (&items)[ItemsPerThread]) ->
+    typename std::enable_if<detail::is_vectorizable<T, ItemsPerThread>::value
+                            && (ItemsPerThread * sizeof(T)) % sizeof(V) == 0>::type
+{
+    static_assert(std::is_convertible<U, T>::value,
+                  "The type U must be such that it can be implicitly converted to T.");
+
+    constexpr unsigned int vectors_per_thread = (sizeof(T) * ItemsPerThread) / sizeof(V);
+
+    V* vector_ptr = ::rocprim::detail::bit_cast<V*>(block_output) + flat_id * vectors_per_thread;
+
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < vectors_per_thread; item++)
+    {
+        vector_ptr[item] = *(reinterpret_cast<const V*>(items) + item);
+    }
+}
+
+template<class V               = rocprim::uint128_t,
+         unsigned int WarpSize = arch::wavefront::min_size(),
+         class T,
+         class U,
+         unsigned int ItemsPerThread>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto block_store_direct_blocked_cast(unsigned int flat_id,
+                                     T*           block_output,
+                                     U (&items)[ItemsPerThread]) ->
+    typename std::enable_if<!detail::is_vectorizable<T, ItemsPerThread>::value
+                            || (ItemsPerThread * sizeof(T)) % sizeof(V) != 0>::type
+{
+    block_store_direct_blocked(flat_id, block_output, items);
 }
 
 END_ROCPRIM_NAMESPACE

@@ -113,6 +113,12 @@ DataType;BlockSize;" PARENT_SCOPE)
     set(list_across "${TUNING_TYPES};64 128 256 512 1024" PARENT_SCOPE)
     set(output_pattern_suffix "\
 @DataType@_@BlockSize@" PARENT_SCOPE)
+elseif(file STREQUAL "benchmark_device_transform_pointer")
+    set(list_across_names "\
+DataType;BlockSize;LoadType" PARENT_SCOPE)
+    set(list_across "${TUNING_TYPES};64 128 256 512 1024;rocprim::load_default rocprim::load_nontemporal" PARENT_SCOPE)
+    set(output_pattern_suffix "\
+@DataType@_@BlockSize@_@LoadType@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_partition")
     set(list_across_names "DataType;BlockSize" PARENT_SCOPE)
     set(list_across "${TUNING_TYPES};128 192 256 384 512" PARENT_SCOPE)

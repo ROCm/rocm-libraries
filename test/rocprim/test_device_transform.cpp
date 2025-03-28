@@ -78,9 +78,10 @@ public:
     static constexpr bool   use_graphs            = Params::use_graphs;
 };
 
-using custom_short2  = common::custom_type<short, short, true>;
-using custom_int2    = common::custom_type<int, int, true>;
-using custom_double2 = common::custom_type<double, double, true>;
+using custom_short2      = common::custom_type<short, short, true>;
+using custom_int2        = common::custom_type<int, int, true>;
+using custom_double2     = common::custom_type<double, double, true>;
+using custom_int64_array = test_utils::custom_test_array_type<std::int64_t, 8>;
 
 using RocprimDeviceTransformTestsParams
     = ::testing::Types<DeviceTransformParams<int, int, true>,
@@ -92,7 +93,10 @@ using RocprimDeviceTransformTestsParams
                        DeviceTransformParams<short, int, true>,
                        DeviceTransformParams<custom_short2, custom_int2, true>,
                        DeviceTransformParams<int, float>,
+                       DeviceTransformParams<uint64_t, uint64_t>,
+                       DeviceTransformParams<rocprim::uint128_t, rocprim::uint128_t>,
                        DeviceTransformParams<custom_double2, custom_double2>,
+                       DeviceTransformParams<custom_int64_array, custom_int64_array>,
                        DeviceTransformParams<int, int, false, 512>,
                        DeviceTransformParams<float, float, false, 2048>,
                        DeviceTransformParams<double, double, false, 4096>,
@@ -418,4 +422,66 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
 TEST(RocprimDeviceTransformTests, LargeIndicesWithGraphs)
 {
     testLargeIndices<true>();
+}
+
+TEST(RocprimDeviceTransformTests, UnalignedPointer)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = int;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        for(auto size : test_utils::get_sizes(seed_value))
+        {
+            hipStream_t stream = 0; // default
+
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            // Generate data
+            std::vector<T> input
+                = test_utils::get_random_data_wrapped<T>(size + 2, 1, 100, seed_value);
+
+            uint8_t* d_unaligned;
+            HIP_CHECK(hipMalloc(&d_unaligned, (size + 3) * sizeof(T)));
+            T* d_input = reinterpret_cast<T*>(d_unaligned + 1);
+            HIP_CHECK(
+                hipMemcpy(d_input, input.data(), (size + 2) * sizeof(T), hipMemcpyHostToDevice));
+
+            // Calculate expected results on host
+            std::vector<T> expected(input.size());
+            // First and last values should be unchanged.
+            expected[0]                = input[0];
+            expected[input.size() - 1] = input[input.size() - 1];
+            std::transform(input.begin() + 1,
+                           input.end() - 1,
+                           expected.begin() + 1,
+                           transform<T>());
+
+            // Run
+            HIP_CHECK(rocprim::transform(d_input + 1,
+                                         d_input + 1,
+                                         input.size() - 2,
+                                         transform<T>(),
+                                         stream));
+
+            HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+
+            // Copy output to host
+            std::vector<T> output(size + 2);
+            HIP_CHECK(
+                hipMemcpy(output.data(), d_input, (size + 2) * sizeof(T), hipMemcpyDeviceToHost));
+
+            // Check if output values are as expected
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<T>));
+        }
+    }
 }
