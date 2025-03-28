@@ -597,9 +597,6 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                         slice_info_list_.resize(num_slices_ + 1, {{0}});
                     }
 
-                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
-                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
-
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 5), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     HevcSliceSegHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
@@ -607,6 +604,9 @@ ParserResult HevcVideoParser::ParsePictureData(const uint8_t* p_stream, uint32_t
                         // we got an error while parsing this NAL unit. ignore and continue with next NAL unit
                         break;      // ignore and continue to next nal_unit
                     }
+
+                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
+                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
 
                     // Start decode process
                     if (num_slices_ == 0) {
@@ -1719,6 +1719,7 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
     }
 
     if (!p_slice_header->dependent_slice_segment_flag) {
+        memset(&slice_header_copy_, 0, sizeof(slice_header_copy_));
         for (int i = 0; i < pps_ptr->num_extra_slice_header_bits; i++) {
             p_slice_header->slice_reserved_flag[i] = Parser::GetBit(nalu, offset);
         }
@@ -1943,9 +1944,13 @@ ParserResult HevcVideoParser::ParseSliceHeader(uint8_t *nalu, size_t size, HevcS
             p_slice_header->slice_loop_filter_across_slices_enabled_flag = Parser::GetBit(nalu, offset);
         }
 
+        p_slice_header->is_received = 1;
         memcpy(&slice_header_copy_, p_slice_header, sizeof(HevcSliceSegHeader));
     } else {
         //dependant slice
+        if (!slice_header_copy_.is_received) {
+            return PARSER_WRONG_STATE;
+        }
         memcpy(p_slice_header, &slice_header_copy_, sizeof(HevcSliceSegHeader));
         p_slice_header->first_slice_segment_in_pic_flag = temp_sh.first_slice_segment_in_pic_flag;
         p_slice_header->no_output_of_prior_pics_flag = temp_sh.no_output_of_prior_pics_flag;

@@ -512,6 +512,7 @@ typedef struct {
 /*! \brief Structure for Slice Segment Header
  */
 typedef struct {
+    uint32_t is_received;
     bool first_slice_segment_in_pic_flag;                //u(1)
     bool no_output_of_prior_pics_flag;                   //u(1)
     uint32_t slice_pic_parameter_set_id;                 //ue(v)
