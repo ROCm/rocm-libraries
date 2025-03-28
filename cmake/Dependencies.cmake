@@ -46,11 +46,11 @@ set(_rocroller_all_local_deps
     Catch2
     CLI11
     libdivide
-    boost
     ROCmCMakeBuildTools
 )
 # Dependencies where we never look for a local version
 set(_rocroller_all_remote_deps
+    boost
     fmt
     yaml-cpp
     isa_spec_manager
