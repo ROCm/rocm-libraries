@@ -36,7 +36,7 @@ namespace rocwmma
         // Mma operation backed, e.g., mfma and wmma.
         // The interface in mma_traits.hpp is expected to
         // be filled by the backends.
-        template<typename MmaOp, typename Enabler = void>
+        template <typename MmaOp, typename Enabler = void>
         struct MmaTraits;
 
     } // namespace MmaTraits_impl
@@ -45,7 +45,7 @@ namespace rocwmma
 
 // Backend fulfillments
 
-#include "mfma_impl.hpp"
-#include "wmma_impl.hpp"
+#include "mfma.hpp"
+#include "wmma.hpp"
 
 #endif // ROCWMMA_MMA_TRAITS_IMPL_HPP

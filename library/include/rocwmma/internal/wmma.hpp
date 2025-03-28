@@ -27,28 +27,34 @@
 #define ROCWMMA_WMMA_HPP
 
 #include "mma.hpp"
+#include "mma_selector.hpp"
+#include "mma_traits.hpp"
 #include "wmma_impl.hpp"
 
 namespace rocwmma
 {
     // Expose WMMA implementation backend
-    template<typename InputTA,
-             typename InputTB,
-             typename ComputeT,
-             uint32_t BlockM,
-             uint32_t BlockN,
-             uint32_t BlockK>
+    template <typename InputTA,
+              typename InputTB,
+              typename ComputeT,
+              uint32_t BlockM,
+              uint32_t BlockN,
+              uint32_t BlockK>
     using Wmma_impl = detail::amdgcn_wmma<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>;
 
     // Create a backend selector class for wmma backend. Given fixed BlockM and BlockN,
     // will try to find the highest BlockK throughput instruction if it exists.
-    template<typename InputTA,
-             typename InputTB,
-             typename ComputeT,
-             uint32_t BlockM,
-             uint32_t BlockN,
-             uint32_t BlockKTest = 32u> // Current max possible K-value for wmma instr (most efficient)
-    struct WmmaSelector : public MmaSelector<Wmma_impl, InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>{};
+    template <typename InputTA,
+              typename InputTB,
+              typename ComputeT,
+              uint32_t BlockM,
+              uint32_t BlockN,
+              uint32_t BlockKTest
+              = 32u> // Current max possible K-value for wmma instr (most efficient)
+    struct WmmaSelector
+        : public MmaSelector<Wmma_impl, InputTA, InputTB, ComputeT, BlockM, BlockN, BlockKTest>
+    {
+    };
 
     // Wmma interface through Mma
     template <uint32_t FragM,
@@ -57,20 +63,22 @@ namespace rocwmma
               typename InputTA,
               typename InputTB,
               typename ComputeT,
-              uint32_t BlockM,
-              uint32_t BlockN,
-              uint32_t BlockK = FragK, // Default K throughput search
+              uint32_t       BlockM,
+              uint32_t       BlockN,
+              uint32_t       BlockK      = FragK, // Default K throughput search
               MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
     struct Wmma
-    : public Mma<FragM,
-                 FragN,
-                 FragK,
-                 typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
-                 AccumPolicy>
+        : public Mma<
+              FragM,
+              FragN,
+              FragK,
+              typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp,
+              AccumPolicy>
     {
 
         // Op cache
-        using SelectedOp = typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp;
+        using SelectedOp =
+            typename WmmaSelector<InputTA, InputTB, ComputeT, BlockM, BlockN, BlockK>::SelectedOp;
 
         // Driver interface from base class Mma:
         // template <typename VecTA, typename VecTB, typename VecTC>

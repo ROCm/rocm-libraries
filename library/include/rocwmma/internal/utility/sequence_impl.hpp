@@ -106,6 +106,28 @@ namespace rocwmma
             return make_offset_index_sequence_helper<Offset, Stride>(make_index_sequence<N>{});
         }
 
+        // Sequence traits
+
+        // Check if sequency of numbers contains number N
+        template <typename T, T N, T... Ns>
+        struct contains_number : public conditional_t<((N == Ns) || ...), true_type, false_type>
+        {
+            static_assert(sizeof...(Ns) >= 1u, "Number list must be >= 1");
+        };
+
+        template <typename T, T N, T... Ns>
+        static constexpr bool contains_number_v = contains_number<T, N, Ns...>::value;
+
+        template <typename T, typename... Ts>
+        struct contains_type
+            : public conditional_t<(is_same_v<T, Ts> || ...), true_type, false_type>
+        {
+            static_assert(sizeof...(Ts) >= 1u, "Types list must be >= 1");
+        };
+
+        template <typename T, typename... Ts>
+        static constexpr bool contains_type_v = contains_type<T, Ts...>::value;
+
     } // namespace detail
 
 } // namespace rocwmma
