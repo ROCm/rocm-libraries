@@ -190,6 +190,9 @@ else()
         find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
     endif( )
 
+    # Add rocisa
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa)
+
     option( Tensile_SKIP_BUILD "Skip building Tensile" OFF )
 
     # we will have expanded "all" for tensile to ensure consistency as we have local rules

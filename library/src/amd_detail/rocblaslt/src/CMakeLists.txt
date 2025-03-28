@@ -72,6 +72,7 @@
     TensileCreateLibraryFiles(
       "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile/Logic/${Tensile_LOGIC}"
       "${PROJECT_BINARY_DIR}/Tensile"
+      "TENSILE_LIBRARY_TARGET"
       ARCHITECTURE        ${Tensile_ARCHITECTURE}
       CODE_OBJECT_VERSION ${Tensile_CODE_OBJECT_VERSION}
       COMPILER            ${Tensile_COMPILER}
@@ -83,6 +84,7 @@
     TensileCreateLibraryFiles(
       "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile/Logic/${Tensile_LOGIC}"
       "${PROJECT_BINARY_DIR}/Tensile"
+      "TENSILE_LIBRARY_TARGET"
       ARCHITECTURE        ${Tensile_ARCHITECTURE}
       CODE_OBJECT_VERSION ${Tensile_CODE_OBJECT_VERSION}
       COMPILER            ${Tensile_COMPILER}
@@ -90,8 +92,10 @@
       ${Tensile_Options}
     )
   endif()
+  add_dependencies(TENSILE_LIBRARY_TARGET rocisa)
 
-  TensileCreateExtOpLibraries("${PROJECT_BINARY_DIR}/Tensile/library" "${Tensile_ARCHITECTURE}")
+  TensileCreateExtOpLibraries("${PROJECT_BINARY_DIR}/Tensile/library" "${Tensile_ARCHITECTURE}" "build_ext_op_library")
+  add_dependencies(build_ext_op_library rocisa)
 
   # Create a unique name for TensileHost compiled for rocBLAS
   set_target_properties( TensileHost PROPERTIES OUTPUT_NAME rocblaslt-tensile CXX_EXTENSIONS NO )

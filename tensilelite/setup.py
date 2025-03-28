@@ -53,9 +53,9 @@ setup(
   license="MIT",
   install_requires=readRequirementsFromTxt(),
   python_requires='>=3.5',
-  packages=["Tensile", "rocisa"],
-  package_data={ "Tensile": ["Tensile/cmake/*"], "rocisa": ["rocisa/cmake/*"] },
-  data_files=[ ("cmake", ["rocisa/cmake/RocisaConfig.cmake", "rocisa/cmake/RocisaConfigVersion.cmake", "Tensile/cmake/TensileConfig.cmake", "Tensile/cmake/TensileConfigVersion.cmake"]) ],
+  packages=["Tensile"],
+  package_data={ "Tensile": ["Tensile/cmake/*"] },
+  data_files=[ ("cmake", ["Tensile/cmake/TensileConfig.cmake", "Tensile/cmake/TensileConfigVersion.cmake"]) ],
   include_package_data=True,
   entry_points={"console_scripts": [
     # user runs a benchmark
@@ -75,7 +75,6 @@ setup(
     # Run tensile benchmark from cluster
     "TensileBenchmarkCluster = Tensile.TensileBenchmarkCluster:main",
     # Retune library logic file
-    "TensileRetuneLibrary = Tensile.TensileRetuneLibrary:main",
-    "RocisaGetPath = rocisa:PrintRocisaRoot"
+    "TensileRetuneLibrary = Tensile.TensileRetuneLibrary:main"
     ]},
   )
