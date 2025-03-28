@@ -29,6 +29,16 @@
  *  flexible API to let user set attributes for solution selection.
  */
 
+/*! \defgroup types_module Data types
+ *
+ *
+ *  \defgroup library_module Library management functions
+ *  Provides the library handle
+ *
+ *  \defgroup aux_module Auxilary functions
+ *  Initializes hipBLASLt for the current HIP device
+ */
+
 #pragma once
 #ifndef _HIPBLASLT_H_
 #define _HIPBLASLT_H_

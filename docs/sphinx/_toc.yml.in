@@ -45,6 +45,7 @@ subtrees:
 
 - caption: API reference
   entries:
+  - file: reference/data-type-support
   - file: reference/datatypes
     title: hipBLASLt datatypes
   - file: reference/api-reference

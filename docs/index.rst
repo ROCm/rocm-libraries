@@ -42,6 +42,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/hipBLASL
 
   .. grid-item-card:: API reference
 
+    * :doc:`Data type support <./reference/data-type-support>`
     * :doc:`hipBLASLt datatypes <./reference/datatypes>`
     * :doc:`hipBLASLt API <./reference/api-reference>`
     * :doc:`hipBLASLtExt API <./reference/ext-reference>`
