@@ -110,15 +110,6 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline decltype(auto)
                 exec(RegsA&& regsA, RegsB&& regsB, RegsC&& regsC)
             {
-                if(threadIdx.x == 0)
-                {
-                    printf("BlockMNK: (%d, %d, %d)\n, \
-                            GfxTargetId: (%d)\n",
-                           BlockM,
-                           BlockN,
-                           BlockK,
-                           GfxTargetId);
-                }
                 return forward<RegsC>(regsC);
             }
         };
