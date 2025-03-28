@@ -19,13 +19,13 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
             getDependenciesCommand += auxiliary.getLibrary(libraryName, platform.jenkinsLabel, null, sameOrg)
         }
     }
-
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
                 ${centos7Workaround}
+                ${auxiliary.gfxTargetParser()}
                 CXX=/opt/rocm/bin/${compiler} ${project.paths.build_command} ${hipClangArgs} ${staticArgs}
             """
 

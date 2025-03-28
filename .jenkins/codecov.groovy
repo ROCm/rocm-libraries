@@ -15,7 +15,12 @@ def runCI =
     def prj  = new rocProject('rocSPARSE', 'CodeCov')
 
     // customize for project
+    if (env.BRANCH_NAME ==~ /PR-\d+/){
+        prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc -a \$gfx_arch --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
+    }
+    else {
     prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
+    }
     prj.libraryDependencies = ['rocPRIM']
     prj.defaults.ccache = false
 
