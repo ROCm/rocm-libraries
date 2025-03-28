@@ -125,6 +125,32 @@ extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
 
 const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
 
+/**
+ * @brief  Data structure defining the unqiueId
+ */
+constexpr int ROCSHMEM_HOSTNAME_LEN = 20;
+struct rocshmem_uniqueid_t {
+  uint64_t random;
+  char hostname[ROCSHMEM_HOSTNAME_LEN];
+  uint32_t pid;
+};
+typedef struct rocshmem_uniqueid_t rocshmem_unique_id_t;
+
+/**
+ * @brief Data structure used for attribute based 
+ *        initialization
+ */
+struct rocshmem_init_attr_t  {
+  int32_t rank;
+  int32_t nranks;
+  rocshmem_uniqueid_t uid;
+  void* mpi_comm;
+};
+typedef struct rocshmem_init_attr_t rocshmem_init_attr_t;
+
+constexpr unsigned int ROCSHMEM_INIT_WITH_MPI_COMM = 0;
+constexpr unsigned int ROCSHMEM_INIT_WITH_UNIQUEID = 1;
+
 }  // namespace rocshmem
 
 #endif  // LIBRARY_INCLUDE_ROCSHMEM_COMMON_HPP

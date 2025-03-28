@@ -32,7 +32,9 @@
 #include "rocshmem/rocshmem.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <functional>
+#include <random>
 
 #include "backend_bc.hpp"
 #include "context_incl.hpp"
@@ -47,6 +49,8 @@
 #include "team.hpp"
 #include "templates_host.hpp"
 #include "util.hpp"
+
+#include <unistd.h>
 
 namespace rocshmem {
 
@@ -96,14 +100,100 @@ rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
   }
 }
 
+[[maybe_unused]] __host__ int rocshmem_init_attr(unsigned int flags,
+						 rocshmem_init_attr_t *attr) {
+  MPI_Comm comm = MPI_COMM_WORLD;
+
+  if ((attr == nullptr) || 
+      ((flags != ROCSHMEM_INIT_WITH_UNIQUEID) &&
+       (flags != ROCSHMEM_INIT_WITH_MPI_COMM)) ) {
+    fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+            "Call 'rocshmem_init_attr: invalid input argument'",
+            __FILE__, __LINE__);
+    return ROCSHMEM_ERROR;
+  }
+
+  if (flags == ROCSHMEM_INIT_WITH_MPI_COMM) {
+    comm = *(static_cast<MPI_Comm*>(attr->mpi_comm));
+  }
+
+  // As of right now, we require initialization through the MPI library.
+  library_init(comm);
+
+  // The unique Id can be used to verify that the processes participating matches
+  // (i.e. they all need to have the same unique Id, as well as the number of ranks.
+  if (flags == ROCSHMEM_INIT_WITH_UNIQUEID) {
+    int worldsize = backend->getNumPEs();
+    if (worldsize != attr->nranks) {
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+              "Call 'rocshmem_init_attr: mismatch between world-team size and "
+	      "attribute value'",  __FILE__, __LINE__);
+      // This is a fatal error, a fundamental mismatch between what was requested
+      // and what we have.
+      abort();
+    }
+  }
+
+  return ROCSHMEM_SUCCESS;
+}
+
+[[maybe_unused]] __host__ int rocshmem_set_attr_uniqueid_args(int rank, int nranks,
+							       rocshmem_uniqueid_t *uid,
+							       rocshmem_init_attr_t *attr) {
+  if (uid == nullptr || attr == nullptr) {
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+              "Call 'rocshmem_get_uniqueid: invalid input argument'",
+	      __FILE__, __LINE__);
+      return ROCSHMEM_ERROR;
+  }
+
+  attr->rank = rank;
+  attr->nranks = nranks;
+  attr->uid = *uid;
+  attr->mpi_comm = nullptr;
+
+  return ROCSHMEM_SUCCESS;
+}
+
+// Note: this function will be called before rocshmem_init_*, so one
+// cannot assume that a backend is already set
+[[maybe_unused]] __host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid) {
+  if (uid == nullptr) {
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+              "Call 'rocshmem_get_uniqueid: invalid input argument'",
+	      __FILE__, __LINE__);
+      return ROCSHMEM_ERROR;
+  }
+
+  std::random_device dev;
+  std::mt19937_64 rng(dev());
+  std::uniform_int_distribution<uint64_t> dist(0, std::numeric_limits<uint64_t>::max());
+
+  char hostname[HOST_NAME_MAX+1];
+  if (0 != gethostname(hostname, HOST_NAME_MAX)) {
+      fprintf(stderr, "ROCSHMEM_ERROR: %s in file '%s' in line %d\n",
+              "Call 'rocshmem_get_uniqueid: could not get hostname'",
+	      __FILE__, __LINE__);
+      return ROCSHMEM_ERROR;
+  }
+
+  uid->random = dist(rng);
+  std::memcpy(uid->hostname, hostname, ROCSHMEM_HOSTNAME_LEN);
+  uid->pid = static_cast<uint32_t>(getpid());
+
+  return ROCSHMEM_SUCCESS;
+}
+
 [[maybe_unused]] __host__ void rocshmem_init(MPI_Comm comm) {
   library_init(comm);
 }
 
-[[maybe_unused]] __host__ void rocshmem_init_thread(
+[[maybe_unused]] __host__ int rocshmem_init_thread(
     [[maybe_unused]] int required, int *provided, MPI_Comm comm) {
   library_init(comm);
   rocshmem_query_thread(provided);
+
+  return ROCSHMEM_SUCCESS;
 }
 
 [[maybe_unused]] __host__ int rocshmem_my_pe() {

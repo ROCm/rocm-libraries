@@ -71,10 +71,50 @@ __host__ void rocshmem_init(MPI_Comm comm = MPI_COMM_WORLD);
  *                      to requested thread mode.
  * @param[in] comm      (Optional) MPI Communicator that rocSHMEM will be using
  *                      If MPI_COMM_NULL, rocSHMEM will be using MPI_COMM_WORLD
+ *
+ * @return int          returns 0 upon success; otherwise, it returns a nonzero
+ *                      value
  */
-__host__ void rocshmem_init_thread(int requested, int *provided,
-                                    MPI_Comm comm = MPI_COMM_WORLD);
+__host__ int rocshmem_init_thread(int requested, int *provided,
+                                  MPI_Comm comm = MPI_COMM_WORLD);
 
+/**
+ * @brief Initialize the rocSHMEM runtime and underlying transport layer
+ *        using the provided mode and attributes
+ *
+ * @param[in] flags   initialization method to be used.
+ *                    Valid values are ROCSHMEM_INIT_WITH_UNIQUEID and
+ *                    ROCSHMEM_INIT_WITH_MPI_COMM
+ * @param[in] attr    attribute structure specifying input characteristics
+ *
+ * @return int        returns 0 upon success; otherwise, it returns a nonzero
+ *                    value
+ */
+__host__ int rocshmem_init_attr(unsigned int flags, rocshmem_init_attr_t *attr);
+
+/**
+ * @brief Return a uniqueID
+ *
+ * @return int        returns 0 upon success; otherwise, it returns a nonzero
+ *                    value
+ */
+__host__ int rocshmem_get_uniqueid(rocshmem_uniqueid_t *uid);
+
+/**
+ * @brief Query the thread mode used by the runtime.
+ *
+ * @param[in] rank     rank of the calling process
+ * @param[in] nranks   number of pes
+ * @param[in] uid      unique ID used to identify the group processes.
+ *                     All processes that
+ * @param[out] attr    attribute structure to be passed to rocshmem_init_attr
+ *
+ * @return int         returns 0 upon success; otherwise, it returns a nonzero
+ *                     value
+ */
+__host__ int rocshmem_set_attr_uniqueid_args(int rank, int nranks,
+                                             rocshmem_uniqueid_t *uid,
+                                             rocshmem_init_attr_t *attr);
 /**
  * @brief Query the thread mode used by the runtime.
  *
