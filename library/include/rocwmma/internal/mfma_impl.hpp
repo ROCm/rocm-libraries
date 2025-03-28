@@ -110,6 +110,15 @@ namespace rocwmma
             ROCWMMA_DEVICE static inline decltype(auto)
                 exec(RegsA&& regsA, RegsB&& regsB, RegsC&& regsC)
             {
+                if(threadIdx.x == 0)
+                {
+                    printf("BlockMNK: (%d, %d, %d)\n, \
+                            GfxTargetId: (%d)\n",
+                           BlockM,
+                           BlockN,
+                           BlockK,
+                           GfxTargetId);
+                }
                 return forward<RegsC>(regsC);
             }
         };
@@ -135,6 +144,13 @@ namespace rocwmma
                            BlockK,
                            GfxTargetId,
                            enable_gfx9_t<GfxTargetId, (sizeof(ComputeT) < 4u)>>
+            : public amdgcn_mfma<InputTA,
+                                 InputTB,
+                                 typename PackTraits<ComputeT>::PackedT,
+                                 BlockM,
+                                 BlockN,
+                                 BlockK,
+                                 GfxTargetId>
         {
         private:
             using PackTraits = PackTraits<ComputeT>;
@@ -144,7 +160,11 @@ namespace rocwmma
             using AccumDataT = typename PackTraits::PackedT;
             using MfmaB32
                 = amdgcn_mfma<InputTA, InputTB, AccumDataT, BlockM, BlockN, BlockK, GfxTargetId>;
+
             using AccumTraitsB32 = VecTraits<typename MfmaB32::CRegsT>;
+
+            // Prevent public use of the base function
+            using MfmaB32::exec;
 
             // ComputeT mfma traits
             // Scale accum registers by pack ratio, due to ComputeT
