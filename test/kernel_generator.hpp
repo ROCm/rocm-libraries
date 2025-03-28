@@ -32,6 +32,7 @@
 
 #include "hip_device.hpp"
 #include <rocwmma/internal/types.hpp>
+#include <rocwmma/internal/utility/sequence.hpp>
 
 namespace rocwmma
 {
@@ -215,18 +216,16 @@ namespace rocwmma
         using Result = List;
     };
 
-    // Helper classes to determine if a tuple contains an element with type DataT
-    template <typename DataT, typename TupleT>
-    struct contains_type;
+    // Override wrapper to apply to tuples
 
-    template <typename DataT, typename... TupleTs>
-    struct contains_type<DataT, std::tuple<TupleTs...>>
-        : std::disjunction<std::is_same<DataT, TupleTs>...>
+    namespace detail
     {
-    };
+        template <typename DataT, typename... TupleTs>
+        struct contains_type<DataT, std::tuple<TupleTs...>> : contains_type<DataT, TupleTs...>
+        {
+        };
 
-    template <typename DataT, typename TupleT>
-    inline constexpr bool contains_type_v = contains_type<DataT, TupleT>::value;
+    } // namespace detail
 
     /// Kernel Generator
     /// Requires two inputs:

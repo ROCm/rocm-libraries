@@ -32,20 +32,19 @@ namespace rocwmma
 {
     struct Constants
     {
-
         ///
         /// Architecture IDs
         ///
-        static constexpr uint32_t AMDGCN_ARCH_ID_GFX908  = 0x908;
-        static constexpr uint32_t AMDGCN_ARCH_ID_GFX90A  = 0x90A;
-        static constexpr uint32_t AMDGCN_ARCH_ID_GFX942  = 0x942;
-        static constexpr uint32_t AMDGCN_ARCH_ID_GFX950  = 0x950;
+        static constexpr uint32_t AMDGCN_ARCH_ID_GFX908  = 0x0908;
+        static constexpr uint32_t AMDGCN_ARCH_ID_GFX90A  = 0x090A;
+        static constexpr uint32_t AMDGCN_ARCH_ID_GFX942  = 0x0942;
+        static constexpr uint32_t AMDGCN_ARCH_ID_GFX950  = 0x0950;
         static constexpr uint32_t AMDGCN_ARCH_ID_GFX1100 = 0x1100;
         static constexpr uint32_t AMDGCN_ARCH_ID_GFX1101 = 0x1101;
         static constexpr uint32_t AMDGCN_ARCH_ID_GFX1102 = 0x1102;
         static constexpr uint32_t AMDGCN_ARCH_ID_GFX1200 = 0x1200;
         static constexpr uint32_t AMDGCN_ARCH_ID_GFX1201 = 0x1201;
-        static constexpr uint32_t AMDGCN_ARCH_ID_NONE    = 0x0;
+        static constexpr uint32_t AMDGCN_ARCH_ID_NONE    = 0x0000;
 
         ///
         /// Wave sizes

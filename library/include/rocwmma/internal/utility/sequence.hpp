@@ -34,6 +34,11 @@ namespace rocwmma
     using detail::make_index_sequence;
     using detail::make_offset_index_sequence;
 
+    using detail::contains_number;
+    using detail::contains_number_v;
+    using detail::contains_type;
+    using detail::contains_type_v;
+
 } // namespace rocwmma
 
 #endif // ROCWMMA_UTILITY_SEQUENCE_HPP
