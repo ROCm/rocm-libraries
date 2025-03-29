@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -31,4 +31,5 @@ if(NOT BUILD_CUDA)
                        src/amd_detail/hipblaslt-ext-op.cpp
                          ${hipblaslt_source_common}
                          ${rocblaslt_source})
+  set_source_files_properties(${hipblaslt_source} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
 endif()

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -50,6 +50,14 @@ enum hipblaslt_argument : int;
 constexpr std::size_t MAX_SUPPORTED_NUM_PROBLEMS{32};
 struct Arguments
 {
+    enum ScalingFormat
+    {
+        None   = 0,
+        Scalar = 1,
+        Vector = 2,
+        Block  = 3
+    };
+
     /*************************************************************************
      *                    Beginning Of Arguments                             *
      *************************************************************************/
@@ -146,6 +154,11 @@ struct Arguments
     bool                     gradient;
     bool                     norm_check_assert;
     bool                     swizzle_a;
+
+    uint32_t scaleABlockRowSize;
+    uint32_t scaleABlockColSize;
+    uint32_t scaleBBlockRowSize;
+    uint32_t scaleBBlockColSize;
 
     // API related
     bool    use_ext;
@@ -247,6 +260,10 @@ struct Arguments
     OPER(gradient) SEP               \
     OPER(norm_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
+    OPER(scaleABlockRowSize) SEP     \
+    OPER(scaleABlockColSize) SEP     \
+    OPER(scaleBBlockRowSize) SEP     \
+    OPER(scaleBBlockColSize) SEP     \
     OPER(use_ext) SEP                \
     OPER(use_ext_setproblem) SEP     \
     OPER(algo_method) SEP            \
@@ -852,7 +869,7 @@ namespace ArgumentsHelper
                 func("rotating_buffer", arg.rotating);
         };
 };
-// clang-format on
+    // clang-format on
 
 #else
 #error "Unsupported C++ version"

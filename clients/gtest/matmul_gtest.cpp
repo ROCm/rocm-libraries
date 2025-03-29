@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,6 +31,8 @@
 #include <cstring>
 #include <type_traits>
 
+#include <gtest/gtest-spi.h>
+
 namespace
 {
 
@@ -38,7 +40,7 @@ namespace
     // matmul
     // ----------------------------------------------------------------------------
 
-    struct matmul_testing: hipblaslt_test_valid
+    struct matmul_testing : hipblaslt_test_valid
     {
         void operator()(const Arguments& arg)
         {
@@ -123,11 +125,15 @@ namespace
                     name << "_SA";
                 else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                     name << "_SAV";
+                else if(arg.scaleA == hipblaslt_scaling_format::Block)
+                    name << "_SAMX";
 
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar)
                     name << "_SB";
                 else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                     name << "_SBV";
+                else if(arg.scaleB == hipblaslt_scaling_format::Block)
+                    name << "_SBMX";
 
                 if(arg.scaleC)
                     name << "_SC";
@@ -181,5 +187,47 @@ namespace
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
+
+#ifdef USE_ROCROLLER
+    // ----------------------------------------------------------------------------
+    // rocRoller
+    // ----------------------------------------------------------------------------
+
+    struct rocroller_predicate_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            testing_matmul(arg);
+        }
+    };
+
+    struct rocroller_predicate_test
+        : RocBlasLt_Test<rocroller_predicate_test, rocroller_predicate_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "rocroller_predicate");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(rocroller_predicate_test, unrollXYK)
+    {
+        // rocRoller has predicates that check the dimensions (M/N/K) must be
+        // multiples of the work group sizes. This test set the K dimension
+        // to not be a multiple, and thus we shall see failure.
+        EXPECT_FATAL_FAILURE(rocroller_predicate_testing{}(GetParam()), "NO solution found!");
+    }
+    INSTANTIATE_TEST_CATEGORIES(rocroller_predicate_test);
+#endif
 
 } // namespace

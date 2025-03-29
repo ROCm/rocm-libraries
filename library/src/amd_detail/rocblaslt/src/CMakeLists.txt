@@ -123,7 +123,7 @@ string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" GCC_VERSION "${GCC_OUTPUT}")
 message(STATUS "Extracted GCC Version: ${GCC_VERSION}")
 
 # Compare GCC version and set the flag conditionally if it's 7.5.0 or less
-if(${GCC_VERSION} VERSION_LESS "7.6.0")    
+if(${GCC_VERSION} VERSION_LESS "7.6.0")
     # Apply -ftemplate-depth=2048 to tensile_host.cpp if GCC_VERSION is less than 7.6.0 to avoid template recursion
     set_source_files_properties(src/amd_detail/rocblaslt/src/tensile_host.cpp PROPERTIES COMPILE_FLAGS "-ftemplate-depth=2048")
 endif()
@@ -131,10 +131,18 @@ endif()
   set( Tensile_SRC
     src/amd_detail/rocblaslt/src/tensile_host.cpp
   )
+  set_source_files_properties(src/amd_detail/rocblaslt/src/tensile_host.cpp PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++17")
 
   set( Tensile_INC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/Tensile
   )
+
+if(USE_ROCROLLER)
+  set( RocRoller_SRC
+    src/amd_detail/rocblaslt/src/rocroller_host.cpp
+  )
+  set_source_files_properties(${RocRoller_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20;-x;c++")
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/CompileSourceKernel.cmake)
 

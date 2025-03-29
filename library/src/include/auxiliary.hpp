@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,8 +32,7 @@
 #include <string_view>
 
 /*! \brief device matches pattern */
-inline
-bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
+inline bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
 {
     if(!pattern.length())
     {
@@ -138,6 +137,12 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
     case HIP_R_8F_E5M2:
         return "bf8_r";
 #endif
+    case HIP_R_6F_E2M3_EXT:
+        return "f6_r";
+    case HIP_R_6F_E3M2_EXT:
+        return "bf6_r";
+    case HIP_R_4F_E2M1_EXT:
+        return "f4_r";
     default:
         return "non-supported type";
     }
@@ -209,6 +214,9 @@ constexpr hipDataType string_to_hip_datatype(const std::string& value)
         value == "f16_r" || value == "h" ? HIP_R_16F  :
         value == "bf16_r"                ? HIP_R_16BF  :
         value == "i8_r" || value == "i8" ? HIP_R_8I  :
+        value == "f6_r"                  ? static_cast<hipDataType>(HIP_R_6F_E2M3_EXT) :
+        value == "bf6_r"                 ? static_cast<hipDataType>(HIP_R_6F_E3M2_EXT) :
+        value == "f4_r"                  ? static_cast<hipDataType>(HIP_R_4F_E2M1_EXT) :
         value == "i32_r" || value == "i" ? HIP_R_32I  :
         HIPBLASLT_DATATYPE_INVALID;
 }
@@ -219,7 +227,7 @@ constexpr hipDataType string_to_hip_datatype_assert(const std::string& value)
     auto datatype = string_to_hip_datatype(value);
     if(datatype == HIPBLASLT_DATATYPE_INVALID)
     {
-        std::cout << "The supported types are f32_r, f64_r, f16_r, bf16_r, f8_r, bf8_r, i8_r, i32_r." << std::endl;
+        std::cout << "The supported types are f32_r, f64_r, f16_r, bf16_r, f8_r, bf8_r, f6_r, bf6_r, f4_r, i8_r, i32_r." << std::endl;
         exit(1);
     }
     return datatype;

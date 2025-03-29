@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -151,6 +151,16 @@ typedef enum {
 } hipblasLtPointerMode_t;
 
 /*! \ingroup types_module
+ *  \brief Block scale mode for A and B.
+ */
+typedef enum {
+    HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F = 0,  /** Scaling factors are single-precision scalars applied to the whole tensors (this mode is the default for fp8). */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3 = 1, /** Not supported yet. Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit HIP_R_8F_E4M3 value for each 16-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 = 2, /** Scaling factors are tensors that contain a dedicated scaling factor stored as an 8-bit R_8F_UE8M0 value for each 32-element block in the innermost dimension of the corresponding data tensor. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_END
+} hipblasLtMatmulMatrixScale_t;
+
+/*! \ingroup types_module
  *  \brief Specify the attributes that define the specifics of the matrix multiply operation.
  */
 typedef enum {
@@ -169,6 +179,8 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE = 12, /**<The batch stride of the epilogue auxiliary buffer pointer in the device memory. Data Type:int64_t */
   HIPBLASLT_MATMUL_DESC_POINTER_MODE = 13,              /**<Specifies alpha and beta are passed by reference, whether they are scalars on the host or on the device, or device vectors. Default value is: HIPBLASLT_POINTER_MODE_HOST (i.e., on the host). Data Type: int32_t based on hipblasLtPointerMode_t*/
   HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER = 14,           /**<Device pointer to the memory location that on completion will be set to the maximum of absolute values in the output matrix. Data Type:void* /const void* */
+  HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See hipblasLtMatmulMatrixScale_t */
+  HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See hipblasLtMatmulMatrixScale_t */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of matrix multiply. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT,        /**<Equivalent to HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER but in vector. Default value: NULL Type: void* /const void* */

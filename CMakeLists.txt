@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22...3.25.2 FATAL_ERROR)
 
 # Build documentation
 option(BUILD_DOCS "Build documentation" OFF)
@@ -117,6 +117,8 @@ option(Tensile_NO_LAZY_LIBRARY_LOADING "Diasble loading kernels on demand?" OFF)
 # For roctx
 include(CMakeDependentOption)
 cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Enable roctx marker in hipBLASLt" ON "BUILD_SHARED_LIBS" OFF)
+# For rocRoller
+option(USE_ROCROLLER "Build with the rocRoller library" ON)
 
 if(BUILD_CODE_COVERAGE)
   add_compile_options(-fprofile-arcs -ftest-coverage)
@@ -252,6 +254,12 @@ else()
     else()
       list(APPEND TENSILE_DEFINES ROCBLASLT_TENSILE_LAZY_LOAD=1)
     endif()
+endif()
+
+find_package(Boost REQUIRED)
+if(Boost_VERSION VERSION_LESS "1.74.0")
+    message(WARNING "Boost version ${Boost_VERSION} too old, not building RocRoller")
+    set(USE_ROCROLLER OFF)
 endif()
 
 if( LEGACY_HIPBLAS_DIRECT )

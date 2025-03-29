@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@
 #include "handle.h"
 #include "definitions.h"
 #include "logging.h"
+#include "rocroller_host.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -47,6 +48,26 @@ _rocblaslt_handle::_rocblaslt_handle()
     asic_rev = properties.asicRevision;
 #else
     asic_rev = 0;
+#endif
+
+#ifdef USE_ROCROLLER
+    rocroller_create_handle(&rocroller_handle);
+    const char* rocRollerEnvVal = std::getenv("HIPBLASLT_USE_ROCROLLER");
+    if(rocRollerEnvVal)
+    {
+        if(strncmp(rocRollerEnvVal, "1", 1) == 0)
+        {
+            useRocRoller = 1;
+        }
+        else
+        {
+            useRocRoller = 0;
+        }
+    }
+    else
+    {
+        useRocRoller = -1;
+    }
 #endif
 }
 

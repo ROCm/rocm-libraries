@@ -30,6 +30,8 @@ if(BUILD_VERBOSE)
   include(../cmake/Verbose.cmake)
 endif()
 
+include(../cmake/Utilities.cmake)
+
 # Configure a header file to pass the hipBLASLt version
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt-version.h.in"
                "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-version.h"
@@ -70,7 +72,7 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 include(src/CMakeLists.txt)
 
 # Create hipBLASLt library
-add_library(hipblaslt ${hipblaslt_source} ${hipblaslt_headers_public})
+add_library(hipblaslt ${hipblaslt_source} ${RocRoller_SRC} ${hipblaslt_headers_public})
 add_library(roc::hipblaslt ALIAS hipblaslt)
 
 # Target compile definitions
@@ -162,6 +164,27 @@ endif()
 
 if( NOT BUILD_CUDA AND NOT LEGACY_HIPBLAS_DIRECT )
   target_link_libraries(hipblaslt INTERFACE roc::hipblas-common)
+endif()
+
+# RocRoller integration
+include(FetchContent)
+if(USE_ROCROLLER)
+  _save_var(BUILD_TESTING)
+  set(BUILD_CLIENTS OFF)
+  _save_var(BUILD_CLIENTS)
+  set(BUILD_TESTING OFF)
+
+  FetchContent_Declare(
+    rocRoller
+    GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+    GIT_TAG 33fb58b76df640f98726b90a45fc5b9aa3e8af3b
+  )
+  FetchContent_MakeAvailable(rocRoller)
+  target_link_libraries(hipblaslt PRIVATE rocroller_interface)
+  add_definitions(-DUSE_ROCROLLER)
+
+  _restore_var(BUILD_TESTING)
+  _restore_var(BUILD_CLIENTS)
 endif()
 
 # Target properties

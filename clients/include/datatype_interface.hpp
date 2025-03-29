@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,6 @@
  *******************************************************************************/
 
 #pragma once
-
 #include <hipblaslt/hipblaslt.h>
 
 union computeTypeInterface
@@ -61,6 +60,12 @@ constexpr auto hipblaslt_type2datatype()
         return HIP_R_32I;
     if(std::is_same<T, hipblasLtInt8>{})
         return HIP_R_8I;
+    if(std::is_same<T, hipblaslt_f6>{})
+        return static_cast<hipDataType>(HIP_R_6F_E2M3_EXT);
+    if(std::is_same<T, hipblaslt_bf6>{})
+        return static_cast<hipDataType>(HIP_R_6F_E3M2_EXT);
+    if(std::is_same<T, hipblaslt_f4>{})
+        return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
 
     return HIP_R_16F; // testing purposes we default to f32 ex
 }
@@ -85,6 +90,14 @@ inline hipDataType computeTypeToRealDataType(hipblasComputeType_t ctype)
 
 inline std::size_t realDataTypeSize(hipDataType dtype)
 {
+    // These types were not defined in older versions of ROCm, so need to be handled specially here.
+    auto const dtype_int = static_cast<int>(dtype);
+    if(dtype_int == HIP_R_4F_E2M1_EXT || dtype_int == HIP_R_6F_E2M3_EXT
+       || dtype_int == HIP_R_6F_E3M2_EXT)
+    {
+        return 1;
+    }
+
     static const std::map<hipDataType, std::size_t> dtypeMap{
         {HIP_R_32F, 4},
         {HIP_R_64F, 8},

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2023 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,11 @@ set(hipblaslt_test_source
 add_executable( hipblaslt-test ${hipblaslt_test_source} ${hipblaslt_test_bench_common} )
 
 target_compile_definitions( hipblaslt-test PRIVATE GOOGLE_TEST )
+
+if( USE_ROCROLLER )
+   set_source_files_properties(${mxDataGen_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20")
+endif()
+
 
 if( LEGACY_HIPBLAS_DIRECT )
   target_compile_definitions(hipblaslt-test PUBLIC LEGACY_HIPBLAS_DIRECT )
@@ -125,6 +130,7 @@ add_custom_command( OUTPUT "${HIPBLASLT_TEST_DATA}"
                             matmul_gtest.yaml
                             auxiliary_gtest.yaml
                             smoke_gtest.yaml
+                            rocroller_gtest.yaml
                     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" )
 add_custom_target( hipblaslt-test-data
                    DEPENDS "${HIPBLASLT_TEST_DATA}" )

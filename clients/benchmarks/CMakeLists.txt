@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,10 @@ target_include_directories( hipblaslt-bench
 )
 
 target_link_libraries( hipblaslt-bench PRIVATE ${BLAS_LIBRARY} roc::hipblaslt )
+
+if( USE_ROCROLLER )
+    set_source_files_properties(${mxDataGen_SRC} PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-std=c++20")
+endif()
 
 if( CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   # GCC or hip-clang needs specific flags to turn on f16c intrinsics
