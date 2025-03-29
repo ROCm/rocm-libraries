@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required( VERSION 3.25.2 )
+cmake_minimum_required( VERSION 3.22...3.25.2 )
 
 #add_definitions(-D_HIPBLASLT_INTERNAL_BFLOAT16_)
 
@@ -114,6 +114,27 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       ../common/hipblaslt_init_device.cpp
       ${BLIS_CPP}
     )
+    
+  # RocRoller integration
+  include(FetchContent)
+  if(USE_ROCROLLER)
+      add_definitions(-DUSE_ROCROLLER)
+
+      FetchContent_Declare(
+        mxDataGenerator
+        GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
+        GIT_TAG 7a9778977f19111d3b9fc4497758df4aaa8165c5
+      )
+      FetchContent_MakeAvailable(mxDataGenerator)
+
+      list( APPEND COMMON_LINK_LIBS mxDataGenerator )
+      set( mxDataGen_SRC
+       ../common/mxDataGen.cpp
+      )
+      list(APPEND hipblaslt_test_bench_common
+       ../common/mxDataGen.cpp
+       )
+  endif()
 
   if( BUILD_CLIENTS_BENCHMARKS )
     add_subdirectory( benchmarks )

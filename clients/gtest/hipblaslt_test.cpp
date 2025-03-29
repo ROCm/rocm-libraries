@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,7 +69,10 @@ thread_pool::thread_pool()
 
 thread_pool::~thread_pool()
 {
-    m_done = true;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_done = true;
+    }
     m_cond.notify_all();
     for(auto& thread : m_threads)
         thread.join();

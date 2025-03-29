@@ -40,7 +40,7 @@ function(virtualenv_install)
       COMMAND_ECHO STDOUT
       RESULT_VARIABLE return_code
       ERROR_VARIABLE error_message
-      OUTPUT_VARIABLE output_message      
+      OUTPUT_VARIABLE output_message
     )
 
     if(return_code)

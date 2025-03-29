@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -83,6 +83,12 @@ const char* hipDataType_to_string(hipDataType type)
 #endif
     case HIP_R_8I:
         return "R_8I";
+    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+        return "R_6F_E2M3";
+    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+        return "R_6F_E3M2";
+    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+        return "R_4F_E2M1";
     default:
         return "Invalid";
     }
@@ -90,11 +96,10 @@ const char* hipDataType_to_string(hipDataType type)
 
 bool rocblaslt_is_complex_datatype(hipDataType type)
 {
-    return type == HIP_C_32F  || type == HIP_C_64F || type == HIP_C_16F ||
-           type == HIP_C_8I   || type == HIP_C_8U  || type == HIP_C_32I ||
-           type == HIP_C_32U || type == HIP_C_16BF || type == HIP_C_4I  ||
-           type == HIP_C_4U  || type == HIP_C_16I || type == HIP_C_16U  ||
-           type == HIP_C_64I || type == HIP_C_64U;
+    return type == HIP_C_32F || type == HIP_C_64F || type == HIP_C_16F || type == HIP_C_8I
+           || type == HIP_C_8U || type == HIP_C_32I || type == HIP_C_32U || type == HIP_C_16BF
+           || type == HIP_C_4I || type == HIP_C_4U || type == HIP_C_16I || type == HIP_C_16U
+           || type == HIP_C_64I || type == HIP_C_64U;
 }
 
 const char* hipDataType_to_bench_string(hipDataType type)
@@ -123,6 +128,12 @@ const char* hipDataType_to_bench_string(hipDataType type)
     case HIP_R_8F_E5M2:
         return "bf8_r";
 #endif
+    case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
+        return "f6_r";
+    case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):
+        return "bf6_r";
+    case static_cast<hipDataType>(HIP_R_4F_E2M1_EXT):
+        return "f4_r";
     default:
         return "invalid";
     }

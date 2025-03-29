@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,6 +120,11 @@ void Arguments::init()
     gradient          = false;
     norm_check_assert = true;
 
+    scaleABlockRowSize = 0;
+    scaleABlockColSize = 0;
+    scaleBBlockRowSize = 0;
+    scaleBBlockColSize = 0;
+
     use_ext                  = false;
     use_ext_setproblem       = false;
     algo_method              = 0;
@@ -127,6 +132,7 @@ void Arguments::init()
     rotating                 = 0;
     use_gpu_timer            = false;
     skip_slow_solution_ratio = 0.0;
+
     // tuning
     gsu_vector[0] = 0;
     for(int32_t i = 1; i < MAX_SUPPORTED_NUM_PROBLEMS; i++)

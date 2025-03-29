@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+# Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 # Helper cmake script to automate building dependencies for rocblaslt
 # This script can be invoked manually by the user with 'cmake -P'
 
-cmake_minimum_required(VERSION 3.25.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.22...3.25.2 FATAL_ERROR)
 
 list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
 

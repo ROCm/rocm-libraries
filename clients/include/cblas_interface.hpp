@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,7 +64,9 @@ void cblas_gemm(hipblasOperation_t       transA,
                 hipDataType              tc,
                 hipDataType              tciA,
                 hipDataType              tciB,
-                bool                     alt = false);
+                bool                     alt              = false,
+                bool                     isScaleAMXFormat = false,
+                bool                     isScaleBMXFormat = false);
 
 inline void cblas_gemm(hipblasOperation_t       transA,
                        hipblasOperation_t       transB,
@@ -91,7 +93,9 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                        hipDataType              tc,
                        hipDataType              tciA,
                        hipDataType              tciB,
-                       bool                     alt = false)
+                       bool                     alt              = false,
+                       bool                     isScaleAMXFormat = false,
+                       bool                     isScaleBMXFormat = false)
 {
     switch(tc)
     {
@@ -149,7 +153,10 @@ inline void cblas_gemm(hipblasOperation_t       transA,
                           tc,
                           tciA,
                           tciB,
-                          alt);
+                          alt,
+                          isScaleAMXFormat,
+                          isScaleBMXFormat);
+
         return;
     case HIP_R_64F:
         cblas_gemm<double>(transA,

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -361,6 +361,8 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE  = 12,
     ROCBLASLT_MATMUL_DESC_POINTER_MODE               = 13,
     ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER             = 14,
+    ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
+    ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT,
@@ -398,17 +400,18 @@ typedef struct __attribute__((packed, aligned(8))) _rocblaslt_matmul_algo
  * \brief rocblaslt_matmul_algo holds the description of the matrix
  * multiplication algorithm.
  *******************************************************************************/
-typedef struct _rocblaslt_matmul_algo{
+typedef struct _rocblaslt_matmul_algo
+{
 #ifdef __cplusplus
-  uint8_t data[8] = {0}; // must match hipblasLtMatmulAlgo_t layout
-  bool fallback = false; // 
-  uint8_t data_pad[7] = {0}; // has uint8_t data[16] 
-  size_t max_workspace_bytes = 0;
+    uint8_t data[8]             = {0}; // must match hipblasLtMatmulAlgo_t layout
+    bool    fallback            = false; //
+    uint8_t data_pad[7]         = {0}; // has uint8_t data[16]
+    size_t  max_workspace_bytes = 0;
 #else
-  uint8_t data[8];
-  bool fallback;
-  uint8_t data_pad[7];
-  size_t max_workspace_bytes;
+    uint8_t data[8];
+    bool    fallback;
+    uint8_t data_pad[7];
+    size_t  max_workspace_bytes;
 #endif
 } rocblaslt_matmul_algo;
 
@@ -610,5 +613,164 @@ namespace rocblaslt
         std::shared_ptr<void> m_data;
     };
 } // End of namespace rocblaslt
+
+/********************************************************************
+ * RocblasltContractionProblem captures the arguments for a GEMM-like *
+ * contraction problem, to be passed to runContractionProblem.      *
+ ********************************************************************/
+struct RocblasltContractionProblem
+{
+    enum class ScalingFormat
+    {
+        None = 0,
+        Scalar,
+        Vector,
+        Block
+    };
+
+    hipblasOperation_t trans_a;
+    hipblasOperation_t trans_b;
+
+    // The RocblasltContractionProblem data members should exactly match
+    // Tensile's parameter types, even if rocBLAS uses differently
+    // sized or signed types. The constructors should convert rocBLAS
+    // types into the corresponding Tensile types stored in this class.
+    size_t m;
+    size_t n;
+    size_t k;
+
+    const void* alpha;
+
+    hipDataType        a_type;
+    const void*        A;
+    const void* const* batch_A;
+    size_t             row_stride_a;
+    size_t             col_stride_a;
+    size_t             batch_stride_a;
+
+    hipDataType        b_type;
+    const void*        B;
+    const void* const* batch_B;
+    size_t             row_stride_b;
+    size_t             col_stride_b;
+    size_t             batch_stride_b;
+
+    const void* beta;
+
+    hipDataType        c_type;
+    const void*        C;
+    const void* const* batch_C;
+    size_t             row_stride_c;
+    size_t             col_stride_c;
+    size_t             batch_stride_c;
+
+    hipDataType  d_type;
+    void*        D;
+    void* const* batch_D;
+    size_t       row_stride_d;
+    size_t       col_stride_d;
+    size_t       batch_stride_d;
+
+    void*        E;
+    void* const* batch_E;
+    size_t       row_stride_e;
+    size_t       col_stride_e;
+    size_t       batch_stride_e;
+
+    size_t batch_count;
+    bool   strided_batch;
+    bool   grouped_gemm;
+    bool   gradient;
+
+    rocblaslt_compute_type compute_type;
+    hipDataType            scale_type;
+
+    const void*   bias;
+    const void*   scaleA;
+    const void*   scaleB;
+    const void*   scaleC;
+    const void*   scaleD;
+    const void*   scaleE;
+    const void*   scaleAlphaVec;
+    ScalingFormat scaleAType;
+    ScalingFormat scaleBType;
+
+    size_t             scaleABlockRowSize;
+    size_t             scaleABlockColSize;
+    size_t             scaleBBlockRowSize;
+    size_t             scaleBBlockColSize;
+    hipDataType        bias_type;
+    rocblaslt_epilogue epilogue;
+    void*              amaxD;
+    void*              workspace;
+    size_t             workspaceSize;
+
+    hipStream_t stream;
+    void*       Synchronizer;
+    bool        swizzleA;
+    bool        swizzleB;
+
+    // gemm_ex
+    // gemm_strided_batched_ex
+    RocblasltContractionProblem(hipblasOperation_t     trans_a,
+                                hipblasOperation_t     trans_b,
+                                int64_t                m,
+                                int64_t                n,
+                                int64_t                k,
+                                const void*            alpha,
+                                hipDataType            a_type,
+                                const void*            A,
+                                const void* const*     batch_A,
+                                int64_t                ld_a,
+                                int64_t                batch_stride_a,
+                                hipDataType            b_type,
+                                const void*            B,
+                                const void* const*     batch_B,
+                                int64_t                ld_b,
+                                int64_t                batch_stride_b,
+                                const void*            beta,
+                                hipDataType            c_type,
+                                const void*            C,
+                                const void* const*     batch_C,
+                                int64_t                ld_c,
+                                int64_t                batch_stride_c,
+                                hipDataType            d_type,
+                                void*                  D,
+                                void* const*           batch_D,
+                                int64_t                ld_d,
+                                int64_t                batch_stride_d,
+                                void*                  E,
+                                void* const*           batch_E,
+                                int64_t                ld_e,
+                                int64_t                batch_stride_e,
+                                int64_t                batch_count,
+                                bool                   strided_batch,
+                                bool                   grouped_gemm,
+                                bool                   gradient,
+                                rocblaslt_compute_type compute_type,
+                                hipDataType            scale_type,
+                                const void*            bias,
+                                const void*            scaleA,
+                                const void*            scaleB,
+                                const void*            scaleC,
+                                const void*            scaleD,
+                                const void*            scaleE,
+                                const void*            scaleAlphaVec,
+                                ScalingFormat          scaleAType,
+                                ScalingFormat          scaleBType,
+                                size_t                 scaleABlockRowSize,
+                                size_t                 scaleABlockColSize,
+                                size_t                 scaleBBlockRowSize,
+                                size_t                 scaleBBlockColSize,
+                                hipDataType            bias_type,
+                                rocblaslt_epilogue     epilogue,
+                                void*                  amaxD,
+                                void*                  workspace,
+                                size_t                 workspaceSize,
+                                hipStream_t            stream,
+                                void*                  Synchronizer,
+                                bool                   swizzleA,
+                                bool                   swizzleB);
+};
 
 #endif /* _ROCBLASLT_TYPES_H_ */
