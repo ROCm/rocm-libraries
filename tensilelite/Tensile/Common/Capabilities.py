@@ -207,6 +207,7 @@ def initArchCaps(isaVersion) -> dict:
     rv["NoSDWA"]             = isaVersion[0] == (12)
     rv["VOP3ByteSel"]      = isaVersion[0] == (12)
     rv["HasFP8_OCP"]         = isaVersion[0] == (12)
+    rv["HasF32XEmulation"]   = (isaVersion in [(9,5,0)])
     # fmt: on
     return rv
 

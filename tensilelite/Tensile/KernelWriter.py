@@ -203,6 +203,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
+  startVgprCvt: int                      = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -3609,7 +3610,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
         raise RuntimeError("Sparse MatrixInstruction not supported for {0}".format(self.states.version))
 
       if (kernel["EnableF32XdlMathOp"] and kernel["ProblemType"]["F32XdlMathOp"].isXFloat32() and (not self.states.asmCaps["HasMFMA_xf32"])):
-        raise RuntimeError("XF32 MatrixInstruction not supported for {0}".format(self.states.version))
+        if kernel["UseF32XEmulation"]:
+          printWarning("XF32 MatrixInstruction not supported for {0}, using emulation".format(self.states.version))
+        else:
+          raise RuntimeError("XF32 MatrixInstruction not supported for {0}".format(self.states.version))
 
     if not self.states.asmCaps["HasDirectToLds"]:
       kernel["DirectToLdsA"] = False
@@ -4318,6 +4322,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # code doesn't have to deal with fragmentation
     self.states.startVgprSerial = vgprIdx
     vgprIdx += 1 # for vgpr serial id
+
+    if kernel["UseF32XEmulation"]:
+      #align 64 bit
+      vgprIdx = int((vgprIdx + 1) / 2) * 2
+      self.states.startVgprCvt = vgprIdx
+      vgprIdx += 9 # for vgpr serial id
 
     self.states.totalVgprs = max(vgprIdx, self.states.c.numVgprValu)
     if self.states.totalVgprs < 0 or self.states.totalVgprs > self.states.regCaps["MaxVgpr"]:

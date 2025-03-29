@@ -2843,8 +2843,8 @@ class VLShiftLeftAddU32(CompositeInstruction):
 
 # V Mov
 class VMovB32(CommonInstruction):
-    def __init__(self, dst, src, comment="") -> None:
-        super().__init__(InstType.INST_B32, dst, [src], None, None, None, comment)
+    def __init__(self, dst, src, comment="", sdwa: Optional[SDWAModifiers] = None) -> None:
+        super().__init__(InstType.INST_B32, dst, [src], sdwa, None, None, comment)
         self.setInst("v_mov_b32")
 
 class _VMovB64(CommonInstruction):

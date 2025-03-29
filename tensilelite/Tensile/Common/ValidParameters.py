@@ -112,7 +112,7 @@ def makeValidMFMA():
         [16, 16, 16, 1],
         [4, 4, 4, 16],
     ] + [[32, 32, 16, 1], [16, 16, 32, 1]]
-    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1]]
+    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1]]
     validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
     validMFMA["B8"] = validMFMA["F8"]
     validMFMA["F8B8"] = validMFMA["F8"]
@@ -815,6 +815,7 @@ validParameters = { # we need to make sure this matches develop
 
 newMIValidParameters = {
     "EnableF32XdlMathOp": [False, True],
+    "UseF32XEmulation": [False, True],
     'EnableMatrixInstruction': [False, True],
     'ISA': -1,
     'MFMA_BF16_1K': [False, True],
