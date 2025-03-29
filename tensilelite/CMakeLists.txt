@@ -79,7 +79,7 @@ separate_arguments(BIN_ARGS_LIST NATIVE_COMMAND "${BIN_ARGS}")
 message(STATUS "Script set: ${TENSILE_BIN} ${BIN_ARGS_LIST}")
 
 # Add rocisa
-add_subdirectory(${CMAKE_SOURCE_DIR}/rocisa)
+add_subdirectory(rocisa)
 
 # Find Python interpreter
 find_package(PythonInterp REQUIRED)

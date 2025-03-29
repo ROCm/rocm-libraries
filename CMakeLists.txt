@@ -191,7 +191,7 @@ else()
     endif( )
 
     # Add rocisa
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa)
+    add_subdirectory(tensilelite/rocisa)
 
     option( Tensile_SKIP_BUILD "Skip building Tensile" OFF )
 

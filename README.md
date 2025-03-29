@@ -64,8 +64,8 @@ Required software:
 
 * Git
 * CMake 3.16.8 or later
-* python3.7 or later
-* python3.7-venv or later
+* python3.8 or later
+* python3.8-venv or later
 * AMD [ROCm](https://github.com/RadeonOpenCompute/ROCm), version 5.5 or later
 * [hipBLAS-common](https://github.com/ROCm/hipBLAS-common)
 * [roctracer](https://github.com/ROCm/roctracer)
@@ -80,6 +80,9 @@ git clone https://github.com/ROCmSoftwarePlatform/hipBLASLt
 
 # Go to hipBLASLt directory
 cd hipBLASLt
+
+# Run requirements.txt in folder tensilelite
+python3 -m pip install -r tensilelite/requirements.txt
 
 # Run install.sh script
 # Command line options:

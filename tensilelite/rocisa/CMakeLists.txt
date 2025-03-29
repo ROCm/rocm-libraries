@@ -36,25 +36,19 @@ endif()
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
-# find nanobind
-if(NOT nanobind_FOUND)
-    execute_process(
-        COMMAND ${Python_EXECUTABLE} -m nanobind --cmake_dir
-        OUTPUT_VARIABLE nanobind_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_VARIABLE error
-        RESULT_VARIABLE result
-    )
-    if(result)
-        message(FATAL_ERROR "Did you forget to install nanobind?")
-    endif()
-    
-    # Use cmake -Dpybind11_DIR=$(python3 -m nanobind --cmakedir) .. to set pybind dir
-    # Use cmake -DCMAKE_PREFIX_PATH=$(python3 -m nanobind --cmake_dir) .. to set nanobind
-    find_package(nanobind CONFIG REQUIRED HINTS ${nanobind_DIR})
+if(Python_VERSION VERSION_GREATER_EQUAL "3.8")
+    message(STATUS "Found Python version: ${Python_VERSION}")
+else()
+    message(FATAL_ERROR "Python version 3.8 or higher is required, but found version ${Python_VERSION}")
 endif()
-message(STATUS "Nanobind path: ${nanobind_DIR}")
 
+include(FetchContent)
+FetchContent_Declare(
+  nanobind
+  GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+  GIT_TAG        9b3afa9dbdc23641daf26fadef7743e7127ff92f # v2.6.1
+)
+FetchContent_MakeAvailable(nanobind)
 
 set(ROCISAINST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/instruction.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/instruction/common.cpp

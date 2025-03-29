@@ -1,3 +1,2 @@
 cmake
-nanobind
 pytest>=5.4.1
