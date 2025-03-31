@@ -3281,7 +3281,7 @@ void AvcVideoParser::PrintPps(AvcPicParameterSet *p_pps) {
 }
 
 void AvcVideoParser::PrintSliceHeader(AvcSliceHeader *p_slice_header) {
-    uint32_t i, j;
+    uint32_t j;
         
     MSG("======================");
     MSG("Slice header");
