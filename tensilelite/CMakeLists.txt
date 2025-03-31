@@ -78,6 +78,12 @@ else()
     message(FATAL_ERROR "TENSILE_BIN is not defined. Please set it to one of the valid options: ${VALID_BINS}")
 endif()
 
+if("$ENV{Python_ROOT}" STREQUAL "" AND NOT Python_ROOT)
+    message(STATUS "Python_ROOT is unset. Setting Python_ROOT to /usr.")
+    message(STATUS "Configure Python_ROOT variable if a different installation is preferred.")
+    set(Python_ROOT /usr)
+endif()
+
 # Add rocisa
 add_subdirectory(rocisa)
 
@@ -91,7 +97,7 @@ set(PYTHONPATH "${PROJECT_BINARY_DIR}/lib")
 if(DEFINED DEVELOP_MODE)
     include(ProcessorCount)
     ProcessorCount(NPROC)
-    set(CMAKE_BUILD_COMMAND "cmake --build . -j ${NPROC}")
+    set(CMAKE_BUILD_COMMAND "cmake --build ${PROJECT_BINARY_DIR} -j ${NPROC}")
     if(WIN32)
         set(SCRIPT_NAME ${TENSILE_BIN}.bat)
         file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"

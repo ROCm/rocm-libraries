@@ -14,9 +14,9 @@ Assumptions:
 
 Example:
 
-```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S hipBLASLt/tensilelite -B <tensile-out>```
+```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S <path-to-tensilelite-root> -B <tensile-out>```
 
-The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script as usual:
+The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script under the ``tensile-out`` folder as usual:
 
 ```
 Tensile.sh <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
@@ -27,6 +27,8 @@ or
 ```
 Tensile.bat <abs-path>/Tensile/Tests/gemm/fp16_use_e.yaml tensile-out
 ```
+
+**You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**
 
 To build asm only:
 
