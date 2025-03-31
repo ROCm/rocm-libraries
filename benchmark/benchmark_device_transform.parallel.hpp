@@ -154,8 +154,8 @@ struct device_transform_benchmark_generator
     template<unsigned int ItemsPerThread>
     struct create_ipt
     {
-        using generated_config
-            = rocprim::transform_config<BlockSize, 1 << ItemsPerThread, LoadType>;
+        using generated_config = rocprim::
+            transform_config<BlockSize, 1 << ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT, LoadType>;
 
         void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
         {
