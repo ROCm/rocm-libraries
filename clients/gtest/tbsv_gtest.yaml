@@ -108,7 +108,7 @@ Tests:
   matrix_size: *large_matrix_size_range
   incx: [ 1 ]
 
-- name: tbsv_64
+- name: tbsv_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2, K: 2, incx: 2147483649, batch_count: 1 }

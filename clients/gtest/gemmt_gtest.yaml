@@ -103,7 +103,7 @@ Tests:
   gpu_arch: ['90a','942']
   os_flags: LINUX
 
-- name: gemmt_64
+- name: gemmt_ILP64
   category: stress
   uplo: [ U , L ] # op(A) and op(B) are NxK
   matrix_size:
@@ -175,7 +175,7 @@ Tests:
   alpha_beta: *alpha_beta
   batch_count: [ 2 ]
 
-- name: gemmt_batched_64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
+- name: gemmt_batched_ILP64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
   category: stress
   api: [C_64]
   function: gemmt_batched
@@ -257,7 +257,7 @@ Tests:
   alpha_beta:
     - { alpha:  0.5, beta:  0.5 }
 
-- name: gemmt_strided_batched_64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
+- name: gemmt_strided_batched_ILP64 # TODO: add tests for K, lda, ldb, ldc > int32_t_max
   category: stress
   api: [C_64]
   function: gemmt_strided_batched

@@ -101,7 +101,7 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha: [ 1.0 ]
 
-- name: spr2_64
+- name: spr2_ILP64
   category: stress
   arguments:
     - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }

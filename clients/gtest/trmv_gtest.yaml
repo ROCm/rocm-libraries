@@ -131,7 +131,7 @@ Tests:
   matrix_size: *large_matrix_size_range
   incx: *incx_range_small
 
-- name: trmv_64
+- name: trmv_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2, incx: 2147483649, batch_count: 1 }

@@ -90,7 +90,7 @@ Tests:
   - set_get_vector_async
   os_flags: LINUX
 
-- name: auxiliary_64
+- name: auxiliary_ILP64
   category: stress
   precision: *single_precision
   arguments:

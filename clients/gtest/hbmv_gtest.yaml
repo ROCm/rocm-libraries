@@ -167,7 +167,7 @@ Tests:
   incx_incy: *incx_incy_range_small
   alpha_beta: *alpha_beta_range_small
 
-- name: hbmv_64
+- name: hbmv_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2147483649, K: 2, incx: 2, incy: 1, batch_count: 1 }

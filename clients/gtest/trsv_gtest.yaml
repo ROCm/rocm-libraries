@@ -124,7 +124,7 @@ Tests:
   matrix_size: *large_matrix_size_range
   incx: [ 2 ]
 
-- name: trsv_64
+- name: trsv_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2, incx: 2147483649, batch_count: 1 }

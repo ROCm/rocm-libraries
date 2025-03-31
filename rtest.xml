@@ -10,6 +10,10 @@
 <test sets="smoke">
   <run name="smoke_test">{TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
 </test>
+<test sets="code_coverage">
+  <run name="code coverage core">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*:*ILP64*-*known_bug*:*stress* </run>
+  <run name="code coverage numerics">ROCBLAS_CHECK_NUMERICS=4 {TEST_BASE_OPTIONS} --yaml rocblas_smoke.yaml </run>
+</test>
 <test sets="cqe">
   <run name="cqe psdb">{TEST_BASE_OPTIONS} --gtest_filter=*quick*:*pre_checkin*-*known_bug*</run>
   <run name="cqe nightly">{TEST_BASE_OPTIONS} --gtest_filter=*nightly*-*known_bug*</run>

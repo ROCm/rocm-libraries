@@ -157,8 +157,8 @@ Tests:
       - rotg_strided_batched: *rotg_precisions
       - rotmg_strided_batched: *single_double_precisions
 
-  - name: rot_64
-    category: nightly
+  - name: rot_ILP64
+    category: pre_checkin
     N: [ 64 ]
     arguments:
       - { incx: 1, incy: 1, batch_count: 1 }
@@ -171,7 +171,7 @@ Tests:
       - rot_strided_batched:  *rot_precisions
       - rot_strided_batched_ex:  *rot_ex_precisions
 
-  - name: rot_64
+  - name: rot_ILP64
     category: stress
     arguments:
       - { N: 2147483649, incx: 1, incy: 1, batch_count: 1 }
@@ -355,7 +355,7 @@ Tests:
       - rotm_strided_batched:  *single_double_precisions
 
   # quick tests will fallback to original kernels at launcher level
-  - name: rotm_64
+  - name: rotm_ILP64
     category: nightly
     N: [ 64 ]
     incx_incy: *incx_incy_range_small
@@ -365,7 +365,7 @@ Tests:
       - rotm_batched:  *single_double_precisions_complex_real
       - rotm_strided_batched:  *single_double_precisions_complex_real
 
-  - name: rotmg_64
+  - name: rotmg_ILP64
     category: nightly
     api: [ FORTRAN_64 ]
     function:
@@ -373,7 +373,7 @@ Tests:
       - rotmg_batched:  *single_double_precisions_complex_real
       - rotmg_strided_batched:  *single_double_precisions_complex_real
 
-  - name: rotg_64
+  - name: rotg_ILP64
     category: nightly
     api: [ FORTRAN_64 ]
     function:
@@ -381,7 +381,7 @@ Tests:
       - rotg_batched:  *single_double_precisions_complex_real
       - rotg_strided_batched:  *single_double_precisions_complex_real
 
-  - name: rotm_64
+  - name: rotm_ILP64
     category: stress
     arguments: # stride_c is param stride so must be >= 5
       - { N: 2147483649, incx: 1, incy: -1, stride_x: 2, stride_y: 2, stride_c: 5, batch_count: 1 }
@@ -395,7 +395,7 @@ Tests:
       - rotm_batched:  *single_precision
       - rotm_strided_batched:  *single_precision
 
-  - name: rotmg_64
+  - name: rotmg_ILP64
     category: stress
     arguments: # stride_c is param stride so must be >= 5
       - { stride_a: 1, stride_b: 1, stride_x: 1, stride_y: 1, stride_c: 5, batch_count: *c_grid_yz_require_passes }
@@ -407,7 +407,7 @@ Tests:
       - rotmg_batched:  *single_precision
       - rotmg_strided_batched:  *single_precision
 
-  - name: rotg_64
+  - name: rotg_ILP64
     category: stress
     arguments:
       - { stride_a: 1, stride_b: 1, stride_c: 1, stride_d: 1, batch_count: *c_grid_yz_require_passes }

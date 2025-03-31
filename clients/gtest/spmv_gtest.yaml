@@ -133,7 +133,7 @@ Tests:
   os_flags: LINUX
   gpu_arch: ['90a','942']
 
-- name: spmv_64
+- name: spmv_ILP64
   category: stress
   arguments:
     - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }

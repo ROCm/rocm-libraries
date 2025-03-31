@@ -110,7 +110,7 @@ Tests:
   - set_get_matrix_async
   os_flags: LINUX
 
-- name: auxiliary_64
+- name: auxiliary_ILP64
   category: stress
   precision: *half_precision
   arguments:

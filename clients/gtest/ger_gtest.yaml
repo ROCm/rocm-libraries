@@ -297,7 +297,7 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [ 3 ]
 
-- name: ger_64
+- name: ger_ILP64
   category: stress
   arguments:
     - { M: 2147483649, N: 1, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }

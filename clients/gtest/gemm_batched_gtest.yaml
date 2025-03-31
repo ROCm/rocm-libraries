@@ -795,7 +795,7 @@ Tests:
   batch_count: [ 3 ]
   graph_test: true
 
-- name: gemm_batched_64_API
+- name: gemm_batched_ILP64
   category: stress
   function:
     - gemm_batched: *half_precision

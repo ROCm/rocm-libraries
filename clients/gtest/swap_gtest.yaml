@@ -105,17 +105,17 @@ Tests:
       - swap_strided_batched_bad_arg:  *single_double_precisions_complex_real
 
   # quick tests will fallback to original kernels at launcher level
-  - name: swap_64
-    category: nightly
+  - name: swap_ILP64
+    category: pre_checkin
     N: [ 64 ]
     incx_incy: *incx_incy_range_small
-    api: [ C_64, FORTRAN_64 ]
+    api: [ FORTRAN_64 ]
     function:
       - swap:  *single_double_precisions_complex_real
       - swap_batched:  *single_double_precisions_complex_real
       - swap_strided_batched:  *single_double_precisions_complex_real
 
-  - name: swap_64
+  - name: swap_ILP64
     category: stress
     arguments:
       - { N: 2147483649, incx: 1, incy: 1,  batch_count: 1 }

@@ -272,7 +272,7 @@ Tests:
     - geam_strided_batched: *single_precision
   stride_scale: 1
 
-- name: geam_64
+- name: geam_ILP64
   category: stress
   arguments:
     - {  M: 2147483649, N: 1, lda: 2147483659, ldb: 2147483669,  ldc: 2147483689, batch_count: 1, transA: N, transB: N}

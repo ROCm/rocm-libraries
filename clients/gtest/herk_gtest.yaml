@@ -211,7 +211,7 @@ Tests:
     - herk_strided_batched: *single_precision_complex
   stride_scale: 1
 
-- name: herk_64
+- name: herk_ILP64
   category: stress
   uplo: [ U, L ]
   arguments:

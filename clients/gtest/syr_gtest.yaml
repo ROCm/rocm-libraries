@@ -125,7 +125,7 @@ Tests:
   gpu_arch: ['90a','942']
   os_flags: LINUX
 
-- name: syr_64
+- name: syr_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2147483649, incx: 1, batch_count: 1 }

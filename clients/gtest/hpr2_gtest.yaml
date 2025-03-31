@@ -232,7 +232,7 @@ Tests:
   stride_scale: [ 1.0 ]
   batch_count: [ 3 ]
 
-- name: hpr2_64
+- name: hpr2_ILP64
   category: stress
   arguments:
     - { N: 2048, incx: 2, incy: 1, batch_count: 2 }

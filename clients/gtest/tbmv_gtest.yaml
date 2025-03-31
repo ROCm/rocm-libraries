@@ -263,7 +263,7 @@ Tests:
   stride_scale: [ 1.5 ]
   batch_count: [256]
 
-- name: tbmv_64
+- name: tbmv_ILP64
   category: stress
   arguments:
     # - { N: 2147483649, K: 1, lda: 1, incx: 1, batch_count: 1 }

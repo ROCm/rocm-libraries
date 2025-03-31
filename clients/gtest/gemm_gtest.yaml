@@ -3882,7 +3882,7 @@ Tests:
   gpu_arch: ['90a','942']
   os_flags: LINUX
 
-- name: gemm_64_API
+- name: gemm_ILP64
   category: pre_checkin
   function:
     - gemm: *single_precision
@@ -3909,7 +3909,7 @@ Tests:
   alpha: 1
   beta: 1
 
-- name: gemm_ex_64_API
+- name: gemm_ex_ILP64
   category: pre_checkin
   function:
     - gemm_batched_ex: *nonint8_real_precisions
@@ -3927,7 +3927,7 @@ Tests:
   stride_scale: [ 1 ]
   os_flags: LINUX
 
-- name: gemm_64_API
+- name: gemm_ILP64
   category: stress
   function:
     - gemm: *half_precision
@@ -3948,7 +3948,7 @@ Tests:
   api: [ C_64 ]
   os_flags: LINUX
 
-- name: gemm_ex_ldd_64_API
+- name: gemm_ex_ldd_ILP64
   category: stress
   function:
     - gemm_ex: *hpa_half_precision

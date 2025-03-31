@@ -145,7 +145,7 @@ Tests:
   gpu_arch: ['90a','942']
   os_flags: LINUX
 
-- name: symm_64_L
+- name: symm_ILP64_L
   category: stress
   api: [C_64]
   function:
@@ -162,7 +162,7 @@ Tests:
   os_flags: LINUX
   gpu_arch: ['90a','942']
 
-- name: symm_64_R
+- name: symm_ILP64_R
   category: stress
   api: [C_64]
   function:
@@ -179,7 +179,7 @@ Tests:
   os_flags: LINUX
   gpu_arch: ['90a','942']
 
-- name: symm_batched_64
+- name: symm_batched_ILP64
   category: stress
   function:
     - symm_batched

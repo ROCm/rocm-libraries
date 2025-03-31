@@ -296,7 +296,7 @@ Tests:
   os_flags: LINUX
   gpu_arch: ['90a','942']
 
-- name: hpmv_64
+- name: hpmv_ILP64
   category: stress
   arguments:
     - { N: 2048, incx: 2, incy: -1, batch_count: 2 }

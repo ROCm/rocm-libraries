@@ -63,8 +63,8 @@ Tests:
 
 
   # quick tests will fallback to original kernels at launcher level
-  - name: copy_64
-    category: nightly
+  - name: copy_ILP64
+    category: pre_checkin
     N: [ 64 ]
     incx_incy: *incx_incy_range_small
     api: [ FORTRAN_64 ]
@@ -73,7 +73,7 @@ Tests:
       - copy_batched:  *single_double_precisions_complex_real
       - copy_strided_batched:  *single_double_precisions_complex_real
 
-  - name: copy_64
+  - name: copy_ILP64
     category: stress
     arguments:
       - { N: 2147483649, incx: 1, incy: 1,  batch_count: 1 }

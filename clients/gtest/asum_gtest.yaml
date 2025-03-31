@@ -36,8 +36,8 @@ Tests:
       - asum_batched_bad_arg:  *single_double_precisions_complex_real
       - asum_strided_batched_bad_arg:  *single_double_precisions_complex_real
 
-  - name: asum_64
-    category: nightly
+  - name: asum_ILP64
+    category: pre_checkin
     N: [ 64 ]
     arguments:
       - { incx: 1, batch_count: 1 }
@@ -47,7 +47,7 @@ Tests:
       - asum_batched: *single_double_precisions_complex_real
       - asum_strided_batched: *single_double_precisions_complex_real
 
-  - name: asum_64
+  - name: asum_ILP64
     category: stress
     pointer_mode_host: false
     initialization: hpl

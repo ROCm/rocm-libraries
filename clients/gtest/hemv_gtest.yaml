@@ -279,7 +279,7 @@ Tests:
   pointer_mode_host: false
 
 # 64-bit interface
-- name: hemv_64
+- name: hemv_ILP64
   category: stress
   arguments:
     - { N: 2, lda: 2147483649, incx: 1, incy: 1, batch_count: 1 }

@@ -113,8 +113,8 @@ Tests:
       - dot_strided_batched_ex: *dot_ex_precisions
       - dotc_strided_batched_ex: *dot_ex_precisions
 
-  - name: dot_64
-    category: nightly
+  - name: dot_ILP64
+    category: pre_checkin
     N: [ 64 ]
     arguments:
       - { incx: 1, incy: 1, batch_count: 1 }
@@ -127,7 +127,7 @@ Tests:
       - dot_strided_batched:  *single_precision
       - dot_strided_batched_ex:  *single_precision
 
-  - name: dot_64
+  - name: dot_ILP64
     category: stress
     arguments:
       - { N: 2147483649, incx: 1, incy: 1, batch_count: 1 }
@@ -145,7 +145,7 @@ Tests:
       - dot_strided_batched: *single_precision
       - dot_strided_batched_ex: *single_precision
 
-  - name: dot_64
+  - name: dot_ILP64
     category: stress
     arguments:
       - { N: 2, incx: 2147483649, incy: 1, batch_count: 1 }

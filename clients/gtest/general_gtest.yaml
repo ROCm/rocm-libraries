@@ -45,7 +45,7 @@ Tests:
   stride_x : [ 0 ]
   precision : *half_bfloat_single_double_complex_real_precisions
 
-- name : check_numerics_vector_64
+- name : check_numerics_vector_ILP64
   category : stress
   function : check_numerics_vector
   N : [ -1, 2147486720 ]
@@ -55,7 +55,7 @@ Tests:
   precision : *half_precision
   os_flags: [ LINUX ]
 
-- name : check_numerics_vector_64
+- name : check_numerics_vector_ILP64
   category : stress
   function : check_numerics_vector
   N : [ 1 ]
@@ -79,7 +79,7 @@ Tests:
   transA: [ T, N, C ]
   precision : *half_bfloat_single_double_complex_real_precisions
 
-- name : check_numerics_matrix_64
+- name : check_numerics_matrix_ILP64
   category : stress
   function : check_numerics_matrix
   M : [ *c_grid_x_require_passes ]
@@ -92,7 +92,7 @@ Tests:
   precision : *half_precision
   os_flags: [ LINUX ]
 
-- name : check_numerics_matrix_batched_64
+- name : check_numerics_matrix_batched_ILP64
   category : stress
   function : check_numerics_matrix_batched
   M : [ 3 ]

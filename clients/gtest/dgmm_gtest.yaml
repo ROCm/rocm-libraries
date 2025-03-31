@@ -202,7 +202,7 @@ Tests:
     - dgmm_strided_batched: *single_precision
   stride_scale: 1
 
-- name: dgmm_64
+- name: dgmm_ILP64
   category: stress
   arguments:
     - {  M: 2147483649, N: 1, lda: 2147483649, incx: 1,  ldc: 2147483649, batch_count: 1 }

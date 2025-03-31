@@ -107,8 +107,8 @@ Tests:
       - nrm2_batched_ex_bad_arg: *nrm2_ex_precisions
       - nrm2_strided_batched_ex_bad_arg: *nrm2_ex_precisions
 
-  - name: nrm2_64
-    category: nightly
+  - name: nrm2_ILP64
+    category: pre_checkin
     N: [ 64 ]
     arguments:
       - { incx: 1, batch_count: 1 }
@@ -121,7 +121,7 @@ Tests:
       - nrm2_strided_batched: *single_double_precisions_complex_real
       - nrm2_strided_batched_ex: *single_double_precisions_complex_real
 
-  - name: nrm2_64
+  - name: nrm2_ILP64
     category: stress
     pointer_mode_host: false
     initialization: hpl

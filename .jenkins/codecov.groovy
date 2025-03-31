@@ -15,7 +15,7 @@ def runCI =
 
     def settings = [formatCheck: false,
                     addressSanitizer: false,
-                    gfilter: "*quick*:*pre_checkin*"]
+                    gfilter: "*quick*:*pre_checkin*:*ILP64*"]
 
     def prj = new rocProject('rocBLAS', 'CodeCov')
 

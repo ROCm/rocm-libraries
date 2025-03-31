@@ -1233,7 +1233,7 @@ Tests:
   stride_scale: [ 1 ]
   batch_count: [64]
 
-- name: trsm_left_64
+- name: trsm_left_ILP64
   category: stress
   arguments:
     # - { M: 2, N: 2147483649, lda: 4, ldb: 4, batch_count: 1 }
@@ -1251,7 +1251,7 @@ Tests:
   precision: *single_precision
   pointer_mode_host: false
 
-- name: trsm_right_64
+- name: trsm_right_ILP64
   category: stress
   arguments:
     # - { M: 2147483649, N: 2, lda: 10, ldb: 2147483650, batch_count: 1 }
@@ -1284,7 +1284,7 @@ Tests:
     - trsm_strided_batched_ex: *single_precision
   pointer_mode_host: false
 
-- name: trsm_batched_64
+- name: trsm_batched_ILP64
   category: stress
   arguments:
     - { M: 4, N: 4, lda: 4, ldb: 4, batch_count: *c_grid_yz_require_passes }

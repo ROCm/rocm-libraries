@@ -107,8 +107,8 @@ Tests:
       - iamin_batched_bad_arg: *single_double_precisions_complex_real
       - iamin_strided_batched_bad_arg: *single_double_precisions_complex_real
 
-  - name: iamax_iamin_64
-    category: nightly
+  - name: iamax_iamin_ILP64
+    category: pre_checkin
     N: [ 1025 ]
     arguments:
       - { incx: 1, batch_count: 3 }
@@ -122,7 +122,7 @@ Tests:
       - iamax_strided_batched: *single_double_precisions_complex_real
       - iamin_strided_batched: *single_double_precisions_complex_real
 
-  - name: iamax_iamin_64
+  - name: iamax_iamin_ILP64
     category: stress
     pointer_mode_host: false
     arguments:

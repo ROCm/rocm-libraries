@@ -263,14 +263,13 @@ Tests:
     os_flags: LINUX
     # all GPU for now
 
-# nightly - 64-bit (nightly only testing interface, not 64-bit sizes)
-# windows testing only nightly not stress as ILP64 reference requires custom build
-  - name: axpy_64
-    category: nightly
+# pre_checkin - 64-bit (pre_checkin only testing interface, not 64-bit sizes)
+  - name: axpy_ILP64
+    category: pre_checkin
     N: [ 64 ]
     incx_incy: *incx_incy_range_small
     alpha_beta: *alpha_beta_range_small
-    api: [ C_64, FORTRAN_64 ]
+    api: [ FORTRAN_64 ]
     function:
       - axpy: *half_single_precisions_complex_real
       - axpy_ex: *bfloat_half_single_double_complex_real_precisions
@@ -279,7 +278,7 @@ Tests:
       - axpy_strided_batched: *half_single_precisions_complex_real
       - axpy_strided_batched_ex: *bfloat_half_single_double_complex_real_precisions
 
-  - name: axpy_64
+  - name: axpy_ILP64
     category: stress
     arguments:
       - { N: 2147483649, incx:  1, incy:  1, batch_count: 1 }

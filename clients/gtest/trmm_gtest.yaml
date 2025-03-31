@@ -732,7 +732,7 @@ Tests:
   alpha_beta: *complex_alpha
   outofplace: [       true] # test outofplace
 
-- name: trmm_left_64
+- name: trmm_left_ILP64
   category: stress
   arguments:
     - { M: 2, N: 8000, lda: 2147483649, ldb: 10, ldc: 10, batch_count: 1 }
@@ -751,7 +751,7 @@ Tests:
   pointer_mode_host: false
   outofplace: [ true, false ]
 
-- name: trmm_right_64
+- name: trmm_right_ILP64
   category: stress
   arguments:
     - { M: 2147483649, N: 2, lda: 10, ldb: 2147483650, ldc: 2147483650, batch_count: 1 }
@@ -783,7 +783,7 @@ Tests:
     - trmm_strided_batched: *single_precision
   outofplace: [ true, false ]
 
-- name: trmm_batched_64
+- name: trmm_batched_ILP64
   category: stress
   arguments:
     - { M: 4, N: 4, lda: 4, ldb: 4, batch_count: *c_grid_yz_require_passes }

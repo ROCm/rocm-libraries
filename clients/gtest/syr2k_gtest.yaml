@@ -246,7 +246,7 @@ Tests:
     - syr2k_strided_batched: *single_precision
   stride_scale: 1
 
-- name: syr2k_64
+- name: syr2k_ILP64
   category: stress
   uplo: [ U, L ]
   arguments:

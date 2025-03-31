@@ -319,6 +319,16 @@ Definitions:
     alpha_beta: *complex_alpha_beta_range
     matrix_size: *geam_dims
 
+  - &gemmt_dims
+    - { N: 8, K: 8, lda: 8, ldb: 8, ldc: 8 }
+
+  - &gemmt_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    transA_transB: *transA_transB_range
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *gemmt_dims
+
   - &hemm_dims
     - { M:    12, N:   33,  lda:   33,  ldb: 33,   ldc: 33 }
 
@@ -399,6 +409,40 @@ Definitions:
     alpha_beta: *complex_alpha_beta_range
     matrix_size: *syrkx_dims
 
+  - &trmm_dims
+    - { M:     5, N:     5, lda:     5, ldb:     5, ldc:   5 }
+
+  - &trmm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [ L, R ]
+    uplo: [ U, L ]
+    transA: [ N, T ]
+    diag: [ N ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trmm_dims
+
+  - &trsm_dims
+    - { M:    8, N:    8, lda:    8, ldb:   8 }
+
+  - &trsm_common_args
+    precision: *single_double_precisions_complex_real
+    side: [ L, R ]
+    uplo: [ U, L ]
+    transA: [ N, C ]
+    diag: [ N, U ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trsm_dims
+
+  - &trtri_dims
+    - { N:    10, lda:    10  }
+
+  - &trtri_common_args
+    precision: *single_double_precisions_complex_real
+    uplo: [ U, L ]
+    diag: [ N ]
+    alpha_beta: *complex_alpha_beta_range
+    matrix_size: *trtri_dims
+
   - &gemm_dims
     - { M:     65, N:    33, K:    33, lda:    128, ldb:    128, ldc:    128 }
 
@@ -427,6 +471,7 @@ Tests:
 
   - name: blas1
     category: quick
+    api: [ C, C_64 ]
     function:
       - rotg:  *rotg_precisions
       - rotmg: *single_double_precisions_complex_real
@@ -434,6 +479,7 @@ Tests:
   - name: blas1_batched
     category: quick
     batch_count: *batch_count_range
+    api: [ C, C_64 ]
     function:
       - rotg_batched: *rotg_precisions
       - rotmg_batched: *single_double_precisions_complex_real
@@ -442,6 +488,7 @@ Tests:
     category: quick
     batch_count: *batch_count_range
     stride_scale: [ 1.0 ]
+    api: [ C, C_64 ]
     function:
       - rotg_strided_batched: *rotg_precisions
       - rotmg_strided_batched: *single_double_precisions_complex_real
@@ -454,6 +501,7 @@ Tests:
     incx_incy: *incx_incy_range_y_output
     alpha_beta: *alpha_beta_range
     alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
     function:
       - axpy:  *half_single_precisions_complex_real
       - axpy_ex: *half_single_double_complex_real_precisions
@@ -463,6 +511,7 @@ Tests:
     N: *N_range
     incx_incy: *incx_incy_range
     alpha_beta: *alpha_beta_range
+    api: [ C, C_64 ]
     function:
       - axpy_ex: *hpa_half_precision
 
@@ -473,6 +522,7 @@ Tests:
     alpha_beta: *alpha_beta_range
     alphai_betai: *alphai_betai_range
     batch_count: *batch_count_range
+    api: [ C, C_64 ]
     function:
       - axpy_batched:  *half_single_precisions_complex_real
       - axpy_batched_ex: *half_single_double_complex_real_precisions
@@ -485,6 +535,7 @@ Tests:
     stride_scale: [ 1 ]
     alpha_beta: *alpha_beta_range
     alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
     function:
       - axpy_strided_batched: *half_single_precisions_complex_real
       - axpy_strided_batched_ex: *half_single_double_complex_real_precisions
@@ -498,6 +549,7 @@ Tests:
     incx: *incx_range
     alpha_beta: *alpha_beta_range
     alphai_betai: *alphai_betai_range
+    api: [ C, C_64 ]
     function:
       - scal:  *single_double_precisions_complex_real
       - scal:  *scal_single_double_complex_real_alpha_complex_out
@@ -511,6 +563,7 @@ Tests:
     alpha_beta: *alpha_beta_range
     alphai_betai: *alphai_betai_range
     batch_count: *batch_count_range
+    api: [ C, C_64 ]
     function:
       - scal_batched:  *single_double_precisions_complex_real
       - scal_batched:  *scal_single_double_complex_real_alpha_complex_out
@@ -525,6 +578,7 @@ Tests:
     alphai_betai: *alphai_betai_range
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
     function:
       - scal_strided_batched:  *single_double_precisions_complex_real
       - scal_strided_batched:  *scal_single_double_complex_real_alpha_complex_out
@@ -539,6 +593,7 @@ Tests:
     category: quick
     N: *N_range
     incx: *incx_range
+    api: [ C, C_64 ]
     function:
       - nrm2:  *single_double_precisions_complex_real
       - asum:  *single_double_precisions_complex_real
@@ -550,6 +605,7 @@ Tests:
     N: *N_range
     incx: *incx_range
     batch_count: *batch_count_range
+    api: [ C, C_64 ]
     function:
       - asum_batched: *single_double_precisions_complex_real
       - nrm2_batched: *single_double_precisions_complex_real
@@ -562,6 +618,7 @@ Tests:
     incx: *incx_range
     batch_count: *batch_count_range
     stride_scale: [ 1.0 ]
+    api: [ C, C_64 ]
     function:
       - asum_strided_batched: *single_double_precisions_complex_real
       - nrm2_strided_batched: *single_double_precisions_complex_real
@@ -574,6 +631,7 @@ Tests:
     category: quick
     N: *N_range
     incx_incy: *incx_incy_range
+    api: [ C, C_64 ]
     function:
       - copy: *single_double_precisions_complex_real
       - dot:   *half_bfloat_single_double_complex_real_precisions
@@ -588,6 +646,7 @@ Tests:
     N: *N_range
     incx_incy: *incx_incy_range
     batch_count: *batch_count_range
+    api: [ C, C_64 ]
     function:
       - copy_batched: *single_double_precisions_complex_real
       - dot_batched:   *half_bfloat_single_double_complex_real_precisions
@@ -602,6 +661,7 @@ Tests:
     incx_incy: *incx_incy_range
     batch_count: *batch_count_range
     stride_scale: [1]
+    api: [ C, C_64 ]
     function:
       - copy_strided_batched: *single_double_precisions_complex_real
       - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
@@ -615,7 +675,8 @@ Tests:
     category: quick
     N: *N_range
     incx_incy: *incx_incy_range
-    algo: 1
+    algo: [0, 1]
+    api: [ C, C_64 ]
     function:
       - dot:   *half_bfloat_single_double_complex_real_precisions
       - dotc:  *single_double_precisions_complex
@@ -625,7 +686,8 @@ Tests:
     N: *N_range
     incx_incy: *incx_incy_range
     batch_count: *batch_count_range
-    algo: 1
+    algo: [0, 1]
+    api: [ C, C_64 ]
     function:
       - dot_batched:   *half_bfloat_single_double_complex_real_precisions
       - dotc_batched:  *single_double_precisions_complex
@@ -636,7 +698,8 @@ Tests:
     incx_incy: *incx_incy_range
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
-    algo: 1
+    algo: [0, 1]
+    api: [ C, C_64 ]
     function:
       - dot_strided_batched:   *half_bfloat_single_double_complex_real_precisions
       - dotc_strided_batched:  *single_double_precisions_complex
@@ -649,6 +712,7 @@ Tests:
     incx_incy: *incx_incy_range_x_y_output
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
     function:
       - swap: *single_double_precisions_complex_real
       - rot:   *rot_precisions
@@ -660,6 +724,7 @@ Tests:
     incx_incy: *incx_incy_range_x_y_output
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
     function:
       - swap_batched: *single_double_precisions_complex_real
       - rot_batched:   *rot_precisions
@@ -671,6 +736,7 @@ Tests:
     incx_incy: *incx_incy_range_x_y_output
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
     function:
       - swap_strided_batched: *single_double_precisions_complex_real
       - rot_strided_batched:   *rot_precisions
@@ -690,6 +756,7 @@ Tests:
     arguments: *gbmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: gemv
     category: quick
@@ -700,6 +767,7 @@ Tests:
     arguments: *gemv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: ger
     category: quick
@@ -710,6 +778,7 @@ Tests:
     arguments: *ger_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: gerc
     category: quick
@@ -720,6 +789,7 @@ Tests:
     arguments: *geruc_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: geru
     category: quick
@@ -730,6 +800,7 @@ Tests:
     arguments: *geruc_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hbmv_strided_batched
     category: quick
@@ -740,6 +811,7 @@ Tests:
     arguments: *hbmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hemv
     category: quick
@@ -750,6 +822,7 @@ Tests:
     arguments: *hemv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: her
     category: quick
@@ -760,6 +833,7 @@ Tests:
     arguments: *her_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: her2
     category: quick
@@ -770,6 +844,7 @@ Tests:
     arguments: *her2_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hpmv
     category: quick
@@ -780,6 +855,7 @@ Tests:
     arguments: *hpmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hpr
     category: quick
@@ -790,6 +866,7 @@ Tests:
     arguments: *hpr_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hpr2
     category: quick
@@ -800,6 +877,7 @@ Tests:
     arguments: *hpr2_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: sbmv
     category: quick
@@ -810,6 +888,7 @@ Tests:
     arguments: *sbmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: spmv
     category: quick
@@ -820,6 +899,7 @@ Tests:
     arguments: *spmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: spr
     category: quick
@@ -830,6 +910,7 @@ Tests:
     arguments: *spr_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: spr2
     category: quick
@@ -840,6 +921,7 @@ Tests:
     arguments: *spr2_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: symv
     category: quick
@@ -850,6 +932,7 @@ Tests:
     arguments: *symv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: syr
     category: quick
@@ -860,6 +943,7 @@ Tests:
     arguments: *syr_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: syr2
     category: quick
@@ -870,6 +954,7 @@ Tests:
     arguments: *syr2_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: tbmv
     category: quick
@@ -880,6 +965,7 @@ Tests:
     arguments: *tbmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: tpmv
     category: quick
@@ -890,6 +976,7 @@ Tests:
     arguments: *tpmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: trmv
     category: quick
@@ -900,6 +987,7 @@ Tests:
     arguments: *trmv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: tbsv
     category: quick
@@ -910,6 +998,7 @@ Tests:
     arguments: *tbsv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: tpsv
     category: quick
@@ -920,6 +1009,7 @@ Tests:
     arguments: *tpsv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: trsv
     category: quick
@@ -930,6 +1020,7 @@ Tests:
     arguments: *trsv_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   ###########
   # Level 3 #
@@ -944,6 +1035,7 @@ Tests:
     arguments: *dgmm_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: geam
     category: quick
@@ -954,6 +1046,18 @@ Tests:
     arguments: *geam_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: gemmt
+    category: quick
+    function:
+    - gemmt
+    - gemmt_batched
+    - gemmt_strided_batched
+    arguments: *gemmt_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: hemm
     category: quick
@@ -964,6 +1068,7 @@ Tests:
     arguments: *hemm_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: herk
     category: quick
@@ -974,6 +1079,7 @@ Tests:
     arguments: *herk_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: her2k
     category: quick
@@ -984,6 +1090,7 @@ Tests:
     arguments: *her2k_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: herkx
     category: quick
@@ -994,6 +1101,7 @@ Tests:
     arguments: *herkx_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: symm
     category: quick
@@ -1004,6 +1112,7 @@ Tests:
     arguments: *symm_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: syrk
     category: quick
@@ -1014,6 +1123,7 @@ Tests:
     arguments: *syrk_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: syr2k
     category: quick
@@ -1024,6 +1134,7 @@ Tests:
     arguments: *syr2k_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: syrkx
     category: quick
@@ -1034,6 +1145,40 @@ Tests:
     arguments: *syrkx_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trmm
+    category: quick
+    function:
+    - trmm
+    - trmm_batched
+    - trmm_strided_batched
+    arguments: *trmm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trsm
+    category: quick
+    function:
+    - trsm
+    - trsm_batched
+    - trsm_strided_batched
+    arguments: *trsm_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
+
+  - name: trtri
+    category: quick
+    function:
+    - trtri
+    - trtri_batched
+    - trtri_strided_batched
+    arguments: *trtri_common_args
+    batch_count: *batch_count_range
+    stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
 # gemms
 
@@ -1046,6 +1191,7 @@ Tests:
     arguments: *gemm_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
   - name: gemm_ex
     category: quick
@@ -1056,5 +1202,6 @@ Tests:
     arguments: *gemm_ex_common_args
     batch_count: *batch_count_range
     stride_scale: [ 1 ]
+    api: [ C, C_64 ]
 
 ...

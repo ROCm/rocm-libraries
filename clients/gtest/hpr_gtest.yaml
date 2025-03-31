@@ -226,7 +226,7 @@ Tests:
   batch_count: [ 3 ]
   pointer_mode_host: false
 
-- name: hpr_64
+- name: hpr_ILP64
   category: stress
   arguments:
     - { N: 2048, incx: 2, batch_count: 2 }

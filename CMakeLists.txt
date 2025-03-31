@@ -401,19 +401,18 @@ rocm_create_package(
 if(BUILD_CODE_COVERAGE)
   #
   # > make coverage_cleanup (clean coverage related files.)
-  # > make coverage GTEST_FILTER=<>
-  # will run:
-  #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
   #
+  # > make coverage
+  # will run:
+  #  > make coverage_analysis (analyze tests)
+  #  > make coverage_output (generate html documentation)
   #
 
   #
-  # Run coverage analysis
+  # Run coverage analysis (rtest.xml sets specify coverage runs)
   #
   add_custom_target(coverage_analysis
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/rocblas-test --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${python} ./clients/staging/rocblas_rtest.py -t code_coverage
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 
