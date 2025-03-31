@@ -86,6 +86,8 @@ parser.add_argument('--num_threads',          type=int, default=1,
                     help='The number of threads is only for the videoDecodePerf sample (sample_mode = 1) - optional (default:1)')
 parser.add_argument('--max_num_decoded_frames',          type=int, default=0,
                     help='The max number of decoded frames. Useful for partial decoding of a long stream. - optional (default:0, meaning no limit)')
+parser.add_argument('--check_decode_status',          type=int, default=0,
+                    help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
 
 args = parser.parse_args()
 
@@ -96,6 +98,9 @@ filesDirPath = Path(filesDir)
 sampleMode = args.sample_mode
 numThreads = args.num_threads
 maxNumFrames = args.max_num_decoded_frames
+checkDecStatus = args.check_decode_status
+if checkDecStatus == 1:
+    sampleMode = 0
 
 print("\nrunrocDecodeTests V"+__version__+"\n")
 
@@ -139,32 +144,33 @@ if sampleMode == 0:
         os.system(run_rocDecode_app+' -i '+str(current_file)+' -d '+str(gpuDeviceID)+' -f '+str(maxNumFrames)+' | tee -a '+resultsPath+'/rocDecode_output.log')
         print("\n\n")
 
-    orig_stdout = sys.stdout
-    sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
-    echo_1 = 'File Name, Codec, Video Size, Bit Depth, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-    print(echo_1)
-    sys.stdout = orig_stdout
+    if checkDecStatus == 0:
+        orig_stdout = sys.stdout
+        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
+        echo_1 = 'File Name, Codec, Video Size, Bit Depth, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
+        print(echo_1)
+        sys.stdout = orig_stdout
 
-    runAwk_csv = r'''awk '/Bitrate: / {bitRate=$2; next}
-                        /info: Input file: / {filename=$4; next}
-                        /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
-                        /info: decoding started, please wait!/{next}
-                        /Input Video Information/{next}
-                        /\tCodec        : / {codec=$3; next}
-                        /\tSequence     : /{next}
-                        /\tCoded size   : /{next}
-                        /\tDisplay area : /{next}
-                        /\tChroma       : /{next}
-                        /\tBit depth    : / {bitDepth=$4; next}
-                        /Video Decoding Params:/{next}
-                        /\tNum Surfaces : /{next}
-                        /\tCrop         : /{next}
-                        /\tResize       : /{videoSize=$3; next}
-                        /^$/{next}
-                        /info: Total pictures decoded: / {totalFrames=$5; next}
-                        /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                        /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecode_results/rocDecode_output.log >> rocDecode_videoDecode_results/rocDecode_test_results.csv'''
-    os.system(runAwk_csv)
+        runAwk_csv = r'''awk '/Bitrate: / {bitRate=$2; next}
+                            /info: Input file: / {filename=$4; next}
+                            /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
+                            /info: decoding started, please wait!/{next}
+                            /Input Video Information/{next}
+                            /\tCodec        : / {codec=$3; next}
+                            /\tSequence     : /{next}
+                            /\tCoded size   : /{next}
+                            /\tDisplay area : /{next}
+                            /\tChroma       : /{next}
+                            /\tBit depth    : / {bitDepth=$4; next}
+                            /Video Decoding Params:/{next}
+                            /\tNum Surfaces : /{next}
+                            /\tCrop         : /{next}
+                            /\tResize       : /{videoSize=$3; next}
+                            /^$/{next}
+                            /info: Total pictures decoded: / {totalFrames=$5; next}
+                            /info: avg decoding time per picture: /{timePerFrame=$7; next}
+                            /info: avg decode FPS: / { printf("%s, %s, %s, %d, %s, %d, %f, %f\n", filename, codec, videoSize, bitDepth, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecode_results/rocDecode_output.log >> rocDecode_videoDecode_results/rocDecode_test_results.csv'''
+        os.system(runAwk_csv)
 elif sampleMode == 1:
     for current_file in iter_files(filesDirPath):
         print_bitrate(current_file)
@@ -172,94 +178,118 @@ elif sampleMode == 1:
         os.system(run_rocDecode_app+' -i '+str(current_file)+' -t '+str(numThreads)+' -f '+str(maxNumFrames)+' | tee -a '+resultsPath+'/rocDecode_output.log')
         print("\n\n")
 
-    orig_stdout = sys.stdout
-    sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
-    echo_1 = 'File Name, Num Threads, Codec, Video Size, Bit Depth, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-    print(echo_1)
-    sys.stdout = orig_stdout
+    if checkDecStatus == 0:
+        orig_stdout = sys.stdout
+        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
+        echo_1 = 'File Name, Num Threads, Codec, Video Size, Bit Depth, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
+        print(echo_1)
+        sys.stdout = orig_stdout
 
-    runAwk_csv = r'''awk '/Bitrate: / {bitRate=$2; next}
-                        /info: Input file: / {filename=$4; next}
-                        /info: Number of threads: / {numThreads=$5; next}
-                        /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
-                        /info: decoding started, please wait!/{next}
-                        /Input Video Information/{next}
-                        /\tCodec        : / {codec=$3; next}
-                        /\tSequence     : /{next}
-                        /\tCoded size   : /{next}
-                        /\tDisplay area : /{next}
-                        /\tChroma       : /{next}
-                        /\tBit depth    : / {bitDepth=$4; next}
-                        /Video Decoding Params:/{next}
-                        /\tNum Surfaces : /{next}
-                        /\tCrop         : /{next}
-                        /\tResize       : /{videoSize=$3; next}
-                        /^$/{next}
-                        /info: Total pictures decoded: / {totalFrames=$5; next}
-                        /info: avg decoding time per picture: /{timePerFrame=$7; next}
-                        /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecodePerf_results/rocDecode_output.log >> rocDecode_videoDecodePerf_results/rocDecode_test_results.csv'''
-    sys.stdout = orig_stdout
-    os.system(runAwk_csv)
+        runAwk_csv = r'''awk '/Bitrate: / {bitRate=$2; next}
+                            /info: Input file: / {filename=$4; next}
+                            /info: Number of threads: / {numThreads=$5; next}
+                            /info: Using GPU device 0 - AMD Radeon Graphics[gfx1030] on PCI bus 0d:00.0/{next}
+                            /info: decoding started, please wait!/{next}
+                            /Input Video Information/{next}
+                            /\tCodec        : / {codec=$3; next}
+                            /\tSequence     : /{next}
+                            /\tCoded size   : /{next}
+                            /\tDisplay area : /{next}
+                            /\tChroma       : /{next}
+                            /\tBit depth    : / {bitDepth=$4; next}
+                            /Video Decoding Params:/{next}
+                            /\tNum Surfaces : /{next}
+                            /\tCrop         : /{next}
+                            /\tResize       : /{videoSize=$3; next}
+                            /^$/{next}
+                            /info: Total pictures decoded: / {totalFrames=$5; next}
+                            /info: avg decoding time per picture: /{timePerFrame=$7; next}
+                            /info: avg decode FPS: / { printf("%s, %d, %s, %s, %d, %s, %d, %f, %f\n", filename, numThreads, codec, videoSize, bitDepth, bitRate, totalFrames, timePerFrame, $5) }' rocDecode_videoDecodePerf_results/rocDecode_output.log >> rocDecode_videoDecodePerf_results/rocDecode_test_results.csv'''
+        sys.stdout = orig_stdout
+        os.system(runAwk_csv)
 
 # get data
-platform_name = platform.platform()
-platform_name_fq = shell('hostname --all-fqdns')
-platform_ip = shell('hostname -I')[0:-1]  # extra trailing space
+if checkDecStatus == 0:
+    platform_name = platform.platform()
+    platform_name_fq = shell('hostname --all-fqdns')
+    platform_ip = shell('hostname -I')[0:-1]  # extra trailing space
 
-file_dtstr = datetime.now().strftime("%Y%m%d")
-reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
-report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
-sys_info = shell('inxi -c0 -S')
-cpu_info = shell('inxi -c0 -C')
-gpu_info = shell('inxi -c0 -G')
-memory_info = shell('inxi -c 0 -m')
-board_info = shell('inxi -c0 -M')
+    file_dtstr = datetime.now().strftime("%Y%m%d")
+    reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
+    report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+    sys_info = shell('inxi -c0 -S')
+    cpu_info = shell('inxi -c0 -C')
+    gpu_info = shell('inxi -c0 -G')
+    memory_info = shell('inxi -c 0 -m')
+    board_info = shell('inxi -c0 -M')
 
-lib_tree = shell('ldd '+run_rocDecode_app)
-lib_tree = strip_libtree_addresses(lib_tree)
+    lib_tree = shell('ldd '+run_rocDecode_app)
+    lib_tree = strip_libtree_addresses(lib_tree)
 
-# Load the data
-df = pd.read_csv(resultsPath+'/rocDecode_test_results.csv')
-# Generate the markdown table
-print(df.to_markdown(index=False))
+    # Load the data
+    df = pd.read_csv(resultsPath+'/rocDecode_test_results.csv')
+    # Generate the markdown table
+    print(df.to_markdown(index=False))
 
-# Write Report
-with open(reportFilename, 'w') as f:
-    f.write("rocDecode app report\n")
-    f.write("================================\n")
-    f.write("\n")
+    # Write Report
+    with open(reportFilename, 'w') as f:
+        f.write("rocDecode app report\n")
+        f.write("================================\n")
+        f.write("\n")
 
-    f.write("Generated: %s\n" % report_dtstr)
-    f.write("\n")
+        f.write("Generated: %s\n" % report_dtstr)
+        f.write("\n")
 
-    f.write("Platform: %s (%s)\n" % (platform_name_fq, platform_ip))
-    f.write("--------\n")
-    f.write("\n")
+        f.write("Platform: %s (%s)\n" % (platform_name_fq, platform_ip))
+        f.write("--------\n")
+        f.write("\n")
 
-    write_formatted(sys_info, f)
-    write_formatted(cpu_info, f)
-    write_formatted(gpu_info, f)
-    write_formatted(board_info, f)
-    write_formatted(memory_info, f)
+        write_formatted(sys_info, f)
+        write_formatted(cpu_info, f)
+        write_formatted(gpu_info, f)
+        write_formatted(board_info, f)
+        write_formatted(memory_info, f)
 
-    f.write("\n\nBenchmark Report\n")
-    f.write("--------\n")
-    f.write("\n")
-    f.write("\n")
-    f.write(df.to_markdown(index=False))
-    f.write("\n")
-    f.write("\n")
-    f.write("Dynamic Libraries Report\n")
-    f.write("-----------------\n")
-    f.write("\n")
-    write_formatted(lib_tree, f)
-    f.write("\n")
+        f.write("\n\nBenchmark Report\n")
+        f.write("--------\n")
+        f.write("\n")
+        f.write("\n")
+        f.write(df.to_markdown(index=False))
+        f.write("\n")
+        f.write("\n")
+        f.write("Dynamic Libraries Report\n")
+        f.write("-----------------\n")
+        f.write("\n")
+        write_formatted(lib_tree, f)
+        f.write("\n")
 
-    f.write(
-        "\n\n---\n**Copyright (c) 2023 - 2025 AMD ROCm rocDecode app -- run_rocDecode_tests.py V-"+__version__+"**\n")
-    f.write("\n")
-    # report file
-    reportFileDir = os.path.abspath(reportFilename)
-    print("\nSTATUS: Output Report File - "+reportFileDir)
+        f.write(
+            "\n\n---\n**Copyright (c) 2023 - 2025 AMD ROCm rocDecode app -- run_rocDecode_tests.py V-"+__version__+"**\n")
+        f.write("\n")
+        # report file
+        reportFileDir = os.path.abspath(reportFilename)
+        print("\nSTATUS: Output Report File - "+reportFileDir)
 
-print("\nrun_rocDecode_tests.py completed - V"+__version__+"\n")
+    print("\nrun_rocDecode_tests.py completed - V"+__version__+"\n")
+else:
+    fileString = 'info: Input file:'
+    decodeEndString = 'info: Total pictures decoded:'
+    numFiles = 0
+    numDecodedStreams = 0
+    with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+        line = logFile.readline()
+        while line:
+            if line.find(fileString) != -1:
+                numFiles += 1
+            if line.find(decodeEndString) != -1:
+                numDecodedStreams += 1
+            line = logFile.readline()
+
+        print("Decode status report of the", numFiles, "streams:")
+        print("     - The number of completed decoded streams is", numDecodedStreams)
+        print("     - The number of streams that did not finish decoding is " + str(numFiles - numDecodedStreams))
+    logFile.close()
+    if numFiles != numDecodedStreams:
+        sys.exit(-1)
+    else:
+        sys.exit(0)
