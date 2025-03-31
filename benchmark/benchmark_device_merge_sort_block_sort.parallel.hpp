@@ -195,7 +195,7 @@ struct device_merge_sort_block_sort_benchmark : public benchmark_utils::autotune
         state.set_items_processed_per_iteration<combined>(gbench_state, size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         do_run(gbench_state, state);
     }

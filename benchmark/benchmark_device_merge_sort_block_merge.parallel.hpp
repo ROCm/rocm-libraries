@@ -340,7 +340,7 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
         HIP_CHECK(hipFree(d_values));
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         do_run(gbench_state, state);
     }

@@ -134,7 +134,7 @@ struct device_partition_flag_benchmark : public benchmark_utils::autotune_interf
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -255,7 +255,7 @@ struct device_partition_predicate_benchmark : public benchmark_utils::autotune_i
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -344,7 +344,7 @@ struct device_partition_two_way_flag_benchmark : public benchmark_utils::autotun
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -470,7 +470,7 @@ struct device_partition_two_way_predicate_benchmark : public benchmark_utils::au
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -561,7 +561,7 @@ struct device_partition_three_way_benchmark : public benchmark_utils::autotune_i
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

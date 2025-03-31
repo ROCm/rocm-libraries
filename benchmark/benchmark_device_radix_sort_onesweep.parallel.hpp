@@ -263,7 +263,7 @@ struct device_radix_sort_onesweep_benchmark : public benchmark_utils::autotune_i
         state.set_items_processed_per_iteration<combined>(gbench_state, size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         do_run(gbench_state, state);
     }

@@ -60,7 +60,7 @@ struct device_partial_sort_benchmark : public benchmark_utils::autotune_interfac
             + ",key_type:" + std::string(Traits<Key>::name()) + ",cfg:default_config}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
 
         const auto& stream = state.stream;

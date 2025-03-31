@@ -72,7 +72,7 @@ struct device_run_length_encode_benchmark : public benchmark_utils::autotune_int
                                          + ",keys_max_length:" + std::to_string(MaxLength)
                                          + ",cfg:" + run_length_encode_config_name<Config>() + "}");
     }
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

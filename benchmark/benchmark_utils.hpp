@@ -1202,6 +1202,11 @@ public:
         run_before_every_iteration_lambda = lambda;
     }
 
+    void accumulate_total_gbench_iterations_every_run()
+    {
+        reset_total_gbench_iterations_every_run = false;
+    }
+
     void run(benchmark::State& gbench_state, std::function<void()> kernel)
     {
         for(auto& event : events)
@@ -1289,6 +1294,12 @@ public:
             }
         }
 
+        if(reset_total_gbench_iterations_every_run)
+        {
+            total_gbench_iterations = 0;
+        }
+        total_gbench_iterations += gbench_state.iterations();
+
         for(const auto& event : events)
         {
             HIP_CHECK(hipEventDestroy(event));
@@ -1298,9 +1309,9 @@ public:
     template<typename T>
     void set_items_processed_per_iteration(benchmark::State& gbench_state, size_t actual_size)
     {
-        gbench_state.SetBytesProcessed(gbench_state.iterations() * batch_iterations * actual_size
+        gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
                                        * sizeof(T));
-        gbench_state.SetItemsProcessed(gbench_state.iterations() * batch_iterations * actual_size);
+        gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
     }
 
     hipStream_t  stream;
@@ -1329,6 +1340,8 @@ private:
     bool                    record_as_whole;
     std::vector<hipEvent_t> events;
     std::function<void()>   run_before_every_iteration_lambda = nullptr;
+    size_t                  total_gbench_iterations;
+    bool                    reset_total_gbench_iterations_every_run = true;
 };
 
 struct autotune_interface
@@ -1338,8 +1351,8 @@ struct autotune_interface
     {
         return name();
     };
-    virtual ~autotune_interface()                                        = default;
-    virtual void run(benchmark::State& gbench_state, state& state) const = 0;
+    virtual ~autotune_interface()                                  = default;
+    virtual void run(benchmark::State& gbench_state, state& state) = 0;
 };
 
 class executor
@@ -1387,7 +1400,12 @@ public:
         apply_settings(benchmark::RegisterBenchmark(
             instance.name().c_str(),
             [instance](benchmark::State& gbench_state, benchmark_utils::state state)
-            { instance.run(gbench_state, state); },
+            {
+                // run() requires a mutable instance, so create a mutable copy.
+                // Using [&instance] doesn't work, as it creates a dangling reference at runtime.
+                // Marking the lambda mutable doesn't work, as the &&instance it copies is const.
+                Benchmark(std::move(instance)).run(gbench_state, state);
+            },
             m_state));
     }
 
@@ -1395,7 +1413,7 @@ public:
     static bool queue_sorted_instance()
     {
         sorted_benchmarks().push_back(std::make_unique<Benchmark>());
-        return true;
+        return true; // Must return something, as this function gets called in global scope.
     }
 
     template<typename BulkCreateFunction>

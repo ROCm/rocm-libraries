@@ -82,7 +82,7 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
             + std::to_string(MaxSegmentLength) + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

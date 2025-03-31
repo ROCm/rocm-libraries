@@ -215,7 +215,7 @@ public:
             <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

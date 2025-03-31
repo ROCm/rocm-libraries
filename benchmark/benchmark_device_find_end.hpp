@@ -65,7 +65,7 @@ struct device_find_end_benchmark : public benchmark_utils::autotune_interface
             + ",value_type:" + std::string(Traits<Key>::name()) + ",cfg:default_config}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

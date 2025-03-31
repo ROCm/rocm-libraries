@@ -79,7 +79,7 @@ struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_inte
             + ",cfg:" + non_trivial_runs_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

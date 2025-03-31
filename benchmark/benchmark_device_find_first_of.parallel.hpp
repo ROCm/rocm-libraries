@@ -91,7 +91,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
             + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;

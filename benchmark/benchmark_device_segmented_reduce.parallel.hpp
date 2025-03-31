@@ -37,6 +37,7 @@
 #include <iostream>
 #include <limits>
 #include <locale>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -71,10 +72,10 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T              = int,
+template<typename T,
          typename BinaryFunction = rocprim::plus<T>,
          typename Config         = rocprim::default_config>
-struct device_segmented_reduce_benchmark : public config_autotune_interface
+struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_interface
 {
 
     std::string name() const override
@@ -84,15 +85,14 @@ struct device_segmented_reduce_benchmark : public config_autotune_interface
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run_benchmark(benchmark::State&   state,
-                       size_t              desired_segment,
-                       size_t              bytes,
-                       const managed_seed& seed,
-                       hipStream_t         stream) const
+    void run_benchmark(benchmark::State&       gbench_state,
+                       benchmark_utils::state& state,
+                       size_t                  desired_segment) const
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using offset_type = int;
         using value_type  = T;
 
@@ -159,61 +159,22 @@ struct device_segmented_reduce_benchmark : public config_autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; i++)
-        {
-            HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
-                                                   temporary_storage_bytes,
-                                                   d_values_input,
-                                                   d_aggregates_output,
-                                                   segments_count,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   reduce_op,
-                                                   init,
-                                                   stream));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state,
+                  [&]
+                  {
+                      HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
+                                                             temporary_storage_bytes,
+                                                             d_values_input,
+                                                             d_aggregates_output,
+                                                             segments_count,
+                                                             d_offsets,
+                                                             d_offsets + 1,
+                                                             reduce_op,
+                                                             init,
+                                                             stream));
+                  });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; i++)
-            {
-                HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
-                                                       temporary_storage_bytes,
-                                                       d_values_input,
-                                                       d_aggregates_output,
-                                                       segments_count,
-                                                       d_offsets,
-                                                       d_offsets + 1,
-                                                       reduce_op,
-                                                       init,
-                                                       stream));
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(value_type));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<value_type>(gbench_state, size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_offsets));
@@ -221,16 +182,13 @@ struct device_segmented_reduce_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_aggregates_output));
     }
 
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         constexpr std::array<size_t, 5> desired_segments{1, 10, 100, 1000, 10000};
 
         for(const auto desired_segment : desired_segments)
         {
-            run_benchmark(state, desired_segment, bytes, seed, stream);
+            run_benchmark(gbench_state, state, desired_segment);
         }
     }
 };

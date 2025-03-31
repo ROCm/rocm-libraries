@@ -209,7 +209,7 @@ struct device_radix_sort_benchmark : public benchmark_utils::autotune_interface
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
         do_run(gbench_state, state);
     }

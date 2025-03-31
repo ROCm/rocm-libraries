@@ -29,8 +29,8 @@
 
 namespace
 {
-auto benchmarks = config_autotune_register::create_bulk(
-    device_segmented_radix_sort_benchmark_generator<
+auto tmp = benchmark_utils::executor::queue_autotune(
+    device_segmented_radix_sort_keys_benchmark_generator<
         @RadixBits@,
         @BlockSize@,
         @ItemsPerThread@,

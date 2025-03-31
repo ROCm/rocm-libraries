@@ -60,7 +60,7 @@ inline std::string transform_config_name<rocprim::default_config>()
 }
 
 template<typename T, bool IsPointer, typename Config = rocprim::default_config>
-struct device_transform_benchmark : public config_autotune_interface
+struct device_transform_benchmark : public benchmark_utils::autotune_interface
 {
 
     std::string name() const override
@@ -72,14 +72,12 @@ struct device_transform_benchmark : public config_autotune_interface
             + std::string(Traits<T>::name()) + ",cfg:" + transform_config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 10;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State&   state,
-             size_t              bytes,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+
         using output_type = T;
 
         // Calculate the number of elements
@@ -106,44 +104,9 @@ struct device_transform_benchmark : public config_autotune_interface
                                                                       debug_synchronous);
         };
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
-        {
-            HIP_CHECK(launch());
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state, [&] { HIP_CHECK(launch()); });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        // Run
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; ++i)
-            {
-                HIP_CHECK(launch());
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
+        state.set_items_processed_per_iteration<T>(gbench_state, size);
     }
 };
 
@@ -157,14 +120,14 @@ struct device_transform_benchmark_generator
         using generated_config = rocprim::
             transform_config<BlockSize, 1 << ItemsPerThread, ROCPRIM_GRID_SIZE_LIMIT, LoadType>;
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         {
             storage.emplace_back(
                 std::make_unique<device_transform_benchmark<T, IsPointer, generated_config>>());
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         static constexpr unsigned int min_items_per_thread = 0;
         static constexpr unsigned int max_items_per_thread = rocprim::Log2<16>::VALUE;
