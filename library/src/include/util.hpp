@@ -146,10 +146,10 @@ namespace hiptensor
     }
 
     /** @name CK type tuple to hiptensor type tuple transform functions
-	 *  @{
-	 *
-	 *  ck::Tuple<ck::bhalf, float> => ck::Tuple<bfloat16_t, float>
-	 */
+     *  @{
+     *
+     *  ck::Tuple<ck::bhalf, float> => ck::Tuple<bfloat16_t, float>
+     */
     // Primary template for the type transformer
     template <typename T>
     struct CkTypeTupleToHiptensorTypeTupleTransformer
