@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,8 @@
 #define ROCPRIM_BENCHMARK_BINARY_SEARCH_PARALLEL_HPP_
 
 #include "benchmark_utils.hpp"
+
+#include "../common/utils_device_ptr.hpp"
 
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/detail/device_config_helper.hpp>
@@ -141,44 +143,32 @@ struct device_binary_search_benchmark : public config_autotune_interface
                                                     random_range.first,
                                                     random_range.second,
                                                     seed.get_0());
-        T*             d_haystack;
-        T*             d_needles;
-        OutputType*    d_output;
-        HIP_CHECK(hipMalloc(&d_haystack, haystack_size * sizeof(*d_haystack)));
-        HIP_CHECK(hipMalloc(&d_needles, needles_size * sizeof(*d_needles)));
-        HIP_CHECK(hipMalloc(&d_output, needles_size * sizeof(*d_output)));
-        HIP_CHECK(hipMemcpy(d_haystack,
-                            haystack.data(),
-                            haystack_size * sizeof(*d_haystack),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(d_needles,
-                            needles.data(),
-                            needles_size * sizeof(*d_needles),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<T>          d_haystack(haystack);
+        common::device_ptr<T>          d_needles(needles);
+        common::device_ptr<OutputType> d_output(needles_size);
 
-        void*  d_temporary_storage = nullptr;
         size_t temporary_storage_bytes;
         auto   dispatch_helper = dispatch_binary_search_helper<Config>();
         HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                         d_temporary_storage,
+                                                         nullptr,
                                                          temporary_storage_bytes,
-                                                         d_haystack,
-                                                         d_needles,
-                                                         d_output,
+                                                         d_haystack.get(),
+                                                         d_needles.get(),
+                                                         d_output.get(),
                                                          haystack_size,
                                                          needles_size,
                                                          compare_op,
                                                          stream));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
         // Warm-up
         HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                         d_temporary_storage,
+                                                         d_temporary_storage.get(),
                                                          temporary_storage_bytes,
-                                                         d_haystack,
-                                                         d_needles,
-                                                         d_output,
+                                                         d_haystack.get(),
+                                                         d_needles.get(),
+                                                         d_output.get(),
                                                          haystack_size,
                                                          needles_size,
                                                          compare_op,
@@ -196,11 +186,11 @@ struct device_binary_search_benchmark : public config_autotune_interface
             HIP_CHECK(hipEventRecord(start, stream));
 
             HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                             d_temporary_storage,
+                                                             d_temporary_storage.get(),
                                                              temporary_storage_bytes,
-                                                             d_haystack,
-                                                             d_needles,
-                                                             d_output,
+                                                             d_haystack.get(),
+                                                             d_needles.get(),
+                                                             d_output.get(),
                                                              haystack_size,
                                                              needles_size,
                                                              compare_op,
@@ -221,11 +211,6 @@ struct device_binary_search_benchmark : public config_autotune_interface
 
         state.SetBytesProcessed(state.iterations() * needles_size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * needles_size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_haystack));
-        HIP_CHECK(hipFree(d_needles));
-        HIP_CHECK(hipFree(d_output));
     }
 };
 

@@ -22,6 +22,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // HIP API
 #include <hip/hip_runtime.h>
 
@@ -110,26 +112,21 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     const auto     bin_size = BinSize * ((N + items_per_block - 1) / items_per_block);
     // Allocate and fill memory
     std::vector<T> input(size, 0.0f);
-    T*             d_input;
-    T*             d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), bin_size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(bin_size);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(gbench_state,
               [&]
               {
                   kernel<Benchmark, T, BlockSize, ItemsPerThread, BinSize, Trials>
-                      <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                                     d_output);
+                      <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(
+                          d_input.get(),
+                          d_output.get());
                   HIP_CHECK(hipGetLastError());
               });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(Benchmark, method, T, BS, IPT)                                  \

@@ -23,10 +23,12 @@
 #include "benchmark_device_binary_search.parallel.hpp"
 
 #include "benchmark_utils.hpp"
-// CmdParser
-#include "cmdparser.hpp"
 
 #include "../common/utils_custom_type.hpp"
+#include "../common/utils_device_ptr.hpp"
+
+// CmdParser
+#include "cmdparser.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -92,47 +94,34 @@ void run_benchmark(benchmark::State&   state,
         std::sort(needles.begin(), needles.end(), compare_op);
     }
 
-    haystack_type* d_haystack;
-    needle_type*   d_needles;
-    output_type*   d_output;
-    HIP_CHECK(
-        hipMalloc(reinterpret_cast<void**>(&d_haystack), haystack_size * sizeof(haystack_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_needles), needles_size * sizeof(needle_type)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), needles_size * sizeof(output_type)));
-    HIP_CHECK(hipMemcpy(d_haystack,
-                        haystack.data(),
-                        haystack_size * sizeof(haystack_type),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_needles,
-                        needles.data(),
-                        needles_size * sizeof(needle_type),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<haystack_type> d_haystack(haystack);
+    common::device_ptr<needle_type>   d_needles(needles);
+    common::device_ptr<output_type>   d_output(needles_size);
 
-    void*  d_temporary_storage = nullptr;
     size_t temporary_storage_bytes;
     auto   dispatch_helper = dispatch_binary_search_helper<rocprim::default_config>();
     HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
-                                                     d_temporary_storage,
+                                                     nullptr,
                                                      temporary_storage_bytes,
-                                                     d_haystack,
-                                                     d_needles,
-                                                     d_output,
+                                                     d_haystack.get(),
+                                                     d_needles.get(),
+                                                     d_output.get(),
                                                      haystack_size,
                                                      needles_size,
                                                      compare_op,
                                                      stream));
 
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; ++i)
     {
         HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
-                                                         d_temporary_storage,
+                                                         d_temporary_storage.get(),
                                                          temporary_storage_bytes,
-                                                         d_haystack,
-                                                         d_needles,
-                                                         d_output,
+                                                         d_haystack.get(),
+                                                         d_needles.get(),
+                                                         d_output.get(),
                                                          haystack_size,
                                                          needles_size,
                                                          compare_op,
@@ -153,11 +142,11 @@ void run_benchmark(benchmark::State&   state,
         for(size_t i = 0; i < batch_size; ++i)
         {
             HIP_CHECK(dispatch_helper.dispatch_binary_search(AlgorithmSelectorTag{},
-                                                             d_temporary_storage,
+                                                             d_temporary_storage.get(),
                                                              temporary_storage_bytes,
-                                                             d_haystack,
-                                                             d_needles,
-                                                             d_output,
+                                                             d_haystack.get(),
+                                                             d_needles.get(),
+                                                             d_output.get(),
                                                              haystack_size,
                                                              needles_size,
                                                              compare_op,
@@ -179,11 +168,6 @@ void run_benchmark(benchmark::State&   state,
 
     state.SetBytesProcessed(state.iterations() * batch_size * needles_size * sizeof(needle_type));
     state.SetItemsProcessed(state.iterations() * batch_size * needles_size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_haystack));
-    HIP_CHECK(hipFree(d_needles));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(T, K, SORTED, ALGO_TAG)                                                 \
