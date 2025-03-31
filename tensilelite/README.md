@@ -14,7 +14,8 @@ Assumptions:
 
 Example:
 
-``cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S hipBLASLt/tensilelite -B <tensile-out>``
+```cmake -DTENSILE_BIN=Tensile -DDEVELOP_MODE=ON -S hipBLASLt/tensilelite -B <tensile-out>```
+
 The script will be created in the build folder and will be named in Tensile.bat or Tensile.sh depending on the platform. Then you can then run the script as usual:
 
 ```
