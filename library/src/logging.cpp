@@ -9,32 +9,6 @@
 /*************************************************
  * Bench log scalar values pointed to by pointer *
  *************************************************/
-inline std::string rocblas_internal_log_bench_scalar_value(const char*         name,
-                                                           const rocblas_half* value)
-{
-    rocblas_internal_ostream ss;
-    ss << "--" << name << " " << (value ? float(*value) : std::numeric_limits<float>::quiet_NaN());
-    return ss.str();
-}
-
-template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-std::string rocblas_internal_log_bench_scalar_value(const char* name, const T* value)
-{
-    rocblas_internal_ostream ss;
-    ss << "--" << name << " " << (value ? *value : std::numeric_limits<T>::quiet_NaN());
-    return ss.str();
-}
-
-template <typename T, std::enable_if_t<+rocblas_is_complex<T>, int> = 0>
-std::string rocblas_internal_log_bench_scalar_value(const char* name, const T* value)
-{
-    rocblas_internal_ostream ss;
-    ss << "--" << name << " "
-       << (value ? std::real(*value) : std::numeric_limits<typename T::value_type>::quiet_NaN());
-    if(value && std::imag(*value))
-        ss << " --" << name << "i " << std::imag(*value);
-    return ss.str();
-}
 
 template <typename T>
 std::string
@@ -79,25 +53,27 @@ inline float rocblas_internal_log_trace_scalar_value(const rocblas_half* value)
     return value ? float(*value) : std::numeric_limits<float>::quiet_NaN();
 }
 
-template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-inline T rocblas_internal_log_trace_scalar_value(const T* value)
+template <typename T>
+T rocblas_internal_log_trace_scalar_value(const T* value)
 {
-    return value ? *value : std::numeric_limits<T>::quiet_NaN();
-}
-
-template <typename T, std::enable_if_t<+rocblas_is_complex<T>, int> = 0>
-inline T rocblas_internal_log_trace_scalar_value(const T* value)
-{
-    return value ? *value
-                 : T{std::numeric_limits<typename T::value_type>::quiet_NaN(),
-                     std::numeric_limits<typename T::value_type>::quiet_NaN()};
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        return value ? *value : std::numeric_limits<T>::quiet_NaN();
+    }
+    else
+    {
+        return value ? *value
+                     : T{std::numeric_limits<typename T::value_type>::quiet_NaN(),
+                         std::numeric_limits<typename T::value_type>::quiet_NaN()};
+    }
 }
 
 template <typename T>
 std::string rocblas_internal_log_trace_scalar_value(rocblas_handle handle, const T* value)
 {
     rocblas_internal_ostream os;
-    T                        host;
+
+    T host;
     if(value && handle->pointer_mode == rocblas_pointer_mode_device)
     {
         hipMemcpyAsync(&host, value, sizeof(host), hipMemcpyDeviceToHost, handle->get_stream());

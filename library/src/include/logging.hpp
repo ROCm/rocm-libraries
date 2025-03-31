@@ -144,6 +144,34 @@ std::string rocblas_internal_log_trace_scalar_value(rocblas_handle handle, const
  *************************************************/
 
 template <typename T>
+inline std::string rocblas_internal_log_bench_scalar_value(const char* name, const T* value)
+{
+    rocblas_internal_ostream ss;
+    if constexpr(!rocblas_is_complex<T>)
+    {
+        ss << "--" << name << " " << (value ? *value : std::numeric_limits<T>::quiet_NaN());
+    }
+    else
+    {
+        ss << "--" << name << " "
+           << (value ? std::real(*value)
+                     : std::numeric_limits<typename T::value_type>::quiet_NaN());
+        if(value && std::imag(*value))
+            ss << " --" << name << "i " << std::imag(*value);
+    }
+    return ss.str();
+}
+
+template <>
+inline std::string rocblas_internal_log_bench_scalar_value<rocblas_half>(const char*         name,
+                                                                         const rocblas_half* value)
+{
+    rocblas_internal_ostream ss;
+    ss << "--" << name << " " << (value ? float(*value) : std::numeric_limits<float>::quiet_NaN());
+    return ss.str();
+}
+
+template <typename T>
 std::string rocblas_internal_log_bench_scalar_value(rocblas_handle handle,
                                                     const char*    name,
                                                     const T*       value);
