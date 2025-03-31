@@ -67,20 +67,26 @@
 
 namespace
 {
-#ifndef WIN32
-    std::string rocsparselt_so_path;
-
+ #ifndef WIN32
     int rocsparselt_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
     {
-        // uncomment to see all dependent .so files
-        //fprintf(stderr, "rocsparselt so file: %s\n", hdr_info->dlpi_name);
-        if(hdr_info->dlpi_name && strstr(hdr_info->dlpi_name, "hipsparselt."))
+        std::pair<std::string, std::string>* typedData
+            = reinterpret_cast<std::pair<std::string, std::string>*>(data);
+        if(hdr_info->dlpi_name && strstr(hdr_info->dlpi_name, typedData->second.c_str()))
         {
-            rocsparselt_so_path = hdr_info->dlpi_name;
+            typedData->first.assign(hdr_info->dlpi_name);
+            return 1;
         }
         return 0;
     }
 #endif
+    
+    std::string rocsparselt_internal_get_so_path(const std::string& keyword)
+    {
+        std::pair<std::string, std::string> result{"", keyword};
+        dl_iterate_phdr(rocsparselt_dl_iterate_phdr_callback, &result);
+        return result.first;
+    }
 
     /******************************************************
      * Map a rocsparselt type to a corresponding Tensile type *
@@ -644,7 +650,7 @@ namespace
                 // Fall back on hard-coded path if static library or not found
 
 #ifndef HIPSPARSELT_STATIC_LIB
-                dl_iterate_phdr(rocsparselt_dl_iterate_phdr_callback, NULL);
+                auto rocsparselt_so_path = rocsparselt_internal_get_so_path("hipsparselt");
                 if(rocsparselt_so_path.size())
                     path = std::string{dirname(&rocsparselt_so_path[0])};
 #endif // ifndef HIPSPARSELT_STATIC_LIB
