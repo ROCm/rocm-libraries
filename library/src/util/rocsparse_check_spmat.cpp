@@ -34,8 +34,6 @@
 
 namespace rocsparse
 {
-    rocsparse_indextype determine_I_index_type(rocsparse_const_spmat_descr mat);
-    rocsparse_indextype determine_J_index_type(rocsparse_const_spmat_descr mat);
 
     template <typename I, typename J, typename T>
     rocsparse_status check_spmat_template(rocsparse_handle            handle,

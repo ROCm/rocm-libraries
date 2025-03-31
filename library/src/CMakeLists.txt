@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@ set(rocsparse_source
   src/rocsparse_message.cpp
   ##
   src/to_string.cpp
+  src/utility.cpp
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -177,11 +178,11 @@ set(rocsparse_source
   src/level3/csrmm/row_split/csrmm_device_row_split_256_16_8_8.cpp
   src/level3/csrmm/row_split/csrmmnn_device_row_split_shared_256_8.cpp
   src/level3/csrmm/row_split/csrmmnn_device_row_split_256_8_8.cpp
-  src/level3/csrmm/row_split/csrmmnn_device_row_split_256_8_1.cpp 
-  src/level3/csrmm/row_split/csrmmtn_device_row_split_256_4.cpp 
-  src/level3/csrmm/row_split/csrmmtt_device_row_split_256_4.cpp 
-  src/level3/csrmm/row_split/csrmm_device_row_split_remainder_256_8_8.cpp 
-  src/level3/csrmm/row_split/csrmm_device_row_split_remainder_256_16_16.cpp 
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_256_8_1.cpp
+  src/level3/csrmm/row_split/csrmmtn_device_row_split_256_4.cpp
+  src/level3/csrmm/row_split/csrmmtt_device_row_split_256_4.cpp
+  src/level3/csrmm/row_split/csrmm_device_row_split_remainder_256_8_8.cpp
+  src/level3/csrmm/row_split/csrmm_device_row_split_remainder_256_16_16.cpp
   # csrmm nnz split
   src/level3/csrmm/nnz_split/csrmmnn_device_nnz_split_main_256_8.cpp
   src/level3/csrmm/nnz_split/csrmmnn_device_nnz_split_main_256_4.cpp

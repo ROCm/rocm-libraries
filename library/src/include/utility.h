@@ -952,4 +952,71 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_type_mismatch);
         }
     }
+
+    template <rocsparse_indextype v>
+    struct indextype_traits;
+
+    template <>
+    struct indextype_traits<rocsparse_indextype_u16>
+    {
+        using type_t = uint16_t;
+    };
+    template <>
+    struct indextype_traits<rocsparse_indextype_i32>
+    {
+        using type_t = int32_t;
+    };
+    template <>
+    struct indextype_traits<rocsparse_indextype_i64>
+    {
+        using type_t = int64_t;
+    };
+
+    template <rocsparse_datatype v>
+    struct datatype_traits;
+
+    template <>
+    struct datatype_traits<rocsparse_datatype_f32_r>
+    {
+        using type_t = float;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_f64_r>
+    {
+        using type_t = double;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_f32_c>
+    {
+        using type_t = rocsparse_float_complex;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_f64_c>
+    {
+        using type_t = rocsparse_double_complex;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_u32_r>
+    {
+        using type_t = uint32_t;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_i32_r>
+    {
+        using type_t = int32_t;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_u8_r>
+    {
+        using type_t = uint8_t;
+    };
+    template <>
+    struct datatype_traits<rocsparse_datatype_i8_r>
+    {
+        using type_t = int8_t;
+    };
+
+    rocsparse_indextype determine_I_index_type(rocsparse_const_spmat_descr mat);
+    rocsparse_indextype determine_J_index_type(rocsparse_const_spmat_descr mat);
+
 }

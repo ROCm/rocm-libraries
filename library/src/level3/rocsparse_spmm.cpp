@@ -829,45 +829,6 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    rocsparse_indextype determine_I_index_type(rocsparse_const_spmat_descr mat)
-    {
-        switch(mat->format)
-        {
-        case rocsparse_format_coo:
-        case rocsparse_format_coo_aos:
-        case rocsparse_format_csr:
-        case rocsparse_format_ell:
-        case rocsparse_format_bell:
-        case rocsparse_format_bsr:
-        {
-            return mat->row_type;
-        }
-        case rocsparse_format_csc:
-        {
-            return mat->col_type;
-        }
-        }
-    }
-
-    rocsparse_indextype determine_J_index_type(rocsparse_const_spmat_descr mat)
-    {
-        switch(mat->format)
-        {
-        case rocsparse_format_coo:
-        case rocsparse_format_coo_aos:
-        case rocsparse_format_csr:
-        case rocsparse_format_ell:
-        case rocsparse_format_bell:
-        case rocsparse_format_bsr:
-        {
-            return mat->col_type;
-        }
-        case rocsparse_format_csc:
-        {
-            return mat->row_type;
-        }
-        }
-    }
 }
 
 /*
