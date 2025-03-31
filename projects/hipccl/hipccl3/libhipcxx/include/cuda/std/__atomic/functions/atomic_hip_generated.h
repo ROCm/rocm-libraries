@@ -96,22 +96,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
@@ -161,22 +151,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_block_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_WORKGROUP);
 }
@@ -259,22 +239,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
@@ -324,22 +294,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_device_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_AGENT);
 }
@@ -424,22 +384,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
    return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==4, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
@@ -489,22 +439,12 @@ __device__ _Type __atomic_fetch_add_cuda(volatile _Type *__ptr, _Type __val, int
     return __hip_atomic_fetch_add(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
 
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_max_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-    return __hip_atomic_fetch_max(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_signed<_Type>::value, int>::type = 0>
-__device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
-    return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
-}
-
-template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8 && cuda::std::is_integral<_Type>::value && cuda::std::is_unsigned<_Type>::value, int>::type = 0>
+template<class _Type, typename cuda::std::enable_if<sizeof(_Type)==8, int>::type = 0>
 __device__ _Type __atomic_fetch_min_cuda(volatile _Type *__ptr, _Type __val, int __memorder, __thread_scope_system_tag) {
     return __hip_atomic_fetch_min(__ptr, __val, __memorder, __HIP_MEMORY_SCOPE_SYSTEM);
 }
