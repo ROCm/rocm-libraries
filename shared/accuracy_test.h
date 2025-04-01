@@ -352,10 +352,6 @@ inline void execute_gpu_fft(Tparams&              params,
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
         throw std::runtime_error("rocFFT plan execution failure");
-    // work around potential problem of following hipMemcpy
-    // not properly waiting for rocFFT's kernels to finish
-    if(hipDeviceSynchronize() != hipSuccess)
-        throw std::runtime_error("hipDeviceSynchronize after execute failed");
 
     // if not comparing, then just executing the GPU FFT is all we
     // need to do
