@@ -40,13 +40,17 @@ matmul_paramList = ['function','transA','transB','grouped_gemm','batch_count','m
 
 amax_paramList = ['function','m','n','type','dtype','us']
 
+api_overhead_paramList = ['function','api_name','us/iter','best_us']
+
 # maps of paramList
 benchTrackedParams = {'matmul' : matmul_paramList,
-                      'amax' : amax_paramList}
+                      'amax' : amax_paramList,
+                      'api_overhead' : api_overhead_paramList}
 
 # maps of benchmark executable
 benchExecs = {'matmul' : 'hipblaslt-bench',
-              'amax' : 'hipblaslt-bench-extop-amax'}
+              'amax' : 'hipblaslt-bench-extop-amax',
+              'api_overhead' : 'hipblaslt-api-overhead'}
 
 #d is default dict or contains a superset of trackedParams
 def extractTrackedParams(d, trackedParam):
@@ -58,7 +62,7 @@ def runBenchmark(benchType, prob_args, executable_folder, probYamlFolder, out_cs
     benchExec = benchExecs[benchType]
     benchCmd = pathlib.Path(os.path.join(executable_folder, benchExec)).resolve()
 
-    csvKeys, benchResults, success = bench.run_bench(benchCmd, probYamlFolder, prob_args, True)
+    csvKeys, benchResults, success = bench.run_bench(benchCmd, probYamlFolder, benchType, prob_args, True)
     # get the actual params we want to track and show in csv of this bench type
     trackedParams = benchTrackedParams[benchType]
     # TODO- check csvKeys == trackedParams

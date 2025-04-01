@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@ from asyncio.subprocess import PIPE, STDOUT
 #####################################
 def run_bench(benchExecutable,
               probYamlFolder,
+              benchType,
               argsDict:Dict[str, str],
               verbose=False,
               timeout=300):
@@ -56,8 +57,9 @@ def run_bench(benchExecutable,
     csvKeys = ''
     benchResultsList = []
     capturingValues = False
+    isAPIOverhead = False
 
-    async def run_command(*args, timeout=None):
+    async def run_command(*args, benchType=benchType, timeout=None):
 
         process = await asyncio.create_subprocess_exec(
             *args, stdout=asyncio.subprocess.PIPE)
@@ -66,6 +68,7 @@ def run_bench(benchExecutable,
         nonlocal csvKeys
         nonlocal benchResultsList
         nonlocal capturingValues
+        nonlocal isAPIOverhead
 
         while True:
             try:
@@ -84,17 +87,24 @@ def run_bench(benchExecutable,
                 line = line.decode('utf-8').rstrip('\n')
                 line = line.strip()
                 if capturingValues:
+                    if not line.startswith(benchType): # filter out some irrelative msg
+                        # print('irrelative msg:',line)
+                        continue
                     print(line)
                     dd_output = defaultdict(str, zip(csvKeys, line.split(',')))
                     benchResultsList += [dd_output]
-                    capturingValues = False
+                    # if is doing api-overhead, the return log will contain serveral values lines
+                    capturingValues = True if isAPIOverhead else False
                 elif line.startswith(startingToken):
                     line = line.replace('hipblaslt-Gflops', 'gflops')
                     line = line.replace('hipblaslt-GB/s', 'GB/s')
-                    line = line.split(':')[1]
-                    print(f'\n{line}')
-                    csvKeys = line.split(',')
+                    splitLine = line.split(':')
+                    funcType = splitLine[0]
+                    keys = splitLine[1]
+                    print(f'\n{keys}')
+                    csvKeys = keys.split(',')
                     capturingValues = True
+                    isAPIOverhead = (funcType == '[overhead]')
         return await process.wait()  # Wait for the child process to exit
 
     if sys.platform == "win32":

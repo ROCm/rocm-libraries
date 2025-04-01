@@ -56,7 +56,6 @@ Tests:
   cold_iters: 1000
   algo_method: 0
   api_method: 2
-  flush: true
   rotating: 512
   gpu_arch: '94?'
 ...

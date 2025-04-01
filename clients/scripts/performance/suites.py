@@ -1,4 +1,4 @@
-# Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -53,6 +53,12 @@ lengths = {
 }
 
 # Suite definitions
+def api_overhead():
+    """API overhead"""
+
+    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "10000"})]
+    yield ProblemSet(benchType="api_overhead", name="benchset_1", problems=problemlist)
+
 def amax_example():
     """AMAX example."""
 
@@ -85,9 +91,16 @@ def matmul_set_1():
     problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset1_bench.yaml"})]
     yield ProblemSet(benchType="matmul", name="benchset_1", problems=problemlist)
 
+def matmul_set_2():
+    """gemm benchset 2"""
+
+    problemlist = [Problem(args={"--log_function_name" : "" , "--yaml" : "matmul_probset2_bench.yaml"})]
+    yield ProblemSet(benchType="matmul", name="benchset_2", problems=problemlist)
 
 def all():
     """all routine benchmarks"""
 
+    yield from api_overhead()
     yield from amax_set_1()
     yield from matmul_set_1()
+    yield from matmul_set_2()

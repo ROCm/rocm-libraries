@@ -104,13 +104,20 @@ add_dependencies( hipblaslt-bench hipblaslt-common )
 
 rocm_install(TARGETS hipblaslt-bench COMPONENT benchmarks)
 
+# A special exe to calc api overhead, it uses the pattern similar with samples
+add_executable( hipblaslt-api-overhead client_api_overhead.cpp)
+target_include_directories( hipblaslt-api-overhead
+  PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../samples/common>
+)
+
 # Other bench files
 add_executable( hipblaslt-bench-groupedgemm-fixed-mk client_groupedgemm_fixed_mk.cpp ../common/hipblaslt_random.cpp ../common/hipblaslt_arguments.cpp)
 add_executable( hipblaslt-bench-extop-layernorm client_extop_layernorm.cpp ../common/hipblaslt_random.cpp)
 add_executable( hipblaslt-bench-extop-matrixtransform client_extop_matrixtransform.cpp ../common/hipblaslt_random.cpp)
 add_executable( hipblaslt-bench-extop-softmax client_extop_softmax.cpp ../common/hipblaslt_random.cpp)
 add_executable( hipblaslt-bench-extop-amax client_extop_amax.cpp  ../common/hipblaslt_random.cpp)
-set(ext_bench_list_all hipblaslt-bench-groupedgemm-fixed-mk hipblaslt-bench-extop-layernorm hipblaslt-bench-extop-matrixtransform hipblaslt-bench-extop-softmax hipblaslt-bench-extop-amax)
+set(ext_bench_list_all hipblaslt-api-overhead hipblaslt-bench-groupedgemm-fixed-mk hipblaslt-bench-extop-layernorm hipblaslt-bench-extop-matrixtransform hipblaslt-bench-extop-softmax hipblaslt-bench-extop-amax)
 # Currently only build this for Ubuntu because other distro's llvm-dev version is not matching the rocm's version.
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   file(READ "/etc/os-release" OS_RELEASE)
