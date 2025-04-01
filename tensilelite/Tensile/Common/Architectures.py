@@ -57,6 +57,9 @@ architectureMap = {
     "gfx1100": "navi31",
     "gfx1101": "navi32",
     "gfx1102": "navi33",
+    "gfx1103": "gfx1103",
+    "gfx1150": "gfx1150",
+    "gfx1151": "gfx1151",
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
 }
@@ -84,6 +87,9 @@ SUPPORTED_ISA = [
     IsaVersion(11, 0, 0),
     IsaVersion(11, 0, 1),
     IsaVersion(11, 0, 2),
+    IsaVersion(11, 0, 3), 
+    IsaVersion(11, 5, 0),
+    IsaVersion(11, 5, 1),
     IsaVersion(12, 0, 0),
     IsaVersion(12, 0, 1),
 ]

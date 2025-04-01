@@ -46,7 +46,8 @@
 #elif defined(__gfx1030__) // special device
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x31014000
-#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__)
+#elif defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
+    || defined(__gfx1150__) || defined(__gfx1151__)
 #define USE_GFX_BUFFER_INTRINSIC
 #define BUFFER_RESOURCE_3RD_DWORD 0x31004000
 #elif defined(__gfx1200__) || defined(__gfx1201__)
