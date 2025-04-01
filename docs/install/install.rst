@@ -26,6 +26,24 @@ Building and testing hipFORT from source
       make -C build
       make -C build check
 
+.. note::
+        The hipFORT installation will compile backends for both ROCm (``hipfort-amdgcn``) and CUDA (``hipfort-nvptx``) backends. When installing hipFORT from source, you do not need to specify the `HIP_PLATFORM` environment variable.
+
+Customizing the build
+=======================
+You can customize the build by setting the following environment variables:
+
+* `HIPFORT_COMPILER` - Fortran compiler to be used
+* `HIPFORT_AR` - Static archive command
+* `HIPFORT_RANLIB` - ranlib used to create Static archive
+* `HIPFORT_COMPILER_FLAGS` - Compiler flags to build hipFORT
+* `HIPFORT_BUILD_TYPE` - Set to RELEASE TESTING or DEBUG
+* `HIPFORT_INSTALL_DIR` - Install directory for hipFORT
+
+.. note::
+        Setting the `CMAKE_INSTALL_DIR` build variable will **not** influence the installation location.
+        Setting the `CMAKE_Fortran_COMPILER` build variable will **not** influence the Fortran compiler used to build hipFORT.
+
 Fortran interfaces
 ===================
 
