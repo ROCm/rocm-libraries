@@ -193,7 +193,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
 endif()
 
 # Version
-set( VERSION_STRING "1.0.19" )
+set( VERSION_STRING "1.0.20" )
 set( hipfft_SOVERSION 0.1 )
 
 if( ROCmCMakeBuildTools_FOUND )
