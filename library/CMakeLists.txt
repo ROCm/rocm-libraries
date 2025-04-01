@@ -42,6 +42,8 @@ configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt.h" "${PROJECT_BIN
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt-ext.hpp" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-ext.hpp" COPYONLY)
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt-types.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-types.h" COPYONLY)
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_xfloat32.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt_xfloat32.h" COPYONLY)
+configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_float4.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt_float4.h" COPYONLY)
+configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_float6.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt_float6.h" COPYONLY)
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_float8.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt_float8.h" COPYONLY)
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_float8_bc.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt_float8_bc.h" COPYONLY)
 configure_file( "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt-ext-op.h" "${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-ext-op.h" COPYONLY)
@@ -51,6 +53,8 @@ set(hipblaslt_headers_public
   include/hipblaslt.h
   include/hipblaslt-ext.hpp
   include/hipblaslt_xfloat32.h
+  include/hipblaslt_float4.h
+  include/hipblaslt_float6.h
   include/hipblaslt_float8.h
   include/hipblaslt_float8_bc.h
   include/hipblaslt-ext-op.h
