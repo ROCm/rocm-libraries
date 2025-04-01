@@ -61,12 +61,6 @@ if(NOT LLVMSupport_LIBRARY)
 endif()
 
 # LLVM Libs we need to link against
-#set(HIPTENSOR_LLVM_LIBS "-L${LLVM_LIBRARY_DIR}"
-#                        "-Wl,-rpath=${LLVM_LIBRARY_DIR}"
-#                        LLVMObjectYAML
-#                        LLVMSupport
-#                        hip::device
-#                        )
 set(HIPTENSOR_LLVM_LIBS "-L${LLVM_LIBRARY_DIR}"
                         "-fno-rtlib-add-rpath"
                         LLVMObjectYAML
