@@ -115,10 +115,9 @@ namespace rocRoller
                     bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
                     if(eval_rhs)
                     {
-                        auto add     = std::get<Add>(*lhs);
-                        auto comment = add.comment + expr.comment;
+                        auto comment = add->comment + expr.comment;
                         return std::make_shared<Expression>(
-                            AddShiftL{add.lhs, add.rhs, rhs, comment});
+                            AddShiftL{add->lhs, add->rhs, rhs, comment});
                     }
                 }
 
