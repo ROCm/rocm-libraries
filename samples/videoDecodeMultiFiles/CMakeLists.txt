@@ -31,12 +31,13 @@ else()
   set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 # Set AMD Clang as default compiler
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS ON)
 if (NOT DEFINED CMAKE_CXX_COMPILER)
   set(CMAKE_C_COMPILER ${ROCM_PATH}/bin/amdclang)
   set(CMAKE_CXX_COMPILER ${ROCM_PATH}/bin/amdclang++)
 endif()
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
 
 project(videodecodemultifiles)
 
@@ -80,7 +81,6 @@ if(HIP_FOUND AND FFMPEG_FOUND AND ROCDECODE_FOUND AND rocprofiler-register_FOUND
     # sample app exe
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} videodecodemultifiles.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../../utils/rocvideodecode/roc_video_dec.cpp)
     add_executable(${PROJECT_NAME} ${SOURCES})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
     target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
     # FFMPEG multi-version support
     if(_FFMPEG_AVCODEC_VERSION VERSION_LESS_EQUAL 58.134.100)

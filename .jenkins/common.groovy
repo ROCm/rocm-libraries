@@ -12,7 +12,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
                 echo Build rocDecode - ${buildTypeDir}
                 cd ${project.paths.project_build_prefix}
                 mkdir -p build/${buildTypeDir} && cd build/${buildTypeDir}
-                cmake ${buildTypeArg} ../..
+                cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_CXX_FLAGS="-fprofile-instr-generate -fcoverage-mapping" ../..
                 make -j\$(nproc)
                 sudo make install
                 sudo make package
@@ -27,49 +27,72 @@ def runTestCommand (platform, project) {
 
     String libLocation = ''
     String libvaDriverPath = ""
+    String packageManager = 'apt -y'
 
     if (platform.jenkinsLabel.contains('rhel')) {
         libLocation = ':/usr/local/lib'
+        packageManager = 'yum -y'
     }
     else if (platform.jenkinsLabel.contains('sles')) {
         libLocation = ':/usr/local/lib'
         libvaDriverPath = "export LIBVA_DRIVERS_PATH=/opt/amdgpu/lib64/dri"
+        packageManager = 'zypper -n'
     }
+    
+    String commitSha
+    String repoUrl
+    (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    def command = """#!/usr/bin/env bash
-                set -ex
-                export HOME=/home/jenkins
-                ${libvaDriverPath}
-                echo make test
-                cd ${project.paths.project_build_prefix}/build/release
-                LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} make test ARGS="-VV --rerun-failed --output-on-failure"
-                echo rocdecode-sample - videoDecode
-                mkdir -p rocdecode-sample && cd rocdecode-sample
-                cmake /opt/rocm/share/rocdecode/samples/videoDecode/
-                make -j8
-                LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
-                echo rocdecode-test package verification
-                cd ../ && mkdir -p rocdecode-test && cd rocdecode-test
-                cmake /opt/rocm/share/rocdecode/test/
-                LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ctest -VV --rerun-failed --output-on-failure
-                echo rocdecode conformance tests
-                cd ../ && mkdir -p conformance && cd conformance
-                pip3 install pandas
-                wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
-                unzip HevcConformance.zip
-                python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../rocdecode-sample/videodecode --files_directory ./HevcConformance --results_directory .
-                echo rocdecode-sample - videoDecode with data1 video test
-                cd ../ && cd rocdecode-sample
-                wget http://math-ci.amd.com/userContent/computer-vision/data1.img
-                LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i ./data1.img
-                echo rocdecode-sample - videoDecodePerf with data1 video test
-                mkdir -p rocdecode-perf && cd rocdecode-perf
-                cmake /opt/rocm/share/rocdecode/samples/videoDecodePerf/
-                make -j8
-                LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecodeperf -i ./../data1.img
-                """
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocdecode", variable: 'CODECOV_TOKEN')])
+    {
+        def command = """#!/usr/bin/env bash
+                    set -ex
+                    export HOME=/home/jenkins
+                    ${libvaDriverPath}
+                    echo make test
+                    cd ${project.paths.project_build_prefix}/build
+                    export LLVM_PROFILE_FILE=\"\$(pwd)/rawdata/rocdecode-%p.profraw\"
+                    echo \$LLVM_PROFILE_FILE
+                    cd release
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} make test ARGS="-VV --rerun-failed --output-on-failure"
+                    echo rocdecode-sample - videoDecode
+                    mkdir -p rocdecode-sample && cd rocdecode-sample
+                    cmake /opt/rocm/share/rocdecode/samples/videoDecode/
+                    make -j8
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i /opt/rocm/share/rocdecode/video/AMD_driving_virtual_20-H265.mp4
+                    echo rocdecode-test package verification
+                    cd ../ && mkdir -p rocdecode-test && cd rocdecode-test
+                    cmake /opt/rocm/share/rocdecode/test/
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ctest -VV --rerun-failed --output-on-failure
+                    echo rocdecode conformance tests
+                    cd ../ && mkdir -p conformance && cd conformance
+                    pip3 install pandas
+                    wget http://math-ci.amd.com/userContent/computer-vision/HevcConformance/*zip*/HevcConformance.zip
+                    unzip HevcConformance.zip
+                    python3 /opt/rocm/share/rocdecode/test/testScripts/run_rocDecode_Conformance.py --videodecode_exe ./../rocdecode-sample/videodecode --files_directory ./HevcConformance --results_directory .
+                    echo rocdecode-sample - videoDecode with data1 video test
+                    cd ../ && cd rocdecode-sample
+                    wget http://math-ci.amd.com/userContent/computer-vision/data1.img
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecode -i ./data1.img
+                    echo rocdecode-sample - videoDecodePerf with data1 video test
+                    mkdir -p rocdecode-perf && cd rocdecode-perf
+                    cmake /opt/rocm/share/rocdecode/samples/videoDecodePerf/
+                    make -j8
+                    LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib${libLocation} ./videodecodeperf -i ./../data1.img
+                    echo \$(pwd)
+                    cd  ../../../
+                    echo \$(pwd)
+                    llvm-profdata merge -sparse rawdata/*.profraw -o rocdecode.profdata
+                    llvm-cov export -object release/lib/librocdecode.so --instr-profile=rocdecode.profdata --format=lcov > coverage.info
+                    sudo ${packageManager} install lcov
+                    lcov --list coverage.info
+                    curl -Os https://uploader.codecov.io/latest/linux/codecov
+                    chmod +x codecov
+                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage.info --name rocDecode --sha ${commitSha}
+                    """
 
-    platform.runCommand(this, command)
+        platform.runCommand(this, command)
+    }
 }
 
 def runPackageCommand(platform, project) {

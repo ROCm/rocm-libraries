@@ -31,12 +31,13 @@ else()
   set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
 endif()
 # Set AMD Clang as default compiler
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS ON)
 if (NOT DEFINED CMAKE_CXX_COMPILER)
   set(CMAKE_C_COMPILER ${ROCM_PATH}/bin/amdclang)
   set(CMAKE_CXX_COMPILER ${ROCM_PATH}/bin/amdclang++)
 endif()
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED On)
 
 # rocDecode Version
 set(VERSION "0.12.0")
@@ -131,8 +132,8 @@ if(HIP_FOUND AND Libva_FOUND)
   file(GLOB_RECURSE SOURCES "./src/*.cpp")
   # rocdecode.so
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
-
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17 -Wall")
+  # --all-warnings/-Wall       -- Enable most warning messages
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
   target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
