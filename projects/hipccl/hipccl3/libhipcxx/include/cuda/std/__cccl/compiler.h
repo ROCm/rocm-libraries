@@ -47,6 +47,11 @@
 #  define _CCCL_MSVC_VERSION_FULL _MSC_FULL_VER
 #elif defined(__CUDACC_RTC__)
 #  define _CCCL_COMPILER_NVRTC
+#elif defined(__HIPCC__)
+# define _CCCL_HIPCC
+# define _CCCL_COMPILER_HIPCC
+#elif defined(__HIPCC_RTC__)
+# define _CCCL_COMPILER_HIPRTC
 #endif
 
 // Convenient shortcut to determine which version of MSVC we are dealing with
