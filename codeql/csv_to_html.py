@@ -31,18 +31,6 @@ from collections import Counter
 
 try:
     df = pd.read_csv("codeql/build/codeql.csv")
-    df = df.iloc[:, 2:]
-
-    titles = [
-        "Type",
-        "Description",
-        "File Path",
-        "Start Line",
-        "Start Column",
-        "End Line",
-        "End Column",
-    ]
-    df = pd.DataFrame([df.columns.values.tolist()] + df.values.tolist(), columns=titles)
 
     types_count = pd.DataFrame([Counter(df.iloc[:, 0])])
 except pd.errors.EmptyDataError:

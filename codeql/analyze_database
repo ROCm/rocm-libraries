@@ -40,14 +40,11 @@ codeql database analyze codeql/build/rr-database codeql/cpp/src/rr-query-suites.
     --compilation-cache=codeql/build/.cache/ \
     --no-default-compilation-cache
 
-# Results are cached from first run
-codeql database analyze codeql/build/rr-database codeql/cpp/src/rr-query-suites.qls \
-    --format=csv --output=codeql/build/codeql.csv \
-    --search-path=codeql/build/codeql-cli:codeql/cpp \
-    -j$(nproc) \
-    --compilation-cache=codeql/build/.cache/ \
-    --no-default-compilation-cache
+./codeql/filter_sarif.py \
+  codeql/build/codeql.sarif \
+  codeql/exclude_paths.txt \
+  -o codeql/build/codeql.sarif.filtered
 
-sarif html codeql/build/codeql.sarif --output codeql/build/codeql_report.html
+sarif csv --output codeql/build/codeql.csv codeql/build/codeql.sarif.filtered
 
 ./codeql/csv_to_html.py
