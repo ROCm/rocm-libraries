@@ -151,6 +151,7 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/CompileSourceKernel.cmake)
 
 CompileSourceKernel(${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/kernels/matrix_transform.cpp "${Tensile_ARCHITECTURE}" "${Tensile_BUILD_ID}" ${PROJECT_BINARY_DIR}/Tensile/library)
+add_dependencies(MatrixTransformKernels TENSILE_LIBRARY_TARGET)
 
 set(DL_LIB dl)
 
