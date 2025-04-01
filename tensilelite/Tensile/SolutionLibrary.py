@@ -175,33 +175,27 @@ class FreeSizeLibrary:
     def __init__(self, table):
         self.table = table
 
-class DecisionTreeLibrary:
-    Tag = "DecisionTree"
-    StateKeys = [("type", "tag"), "features", "trees", "nullValue"]
+class MLPClassificationLibrary:
+    Tag = "MLPClassification"
+    StateKeys = [("type", "tag"), "table", "mlp", "problemFeatures"]
 
     @classmethod
     def FromOriginalState(cls, d, solutions):
-        features = d["features"]
-        origTrees = d["trees"]
+        origTable = d["table"]
+        table = []
 
-        trees = []
+        try:
+            indexStart  = origTable[0]
+            indexOffset = origTable[1]
+            for index in range(indexStart, indexStart + indexOffset):
+                value = IndexSolutionLibrary(solutions[index])
+                table.append(value)
+        except KeyError:
+            pass
 
-        if "fallback" in d:
-            fallbackIndex = d["fallback"]
-            nullValue = SingleSolutionLibrary(solutions[fallbackIndex])
-        else:
-            raise RuntimeError(
-                "DecisionTree has no fallback; likely a legacy model which is not supported."
-            )
-
-        for tree in origTrees:
-            index = tree["solution"]
-            value = SingleSolutionLibrary(solutions[index])
-
-            entry = {"tree": tree["tree"], "value": value}
-            trees.append(entry)
-
-        return cls(features, trees, nullValue)
+        mlp = d["mlp"]
+        problem_features = d["problemFeatures"]
+        return cls(table, mlp, problem_features)
 
     @property
     def tag(self):
@@ -209,16 +203,16 @@ class DecisionTreeLibrary:
 
     def merge(self, other):
         raise RuntimeError(
-            "DecisionTreeLibrary does not support merging; ensure each library row has a unique predicate"
+            "MLPClassificationLibrary does not support merging."
         )
 
     def remapSolutionIndices(self, indexMap):
         pass
 
-    def __init__(self, features, trees, nullValue):
-        self.features = features
-        self.trees = trees
-        self.nullValue = nullValue
+    def __init__(self, table, mlp, problem_features):
+        self.table = table
+        self.mlp = mlp
+        self.problemFeatures = problem_features
 
 
 class ProblemMapLibrary:
@@ -389,19 +383,12 @@ class MasterSolutionLibrary:
                 freesizeLib = FreeSizeLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
                 library.rows.append({"predicate": predicate, "library": freesizeLib})
-            elif d["LibraryType"] == "DecisionTree":
+            elif d["LibraryType"] == "MLPClassification":
+                predicate = Properties.Predicate(tag="TruePred")
+
+                regressionLib = MLPClassificationLibrary.FromOriginalState(d["Library"], solutions)
                 library = PredicateLibrary(tag="Problem")
-                for lib in d["Library"]:
-                    preds = lib["region"]
-                    predObjs = [Properties.Predicate.FromOriginalState(p) for p in preds]
-
-                    if len(predObjs) == 1:
-                        predicate = predObjs[0]
-                    else:
-                        predicate = Properties.Predicate.And(predObjs)
-
-                    treeLib = DecisionTreeLibrary.FromOriginalState(lib, solutions)
-                    library.rows.append({"predicate": predicate, "library": treeLib})
+                library.rows.append({"predicate": predicate, "library": regressionLib})
             else:
                 assert 0 and "Unrecognized LibraryType."
 

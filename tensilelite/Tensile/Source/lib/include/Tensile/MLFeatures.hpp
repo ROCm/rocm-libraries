@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,26 @@ namespace TensileLite
             virtual float operator()(ContractionProblemGemm const& problem) const
             {
                 return (float)problem.freeSizeB(index);
+            }
+        };
+
+        struct BatchSize : public MLFeature_CRTP<BatchSize, ContractionProblemGemm>
+        {
+            enum
+            {
+                HasIndex = true,
+                HasValue = false
+            };
+            size_t index;
+
+            static std::string Type()
+            {
+                return "BatchSize";
+            }
+
+            virtual float operator()(ContractionProblemGemm const& problem) const
+            {
+                return (float)problem.batchSize(index);
             }
         };
 
