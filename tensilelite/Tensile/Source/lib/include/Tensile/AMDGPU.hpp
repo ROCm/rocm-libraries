@@ -70,6 +70,9 @@ namespace TensileLite
             gfx1100 = 1100,
             gfx1101 = 1101,
             gfx1102 = 1102,
+            gfx1103 = 1103,
+            gfx1150 = 1150,
+            gfx1151 = 1151,
             gfx1200 = 1200,
             gfx1201 = 1201
         };
@@ -140,6 +143,18 @@ namespace TensileLite
             {
                 return Processor::gfx1102;
             }
+            else if(archName.find("gfx1103") != std::string::npos)
+            {
+                return Processor::gfx1103;
+            }
+            else if(archName.find("gfx1150") != std::string::npos)
+            {
+                return Processor::gfx1150;
+            }
+            else if(archName.find("gfx1151") != std::string::npos)
+            {
+                return Processor::gfx1151;
+            }
             else if(archName.find("gfx1200") != std::string::npos)
             {
                 return Processor::gfx1200;
@@ -187,6 +202,12 @@ namespace TensileLite
                 return "gfx1101";
             case AMDGPU::Processor::gfx1102:
                 return "gfx1102";
+            case AMDGPU::Processor::gfx1103:
+                return "gfx1103";
+            case AMDGPU::Processor::gfx1150:
+                return "gfx1150";
+            case AMDGPU::Processor::gfx1151:
+                return "gfx1151";
             case AMDGPU::Processor::gfx1200:
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:

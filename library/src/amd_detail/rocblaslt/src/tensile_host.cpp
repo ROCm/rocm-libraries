@@ -1785,6 +1785,18 @@ namespace
         {
             return TensileLite::LazyLoadingInit::gfx1102;
         }
+        else if(deviceString.find("gfx1103") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1103;
+        }
+        else if(deviceString.find("gfx1150") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1150;
+        }
+        else if(deviceString.find("gfx1151") != std::string::npos)
+        {
+            return TensileLite::LazyLoadingInit::gfx1151;
+        }
         else if(deviceString.find("gfx1200") != std::string::npos)
         {
             return TensileLite::LazyLoadingInit::gfx1200;
