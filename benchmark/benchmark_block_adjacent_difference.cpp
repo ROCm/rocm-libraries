@@ -22,6 +22,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // HIP API
 #include <hip/hip_runtime.h>
 
@@ -257,25 +259,20 @@ auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     const std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
 
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(input.size());
 
     state.run(gbench_state,
               [&]
               {
                   kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
-                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input, d_output, Trials);
+                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                         d_output.get(),
+                                                                         Trials);
                   HIP_CHECK(hipGetLastError());
               });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 template<typename Benchmark,
@@ -312,35 +309,22 @@ auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                                         random_range_tile_sizes.second,
                                         seed.get_1());
 
-    T*            d_input;
-    unsigned int* d_tile_sizes;
-    T*            d_output;
-    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-    HIP_CHECK(hipMalloc(&d_tile_sizes, tile_sizes.size() * sizeof(tile_sizes[0])));
-    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(input[0])));
-    HIP_CHECK(
-        hipMemcpy(d_input, input.data(), input.size() * sizeof(input[0]), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_tile_sizes,
-                        tile_sizes.data(),
-                        tile_sizes.size() * sizeof(tile_sizes[0]),
-                        hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
+    common::device_ptr<T>            d_output(input.size());
 
     state.run(gbench_state,
               [&]
               {
                   kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
-                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input,
-                                                                         d_tile_sizes,
-                                                                         d_output,
+                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                         d_tile_sizes.get(),
+                                                                         d_output.get(),
                                                                          Trials);
                   HIP_CHECK(hipGetLastError());
               });
 
     state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_tile_sizes));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                         \

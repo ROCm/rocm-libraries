@@ -23,6 +23,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/device_batch_memcpy.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -96,34 +97,18 @@ template<typename ValueType, typename BufferSizeType>
 struct BatchMemcpyData
 {
     size_t          total_num_elements = 0;
-    ValueType*      d_input            = nullptr;
-    ValueType*      d_output           = nullptr;
-    ValueType**     d_buffer_srcs      = nullptr;
-    ValueType**     d_buffer_dsts      = nullptr;
-    BufferSizeType* d_buffer_sizes     = nullptr;
+    common::device_ptr<ValueType>      d_input;
+    common::device_ptr<ValueType>      d_output;
+    common::device_ptr<ValueType*>     d_buffer_srcs;
+    common::device_ptr<ValueType*>     d_buffer_dsts;
+    common::device_ptr<BufferSizeType> d_buffer_sizes;
 
     BatchMemcpyData()                       = default;
     BatchMemcpyData(const BatchMemcpyData&) = delete;
 
-    BatchMemcpyData(BatchMemcpyData&& other)
-        : total_num_elements{std::exchange(other.total_num_elements, 0)}
-        , d_input{std::exchange(other.d_input, nullptr)}
-        , d_output{std::exchange(other.d_output, nullptr)}
-        , d_buffer_srcs{std::exchange(other.d_buffer_srcs, nullptr)}
-        , d_buffer_dsts{std::exchange(other.d_buffer_dsts, nullptr)}
-        , d_buffer_sizes{std::exchange(other.d_buffer_sizes, nullptr)}
-    {}
+    BatchMemcpyData(BatchMemcpyData&& other) = default;
 
-    BatchMemcpyData& operator=(BatchMemcpyData&& other)
-    {
-        total_num_elements = std::exchange(other.total_num_elements, 0);
-        d_input            = std::exchange(other.d_input, nullptr);
-        d_output           = std::exchange(other.d_output, nullptr);
-        d_buffer_srcs      = std::exchange(other.d_buffer_srcs, nullptr);
-        d_buffer_dsts      = std::exchange(other.d_buffer_dsts, nullptr);
-        d_buffer_sizes     = std::exchange(other.d_buffer_sizes, nullptr);
-        return *this;
-    };
+    BatchMemcpyData& operator=(BatchMemcpyData&& other) = default;
 
     BatchMemcpyData& operator=(const BatchMemcpyData&) = delete;
 
@@ -132,14 +117,7 @@ struct BatchMemcpyData
         return total_num_elements * sizeof(ValueType);
     }
 
-    ~BatchMemcpyData()
-    {
-        HIP_CHECK(hipFree(d_buffer_sizes));
-        HIP_CHECK(hipFree(d_buffer_srcs));
-        HIP_CHECK(hipFree(d_buffer_dsts));
-        HIP_CHECK(hipFree(d_output));
-        HIP_CHECK(hipFree(d_input));
-    }
+    ~BatchMemcpyData() {}
 };
 
 template<typename ValueType, typename BufferSizeType, bool IsMemCpy>
@@ -208,12 +186,12 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(hipStream_t         stre
                                  rng,
                                  result.total_num_elements * sizeof(ValueType));
 
-    HIP_CHECK(hipMalloc(&result.d_input, result.total_num_bytes()));
-    HIP_CHECK(hipMalloc(&result.d_output, result.total_num_bytes()));
+    result.d_input.resize(result.total_num_elements);
+    result.d_output.resize(result.total_num_elements);
 
-    HIP_CHECK(hipMalloc(&result.d_buffer_srcs, num_buffers * sizeof(ValueType*)));
-    HIP_CHECK(hipMalloc(&result.d_buffer_dsts, num_buffers * sizeof(ValueType*)));
-    HIP_CHECK(hipMalloc(&result.d_buffer_sizes, num_buffers * sizeof(BufferSizeType)));
+    result.d_buffer_srcs.resize(num_buffers);
+    result.d_buffer_dsts.resize(num_buffers);
+    result.d_buffer_sizes.resize(num_buffers);
 
     using offset_type = size_t;
 
@@ -247,41 +225,29 @@ BatchMemcpyData<ValueType, BufferSizeType> prepare_data(hipStream_t         stre
 
     for(size_t i = 0; i < num_buffers; ++i)
     {
-        h_buffer_srcs[i] = result.d_input + src_offsets[i];
-        h_buffer_dsts[i] = result.d_output + dst_offsets[i];
+        h_buffer_srcs[i] = result.d_input.get() + src_offsets[i];
+        h_buffer_dsts[i] = result.d_output.get() + dst_offsets[i];
     }
 
     // Prepare the batch memcpy.
     if(IsMemCpy)
     {
-        HIP_CHECK(hipMemcpy(result.d_input,
-                            h_input_for_memcpy.data(),
-                            result.total_num_bytes(),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(result.d_buffer_sizes,
-                            h_buffer_num_bytes.data(),
-                            h_buffer_num_bytes.size() * sizeof(BufferSizeType),
-                            hipMemcpyHostToDevice));
+        using cast_value_type = typename decltype(result.d_input)::value_type;
+        result.d_input.store(std::vector<cast_value_type>(
+            reinterpret_cast<cast_value_type*>(h_input_for_memcpy.data()),
+            reinterpret_cast<cast_value_type*>(h_input_for_memcpy.data())
+                + result.total_num_elements));
+        result.d_buffer_sizes.store(h_buffer_num_bytes);
     }
     else
     {
-        HIP_CHECK(hipMemcpy(result.d_input,
-                            h_input_for_copy.data(),
-                            result.total_num_bytes(),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(hipMemcpy(result.d_buffer_sizes,
-                            h_buffer_num_elements.data(),
-                            h_buffer_num_elements.size() * sizeof(BufferSizeType),
-                            hipMemcpyHostToDevice));
+        result.d_input.store(
+            decltype(h_input_for_copy)(h_input_for_copy.data(),
+                                       h_input_for_copy.data() + result.total_num_elements));
+        result.d_buffer_sizes.store(h_buffer_num_elements);
     }
-    HIP_CHECK(hipMemcpy(result.d_buffer_srcs,
-                        h_buffer_srcs.data(),
-                        h_buffer_srcs.size() * sizeof(ValueType*),
-                        hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(result.d_buffer_dsts,
-                        h_buffer_dsts.data(),
-                        h_buffer_dsts.size() * sizeof(ValueType*),
-                        hipMemcpyHostToDevice));
+    result.d_buffer_srcs.store(h_buffer_srcs);
+    result.d_buffer_dsts.store(h_buffer_dsts);
 
     return result;
 }
@@ -303,14 +269,13 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     BatchMemcpyData<ValueType, BufferSizeType> data;
     batch_copy<IsMemCpy>(nullptr,
                          temp_storage_bytes,
-                         data.d_buffer_srcs,
-                         data.d_buffer_dsts,
-                         data.d_buffer_sizes,
+                         data.d_buffer_srcs.get(),
+                         data.d_buffer_dsts.get(),
+                         data.d_buffer_sizes.get(),
                          num_buffers,
                          stream);
 
-    void* d_temp_storage = nullptr;
-    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+    common::device_ptr<void> d_temp_storage(temp_storage_bytes);
 
     data = prepare_data<ValueType, BufferSizeType, IsMemCpy>(stream,
                                                              seed,
@@ -321,18 +286,16 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     state.run(gbench_state,
               [&]
               {
-                  batch_copy<IsMemCpy>(d_temp_storage,
+                  batch_copy<IsMemCpy>(d_temp_storage.get(),
                                        temp_storage_bytes,
-                                       data.d_buffer_srcs,
-                                       data.d_buffer_dsts,
-                                       data.d_buffer_sizes,
+                                       data.d_buffer_srcs.get(),
+                                       data.d_buffer_dsts.get(),
+                                       data.d_buffer_sizes.get(),
                                        num_buffers,
                                        stream);
               });
 
     state.set_items_processed_per_iteration<ValueType>(gbench_state, data.total_num_elements);
-
-    HIP_CHECK(hipFree(d_temp_storage));
 }
 
 // Naive implementation used for comparison
@@ -397,9 +360,9 @@ void run_naive_benchmark(benchmark::State& gbench_state, benchmark_utils::state&
               [&]
               {
                   naive_kernel<BufferSizeType, 256>
-                      <<<num_buffers, 256, 0, stream>>>((void**)data.d_buffer_srcs,
-                                                        (void**)data.d_buffer_dsts,
-                                                        data.d_buffer_sizes);
+                      <<<num_buffers, 256, 0, stream>>>((void**)data.d_buffer_srcs.get(),
+                                                        (void**)data.d_buffer_dsts.get(),
+                                                        data.d_buffer_sizes.get());
               });
 
     state.set_items_processed_per_iteration<ValueType>(gbench_state, data.total_num_elements);

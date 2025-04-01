@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -120,66 +122,47 @@ struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_inte
         std::vector<value_type> values_input(size);
         std::iota(values_input.begin(), values_input.end(), 0);
 
-        offset_type* d_offsets;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_offsets),
-                            (segments_count + 1) * sizeof(offset_type)));
-        HIP_CHECK(hipMemcpy(d_offsets,
-                            offsets.data(),
-                            (segments_count + 1) * sizeof(offset_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<offset_type> d_offsets(offsets);
 
-        value_type* d_values_input;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_values_input), size * sizeof(value_type)));
-        HIP_CHECK(hipMemcpy(d_values_input,
-                            values_input.data(),
-                            size * sizeof(value_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<value_type> d_values_input(values_input);
 
-        value_type* d_aggregates_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_aggregates_output),
-                            segments_count * sizeof(value_type)));
+        common::device_ptr<value_type> d_aggregates_output(segments_count);
 
         rocprim::plus<value_type> reduce_op;
         value_type                init(0);
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
 
-        HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
+        HIP_CHECK(rp::segmented_reduce<Config>(nullptr,
                                                temporary_storage_bytes,
-                                               d_values_input,
-                                               d_aggregates_output,
+                                               d_values_input.get(),
+                                               d_aggregates_output.get(),
                                                segments_count,
-                                               d_offsets,
-                                               d_offsets + 1,
+                                               d_offsets.get(),
+                                               d_offsets.get() + 1,
                                                reduce_op,
                                                init,
                                                stream));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         state.run(gbench_state,
                   [&]
                   {
-                      HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage,
+                      HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage.get(),
                                                              temporary_storage_bytes,
-                                                             d_values_input,
-                                                             d_aggregates_output,
+                                                             d_values_input.get(),
+                                                             d_aggregates_output.get(),
                                                              segments_count,
-                                                             d_offsets,
-                                                             d_offsets + 1,
+                                                             d_offsets.get(),
+                                                             d_offsets.get() + 1,
                                                              reduce_op,
                                                              init,
                                                              stream));
                   });
 
         state.set_items_processed_per_iteration<value_type>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_offsets));
-        HIP_CHECK(hipFree(d_values_input));
-        HIP_CHECK(hipFree(d_aggregates_output));
     }
 
     void run(benchmark::State& gbench_state, benchmark_utils::state& state) override

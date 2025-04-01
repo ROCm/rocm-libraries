@@ -25,6 +25,8 @@
 
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -112,29 +114,17 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
         std::vector<ValueType> value_input(size);
         std::iota(value_input.begin(), value_input.end(), 0);
 
-        KeyType* d_key_inputs[num_input_arrays];
+        common::device_ptr<KeyType> d_key_inputs[num_input_arrays];
         for(int i = 0; i < num_input_arrays; ++i)
         {
-            HIP_CHECK(hipMalloc(&d_key_inputs[i], size * sizeof(*d_key_inputs[i])));
-            HIP_CHECK(hipMemcpy(d_key_inputs[i],
-                                key_inputs[i].data(),
-                                size * sizeof(*d_key_inputs[i]),
-                                hipMemcpyHostToDevice));
+            d_key_inputs[i].store(key_inputs[i]);
         }
 
-        ValueType* d_value_input;
-        HIP_CHECK(hipMalloc(&d_value_input, size * sizeof(*d_value_input)));
-        HIP_CHECK(hipMemcpy(d_value_input,
-                            value_input.data(),
-                            size * sizeof(*d_value_input),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<ValueType> d_value_input(value_input);
 
-        KeyType*      d_unique_output;
-        ValueType*    d_aggregates_output;
-        unsigned int* d_unique_count_output;
-        HIP_CHECK(hipMalloc(&d_unique_output, size * sizeof(*d_unique_output)));
-        HIP_CHECK(hipMalloc(&d_aggregates_output, size * sizeof(*d_aggregates_output)));
-        HIP_CHECK(hipMalloc(&d_unique_count_output, sizeof(*d_unique_count_output)));
+        common::device_ptr<KeyType>      d_unique_output(size);
+        common::device_ptr<ValueType>    d_aggregates_output(size);
+        common::device_ptr<unsigned int> d_unique_count_output(1);
 
         rocprim::plus<ValueType>   reduce_op;
         rocprim::equal_to<KeyType> key_compare_op;
@@ -148,28 +138,29 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
                     HIP_CHECK(rocprim::reduce_by_key<Config>(d_temp_storage,
                                                              temp_storage_size_bytes,
                                                              d_key_input,
-                                                             d_value_input,
+                                                             d_value_input.get(),
                                                              size,
-                                                             d_unique_output,
-                                                             d_aggregates_output,
-                                                             d_unique_count_output,
+                                                             d_unique_output.get(),
+                                                             d_aggregates_output.get(),
+                                                             d_unique_count_output.get(),
                                                              reduce_op,
                                                              key_compare_op,
                                                              stream));
                 }
                 else
                 {
-                    HIP_CHECK(rocprim::deterministic_reduce_by_key<Config>(d_temp_storage,
-                                                                           temp_storage_size_bytes,
-                                                                           d_key_input,
-                                                                           d_value_input,
-                                                                           size,
-                                                                           d_unique_output,
-                                                                           d_aggregates_output,
-                                                                           d_unique_count_output,
-                                                                           reduce_op,
-                                                                           key_compare_op,
-                                                                           stream));
+                    HIP_CHECK(
+                        rocprim::deterministic_reduce_by_key<Config>(d_temp_storage,
+                                                                     temp_storage_size_bytes,
+                                                                     d_key_input,
+                                                                     d_value_input.get(),
+                                                                     size,
+                                                                     d_unique_output.get(),
+                                                                     d_aggregates_output.get(),
+                                                                     d_unique_count_output.get(),
+                                                                     reduce_op,
+                                                                     key_compare_op,
+                                                                     stream));
                 }
             };
 
@@ -179,17 +170,16 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
             //   generally larger segments perform better.
             for(int i = 0; i < num_input_arrays; ++i)
             {
-                dispatch_input(d_key_inputs[i]);
+                dispatch_input(d_key_inputs[i].get());
             }
         };
 
         // Allocate temporary storage memory
         size_t temp_storage_size_bytes{};
         dispatch(nullptr, temp_storage_size_bytes);
-        void* d_temp_storage{};
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
 #pragma pack(push, 1)
         struct combined
@@ -199,16 +189,6 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
         };
 #pragma pack(pop)
         state.set_items_processed_per_iteration<combined>(gbench_state, size);
-
-        HIP_CHECK(hipFree(d_temp_storage));
-        for(int i = 0; i < num_input_arrays; ++i)
-        {
-            HIP_CHECK(hipFree(d_key_inputs[i]));
-        }
-        HIP_CHECK(hipFree(d_value_input));
-        HIP_CHECK(hipFree(d_unique_output));
-        HIP_CHECK(hipFree(d_aggregates_output));
-        HIP_CHECK(hipFree(d_unique_count_output));
     }
 
     static constexpr bool is_tuning = !std::is_same<Config, rocprim::default_config>::value;
