@@ -1799,98 +1799,99 @@ Tests:
   gpu_arch: '942'
   c_equal_d: [0, 1]
 
-- name: matmul_mx_datatypes
-  category: pre_checkin
-  function:
-    matmul: *real_precisions_mx
-  M: [128, 96, 64]
-  N: [128, 96, 64]
-  K: [128]
-  transA: T
-  transB: N
-  alpha: 1.5
-  beta: 2.0
-  initialization: hpl
-  unit_check: 0
-  norm_check: 1
-  gpu_arch: '950'
+# TODO: Enable when rocRoller turned on
+# - name: matmul_mx_datatypes
+#   category: pre_checkin
+#   function:
+#     matmul: *real_precisions_mx
+#   M: [128, 96, 64]
+#   N: [128, 96, 64]
+#   K: [128]
+#   transA: T
+#   transB: N
+#   alpha: 1.5
+#   beta: 2.0
+#   initialization: hpl
+#   unit_check: 0
+#   norm_check: 1
+#   gpu_arch: '950'
 
-- name: matmul_mx_large
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-    - { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  M: [4096]
-  N: [4096]
-  K: [16384]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: trig_float
-  unit_check: 0
-  norm_check: 1
-  requested_solution_num: -1
-  gpu_arch: '950'
+# - name: matmul_mx_large
+#   category: pre_checkin
+#   function:
+#     matmul:
+#     - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#     - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#     - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#     - { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#   M: [4096]
+#   N: [4096]
+#   K: [16384]
+#   transA: T
+#   transB: N
+#   alpha: 1.0
+#   beta: 0.0
+#   initialization: trig_float
+#   unit_check: 0
+#   norm_check: 1
+#   requested_solution_num: -1
+#   gpu_arch: '950'
 
-- name: matmul_mx_solution_index
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  M: [256]
-  N: [256]
-  K: [256]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: hpl
-  unit_check: 0
-  norm_check: 1
-  algo_method: [2]
-  solution_index: -2146957310  # Workgroup tile size = 256x256x64
-  gpu_arch: '950'
+# - name: matmul_mx_solution_index
+#   category: pre_checkin
+#   function:
+#     matmul:
+#     - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#   M: [256]
+#   N: [256]
+#   K: [256]
+#   transA: T
+#   transB: N
+#   alpha: 1.0
+#   beta: 0.0
+#   initialization: hpl
+#   unit_check: 0
+#   norm_check: 1
+#   algo_method: [2]
+#   solution_index: -2146957310  # Workgroup tile size = 256x256x64
+#   gpu_arch: '950'
 
-# Workgroup tile size = 128x128x64
-- name: matmul_mx_solution_index_wgt_128x128x64
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  M: [128]
-  N: [128]
-  K: [128]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: hpl
-  unit_check: 0
-  norm_check: 1
-  algo_method: [2]
-  solution_index: -2147220478  # Workgroup tile size = 128x128x64
-  gpu_arch: '950'
+# # Workgroup tile size = 128x128x64
+# - name: matmul_mx_solution_index_wgt_128x128x64
+#   category: pre_checkin
+#   function:
+#     matmul:
+#     - { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#   M: [128]
+#   N: [128]
+#   K: [128]
+#   transA: T
+#   transB: N
+#   alpha: 1.0
+#   beta: 0.0
+#   initialization: hpl
+#   unit_check: 0
+#   norm_check: 1
+#   algo_method: [2]
+#   solution_index: -2147220478  # Workgroup tile size = 128x128x64
+#   gpu_arch: '950'
 
-- name: matmul_mx_multiple_kernels
-  category: pre_checkin
-  function:
-    matmul:
-    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-  M: [256]
-  N: [256]
-  K: [256]
-  transA: T
-  transB: N
-  alpha: 1.0
-  beta: 0.0
-  initialization: hpl
-  unit_check: 0
-  norm_check: 1
-  requested_solution_num: 3
-  gpu_arch: '950'
+# - name: matmul_mx_multiple_kernels
+#   category: pre_checkin
+#   function:
+#     matmul:
+#     - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+#   M: [256]
+#   N: [256]
+#   K: [256]
+#   transA: T
+#   transB: N
+#   alpha: 1.0
+#   beta: 0.0
+#   initialization: hpl
+#   unit_check: 0
+#   norm_check: 1
+#   requested_solution_num: 3
+#   gpu_arch: '950'
 
 ...
