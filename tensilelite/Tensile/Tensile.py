@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Dict
 
 from Tensile import __version__
-from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, \
+from Tensile.Common import print1, printExit, printWarning, ensurePath, HR, isRhel8, \
                            LIBRARY_LOGIC_DIR, setVerbosity, IsaInfo, makeDebugConfig, \
                            makeDepthUConfig, DebugConfig, DepthUConfig, IsaVersion, coVersionMap
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
@@ -438,26 +438,6 @@ def Tensile(userArgs):
 
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
-
-    def isRhel8():
-        try:
-            import distro
-        except:
-            printWarning(
-                """
-                Failed to import distro package. Cannot verify platform.
-                Run: pip install distro or pip install -r requirements.txt to resolve warning.
-                """
-            )
-            return False
-
-        dist = distro.linux_distribution()
-        if distro.id() == "rhel" and distro.version()[0] == "8":
-            printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
-            return True
-        else:
-            return False
-
     UseEffLike = False if isRhel8() else UseEffLike
 
     if 'LibraryLogic' in config and UseEffLike:

@@ -27,6 +27,7 @@ import math
 import os
 import sys
 import time
+import re
 
 from inspect import currentframe, getframeinfo
 from copy import deepcopy
@@ -309,3 +310,23 @@ def assignParameterWithDefault(destinationDictionary, key, sourceDictionary, def
         destinationDictionary[key] = deepcopy(sourceDictionary[key])
     else:
         destinationDictionary[key] = deepcopy(defaultDictionary[key])
+
+
+def isRhel8() -> bool:
+    """
+    Check if the current OS is Red Hat Enterprise Linux 8 by reading the /etc/os-release file.
+
+    Returns:
+        True if the current OS is RHEL 8, False otherwise
+    """
+    file = Path("/etc/os-release")
+    pattern = r'NAME="Red Hat Enterprise Linux".*VERSION_ID="8\.\d+"'
+    if not file.exists():
+        return False
+    with open(file, "r") as f:
+        content = f.read()
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        printWarning("Rhel8 environments may not support all tools for system queries such as rocm-smi.")
+        return True
+    return False

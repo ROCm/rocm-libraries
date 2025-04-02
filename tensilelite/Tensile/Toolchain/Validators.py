@@ -24,9 +24,11 @@
 
 import os
 import re
+
 from pathlib import Path
 from typing import List, NamedTuple, Union
-from subprocess import run, PIPE
+
+from Tensile.Common.Utilities import isRhel8
 
 DEFAULT_ROCM_BIN_PATH_POSIX = Path("/opt/rocm/bin")
 DEFAULT_ROCM_LLVM_BIN_PATH_POSIX = Path("/opt/rocm/lib/llvm/bin")
@@ -103,12 +105,6 @@ def _posixSearchPaths() -> List[Path]:
         searchPaths.extend(envPath)
 
     return searchPaths
-
-
-def isRhel8():
-    import platform  # import here b/c it's only needed in this context
-    osRelease = platform.freedesktop_os_release()
-    return ("8.8" == osRelease["VERSION_ID"] and "rhel" == osRelease["ID"])
 
 
 class ToolchainDefaults(NamedTuple):
@@ -262,5 +258,5 @@ def validateToolchain(*args: str) :
     searchPaths = _windowsSearchPaths() if os.name == "nt" else _posixSearchPaths()
 
     out = (_validateExecutable(x, searchPaths) for x in args)
-    
+
     return next(out) if len(args) == 1 else tuple(out)
