@@ -84,8 +84,28 @@ __device__ void IPCContext::internal_atomic_barrier(int pe, int PE_start,
   }
 }
 
-// Uses PE values that are relative to world
 __device__ void IPCContext::internal_sync(int pe, int PE_start, int stride,
+                                          int PE_size, int64_t *pSync) {
+  if (PE_size < 64) {
+    internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
+  } else {
+    internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
+  }
+}
+
+__device__ void IPCContext::internal_sync_wave(int pe, int PE_start, int stride,
+                                          int PE_size, int64_t *pSync) {
+  if (is_thread_zero_in_wave()) {
+    if (PE_size < 64) {
+      internal_direct_barrier(pe, PE_start, stride, PE_size, pSync);
+    } else {
+      internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync);
+    }
+  }
+}
+
+// Uses PE values that are relative to world
+__device__ void IPCContext::internal_sync_wg(int pe, int PE_start, int stride,
                                           int PE_size, int64_t *pSync) {
   __syncthreads();
   if (is_thread_zero_in_block()) {
@@ -98,7 +118,7 @@ __device__ void IPCContext::internal_sync(int pe, int PE_start, int stride,
   __syncthreads();
 }
 
-__device__ void IPCContext::sync(rocshmem_team_t team) {
+__device__ void IPCContext::sync_wg(rocshmem_team_t team) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe = team_obj->my_pe_in_world;
@@ -107,18 +127,38 @@ __device__ void IPCContext::sync(rocshmem_team_t team) {
   int pe_size = team_obj->num_pes;
   long *p_sync = team_obj->barrier_pSync;
 
-  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync);
 }
 
 __device__ void IPCContext::sync_all() {
   internal_sync(my_pe, 0, 1, num_pes, barrier_sync);
 }
 
+__device__ void IPCContext::sync_all_wave() {
+  internal_sync_wave(my_pe, 0, 1, num_pes, barrier_sync);
+}
+
+__device__ void IPCContext::sync_all_wg() {
+  internal_sync_wg(my_pe, 0, 1, num_pes, barrier_sync);
+}
+
 __device__ void IPCContext::barrier_all() {
+  quiet();
+  sync_all();
+}
+
+__device__ void IPCContext::barrier_all_wave() {
+  if (is_thread_zero_in_wave()) {
+    quiet();
+  }
+  sync_all_wave();
+}
+
+__device__ void IPCContext::barrier_all_wg() {
   if (is_thread_zero_in_block()) {
     quiet();
   }
-  sync_all();
+  sync_all_wg();
   __syncthreads();
 }
 
@@ -134,7 +174,7 @@ __device__ void IPCContext::barrier(rocshmem_team_t team) {
   if (is_thread_zero_in_block()) {
     quiet();
   }
-  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+  internal_sync_wg(pe, pe_start, pe_stride, pe_size, p_sync);
   __syncthreads();
 }
 

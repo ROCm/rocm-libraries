@@ -170,6 +170,20 @@ __device__ void *ROContext::shmem_ptr(const void *dest, int pe) {
 }
 
 __device__ void ROContext::barrier_all() {
+  build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
+                      nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
+                      block_handle, true, get_status_flag(), is_default_ctx);
+}
+
+__device__ void ROContext::barrier_all_wave() {
+  if (is_thread_zero_in_wave()) {
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
+                        nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
+                        block_handle, true, get_status_flag(), is_default_ctx);
+  }
+}
+
+__device__ void ROContext::barrier_all_wg() {
   if (is_thread_zero_in_block()) {
     build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
                         nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
@@ -189,6 +203,20 @@ __device__ void ROContext::barrier(rocshmem_team_t team) {
 }
 
 __device__ void ROContext::sync_all() {
+  build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
+                      nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
+                      block_handle, true, get_status_flag(), is_default_ctx);
+}
+
+__device__ void ROContext::sync_all_wave() {
+  if (is_thread_zero_in_wave()) {
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
+                        nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
+                        block_handle, true, get_status_flag(), is_default_ctx);
+  }
+}
+
+__device__ void ROContext::sync_all_wg() {
   if (is_thread_zero_in_block()) {
     build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
                         nullptr, nullptr, (MPI_Comm)NULL, ro_net_win_id,
@@ -197,7 +225,7 @@ __device__ void ROContext::sync_all() {
   __syncthreads();
 }
 
-__device__ void ROContext::sync(rocshmem_team_t team) {
+__device__ void ROContext::sync_wg(rocshmem_team_t team) {
   ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
   if (is_thread_zero_in_block()) {
     build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,

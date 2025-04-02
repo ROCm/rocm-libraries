@@ -20,7 +20,7 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
-#include "barrier_all_tester.hpp"
+#include "sync_all_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
 
@@ -29,7 +29,7 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
+__global__ void SyncAllTest(int loop, int skip, long long int *start_time,
                                long long int *end_time, TestType type,
                                int wf_size) {
   __shared__ rocshmem_ctx_t ctx;
@@ -46,18 +46,18 @@ __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
     }
 
     switch (type) {
-      case BarrierAllTestType:
+      case SyncAllTestType:
         if(t_id == 0) {
-          rocshmem_ctx_barrier_all(ctx);
+          rocshmem_ctx_sync_all(ctx);
         }
         break;
-      case WAVEBarrierAllTestType:
+      case WAVESyncAllTestType:
         if(wf_id == 0) {
-          rocshmem_ctx_wave_barrier_all(ctx);
+          rocshmem_ctx_wave_sync_all(ctx);
         }
         break;
-      case WGBarrierAllTestType:
-        rocshmem_ctx_wg_barrier_all(ctx);
+      case WGSyncAllTestType:
+        rocshmem_ctx_wg_sync_all(ctx);
         break;
       default:
         break;
@@ -76,21 +76,21 @@ __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-BarrierAllTester::BarrierAllTester(TesterArguments args) : Tester(args) {}
+SyncAllTester::SyncAllTester(TesterArguments args) : Tester(args) {}
 
-BarrierAllTester::~BarrierAllTester() {}
+SyncAllTester::~SyncAllTester() {}
 
-void BarrierAllTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+void SyncAllTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                     uint64_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(BarrierAllTest, gridSize, blockSize, shared_bytes, stream,
+  hipLaunchKernelGGL(SyncAllTest, gridSize, blockSize, shared_bytes, stream,
                      loop, args.skip, start_time, end_time, _type, wf_size);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
-void BarrierAllTester::resetBuffers(uint64_t size) {}
+void SyncAllTester::resetBuffers(uint64_t size) {}
 
-void BarrierAllTester::verifyResults(uint64_t size) {}
+void SyncAllTester::verifyResults(uint64_t size) {}

@@ -36,15 +36,18 @@
 
 namespace rocshmem {
 
-__host__ IPCContext::IPCContext(Backend *b)
+__host__ IPCContext::IPCContext(Backend *b, unsigned int ctx_id)
     : Context(b, false) {
   IPCBackend *backend{static_cast<IPCBackend *>(b)};
   ipcImpl_.ipc_bases = b->ipcImpl.ipc_bases;
   ipcImpl_.shm_size = b->ipcImpl.shm_size;
 
-  barrier_sync = backend->barrier_sync;
+  size_t barrier_sync_offset = ctx_id * ROCSHMEM_BARRIER_SYNC_SIZE;
+
+  barrier_sync = backend->barrier_sync + barrier_sync_offset;
   fence_pool = backend->fence_pool;
   Wrk_Sync_buffer_bases_ = backend->get_wrk_sync_bases();
+  ctx_id_ = ctx_id;
 
   orders_.store = detail::atomic::rocshmem_memory_order::memory_order_seq_cst;
 }

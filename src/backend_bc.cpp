@@ -130,6 +130,8 @@ void Backend::dump_stats() {
   printf("Quiets %llu\n", device_stats.getStat(NUM_QUIET));
   printf("ToAll %llu\n", device_stats.getStat(NUM_TO_ALL));
   printf("BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL));
+  printf("WAVE_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WAVE));
+  printf("WG_BarrierAll %llu\n", device_stats.getStat(NUM_BARRIER_ALL_WG));
   printf("Wait Until %llu\n", device_stats.getStat(NUM_WAIT_UNTIL));
   printf("Wait Until Any %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ANY));
   printf("Wait Until All %llu\n", device_stats.getStat(NUM_WAIT_UNTIL_ALL));
@@ -153,6 +155,8 @@ void Backend::dump_stats() {
   printf("Tests %llu\n", device_stats.getStat(NUM_TEST));
   printf("SHMEM_PTR %llu\n", device_stats.getStat(NUM_SHMEM_PTR));
   printf("SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL));
+  printf("WAVE_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WAVE));
+  printf("WG_SyncAll %llu\n", device_stats.getStat(NUM_SYNC_ALL_WG));
 
   const auto& host_stats{globalHostStats};
   printf("HOST STATS\n");

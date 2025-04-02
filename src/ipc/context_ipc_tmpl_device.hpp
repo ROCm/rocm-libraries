@@ -468,7 +468,7 @@ __device__ void IPCContext::internal_broadcast(T *dst, const T *src, int nelems,
   }
 
   // Synchronize on completion of broadcast
-  internal_sync(my_pe, pe_start, stride, pe_size, p_sync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, p_sync);
 }
 
 template <typename T>
@@ -497,7 +497,7 @@ __device__ void IPCContext::alltoall_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
 }
 
 template <typename T>
@@ -527,7 +527,7 @@ __device__ void IPCContext::fcollect_linear(rocshmem_team_t team, T *dst,
     quiet();
   }
   // wait until everyone has obtained their designated data
-  internal_sync(my_pe, pe_start, stride, pe_size, pSync);
+  internal_sync_wg(my_pe, pe_start, stride, pe_size, pSync);
 }
 
 // Block/wave functions

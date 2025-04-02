@@ -43,10 +43,11 @@
 #include "random_access_tester.hpp"
 #include "shmem_ptr_tester.hpp"
 #include "signaling_operations_tester.hpp"
+#include "sync_all_tester.hpp"
 #include "sync_tester.hpp"
 #include "team_alltoall_tester.hpp"
-#include "team_broadcast_tester.hpp"
 #include "team_barrier_tester.hpp"
+#include "team_broadcast_tester.hpp"
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
 #include "team_fcollect_tester.hpp"
@@ -317,12 +318,28 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Barrier_All ###" << std::endl;
       testers.push_back(new BarrierAllTester(args));
       return testers;
+    case WAVEBarrierAllTestType:
+      if (rank == 0) std::cout << "WAVE Barrier_All ###" << std::endl;
+      testers.push_back(new BarrierAllTester(args));
+      return testers;
+    case WGBarrierAllTestType:
+      if (rank == 0) std::cout << "WG Barrier_All ###" << std::endl;
+      testers.push_back(new BarrierAllTester(args));
+      return testers;
     case TeamBarrierTestType:
       if (rank == 0) std::cout << "Team Barrier Test ###" << std::endl;
       testers.push_back(new TeamBarrierTester(args));
       return testers;
     case SyncAllTestType:
       if (rank == 0) std::cout << "SyncAll ###" << std::endl;
+      testers.push_back(new SyncTester(args));
+      return testers;
+    case WAVESyncAllTestType:
+      if (rank == 0) std::cout << "WAVE SyncAll ###" << std::endl;
+      testers.push_back(new SyncTester(args));
+      return testers;
+    case WGSyncAllTestType:
+      if (rank == 0) std::cout << "WG SyncAll ###" << std::endl;
       testers.push_back(new SyncTester(args));
       return testers;
     case SyncTestType:
@@ -510,7 +527,9 @@ bool Tester::peLaunchesKernel() {
                 (_type == TeamBroadcastTestType) || (_type == TeamCtxInfraTestType) ||
                 (_type == TeamAllToAllTestType) || (_type == TeamFCollectTestType) ||
                 (_type == PingPongTestType) || (_type == BarrierAllTestType) ||
+                (_type == WAVEBarrierAllTestType) || (_type == WGBarrierAllTestType) ||
                 (_type == SyncTestType) || (_type == SyncAllTestType) ||
+                (_type == WAVESyncAllTestType) || (_type == WGSyncAllTestType) ||
                 (_type == RandomAccessTestType) || (_type == PingAllTestType) ||
                 (_type == TeamBarrierTestType);
 

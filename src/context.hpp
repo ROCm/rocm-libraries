@@ -137,11 +137,19 @@ class Context {
 
   __device__ void barrier_all();
 
+  __device__ void barrier_all_wave();
+
+  __device__ void barrier_all_wg();
+
   __device__ void barrier(rocshmem_team_t team);
 
   __device__ void sync_all();
 
-  __device__ void sync(rocshmem_team_t team);
+  __device__ void sync_all_wave();
+
+  __device__ void sync_all_wg();
+
+  __device__ void sync_wg(rocshmem_team_t team);
 
   template <typename T>
   __device__ T amo_fetch(void* dst, T value, T cond, int pe, uint8_t atomic_op);

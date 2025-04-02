@@ -148,6 +148,18 @@ __device__ void Context::barrier_all() {
   DISPATCH(barrier_all());
 }
 
+__device__ void Context::barrier_all_wave() {
+  ctxStats.incStat(NUM_BARRIER_ALL_WAVE);
+
+  DISPATCH(barrier_all_wave());
+}
+
+__device__ void Context::barrier_all_wg() {
+  ctxStats.incStat(NUM_BARRIER_ALL_WG);
+
+  DISPATCH(barrier_all_wg());
+}
+
 __device__ void Context::barrier(rocshmem_team_t team) {
   ctxStats.incStat(NUM_BARRIER_ALL);
 
@@ -160,10 +172,22 @@ __device__ void Context::sync_all() {
   DISPATCH(sync_all());
 }
 
-__device__ void Context::sync(rocshmem_team_t team) {
-  ctxStats.incStat(NUM_SYNC_ALL);
+__device__ void Context::sync_all_wave() {
+  ctxStats.incStat(NUM_SYNC_ALL_WAVE);
 
-  DISPATCH(sync(team));
+  DISPATCH(sync_all_wave());
+}
+
+__device__ void Context::sync_all_wg() {
+  ctxStats.incStat(NUM_SYNC_ALL_WG);
+
+  DISPATCH(sync_all_wg());
+}
+
+__device__ void Context::sync_wg(rocshmem_team_t team) {
+  ctxStats.incStat(NUM_SYNC_ALL_WG);
+
+  DISPATCH(sync_wg(team));
 }
 
 __device__ void Context::putmem_wg(void* dest, const void* source,

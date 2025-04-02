@@ -31,9 +31,9 @@ namespace rocshmem {
 
 class IPCContext : public Context {
  public:
-  __host__ IPCContext(Backend *b);
+  __host__ IPCContext(Backend *b, unsigned int ctx_id);
 
-  __device__ IPCContext(Backend *b);
+  __device__ IPCContext(Backend *b, unsigned int ctx_id);
 
   __device__ void threadfence_system();
 
@@ -61,11 +61,19 @@ class IPCContext : public Context {
 
   __device__ void barrier_all();
 
+  __device__ void barrier_all_wave();
+
+  __device__ void barrier_all_wg();
+
   __device__ void barrier(rocshmem_team_t team);
 
   __device__ void sync_all();
 
-  __device__ void sync(rocshmem_team_t team);
+  __device__ void sync_all_wave();
+
+  __device__ void sync_all_wg();
+
+  __device__ void sync_wg(rocshmem_team_t team);
 
   template <typename T>
   __device__ void p(T *dest, T value, int pe);
@@ -240,6 +248,12 @@ class IPCContext : public Context {
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
                                 int64_t *pSync);
 
+  __device__ void internal_sync_wave(int pe, int PE_start, int stride, int PE_size,
+                                int64_t *pSync);
+
+  __device__ void internal_sync_wg(int pe, int PE_start, int stride, int PE_size,
+                                int64_t *pSync);
+
   __device__ void internal_direct_barrier(int pe, int PE_start, int stride,
                                           int n_pes, int64_t *pSync);
 
@@ -288,6 +302,11 @@ class IPCContext : public Context {
    * of other PEs
   */
   char **Wrk_Sync_buffer_bases_{nullptr};
+
+  /**
+   * @brief Decive context Id
+   */
+  unsigned int ctx_id_{};
 
  public:
   //TODO(Avinash):
