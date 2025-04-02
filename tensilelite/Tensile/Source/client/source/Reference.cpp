@@ -176,7 +176,10 @@ namespace TensileLite
             T>::type
             SaturateCast(Accumulator val)
         {
-            return static_cast<T>(static_cast<Half>(val));
+            if constexpr(std::is_same<Accumulator, BFloat16>::value)
+		return static_cast<T>(static_cast<float>(val));
+            else
+                return static_cast<T>(val);
         }
 
         template <typename T, typename Accumulator>
