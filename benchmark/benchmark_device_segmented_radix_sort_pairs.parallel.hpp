@@ -297,9 +297,8 @@ struct device_segmented_radix_sort_pairs_benchmark_generator
         -> std::enable_if_t<((key_size + value_type) * BlockSize * ItemsPerThread
                              <= TUNING_SHARED_MEMORY_MAX)>
     {
-        constexpr std::array<size_t, 8>
-            segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
-        constexpr std::array<size_t, 8> segment_lengths{30, 256, 3000, 300000};
+        const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
+        const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
 
         storage.emplace_back(std::make_unique<device_segmented_radix_sort_pairs_benchmark<
                                  Key,

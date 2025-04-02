@@ -266,9 +266,8 @@ struct device_segmented_radix_sort_keys_benchmark_generator
     static auto _create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
         -> std::enable_if_t<(key_size * BlockSize * ItemsPerThread < TUNING_SHARED_MEMORY_MAX)>
     {
-        constexpr std::array<size_t, 8>
-            segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
-        constexpr std::array<size_t, 8> segment_lengths{30, 256, 3000, 300000};
+        const std::vector<size_t> segment_counts{10, 100, 1000, 2500, 5000, 7500, 10000, 100000};
+        const std::vector<size_t> segment_lengths{30, 256, 3000, 300000};
 
         storage.emplace_back(std::make_unique<device_segmented_radix_sort_keys_benchmark<
                                  Key,
