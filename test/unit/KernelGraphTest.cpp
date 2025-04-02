@@ -2995,7 +2995,10 @@ namespace KernelGraphTest
 
         EXPECT_THAT(output(), testing::HasSubstr("vmcnt(0)"));
         EXPECT_THAT(output(), testing::HasSubstr("lgkmcnt(0)"));
-        EXPECT_THAT(output(), testing::HasSubstr("expcnt(0)"));
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasExpcnt))
+        {
+            EXPECT_THAT(output(), testing::HasSubstr("expcnt(0)"));
+        }
     }
 
     TEST_F(KernelGraphTest, ReindexConditionalOpExpression)

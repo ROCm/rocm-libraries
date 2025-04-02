@@ -33,7 +33,7 @@ namespace rocRoller
     namespace Scheduling
     {
         /**
-         * @brief 102X rules for WMMA Write Hazards.
+         * @brief 120X rules for WMMA Write Hazards.
          *
          * | Arch  | 1st Inst | 2nd Inst            | NOPs |
          * | ----- | -------- | ------------------- | ---- |

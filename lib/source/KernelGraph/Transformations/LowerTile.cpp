@@ -439,7 +439,8 @@ namespace rocRoller
                                int                              wavefrontSize,
                                bool                             isFromLDS,
                                std::vector<unsigned int> const& jammedTiles,
-                               CommandParametersPtr             params)
+                               CommandParametersPtr             params,
+                               ContextPtr                       context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -493,9 +494,33 @@ namespace rocRoller
                             && (((M == 16) && (N == 16) && (K == 128))
                                 || ((M == 32) && (N == 32) && (K == 64)));
 
-            auto isF16TransposableTileLayout = (bitsPerElement == 16)
-                                               && (((M == 16) && (N == 16) && (K == 32))
-                                                   || ((M == 32) && (N == 32) && (K == 16)));
+            auto isTransposableType = [isF8F6F4, bitsPerElement, context, M, N, K](DataType type) {
+                auto isF16TransposableTileLayout = (bitsPerElement == 16)
+                                                   && (((M == 16) && (N == 16) && (K == 32))
+                                                       || ((M == 32) && (N == 32) && (K == 16)));
+
+                auto hasTransposeInstructionForType = [context](DataType type) {
+                    auto const& arch = context->targetArchitecture();
+                    switch(type)
+                    {
+                    case DataType::Half:
+                    case DataType::BFloat16:
+                        return arch.HasCapability(GPUCapability::HasDSReadTransposeB16);
+                    case DataType::FP8:
+                    case DataType::BF8:
+                        return arch.HasCapability(GPUCapability::HasDSReadTransposeB8);
+                    case DataType::FP6:
+                    case DataType::BF6:
+                        return arch.HasCapability(GPUCapability::HasDSReadTransposeB6);
+                    case DataType::FP4:
+                        return arch.HasCapability(GPUCapability::HasDSReadTransposeB4);
+                    default:
+                        return false;
+                    };
+                };
+                return (isF8F6F4 || isF16TransposableTileLayout)
+                       && hasTransposeInstructionForType(type);
+            };
 
             bool isTransposeLayout = params->transposeMemoryAccess[waveTile.layout];
 
@@ -507,7 +532,7 @@ namespace rocRoller
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
 
-                if(isFromLDS && (isF8F6F4 || isF16TransposableTileLayout) && !isTransposeLayout)
+                if(isFromLDS && isTransposableType(varType.dataType) && !isTransposeLayout)
                 {
                     Log::debug("Adding transpose-load CT for A macTileTag {}", macTileTag);
                     addTransposeLoadWaveTileCT(
@@ -545,7 +570,7 @@ namespace rocRoller
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
 
-                if(isFromLDS && (isF8F6F4 || isF16TransposableTileLayout) && isTransposeLayout)
+                if(isFromLDS && isTransposableType(varType.dataType) && isTransposeLayout)
                 {
                     Log::debug("Adding transpose-load CT for B macTileTag {}", macTileTag);
                     addTransposeLoadWaveTileCT(
@@ -1425,7 +1450,8 @@ namespace rocRoller
                               wavefrontSize,
                               true,
                               jammedTiles,
-                              params);
+                              params,
+                              context);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
         }
@@ -1841,7 +1867,8 @@ namespace rocRoller
                                       wavefrontSize,
                                       true,
                                       jammedTiles,
-                                      m_params);
+                                      m_params,
+                                      m_context);
                 }
                 else if(tile.memoryType == MemoryType::WAVE_SPLIT)
                 {

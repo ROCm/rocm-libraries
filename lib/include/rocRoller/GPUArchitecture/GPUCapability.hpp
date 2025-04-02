@@ -120,6 +120,7 @@ namespace rocRoller
             MaxVmcnt,
             MaxLgkmcnt,
             MaxExpcnt,
+            HasExpcnt,
             SupportedSource,
 
             Waitcnt0Disabled,

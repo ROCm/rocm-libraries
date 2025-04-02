@@ -104,13 +104,6 @@ namespace rocRollerTest
          */
         void genF6x16BufferLoadAndStore(int num_f6, DataType F6x16Type)
         {
-            auto arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNAGPU())
-            {
-                GTEST_SKIP() << "Test not yet supported on "
-                             << m_context->targetArchitecture().target().toString() << std::endl;
-            }
-
             int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
 
             auto k = m_context->kernel();
@@ -391,6 +384,13 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6x16BufferLoadAndStore)
     {
+        auto const& arch = m_context->targetArchitecture().target();
+        if(!arch.isCDNAGPU())
+        {
+            GTEST_SKIP() << "Test not yet supported on "
+                         << m_context->targetArchitecture().target().toString() << std::endl;
+        }
+
         int  num_f6    = 16;
         auto F6x16Type = std::get<rocRoller::DataType>(GetParam()) == DataType::FP6
                              ? DataType::FP6x16
@@ -409,6 +409,13 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6x16GlobalLoadAndStore)
     {
+        auto const& arch = m_context->targetArchitecture().target();
+        if(!arch.isCDNAGPU())
+        {
+            GTEST_SKIP() << "Test not yet supported on "
+                         << m_context->targetArchitecture().target().toString() << std::endl;
+        }
+
         int  num_f6    = 16;
         auto F6x16Type = std::get<rocRoller::DataType>(GetParam()) == DataType::FP6
                              ? DataType::FP6x16
@@ -442,6 +449,13 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
+        auto const& arch = m_context->targetArchitecture().target();
+        if(!arch.isCDNAGPU())
+        {
+            GTEST_SKIP() << "Test not yet supported on "
+                         << m_context->targetArchitecture().target().toString() << std::endl;
+        }
+
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 

@@ -10,6 +10,7 @@ Architectures:
       HasCodeObjectV4: 0
       HasCodeObjectV5: 0
       HasDirectToLds: 0
+      HasExpcnt: 0
       HasExplicitVectorCO: 0
       HasExplicitVectorRevCO: 0
       HasGlobalOffset: 0

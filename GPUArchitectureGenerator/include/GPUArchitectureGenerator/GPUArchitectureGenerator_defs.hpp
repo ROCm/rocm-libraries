@@ -158,6 +158,8 @@ namespace GPUArchitectureGenerator
             {rocRoller::GPUCapability::s_barrier, {{"s_barrier"}, ""}},
             {rocRoller::GPUCapability::s_barrier_signal, {{"s_barrier_signal -1"}, ""}},
 
+            {rocRoller::GPUCapability::HasExpcnt, {{"s_waitcnt expcnt(0)", "s_wait_expcnt 0"}, ""}},
+
             {rocRoller::GPUCapability::HasAtomicAdd,
              {{"buffer_atomic_add_f32 v0, v1, s[0:3], 0 offen offset:0"}, ""}},
 

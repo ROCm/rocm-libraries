@@ -257,7 +257,7 @@ TEST_F(InstructionTest, WaitOnRegularInstruction)
 
     auto inst = Instruction("v_add_f32", {dst}, {src, Register::Value::Literal(5)}, {}, "Addition");
 
-    auto arch = m_context->targetArchitecture();
+    auto const& arch = m_context->targetArchitecture();
     inst.addWaitCount(WaitCount::KMCnt(arch, 1));
     m_context->schedule(inst);
 

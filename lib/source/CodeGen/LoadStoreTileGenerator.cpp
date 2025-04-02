@@ -575,6 +575,7 @@ namespace rocRoller
                         auto limit = (limitValue->regType() == Register::Type::Literal)
                                          ? limitValue
                                          : limitValue->subset({0});
+                        limit->setVariableType(DataType::UInt32);
                         co_yield bufDesc.setSize(limit);
                     }
                     scope->addRegister(buffer);

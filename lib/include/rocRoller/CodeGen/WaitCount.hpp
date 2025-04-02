@@ -141,6 +141,7 @@ namespace rocRoller
 
         bool m_isSplitCounter = false;
         bool m_hasVSCnt       = false;
+        bool m_hasEXPCnt      = false;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);

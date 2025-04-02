@@ -76,7 +76,7 @@ namespace ArithmeticTest
 
             auto k = m_context->kernel();
 
-            auto gpu = m_context->targetArchitecture().target();
+            auto const& gpu = m_context->targetArchitecture().target();
             if(!(gpu.isCDNAGPU() || gpu.isRDNAGPU()))
             {
                 GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
@@ -819,7 +819,7 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto gpu = m_context->targetArchitecture().target();
+        auto const& gpu = m_context->targetArchitecture().target();
 
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a;
@@ -939,7 +939,7 @@ namespace ArithmeticTest
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
-        auto gpu = m_context->targetArchitecture().target();
+        auto const& gpu = m_context->targetArchitecture().target();
 
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a, s_b, s_c;

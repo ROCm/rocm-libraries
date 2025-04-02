@@ -35,6 +35,7 @@ namespace rocRoller
     {
         m_isSplitCounter = arch.HasCapability(GPUCapability::HasSplitWaitCounters);
         m_hasVSCnt       = arch.HasCapability(GPUCapability::SeparateVscnt);
+        m_hasEXPCnt      = arch.HasCapability(GPUCapability::HasExpcnt);
         if(message.length() > 0)
         {
             m_comments = {message};
@@ -56,6 +57,7 @@ namespace rocRoller
         , m_expcnt(expcnt)
         , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
         , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
+        , m_hasEXPCnt(arch.HasCapability(GPUCapability::HasExpcnt))
     {
     }
 
@@ -68,6 +70,7 @@ namespace rocRoller
         , m_expcnt(-1)
         , m_isSplitCounter(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
         , m_hasVSCnt(arch.HasCapability(GPUCapability::SeparateVscnt))
+        , m_hasEXPCnt(arch.HasCapability(GPUCapability::HasExpcnt))
     {
         switch(queue)
         {
@@ -151,9 +154,12 @@ namespace rocRoller
         {
             rv.m_vscnt = 0;
         }
-        rv.m_dscnt  = 0;
-        rv.m_kmcnt  = 0;
-        rv.m_expcnt = 0;
+        rv.m_dscnt = 0;
+        rv.m_kmcnt = 0;
+        if(architecture.HasCapability(GPUCapability::HasExpcnt))
+        {
+            rv.m_expcnt = 0;
+        }
 
         return rv;
     }
@@ -184,6 +190,7 @@ namespace rocRoller
 
         m_isSplitCounter = other.m_isSplitCounter;
         m_hasVSCnt       = other.m_hasVSCnt;
+        m_hasEXPCnt      = other.m_hasEXPCnt;
 
         m_comments.insert(m_comments.end(), other.m_comments.begin(), other.m_comments.end());
     }
@@ -379,6 +386,8 @@ namespace rocRoller
 
                 if(m_expcnt >= 0)
                 {
+                    AssertFatal(m_hasEXPCnt,
+                                "EXPCnt is not a valid counter in target architecture");
                     os << " expcnt(" << m_expcnt << ")";
                 }
             }

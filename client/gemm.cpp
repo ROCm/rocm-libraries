@@ -635,7 +635,7 @@ namespace rocRoller::Client::GEMMClient
     {
         GEMMSolutionPtr gemmSolution;
 
-        auto arch = context->targetArchitecture().target();
+        auto const& arch = context->targetArchitecture().target();
 
         if(solution.streamK)
         {
@@ -746,7 +746,7 @@ namespace rocRoller::Client::GEMMClient
             }
         }
 
-        auto arch = GPUArchitectureLibrary::getInstance()->GetArch(architecture.target);
+        auto const arch = GPUArchitectureLibrary::getInstance()->GetArch(architecture.target);
 
         if(solution.scheduler != "")
         {

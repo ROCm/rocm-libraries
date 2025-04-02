@@ -79,7 +79,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        auto gpu = m_context->targetArchitecture().target();
+        auto const& gpu = m_context->targetArchitecture().target();
         if(gpu.isCDNAGPU())
         {
             co_yield_(Instruction("v_sub_i32", {dest}, {lhs, rhs}, {}, ""));

@@ -46,7 +46,7 @@ namespace largerLDSTest
             , m_numBytes(numBytes)
             , m_numLoads(numLoads)
         {
-            auto arch = m_context->targetArchitecture().target();
+            auto const& arch = m_context->targetArchitecture().target();
             if(!arch.isCDNA35GPU())
                 SKIP("Test not yet supported on " << arch);
 

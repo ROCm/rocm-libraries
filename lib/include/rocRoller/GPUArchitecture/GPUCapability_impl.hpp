@@ -136,6 +136,7 @@ namespace rocRoller
             {"MaxVmcnt", Value::MaxVmcnt},
             {"MaxLgkmcnt", Value::MaxLgkmcnt},
             {"MaxExpcnt", Value::MaxExpcnt},
+            {"HasExpcnt", Value::HasExpcnt},
             {"SupportedSource", Value::SupportedSource},
 
             {"Waitcnt0Disabled", Value::Waitcnt0Disabled},

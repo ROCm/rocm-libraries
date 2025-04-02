@@ -56,6 +56,7 @@ TEST_F(WaitCountTest, Combine)
     GPUArchitecture arch{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     // Add capability so VSCnt can be generated
     arch.AddCapability(GPUCapability::SeparateVscnt, 0);
+    arch.AddCapability(GPUCapability::HasExpcnt, 0);
     auto wc = WaitCount::KMCnt(arch, 2);
 
     wc.combine(WaitCount::LoadCnt(arch, 4));
@@ -151,6 +152,7 @@ TEST_F(WaitCountTest, VSCnt)
     GPUArchitecture TestWithVSCnt{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     TestWithVSCnt.AddCapability(GPUCapability::SupportedISA, 0);
     TestWithVSCnt.AddCapability(GPUCapability::SeparateVscnt, 0);
+    TestWithVSCnt.AddCapability(GPUCapability::HasExpcnt, 0);
     EXPECT_EQ(TestWithVSCnt.HasCapability(GPUCapability::SupportedISA), true);
     EXPECT_EQ(TestWithVSCnt.HasCapability(GPUCapability::SeparateVscnt), true);
 
@@ -173,6 +175,7 @@ TEST_F(WaitCountTest, VSCnt)
 
     GPUArchitecture TestNoVSCnt{GPUArchitectureTarget{GPUArchitectureGFX::GFX90A}};
     TestNoVSCnt.AddCapability(GPUCapability::SupportedISA, 0);
+    TestNoVSCnt.AddCapability(GPUCapability::HasExpcnt, 0);
     EXPECT_EQ(TestNoVSCnt.HasCapability(GPUCapability::SupportedISA), true);
     EXPECT_EQ(TestNoVSCnt.HasCapability(GPUCapability::SeparateVscnt), false);
 
@@ -199,6 +202,7 @@ TEST_F(WaitCountTest, SaturatedValues)
     testArch.AddCapability(GPUCapability::MaxExpcnt, 7);
     testArch.AddCapability(GPUCapability::MaxLgkmcnt, 15);
     testArch.AddCapability(GPUCapability::MaxVmcnt, 63);
+    testArch.AddCapability(GPUCapability::HasExpcnt, 0);
     EXPECT_EQ(testArch.HasCapability(GPUCapability::MaxExpcnt), true);
     EXPECT_EQ(testArch.HasCapability(GPUCapability::MaxLgkmcnt), true);
     EXPECT_EQ(testArch.HasCapability(GPUCapability::MaxVmcnt), true);

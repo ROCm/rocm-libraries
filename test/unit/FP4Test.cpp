@@ -344,7 +344,7 @@ namespace rocRollerTest
 
     TEST_P(FP4MemoryInstructionTest, GPU_FP4x8BufferLoadAndStore)
     {
-        auto arch = m_context->targetArchitecture().target();
+        auto const& arch = m_context->targetArchitecture().target();
         if(!arch.isCDNAGPU())
         {
             GTEST_SKIP() << "Test not yet supported on "

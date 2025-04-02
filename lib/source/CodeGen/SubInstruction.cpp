@@ -34,7 +34,7 @@ namespace rocRoller
                                Register::ValuePtr rhs,
                                std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitScalarCO))
         {
             return Instruction("s_sub_co_i32", {dest}, {lhs, rhs}, {}, comment);
@@ -51,7 +51,7 @@ namespace rocRoller
                                 Register::ValuePtr rhs,
                                 std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitScalarCO))
         {
             return Instruction("s_sub_co_u32", {dest}, {lhs, rhs}, {}, comment);
@@ -68,7 +68,7 @@ namespace rocRoller
                                           Register::ValuePtr rhs,
                                           std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitScalarCOCI))
         {
             return Instruction("s_sub_co_ci_u32", {dest}, {lhs, rhs}, {}, comment);
@@ -85,7 +85,7 @@ namespace rocRoller
                                 Register::ValuePtr rhs,
                                 std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitNC))
         {
             return Instruction("v_sub_nc_u32", {dest}, {lhs, rhs}, {}, comment);
@@ -103,7 +103,7 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitVectorCO))
         {
             return Instruction("v_sub_co_u32", {dest, carry}, {lhs, rhs}, {}, comment);
@@ -132,7 +132,7 @@ namespace rocRoller
                                           Register::ValuePtr rhs,
                                           std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitVectorCOCI))
         {
             return Instruction(
@@ -160,7 +160,7 @@ namespace rocRoller
                                    Register::ValuePtr rhs,
                                    std::string        comment)
     {
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitVectorRevNC))
         {
             return Instruction("v_subrev_nc_u32", {dest}, {lhs, rhs}, {}, comment);
@@ -179,7 +179,7 @@ namespace rocRoller
                                            std::string        comment)
     {
 
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitVectorRevCO))
         {
             return Instruction("v_subrev_co_u32", {dest, carryOut}, {lhs, rhs}, {}, comment);
@@ -211,7 +211,7 @@ namespace rocRoller
                                              std::string        comment)
     {
 
-        auto arch = ctx->targetArchitecture();
+        auto const& arch = ctx->targetArchitecture();
         if(arch.HasCapability(GPUCapability::HasExplicitVectorRevCOCI))
         {
             return Instruction(

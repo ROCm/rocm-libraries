@@ -54,7 +54,7 @@ namespace ExpressionTest
             : AssemblyTestKernel(context)
             , m_numWorkItems(numWorkItems)
         {
-            auto arch = m_context->targetArchitecture().target();
+            auto const& arch = m_context->targetArchitecture().target();
             if(!arch.isCDNAGPU())
                 SKIP("Test not yet supported on " << arch);
         }

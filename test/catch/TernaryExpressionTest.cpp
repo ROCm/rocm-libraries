@@ -99,9 +99,6 @@ namespace ExpressionTest
             , m_destRegMode(destRegMode)
 
         {
-            auto arch = m_context->targetArchitecture().target();
-            if(!arch.isCDNAGPU())
-                SKIP("Test not yet supported on " << arch);
         }
 
         void generate() override

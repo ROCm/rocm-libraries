@@ -83,15 +83,16 @@ namespace rocRoller
 
         co_yield swapIfRHSLiteral(lhs, rhs);
 
-        auto gpu = m_context->targetArchitecture().target();
+        auto const& arch = m_context->targetArchitecture();
+        auto const& gpu  = arch.target();
 
-        if(gpu.isCDNAGPU())
-        {
-            co_yield_(Instruction("v_add_i32", {dest}, {lhs, rhs}, {}, ""));
-        }
-        else if(gpu.isRDNAGPU())
+        if(arch.HasCapability(GPUCapability::HasExplicitNC))
         {
             co_yield_(Instruction("v_add_nc_i32", {dest}, {lhs, rhs}, {}, ""));
+        }
+        else if(gpu.isCDNAGPU())
+        {
+            co_yield_(Instruction("v_add_i32", {dest}, {lhs, rhs}, {}, ""));
         }
         else
         {

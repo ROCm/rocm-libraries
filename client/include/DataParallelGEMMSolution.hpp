@@ -272,7 +272,7 @@ namespace rocRoller
                                     > wave_n * wave_k,
                                 "Not enough elements (B).");
 
-                    auto arch = GPUArchitectureLibrary::getInstance()->GetArch(
+                    auto const arch = GPUArchitectureLibrary::getInstance()->GetArch(
                         solutionParams.architecture);
                     uint wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
                     uint wavetilePerWavefrontM = wavefrontSize * solutionParams.macM / wave_m

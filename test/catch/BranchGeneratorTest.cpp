@@ -125,13 +125,22 @@ namespace BranchGeneratorTest
                 co_yield Instruction::Unlock();
             };
 
-            std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
-                                   + std::string("\n") + std::string("s_branch");
-            if(ctx->targetArchitecture().target().isRDNA4GPU())
+            auto const& arch     = ctx->targetArchitecture();
+            std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0)");
+            if(arch.HasCapability(GPUCapability::HasExpcnt))
+            {
+                expected += std::string(" expcnt(0)");
+            }
+            expected += std::string("\n") + std::string("s_branch");
+            if(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
             {
                 expected = std::string("s_wait_loadcnt 0\ns_wait_storecnt 0\ns_wait_kmcnt "
-                                       "0\ns_wait_dscnt 0\ns_wait_expcnt 0")
-                           + std::string("\n") + std::string("s_branch");
+                                       "0\ns_wait_dscnt 0\n");
+                if(arch.HasCapability(GPUCapability::HasExpcnt))
+                {
+                    expected += std::string("s_wait_expcnt 0");
+                }
+                expected += std::string("\n") + std::string("s_branch");
             }
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
@@ -161,13 +170,22 @@ namespace BranchGeneratorTest
                 co_yield Instruction::Unlock();
             };
 
-            std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
-                                   + std::string("\n") + std::string("s_branch");
-            if(ctx->targetArchitecture().target().isRDNA4GPU())
+            auto const& arch     = ctx->targetArchitecture();
+            std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)");
+            if(arch.HasCapability(GPUCapability::HasExpcnt))
+            {
+                expected += std::string(" expcnt(0)");
+            }
+            expected += std::string("\n") + std::string("s_branch");
+            if(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
             {
                 expected = std::string("s_wait_loadcnt 0\ns_wait_storecnt 0\ns_wait_kmcnt "
-                                       "0\ns_wait_dscnt 0\ns_wait_expcnt 0")
-                           + std::string("\n") + std::string("s_branch");
+                                       "0\ns_wait_dscnt 0\ns_wait_expcnt 0");
+                if(arch.HasCapability(GPUCapability::HasExpcnt))
+                {
+                    expected += std::string("s_wait_expcnt 0");
+                }
+                expected += std::string("\n") + std::string("s_branch");
             }
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(

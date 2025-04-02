@@ -56,7 +56,7 @@ namespace multipleLDSAllocTest
             , m_numBytes3(numBytes3)
             , m_numLoads3(numLoads3)
         {
-            auto arch = m_context->targetArchitecture().target();
+            auto const& arch = m_context->targetArchitecture().target();
             if(!arch.isCDNA35GPU())
                 SKIP("Test not yet supported on " << arch);
 

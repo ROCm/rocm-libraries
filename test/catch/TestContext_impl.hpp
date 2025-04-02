@@ -114,3 +114,29 @@ inline std::string TestContext::output()
 {
     return m_context->instructions()->toString();
 }
+
+inline std::vector<rocRoller::Register::ValuePtr>
+    TestContext::createRegisters(rocRoller::Register::Type const        regType,
+                                 rocRoller::DataType const              dataType,
+                                 size_t const                           amount,
+                                 int const                              regCount,
+                                 rocRoller::Register::AllocationOptions allocOptions)
+{
+    std::vector<rocRoller::Register::ValuePtr> regs;
+    for(size_t i = 0; i < amount; i++)
+    {
+        auto reg = std::make_shared<rocRoller::Register::Value>(
+            m_context, regType, dataType, regCount, allocOptions);
+        try
+        {
+            reg->allocateNow();
+        }
+        catch(...)
+        {
+            std::cout << i << std::endl;
+            throw;
+        }
+        regs.push_back(reg);
+    }
+    return regs;
+}

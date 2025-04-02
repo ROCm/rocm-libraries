@@ -138,7 +138,7 @@ namespace rocRoller
                         "Invalid D/R2HS (D/C) data types",
                         ShowValue(C->variableType()));
 
-            auto arch = m_context->targetArchitecture();
+            auto const& arch = m_context->targetArchitecture();
             if(arch.HasCapability(GPUCapability::HasAccCD))
             {
                 AssertFatal(D->regType() == Register::Type::Accumulator,

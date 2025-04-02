@@ -6,6 +6,7 @@ Architectures:
       HasBufferOutOfBoundsCheckOption: 0
       HasCodeObjectV4: 0
       HasCodeObjectV5: 0
+      HasExpcnt: 0
       HasExplicitNC: 0
       HasExplicitScalarCO: 0
       HasExplicitScalarCOCI: 0
@@ -13056,7 +13057,7 @@ Architectures:
         IsBranch: false
         Latency: 8
         MaxLiteral: 0
-        WaitCount: -1
+        WaitCount: 0
         WaitQueues: []
       v_wmma_i32_16x16x16_iu4:
         ImplicitAccess: false

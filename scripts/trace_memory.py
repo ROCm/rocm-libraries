@@ -266,7 +266,7 @@ class MemoryTrace(gdb.Command):
                             f"{wg[0]},"
                             f"{wg[1]},"
                             f"{wg[2]},"
-                            f"{wf*64+lane}\n"
+                            f"{wf * 64 + lane}\n"
                         )
 
             count += 1

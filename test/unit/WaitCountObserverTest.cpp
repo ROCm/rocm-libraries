@@ -979,7 +979,14 @@ namespace rocRollerTest
             auto        newOutput = getNewOutput();
             std::string expected;
             if(waitBeforeBarrier)
-                expected += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //\n";
+            {
+                expected += "s_waitcnt vmcnt(0) lgkmcnt(0)";
+                if(m_context->targetArchitecture().HasCapability(GPUCapability::HasExpcnt))
+                {
+                    expected += " expcnt(0)";
+                }
+                expected += " //\n";
+            }
 
             expected += "s_barrier ";
 
@@ -1110,7 +1117,12 @@ namespace rocRollerTest
 
             if(waitBeforeBarrier)
             {
-                expected += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //\n";
+                expected += "s_waitcnt vmcnt(0) lgkmcnt(0)";
+                if(m_context->targetArchitecture().HasCapability(GPUCapability::HasExpcnt))
+                {
+                    expected += " expcnt(0)";
+                }
+                expected += " //\n";
             }
             else
             {

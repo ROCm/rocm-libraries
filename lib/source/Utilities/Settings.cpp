@@ -31,7 +31,7 @@ namespace rocRoller
 {
     F8Mode getDefaultF8ModeForCurrentHipDevice()
     {
-        const auto arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
+        auto const& arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
         return arch.HasCapability(GPUCapability::HasNaNoo) ? F8Mode::NaNoo : F8Mode::OCP;
     }
 }

@@ -122,8 +122,6 @@ set(
     unit/VectorAddBenchmark.cpp
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
-    unit/WMMAHazardObserverTest.cpp
-    unit/WMMAUnitObserverTest.cpp
     unit/OperationTagTest.cpp
     unit/StreamTest.cpp
     unit/EnumToStringTest.cpp
@@ -197,6 +195,8 @@ set(
     catch/UtilsTest.cpp
     catch/mxDataGeneratorTest.cpp
     catch/WidenAddrExprTo64bitTest.cpp
+    catch/WMMAHazardObserverTest.cpp
+    catch/WMMAObserverUnitTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

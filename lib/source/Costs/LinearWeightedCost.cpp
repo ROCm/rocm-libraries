@@ -192,7 +192,7 @@ namespace rocRoller
             }
             else
             {
-                const auto arch = ctx->targetArchitecture().target();
+                auto const& arch = ctx->targetArchitecture().target();
 
                 if(arch.isCDNA1GPU())
                     m_weights = GFX908_WEIGHTS;
