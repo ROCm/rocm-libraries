@@ -5,7 +5,7 @@
 .. _hipsparse_conversion_functions:
 
 ********************************************************************
-Sparse Conversion Functions
+Sparse conversion functions
 ********************************************************************
 
 This module holds all sparse conversion routines.

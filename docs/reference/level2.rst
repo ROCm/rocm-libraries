@@ -5,7 +5,7 @@
 .. _hipsparse_level2_functions:
 
 ********************************************************************
-Sparse Level 2 Functions
+Sparse level 2 functions
 ********************************************************************
 
 This module holds all sparse level 2 routines.

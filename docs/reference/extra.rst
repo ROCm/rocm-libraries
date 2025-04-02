@@ -5,7 +5,7 @@
 .. _hipsparse_extra_functions:
 
 ********************************************************************
-Sparse Extra Functions
+Sparse extra functions
 ********************************************************************
 
 This module holds all sparse extra routines.

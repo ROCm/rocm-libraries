@@ -5,7 +5,7 @@
 .. _hipsparse_reordering_functions:
 
 ********************************************************************
-Sparse Reordering Functions
+Sparse reordering functions
 ********************************************************************
 
 This module holds all sparse reordering routines.

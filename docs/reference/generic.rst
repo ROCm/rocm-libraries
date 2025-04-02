@@ -5,7 +5,7 @@
 .. _hipsparse_generic_functions:
 
 ********************************************************************
-Sparse Generic Functions
+Sparse generic functions
 ********************************************************************
 
 This module holds all sparse generic routines.

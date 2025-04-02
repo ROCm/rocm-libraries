@@ -5,7 +5,7 @@
 .. _api:
 
 ********************************************************************
-Exported hipSPARSE Functions
+Exported hipSPARSE functions
 ********************************************************************
 
 Auxiliary Functions

@@ -5,7 +5,7 @@
 .. _hipsparse_precond_functions:
 
 ********************************************************************
-Preconditioner Functions
+Preconditioner functions
 ********************************************************************
 
 This module holds all sparse preconditioners.

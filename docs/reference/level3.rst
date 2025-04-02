@@ -5,7 +5,7 @@
 .. _hipsparse_level3_functions:
 
 ********************************************************************
-Sparse Level 3 Functions
+Sparse level 3 functions
 ********************************************************************
 
 This module holds all sparse level 3 routines.

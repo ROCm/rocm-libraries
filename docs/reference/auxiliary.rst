@@ -5,7 +5,7 @@
 .. _hipsparse_auxiliary_functions:
 
 ********************************************************************
-Sparse Auxiliary Functions
+Sparse auxiliary functions
 ********************************************************************
 
 This module holds all sparse auxiliary functions.
