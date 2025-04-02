@@ -5,7 +5,7 @@
 .. _rocsparse_auxiliary_functions_:
 
 ********************************************************************
-Sparse Auxiliary Functions
+Sparse auxiliary functions
 ********************************************************************
 
 This module holds all sparse auxiliary functions.

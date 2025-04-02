@@ -5,7 +5,7 @@
 .. _rocsparse_generic_functions_:
 
 ********************************************************************
-Sparse Generic Functions
+Sparse generic functions
 ********************************************************************
 
 This module holds all sparse generic routines.

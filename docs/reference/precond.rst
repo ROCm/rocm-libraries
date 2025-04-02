@@ -5,7 +5,7 @@
 .. _rocsparse_precond_functions_:
 
 ********************************************************************
-Sparse Preconditioner Functions
+Sparse preconditioner functions
 ********************************************************************
 
 This module holds all sparse preconditioners.

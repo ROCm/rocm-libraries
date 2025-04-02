@@ -2,19 +2,28 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- entries:
-  - file: install/install.rst
-    subtrees:
-    - entries:
-      - file: install/Linux_Install_Guide
-      - file: install/Windows_Install_Guide
-  - file: how-to/usermanual.rst
-    title: How to
-    subtrees:
-    - entries:
-      - file: how-to/basics.rst
-      - file: how-to/design.rst
-      - file: how-to/contribute.rst
+
+- caption: Install
+  entries:
+  - file: install/Linux_Install_Guide
+    title: Linux installation guide
+  - file: install/Windows_Install_Guide
+    title: Windows installation guide
+
+- caption: Conceptual
+  entries:
+  - file: conceptual/rocsparse-design
+    title: rocSPARSE design
+
+- caption: How to
+  entries:
+  - file: how-to/using-rocsparse
+    title: Use rocSPARSE
+  - file: how-to/contribute
+    title: Contribute to rocSPARSE
+
+- caption: API reference
+  entries:
   - file: reference/reference.rst
     title: API reference
     subtrees:
@@ -33,4 +42,7 @@ subtrees:
       - file: reference/utility.rst
       - file: reference/generic.rst
       - file: reference/reproducibility.rst
-  - file: license.rst
+
+- caption: About
+  entries:
+  - file: license

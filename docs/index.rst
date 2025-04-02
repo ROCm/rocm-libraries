@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: introduction to the rocSPARSE library and API reference library
+  :keywords: rocSPARSE, ROCm, API, documentation, intro
 
 .. _rocsparse:
 
@@ -8,27 +8,36 @@
 rocSPARSE documentation
 ********************************************************************
 
-rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors written in HIP and implemented on top of AMD's ROCm runtime and toolchains.
-rocSPARSE is created using the HIP programming language and optimized for AMD's latest discrete GPUs.
+rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors.
+It's created using the HIP programming language, implemented on top of the ROCm runtime and toolchains,
+and optimized for AMD discrete GPUs.
 
-| The code is open and hosted at: https://github.com/ROCmSoftwarePlatform/rocSPARSE 
-| Code examples can found at: https://github.com/ROCm/rocm-examples
-
-The rocSPARSE documentation is structured as follows:
+The rocSPARSE public repository is located at `<https://github.com/ROCm/rocSPARSE>`_.
+For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
 .. grid:: 2
   :gutter: 3
 
-  .. grid-item-card:: Installation
+  .. grid-item-card:: Install
 
-    * :ref:`linux-install`
-    * :ref:`windows-install`
+    * :doc:`Linux installation guide <./install/Linux_Install_Guide>`
+    * :doc:`Windows installation guide <./install/Windows_Install_Guide>`
+
+.. grid:: 2
+  :gutter: 3
+
+  .. grid-item-card:: Conceptual
+
+    * :doc:`rocSPARSE design <./conceptual/rocsparse-design>`
 
   .. grid-item-card:: How to
 
-    * :ref:`rocsparse_docs`
-    * :ref:`design`
-    * :ref:`contributing-to`
+    * :doc:`Use rocSPARSE <./how-to/using-rocsparse>`
+    * :doc:`Contribute to rocSPARSE <./how-to/contribute>`
+
+  .. grid-item-card:: Examples
+
+   * `Client samples <https://github.com/ROCm/rocSPARSE/tree/develop/clients/samples>`_
 
   .. grid-item-card:: API reference
 
@@ -47,6 +56,6 @@ The rocSPARSE documentation is structured as follows:
     * :ref:`rocsparse_generic_functions_`
     * :ref:`reproducibility`
 
-To contribute to the documentation refer to `Contributing to ROCm  <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

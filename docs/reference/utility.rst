@@ -5,7 +5,7 @@
 .. _rocsparse_utility_functions_:
 
 ********************************************************************
-Sparse Utility Functions
+Sparse utility functions
 ********************************************************************
 
 This module holds all sparse utility routines.

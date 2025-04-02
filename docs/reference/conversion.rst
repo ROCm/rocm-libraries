@@ -5,7 +5,7 @@
 .. _rocsparse_conversion_functions_:
 
 ********************************************************************
-Sparse Conversion Functions
+Sparse conversion functions
 ********************************************************************
 
 This module holds all sparse conversion routines.

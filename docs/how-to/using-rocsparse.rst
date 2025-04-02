@@ -5,7 +5,7 @@
 .. _rocsparse_docs:
 
 ********************************************************************
-rocSPARSE User Guide
+rocSPARSE user guide
 ********************************************************************
 
 HIP Device Management

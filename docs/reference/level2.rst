@@ -5,7 +5,7 @@
 .. _rocsparse_level2_functions_:
 
 ********************************************************************
-Sparse Level 2 Functions
+Sparse level 2 functions
 ********************************************************************
 
 This module holds all sparse level 2 routines.

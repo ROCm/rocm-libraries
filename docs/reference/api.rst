@@ -4,7 +4,7 @@
 
 .. _api:
 
-Exported rocSPARSE Functions
+Exported rocSPARSE functions
 ============================
 
 Auxiliary Functions

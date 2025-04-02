@@ -4,9 +4,9 @@
 
 .. _design:
 
-********************
-Design Documentation
-********************
+******************************
+rocSPARSE design documentation
+******************************
 
 This document is intended for advanced developers that want to understand, modify or extend the functionality of the rocSPARSE library.
 

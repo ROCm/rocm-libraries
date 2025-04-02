@@ -5,7 +5,7 @@
 .. _rocsparse_extra_functions_:
 
 ********************************************************************
-Sparse Extra Functions
+Sparse extra functions
 ********************************************************************
 
 This module holds all sparse extra routines.

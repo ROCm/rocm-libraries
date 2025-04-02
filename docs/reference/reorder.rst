@@ -5,7 +5,7 @@
 .. _rocsparse_reordering_functions_:
 
 ********************************************************************
-Sparse Reordering Functions
+Sparse reordering functions
 ********************************************************************
 
 This module holds all sparse reordering routines.
