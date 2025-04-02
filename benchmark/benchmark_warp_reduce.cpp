@@ -24,10 +24,6 @@
 
 #include "../common/utils_device_ptr.hpp"
 
-// CmdParser
-#include "cmdparser.hpp"
-
-// Google Benchmark
 #include <benchmark/benchmark.h>
 
 // HIP API
@@ -43,10 +39,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#ifndef DEFAULT_BYTES
-const size_t DEFAULT_BYTES = 1024 * 1024 * 32 * 4;
-#endif
 
 template<bool AllReduce, typename T, unsigned int WarpSize, unsigned int Trials>
 __global__ __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
@@ -136,11 +128,12 @@ template<bool AllReduce,
          unsigned int WarpSize,
          unsigned int BlockSize,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State&   state,
-                   size_t              bytes,
-                   const managed_seed& seed,
-                   hipStream_t         stream)
+void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
 {
+    const auto& stream = state.stream;
+    const auto& bytes  = state.bytes;
+    const auto& seed   = state.seed;
+
     using flag_type = unsigned char;
 
     // Calculate the number of elements
@@ -157,125 +150,57 @@ void run_benchmark(benchmark::State&   state,
     common::device_ptr<T>         d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    // HIP events creation
-    hipEvent_t start, stop;
-    HIP_CHECK(hipEventCreate(&start));
-    HIP_CHECK(hipEventCreate(&stop));
+    state.run(gbench_state,
+              [&]
+              {
+                  execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
+                      d_input.get(),
+                      d_output.get(),
+                      d_flags.get(),
+                      size,
+                      stream);
+              });
 
-    for(auto _ : state)
-    {
-        // Record start event
-        HIP_CHECK(hipEventRecord(start, stream));
-
-        execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
-            d_input.get(),
-            d_output.get(),
-            d_flags.get(),
-            size,
-            stream);
-
-        // Record stop event and wait until it completes
-        HIP_CHECK(hipEventRecord(stop, stream));
-        HIP_CHECK(hipEventSynchronize(stop));
-
-        float elapsed_mseconds;
-        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-        state.SetIterationTime(elapsed_mseconds / 1000);
-    }
-
-    // Destroy HIP events
-    HIP_CHECK(hipEventDestroy(start));
-    HIP_CHECK(hipEventDestroy(stop));
-
-    state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * Trials * size);
+    state.set_items_processed_per_iteration<T>(gbench_state, Trials * size);
 }
 
 #define CREATE_BENCHMARK(T, WS, BS)                                                           \
-    benchmark::RegisterBenchmark(                                                             \
+    executor.queue_fn(                                                                        \
         bench_naming::format_name("{lvl:warp,algo:reduce,key_type:" #T ",broadcast_result:"   \
                                   + std::string(AllReduce ? "true" : "false")                 \
                                   + ",segmented:" + std::string(Segmented ? "true" : "false") \
                                   + ",ws:" #WS ",cfg:{bs:" #BS "}}")                          \
             .c_str(),                                                                         \
-        run_benchmark<AllReduce, Segmented, T, WS, BS>,                                       \
-        bytes,                                                                                \
-        seed,                                                                                 \
-        stream)
+        run_benchmark<AllReduce, Segmented, T, WS, BS>);
 
-#define BENCHMARK_TYPE(type)                                        \
-    CREATE_BENCHMARK(type, 32, 64), CREATE_BENCHMARK(type, 37, 64), \
-        CREATE_BENCHMARK(type, 61, 64), CREATE_BENCHMARK(type, 64, 64)
+// clang-format off
+#define BENCHMARK_TYPE(type)       \
+    CREATE_BENCHMARK(type, 32, 64) \
+    CREATE_BENCHMARK(type, 37, 64) \
+    CREATE_BENCHMARK(type, 61, 64) \
+    CREATE_BENCHMARK(type, 64, 64)
+// clang-format on
 
 template<bool AllReduce, bool Segmented>
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    size_t                                        bytes,
-                    const managed_seed&                           seed,
-                    hipStream_t                                   stream)
+void add_benchmarks(benchmark_utils::executor& executor)
 {
-    std::vector<benchmark::internal::Benchmark*> bs = {BENCHMARK_TYPE(int),
-                                                       BENCHMARK_TYPE(float),
-                                                       BENCHMARK_TYPE(double),
-                                                       BENCHMARK_TYPE(int8_t),
-                                                       BENCHMARK_TYPE(uint8_t),
-                                                       BENCHMARK_TYPE(rocprim::half),
-                                                       BENCHMARK_TYPE(rocprim::int128_t),
-                                                       BENCHMARK_TYPE(rocprim::uint128_t)};
-
-    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+    BENCHMARK_TYPE(int)
+    BENCHMARK_TYPE(float)
+    BENCHMARK_TYPE(double)
+    BENCHMARK_TYPE(int8_t)
+    BENCHMARK_TYPE(uint8_t)
+    BENCHMARK_TYPE(rocprim::half)
+    BENCHMARK_TYPE(rocprim::int128_t)
+    BENCHMARK_TYPE(rocprim::uint128_t)
 }
 
 int main(int argc, char* argv[])
 {
-    cli::Parser parser(argc, argv);
-    parser.set_optional<size_t>("size", "size", DEFAULT_BYTES, "number of bytes");
-    parser.set_optional<int>("trials", "trials", -1, "number of iterations");
-    parser.set_optional<std::string>("name_format",
-                                     "name_format",
-                                     "human",
-                                     "either: json,human,txt");
-    parser.set_optional<std::string>("seed", "seed", "random", get_seed_message());
-    parser.run_and_exit_if_error();
+    benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 1, 0);
 
-    // Parse argv
-    benchmark::Initialize(&argc, argv);
-    const size_t bytes  = parser.get<size_t>("size");
-    const int    trials = parser.get<int>("trials");
-    bench_naming::set_format(parser.get<std::string>("name_format"));
-    const std::string  seed_type = parser.get<std::string>("seed");
-    const managed_seed seed(seed_type);
+    add_benchmarks<false, false>(executor);
+    add_benchmarks<true, false>(executor);
+    add_benchmarks<false, true>(executor);
 
-    // HIP
-    hipStream_t stream = 0; // default
-
-    // Benchmark info
-    add_common_benchmark_info();
-    benchmark::AddCustomContext("bytes", std::to_string(bytes));
-    benchmark::AddCustomContext("seed", seed_type);
-
-    // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<false, false>(benchmarks, bytes, seed, stream);
-    add_benchmarks<true, false>(benchmarks, bytes, seed, stream);
-    add_benchmarks<false, true>(benchmarks, bytes, seed, stream);
-
-    // Use manual timing
-    for(auto& b : benchmarks)
-    {
-        b->UseManualTime();
-        b->Unit(benchmark::kMillisecond);
-    }
-
-    // Force number of iterations
-    if(trials > 0)
-    {
-        for(auto& b : benchmarks)
-        {
-            b->Iterations(trials);
-        }
-    }
-
-    // Run benchmarks
-    benchmark::RunSpecifiedBenchmarks();
-    return 0;
+    executor.run();
 }
