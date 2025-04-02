@@ -399,3 +399,14 @@ bool    UserClientArguments::m_flush              = false;
 int32_t UserClientArguments::m_rotatingBufferSize = 0;
 int32_t UserClientArguments::m_coldIterations     = 0;
 int32_t UserClientArguments::m_hotIterations      = 0;
+
+// Define and initialize static members of struct hipblasltClientPerformanceArgs
+double hipblasltClientPerformanceArgs::totalGranularity = 0.0;
+double hipblasltClientPerformanceArgs::tilesPerCu       = 0.0;
+double hipblasltClientPerformanceArgs::tile0Granularity = 0.0; // loss due to tile0
+double hipblasltClientPerformanceArgs::tile1Granularity = 0.0;
+double hipblasltClientPerformanceArgs::cuGranularity    = 0.0;
+double hipblasltClientPerformanceArgs::waveGranularity  = 0.0;
+int    hipblasltClientPerformanceArgs::CUs              = 0;
+size_t hipblasltClientPerformanceArgs::memWriteBytesD   = 0.0; //! Estimated memory writes D
+size_t hipblasltClientPerformanceArgs::memReadBytes     = 0.0;

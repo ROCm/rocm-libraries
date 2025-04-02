@@ -39,7 +39,7 @@
 #include <string>
 #include <type_traits>
 
-#include "frequency_monitor.hpp"
+#include "efficiency_monitor.hpp"
 
 #include "testing_matmul.hpp"
 
@@ -802,8 +802,8 @@ try
         throw std::invalid_argument("Invalid Device ID");
     set_device(device_id);
 
-    FrequencyMonitor& freq_monitor = getFrequencyMonitor();
-    freq_monitor.set_device_id(device_id);
+    EfficiencyMonitor& perf_monitor = getEfficiencyMonitor();
+    perf_monitor.set_device_id(device_id);
 
     if(datafile)
         return hipblaslt_bench_datafile(filter, any_stride, props);
@@ -1008,7 +1008,7 @@ try
 
     arg.norm_check_assert = false;
     int status            = run_bench_test(arg, filter, any_stride, props);
-    freeFrequencyMonitor();
+    freeEfficiencyMonitor();
     return status;
 }
 catch(const std::invalid_argument& exp)

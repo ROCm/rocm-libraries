@@ -21,7 +21,8 @@
  *
  * ************************************************************************ */
 
-#include "frequency_monitor.hpp"
+#include "efficiency_monitor.hpp"
+#include "hipblaslt-ext-op.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -93,22 +94,24 @@ inline std::string concatenate(Ts&&... vals)
 
 #endif
 
-class FrequencyMonitorImp : public FrequencyMonitor
+class EfficiencyMonitorImp : public EfficiencyMonitor
 {
 public:
     const double cHzToMHz = 0.000001;
     const double cMhzToHz = 1000000;
 
     // deleting copy constructor
-    FrequencyMonitorImp(const FrequencyMonitorImp& obj) = delete;
+    EfficiencyMonitorImp(const EfficiencyMonitorImp& obj) = delete;
 
 #ifndef _WIN32
 
     bool enabled()
     {
-        static const char* env1 = getenv("HIPBLASLT_BENCH_FREQ");
-        static const char* env2 = getenv("HIPBLASLT_BENCH_FREQ_ALL");
-        return env1 != nullptr || (env2 != nullptr && m_isMultiXCDSupported);
+        static const char* env1_freq = getenv("HIPBLASLT_BENCH_FREQ");
+        static const char* env1_eff = getenv("HIPBLASLT_BENCH_EFF");
+        static const char* env2      = getenv("HIPBLASLT_BENCH_FREQ_ALL");
+        return env1_freq != nullptr || env1_eff != nullptr
+               || (env2 != nullptr && m_isMultiXCDSupported);
     }
 
     bool detailedReport()
@@ -117,12 +120,12 @@ public:
         return (env2 != nullptr && m_isMultiXCDSupported);
     }
 
-    FrequencyMonitorImp()
+    EfficiencyMonitorImp()
     {
         initThread();
     }
 
-    ~FrequencyMonitorImp()
+    ~EfficiencyMonitorImp()
     {
         m_stop = true;
         m_exit = true;
@@ -139,7 +142,7 @@ public:
 #if rocm_smi_VERSION_MAJOR >= 7
         auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
 
-        if(status2 != RSMI_STATUS_SUCCESS || m_XCDCount == 0)
+        if(status2 != RSMI_STATUS_SUCCESS)
         {
             m_XCDCount = 1;
         }
@@ -251,6 +254,61 @@ public:
     double getMedianMEMCLK()
     {
         return medianValueMHz(m_MEMCLK_array);
+    }
+
+    double getTotalGranularityValue()
+    {
+        return hipblasltGetTotalGranularityValue();
+    }
+
+    double getTilesPerCuValue()
+    {
+        return hipblasltGetTilesPerCuValue();
+    }
+
+    double getTile0Granularity()
+    {
+        return hipblasltGetTile0Granularity();
+    }
+
+    double getTile1Granularity()
+    {
+        return hipblasltGetTile1Granularity();
+    }
+
+    double getCuGranularity()
+    {
+        return hipblasltGetCuGranularity();
+    }
+
+    double getWaveGranularity()
+    {
+        return hipblasltGetWaveGranularity();
+    }
+
+    int getCUs()
+    {
+        return hipblasltGetCUs();
+    }
+
+    size_t getMemWriteBytesD()
+    {
+        return hipblasltGetMemWriteBytesD();
+    }
+
+    size_t getMemReadBytes()
+    {
+        return hipblasltGetMemReadBytes();
+    }
+
+    uint16_t getCuCount()
+    {
+        return m_CUCount;
+    }
+
+    std::string getDeviceString()
+    {
+        return m_deviceString;
     }
 
 private:
@@ -390,6 +448,10 @@ private:
         hipDeviceProp_t props;
 
         HIP_CHECK_EXC(hipGetDeviceProperties(&props, hipDeviceIndex));
+        m_CUCount = props.multiProcessorCount;
+        std::string deviceFullString(props.gcnArchName);
+        m_deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
+
 #if HIP_VERSION >= 50220730
         int hip_version;
         HIP_CHECK_EXC(hipRuntimeGetVersion(&hip_version));
@@ -454,6 +516,8 @@ private:
     uint32_t                m_smiDeviceIndex;
     bool                    m_isMultiXCDSupported;
     uint16_t                m_XCDCount;
+    uint16_t                m_CUCount;
+    std::string             m_deviceString;
 
     std::vector<uint64_t>              m_SYSCLK_sum;
     std::vector<std::vector<uint64_t>> m_SYSCLK_array;
@@ -465,9 +529,9 @@ private:
     // not supporting windows for now
 
 public:
-    FrequencyMonitorImp() {}
+    EfficiencyMonitorImp() {}
 
-    ~FrequencyMonitorImp() {}
+    ~EfficiencyMonitorImp() {}
 
     void set_device_id(int deviceId) {}
 
@@ -514,25 +578,79 @@ public:
     {
         return 0.0;
     }
+    double getTotalGranularityValue()
+    {
+        return 0.0;
+    }
+
+    double getTilesPerCuValue()
+    {
+        return 0.0;
+    }
+
+    double getTile0Granularity()
+    {
+        return 0.0;
+    }
+
+    double getTile1Granularity()
+    {
+        return 0.0;
+    }
+
+    double getCuGranularity()
+    {
+        return 0.0;
+    }
+
+    double getWaveGranularity()
+    {
+        return 0.0;
+    }
+
+    int getCUs()
+    {
+        return 0.0;
+    }
+
+    size_t getMemWriteBytesD()
+    {
+        return 0.0;
+    }
+
+    size_t getMemReadBytes()
+    {
+        return 0.0;
+    }
+
+    uint16_t getCuCount()
+    {
+        return 0.0;
+    }
+
+    std::string getDeviceString()
+    {
+        return " ";
+    }
 #endif
 };
 
-static FrequencyMonitorImp* g_FreqMonitorInstance{nullptr};
+static EfficiencyMonitorImp* g_EffMonitorInstance{nullptr};
 
-FrequencyMonitor& getFrequencyMonitor()
+EfficiencyMonitor& getEfficiencyMonitor()
 {
-    if(g_FreqMonitorInstance == nullptr)
+    if(g_EffMonitorInstance == nullptr)
     {
-        g_FreqMonitorInstance = new FrequencyMonitorImp();
+        g_EffMonitorInstance = new EfficiencyMonitorImp();
     }
-    return *g_FreqMonitorInstance;
+    return *g_EffMonitorInstance;
 }
 
-void freeFrequencyMonitor()
+void freeEfficiencyMonitor()
 {
-    if(g_FreqMonitorInstance != nullptr)
+    if(g_EffMonitorInstance != nullptr)
     {
-        delete g_FreqMonitorInstance;
-        g_FreqMonitorInstance = nullptr;
+        delete g_EffMonitorInstance;
+        g_EffMonitorInstance = nullptr;
     }
 }

@@ -24,7 +24,7 @@
 #pragma once
 
 #include <vector>
-class FrequencyMonitor
+class EfficiencyMonitor
 {
 public:
     virtual bool enabled()        = 0;
@@ -35,13 +35,24 @@ public:
     virtual void start() = 0;
     virtual void stop()  = 0;
 
-    virtual double              getLowestAverageSYSCLK() = 0;
-    virtual double              getLowestMedianSYSCLK()  = 0;
-    virtual std::vector<double> getAllAverageSYSCLK()    = 0;
-    virtual std::vector<double> getAllMedianSYSCLK()     = 0;
-    virtual double              getAverageMEMCLK()       = 0;
-    virtual double              getMedianMEMCLK()        = 0;
+    virtual double              getLowestAverageSYSCLK()   = 0;
+    virtual double              getLowestMedianSYSCLK()    = 0;
+    virtual std::vector<double> getAllAverageSYSCLK()      = 0;
+    virtual std::vector<double> getAllMedianSYSCLK()       = 0;
+    virtual double              getAverageMEMCLK()         = 0;
+    virtual double              getMedianMEMCLK()          = 0;
+    virtual double              getTotalGranularityValue() = 0;
+    virtual double              getTilesPerCuValue()       = 0;
+    virtual double              getTile0Granularity()      = 0;
+    virtual double              getTile1Granularity()      = 0;
+    virtual double              getCuGranularity()         = 0;
+    virtual double              getWaveGranularity()       = 0;
+    virtual int                 getCUs()                   = 0;
+    virtual size_t              getMemWriteBytesD()        = 0;
+    virtual size_t              getMemReadBytes()          = 0;
+    virtual uint16_t            getCuCount()               = 0;
+    virtual std::string         getDeviceString()          = 0;
 };
 
-FrequencyMonitor& getFrequencyMonitor();
-void              freeFrequencyMonitor();
+EfficiencyMonitor& getEfficiencyMonitor();
+void                freeEfficiencyMonitor();

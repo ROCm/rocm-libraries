@@ -27,6 +27,7 @@
 #pragma once
 
 #include "hipblaslt_arguments.hpp"
+#include "efficiency_monitor.hpp"
 #include <fstream>
 #include <string>
 
@@ -38,8 +39,13 @@ namespace ArgumentLogging
 void ArgumentModel_set_log_function_name(bool f);
 bool ArgumentModel_get_log_function_name();
 
-void ArgumentModel_log_frequencies(hipblaslt_internal_ostream& name_line,
+void ArgumentModel_log_performance(hipblaslt_internal_ostream& name_line,
                                    hipblaslt_internal_ostream& val_line);
+
+void ArgumentModel_log_efficiency(hipblaslt_internal_ostream& name_line,
+                                  hipblaslt_internal_ostream& val_line,
+                                  const Arguments&            arg,
+                                  double                      hipblaslt_gflops);
 
 // ArgumentModel template has a variadic list of argument enums
 template <hipblaslt_argument... Args>
@@ -69,7 +75,7 @@ public:
                   double                      rtol)
     {
         // requires enablement for frequency logging
-        ArgumentModel_log_frequencies(name_line, val_line);
+        ArgumentModel_log_performance(name_line, val_line);
 
         constexpr bool has_batch_count = has(e_batch_count);
         int64_t        batch_count     = has_batch_count ? arg.batch_count : 1;
@@ -93,6 +99,7 @@ public:
         {
             name_line << ",hipblaslt-Gflops";
             val_line << "," << hipblaslt_gflops;
+            ArgumentModel_log_efficiency(name_line, val_line, arg, hipblaslt_gflops);
         }
 
         if(gbytes != ArgumentLogging::NA_value)

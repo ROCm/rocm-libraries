@@ -579,3 +579,43 @@ void hipblasltSetHotIterationsValue(int newHotIterations)
     UserClientArguments clientArguments;
     clientArguments.SetHotIterationsValue(newHotIterations);
 }
+
+// Get hipblaslt client performance args, For internal use only.
+double hipblasltGetTotalGranularityValue()
+{
+    return hipblasltClientPerformanceArgs::totalGranularity;
+}
+
+double hipblasltGetTilesPerCuValue()
+{
+    return hipblasltClientPerformanceArgs::tilesPerCu;
+}
+
+double hipblasltGetTile0Granularity()
+{
+    return hipblasltClientPerformanceArgs::tile0Granularity;
+}
+double hipblasltGetTile1Granularity()
+{
+    return hipblasltClientPerformanceArgs::tile1Granularity;
+}
+double hipblasltGetCuGranularity()
+{
+    return hipblasltClientPerformanceArgs::cuGranularity;
+}
+double hipblasltGetWaveGranularity()
+{
+    return hipblasltClientPerformanceArgs::waveGranularity;
+}
+int hipblasltGetCUs()
+{
+    return hipblasltClientPerformanceArgs::CUs;
+}
+size_t hipblasltGetMemWriteBytesD()
+{
+    return hipblasltClientPerformanceArgs::memWriteBytesD;
+}
+size_t hipblasltGetMemReadBytes()
+{
+    return hipblasltClientPerformanceArgs::memReadBytes;
+}

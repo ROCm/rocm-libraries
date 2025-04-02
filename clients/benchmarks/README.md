@@ -96,3 +96,9 @@ HIPBLASLT_BENCH_FREQ_ALL=1 ./clients/staging/hipblaslt-bench -m 16 -n 16 -k 4096
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,avg-freq_0,avg-freq_1,avg-freq_2,avg-freq_3,avg-freq_4,avg-freq_5,avg-freq_6,avg-freq_7,median-freq_0,median-freq_1,median-freq_2,median-freq_3,median-freq_4,median-freq_5,median-freq_6,median-freq_7,avg-MCLK,median-MCLK,hipblaslt-Gflops,hipblaslt-GB/s,us
     T,N,0,1,16,16,4096,1,4096,65536,0,4096,65536,16,256,16,256,bf16_r,bf16_r,bf16_r,bf16_r,f32_r,0,0,0,0,0,none,0,non-supported type,143,141,143,143,142,143,141,141,143,141,143,143,142,143,141,141,900,900,148.734,17.3488,14.1
 ```
+Show the efficiency and other performance related args with environment variable
+```
+HIPBLASLT_BENCH_EFF=1 ./hipblaslt-bench -m 4096 -n 4864 -k 32896 --alpha 1 --beta 0 --transA N --transB N --initialization trig_float --iters 466 --cold_iters 94 --a_type f16_r --b_type f16_r --c_type f16_r --d_type f16_r --compute_type f32_r --function matmul --rotating 512 --use_gpu_timer
+[0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,activation_type,bias_vector,bias_type,rotating_buffer,total_gran,tiles_per_cu,num_cu's,tile_0_granularity,tile_1_granularity,cu_gran,wave_gran,mem_read_bytes,mem_write_bytes,lowest_avg_freq,lowest_median_freq,avg_MCLK,median_MCLK,hipblaslt-Gflops,efficiency,hipblaslt-GB/s,us
+    N,N,0,1,4096,4864,32896,1,4096,134742016,0,32896,160006144,4096,19922944,4096,19922944,f16_r,f16_r,f16_r,f16_r,f32_r,0,0,0,0,0,none,0,f16_r,512,0,0,0,0,0,0,0,0,0,1096,1067,908.602,900,555009,81.3366,248.176,2361.71
+```

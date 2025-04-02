@@ -229,6 +229,17 @@ HIPBLASLT_EXPORT void hipblasltSetRotatingBufferSizeValue(int newrotatingBufferS
 HIPBLASLT_EXPORT void hipblasltSetColdIterationsValue(int newColdIterations);
 HIPBLASLT_EXPORT void hipblasltSetHotIterationsValue(int newHotIterations);
 
+// Get hipblaslt client performance args, For internal use only.
+HIPBLASLT_EXPORT double hipblasltGetTotalGranularityValue();
+HIPBLASLT_EXPORT double hipblasltGetTilesPerCuValue();
+HIPBLASLT_EXPORT double hipblasltGetTile0Granularity();
+HIPBLASLT_EXPORT double hipblasltGetTile1Granularity();
+HIPBLASLT_EXPORT double hipblasltGetCuGranularity();
+HIPBLASLT_EXPORT double hipblasltGetWaveGranularity();
+HIPBLASLT_EXPORT int    hipblasltGetCUs();
+HIPBLASLT_EXPORT size_t hipblasltGetMemWriteBytesD();
+HIPBLASLT_EXPORT size_t hipblasltGetMemReadBytes();
+
 #ifdef __cplusplus
 }
 #endif

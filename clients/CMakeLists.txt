@@ -105,7 +105,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( hipblaslt_test_bench_common
       ../common/singletons.cpp
       ../common/utility.cpp
-      ../common/frequency_monitor.cpp
+      ../common/efficiency_monitor.cpp
       ../common/cblas_interface.cpp
       ../common/argument_model.cpp
       ../common/hipblaslt_parse_data.cpp

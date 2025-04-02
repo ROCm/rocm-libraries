@@ -562,4 +562,19 @@ public:
     }
 };
 
+//! Estimates based on problem size, solution tile, and  machine hardware
+struct hipblasltClientPerformanceArgs
+{
+    //! Granularity is measured 0..1 with 1.0 meaning no granularity loss
+    static double totalGranularity;
+    static double tilesPerCu;
+    static double tile0Granularity; // loss due to tile0
+    static double tile1Granularity;
+    static double cuGranularity;
+    static double waveGranularity;
+    static int    CUs;
+    static size_t memWriteBytesD; //! Estimated memory writes D
+    static size_t memReadBytes;
+};
+
 #endif // UTILITY_H

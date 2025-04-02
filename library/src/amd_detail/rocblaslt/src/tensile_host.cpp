@@ -2445,6 +2445,42 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+
+        if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
+           || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)
+        {
+            auto Granularity = solution->computeGranularities(
+                *hardware,
+                data->problem.c().sizes()[0],
+                data->problem.c().sizes()[1],
+                data->problem.a().sizes()[data->problem.boundIndices()[0].a],
+                data->problem.batchSize(0));
+
+            hipblasltClientPerformanceArgs::totalGranularity = Granularity.totalGranularity;
+            hipblasltClientPerformanceArgs::tilesPerCu       = Granularity.tilesPerCu;
+            hipblasltClientPerformanceArgs::tile0Granularity
+                = Granularity.tile0Granularity; // loss due to tile0
+            hipblasltClientPerformanceArgs::tile1Granularity = Granularity.tile1Granularity;
+            hipblasltClientPerformanceArgs::cuGranularity    = Granularity.cuGranularity;
+            hipblasltClientPerformanceArgs::waveGranularity  = Granularity.waveGranularity;
+            hipblasltClientPerformanceArgs::CUs              = Granularity.CUs;
+
+            auto staticPerformanceModel = solution->staticPerformanceModel(
+                data->problem.c().sizes()[0],
+                data->problem.c().sizes()[1],
+                data->problem.a().sizes()[data->problem.boundIndices()[0].a],
+                data->problem.batchSize(0),
+                Granularity.MT0,
+                Granularity.MT1,
+                Granularity.CUs,
+                Granularity.totalGranularity,
+                solution->sizeMapping.globalSplitU);
+
+            hipblasltClientPerformanceArgs::memWriteBytesD
+                = staticPerformanceModel.memWriteBytesD; //! Estimated memory writes D
+            hipblasltClientPerformanceArgs::memReadBytes = staticPerformanceModel.memReadBytes;
+        }
+
         if(!solution)
         {
 #if 0
