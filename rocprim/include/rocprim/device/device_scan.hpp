@@ -25,8 +25,8 @@
 #include <iterator>
 #include <type_traits>
 
-#include "../config.hpp"
 #include "../common.hpp"
+#include "../config.hpp"
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
@@ -195,10 +195,10 @@ inline auto scan_impl(void*               temporary_storage,
     const size_t size_limit = params.kernel_config.size_limit;
     const size_t aligned_size_limit
         = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
-    size_t limited_size = std::min<size_t>(size, aligned_size_limit);
+    size_t     limited_size     = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
-    unsigned int number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
+    unsigned int number_of_blocks = (limited_size + items_per_block - 1) / items_per_block;
 
     // Pointer to array with block_prefixes
     void*    scan_state_storage;
@@ -230,7 +230,7 @@ inline auto scan_impl(void*               temporary_storage,
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
 
-    if( number_of_blocks == 0u )
+    if(number_of_blocks == 0u)
         return hipSuccess;
 
     if(number_of_blocks > 1 || use_limited_size)
@@ -270,14 +270,15 @@ inline auto scan_impl(void*               temporary_storage,
             }
         };
 
-        if(debug_synchronous) start = std::chrono::steady_clock::now();
+        if(debug_synchronous)
+            start = std::chrono::steady_clock::now();
 
-        size_t number_of_launch = (size + limited_size - 1)/limited_size;
-        for (size_t i = 0, offset = 0; i < number_of_launch; i++, offset+=limited_size )
+        size_t number_of_launch = (size + limited_size - 1) / limited_size;
+        for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
         {
             size_t current_size = std::min<size_t>(size - offset, limited_size);
-            number_of_blocks = (current_size + items_per_block - 1)/items_per_block;
-            auto grid_size = (number_of_blocks + block_size - 1)/block_size;
+            number_of_blocks    = (current_size + items_per_block - 1) / items_per_block;
+            auto grid_size      = (number_of_blocks + block_size - 1) / block_size;
 
             if(debug_synchronous)
             {
@@ -303,7 +304,8 @@ inline auto scan_impl(void*               temporary_storage,
                                                         number_of_blocks,
                                                         start);
 
-            if(debug_synchronous) start = std::chrono::steady_clock::now();
+            if(debug_synchronous)
+                start = std::chrono::steady_clock::now();
             grid_size = number_of_blocks;
 
             if(debug_synchronous)
@@ -340,7 +342,9 @@ inline auto scan_impl(void*               temporary_storage,
                                                                            i != size_t(0),
                                                                            number_of_launch > 1);
                 });
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", current_size, start);
+            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel",
+                                                        current_size,
+                                                        start);
 
             // Swap the last_elements
             if(number_of_launch > 1)
@@ -351,7 +355,8 @@ inline auto scan_impl(void*               temporary_storage,
                                                         ::rocprim::identity<AccType>(),
                                                         stream,
                                                         debug_synchronous);
-                if(error != hipSuccess) return error;
+                if(error != hipSuccess)
+                    return error;
             }
         }
     }
@@ -380,7 +385,7 @@ inline auto scan_impl(void*               temporary_storage,
     return hipSuccess;
 }
 
-} // end of detail namespace
+} // namespace detail
 
 /// \brief Parallel inclusive scan primitive for device level.
 ///
@@ -410,7 +415,7 @@ inline auto scan_impl(void*               temporary_storage,
 /// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 /// \tparam AccType accumulator type used to propagate the scanned values. The default is the type that
-/// is returned by a function of type BinaryFunction when it's is passed an InputIterator value.
+/// is returned by a function of type BinaryFunction when it is passed an InputIterator value.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -501,7 +506,9 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>>
+         class AccType = rocprim::invoke_result_binary_op_t<
+             typename std::iterator_traits<InputIterator>::value_type,
+             BinaryFunction>>
 inline hipError_t inclusive_scan(void*             temporary_storage,
                                  size_t&           storage_size,
                                  InputIterator     input,
@@ -700,7 +707,9 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>>
+         class AccType = rocprim::invoke_result_binary_op_t<
+             typename std::iterator_traits<InputIterator>::value_type,
+             BinaryFunction>>
 inline hipError_t deterministic_inclusive_scan(void*             temporary_storage,
                                                size_t&           storage_size,
                                                InputIterator     input,
@@ -799,7 +808,8 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 /// \tparam BinaryFunction type of binary function used for scan. Default type
 /// is \p rocprim::plus<T>, where \p T is a \p value_type of \p InputIterator.
 /// \tparam AccType accumulator type used to propagate the scanned values. The default is the type that
-/// is returned by a function of type BinaryFunction when it's is passed a value of type InitValueType.
+/// is returned by a function of type BinaryFunction when it is passed a value of type \p InitValueType,
+/// unless it's 'rocprim::future_value'. Then it will be the wrapped input type.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -869,7 +879,9 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>>
+         class AccType
+         = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>,
+                                              BinaryFunction>>
 inline hipError_t exclusive_scan(void*               temporary_storage,
                                  size_t&             storage_size,
                                  InputIterator       input,
@@ -912,7 +924,9 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>>
+         class AccType
+         = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>,
+                                              BinaryFunction>>
 inline hipError_t deterministic_exclusive_scan(void*               temporary_storage,
                                                size_t&             storage_size,
                                                InputIterator       input,

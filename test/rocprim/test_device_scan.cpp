@@ -178,9 +178,9 @@ public:
     const bool            debug_synchronous     = false;
     static constexpr bool use_identity_iterator = Params::use_identity_iterator;
     using config_helper                         = typename Params::config_helper;
-    bool use_graphs                             = Params::use_graphs;
-    static constexpr bool deterministic                          = Params::deterministic;
-    bool                  use_initial_value                      = Params::use_initial_value;
+    bool                  use_graphs            = Params::use_graphs;
+    static constexpr bool deterministic         = Params::deterministic;
+    bool                  use_initial_value     = Params::use_initial_value;
 };
 
 using RocprimDeviceScanTestsParams = ::testing::Types<
@@ -318,10 +318,12 @@ using RocprimDeviceScanTestsParams = ::testing::Types<
                      true>>;
 
 // use float for accumulation of bfloat16 and half inputs if operator is plus
-template <typename input_type, typename input_op_type> struct accum_type {
-    static constexpr bool is_low_precision =
-        std::is_same<input_type, ::rocprim::half>::value ||
-        std::is_same<input_type, ::rocprim::bfloat16>::value;
+template<typename input_type, typename input_op_type>
+struct accum_type
+{
+    static constexpr bool is_low_precision
+        = std::is_same<input_type, ::rocprim::half>::value
+          || std::is_same<input_type, ::rocprim::bfloat16>::value;
     static constexpr bool is_plus = test_utils::is_plus_operator<input_op_type>::value;
     using type = typename std::conditional_t<is_low_precision && is_plus, float, input_type>;
 };
@@ -344,7 +346,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     HIP_CHECK(hipSetDevice(device_id));
 
     hipStream_t stream = 0; // default
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -352,7 +354,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 
     common::device_ptr<U> d_output(1);
 
-    test_utils::out_of_bounds_flag out_of_bounds;
+    test_utils::out_of_bounds_flag          out_of_bounds;
     test_utils::bounds_checking_iterator<U> d_checking_output(d_output.get(),
                                                               out_of_bounds.device_pointer(),
                                                               0);
@@ -404,7 +406,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
 
     ASSERT_FALSE(out_of_bounds.get());
 
-    if (TestFixture::use_graphs)
+    if(TestFixture::use_graphs)
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
@@ -441,7 +443,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(auto size : test_utils::get_sizes(seed_value))
@@ -455,7 +458,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 break;
             }
             hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -587,7 +590,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 }
             }
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
@@ -628,7 +631,8 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(auto size : test_utils::get_sizes(seed_value))
@@ -642,7 +646,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 break;
             }
             hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -662,11 +666,11 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             // Calculate expected results on host
             std::vector<U> expected(input.size());
             initial_value = test_utils::get_random_value<acc_type>(1, 10, seed_value);
-            test_utils::host_exclusive_scan(
-                input.begin(), input.end(),
-                initial_value, expected.begin(),
-                scan_op
-            );
+            test_utils::host_exclusive_scan(input.begin(),
+                                            input.end(),
+                                            initial_value,
+                                            expected.begin(),
+                                            scan_op);
 
             auto input_iterator
                 = rocprim::make_transform_iterator(d_input.get(),
@@ -730,7 +734,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 }
             }
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
@@ -764,7 +768,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(auto size : test_utils::get_sizes(seed_value))
@@ -778,7 +783,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
                 break;
             }
             hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -812,11 +817,12 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            test_utils::host_inclusive_scan_by_key(
-                input.begin(), input.end(), keys.begin(),
-                expected.begin(),
-                scan_op, keys_compare_op
-            );
+            test_utils::host_inclusive_scan_by_key(input.begin(),
+                                                   input.end(),
+                                                   keys.begin(),
+                                                   expected.begin(),
+                                                   scan_op,
+                                                   keys_compare_op);
 
             auto input_iterator
                 = rocprim::make_transform_iterator(d_input.get(),
@@ -874,7 +880,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
@@ -909,7 +915,8 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(auto size : test_utils::get_sizes(seed_value))
@@ -923,7 +930,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
                 break;
             }
             hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -959,11 +966,13 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            test_utils::host_exclusive_scan_by_key(
-                input.begin(), input.end(), keys.begin(),
-                initial_value, expected.begin(),
-                scan_op, keys_compare_op
-            );
+            test_utils::host_exclusive_scan_by_key(input.begin(),
+                                                   input.end(),
+                                                   keys.begin(),
+                                                   initial_value,
+                                                   expected.begin(),
+                                                   scan_op,
+                                                   keys_compare_op);
 
             auto input_iterator
                 = rocprim::make_transform_iterator(d_input.get(),
@@ -1023,7 +1032,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, single_op_precision * (size - 1)));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
@@ -1032,23 +1041,28 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     }
 }
 
-template <typename T>
-class single_index_iterator {
+template<typename T>
+class single_index_iterator
+{
 private:
-    class conditional_discard_value {
+    class conditional_discard_value
+    {
     public:
         __host__ __device__ explicit conditional_discard_value(T* const value, bool keep)
-            : value_{value}
-            , keep_{keep}
-        {
-        }
+            : value_{value}, keep_{keep}
+        {}
 
-        __host__ __device__ conditional_discard_value& operator=(T value) {
-            if(keep_) {
+        __host__ __device__
+        conditional_discard_value&
+            operator=(T value)
+        {
+            if(keep_)
+            {
                 *value_ = value;
             }
             return *this;
         }
+
     private:
         T* const   value_;
         const bool keep_;
@@ -1063,17 +1077,17 @@ public:
     using reference         = conditional_discard_value;
     using pointer           = conditional_discard_value*;
     using iterator_category = std::random_access_iterator_tag;
-    using difference_type   = std::ptrdiff_t;
+    using difference_type = std::ptrdiff_t;
 
     __host__ __device__ single_index_iterator(T* value, size_t expected_index, size_t index = 0)
-        : value_{value}
-        , expected_index_{expected_index}
-        , index_{index}
-    {
-    }
+        : value_{value}, expected_index_{expected_index}, index_{index}
+    {}
 
     __host__ __device__ single_index_iterator(const single_index_iterator&) = default;
-    __host__ __device__ single_index_iterator& operator=(const single_index_iterator&) = default;
+    __host__ __device__
+    single_index_iterator&
+        operator=(const single_index_iterator&)
+        = default;
 
     // clang-format off
     __host__ __device__ bool operator==(const single_index_iterator& rhs) const { return index_ == rhs.index_; }
@@ -1106,13 +1120,13 @@ void testLargeIndicesInclusiveScan()
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = size_t;
-    using Iterator = typename rocprim::counting_iterator<T>;
-    using OutputIterator = single_index_iterator<T>;
+    using T                      = size_t;
+    using Iterator               = typename rocprim::counting_iterator<T>;
+    using OutputIterator         = single_index_iterator<T>;
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default
-    if (UseGraphs)
+    if(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1267,13 +1281,13 @@ void testLargeIndicesExclusiveScan()
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = size_t;
-    using Iterator = typename rocprim::counting_iterator<T>;
-    using OutputIterator = single_index_iterator<T>;
+    using T                      = size_t;
+    using Iterator               = typename rocprim::counting_iterator<T>;
+    using OutputIterator         = single_index_iterator<T>;
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default
-    if (UseGraphs)
+    if(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1352,7 +1366,7 @@ void testLargeIndicesExclusiveScan()
             const T multiplicand_2 = 2 * (*input_begin) + size - 2;
 
             const T product = (multiplicand_1 % 2 == 0) ? multiplicand_1 / 2 * multiplicand_2
-                : multiplicand_1 * (multiplicand_2 / 2);
+                                                        : multiplicand_1 * (multiplicand_2 / 2);
 
             const T expected_output = initial_value + product;
 
@@ -1393,64 +1407,87 @@ public:
     using reference         = CheckValue;
     using pointer           = CheckValue*;
     using iterator_category = std::random_access_iterator_tag;
-    using difference_type   = std::ptrdiff_t;
+    using difference_type = std::ptrdiff_t;
+
+    ROCPRIM_HOST_DEVICE check_run_iterator(const args_t args) : current_index_(0), args_(args) {}
 
     ROCPRIM_HOST_DEVICE
-    check_run_iterator(const args_t args) : current_index_(0), args_(args) {}
-
-    ROCPRIM_HOST_DEVICE bool operator==(const check_run_iterator& rhs) const
+    bool operator==(const check_run_iterator& rhs) const
     {
         return current_index_ == rhs.current_index_;
     }
-    ROCPRIM_HOST_DEVICE bool operator!=(const check_run_iterator& rhs) const
+    ROCPRIM_HOST_DEVICE
+    bool operator!=(const check_run_iterator& rhs) const
     {
         return !(*this == rhs);
     }
-    ROCPRIM_HOST_DEVICE reference operator*()
+    ROCPRIM_HOST_DEVICE
+    reference
+        operator*()
     {
         return value_type{current_index_, args_};
     }
-    ROCPRIM_HOST_DEVICE reference operator[](const difference_type distance) const
+    ROCPRIM_HOST_DEVICE
+    reference
+        operator[](const difference_type distance) const
     {
         return *(*this + distance);
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator& operator+=(const difference_type rhs)
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator&
+        operator+=(const difference_type rhs)
     {
         current_index_ += rhs;
         return *this;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator& operator-=(const difference_type rhs)
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator&
+        operator-=(const difference_type rhs)
     {
         current_index_ -= rhs;
         return *this;
     }
-    ROCPRIM_HOST_DEVICE difference_type operator-(const check_run_iterator& rhs) const
+    ROCPRIM_HOST_DEVICE
+    difference_type
+        operator-(const check_run_iterator& rhs) const
     {
         return current_index_ - rhs.current_index_;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator operator+(const difference_type rhs) const
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator
+        operator+(const difference_type rhs) const
     {
         return check_run_iterator(*this) += rhs;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator operator-(const difference_type rhs) const
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator
+        operator-(const difference_type rhs) const
     {
         return check_run_iterator(*this) -= rhs;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator& operator++()
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator&
+        operator++()
     {
         ++current_index_;
         return *this;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator& operator--()
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator&
+        operator--()
     {
         --current_index_;
         return *this;
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator operator++(int)
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator
+        operator++(int)
     {
         return ++check_run_iterator{*this};
     }
-    ROCPRIM_HOST_DEVICE check_run_iterator operator--(int)
+    ROCPRIM_HOST_DEVICE
+    check_run_iterator
+        operator--(int)
     {
         return --check_run_iterator{*this};
     }
@@ -1470,7 +1507,8 @@ struct check_value_inclusive
     rocprim::tuple<size_t, unsigned int*> args_; // run_length, incorrect flag
 
     ROCPRIM_HOST_DEVICE
-    size_t operator=(const size_t value)
+    size_t
+        operator=(const size_t value)
     {
         const size_t run_start    = current_index_ - (current_index_ % rocprim::get<0>(args_));
         const size_t index_in_run = current_index_ - run_start + 1;
@@ -1494,7 +1532,8 @@ struct check_value_exclusive
         args_; // run_length, initial_value, incorrect flag
 
     ROCPRIM_HOST_DEVICE
-    size_t operator=(const size_t value)
+    size_t
+        operator=(const size_t value)
     {
         const size_t run_start    = current_index_ - (current_index_ % rocprim::get<0>(args_));
         const size_t index_in_run = current_index_ - run_start;
@@ -1522,9 +1561,9 @@ void large_indices_scan_by_key_test(ScanByKeyFun scan_by_key_fun)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    constexpr bool        debug_synchronous = false;
-    hipStream_t stream            = 0;
-    if (UseGraphs)
+    constexpr bool debug_synchronous = false;
+    hipStream_t    stream            = 0;
+    if(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1591,7 +1630,7 @@ void large_indices_scan_by_key_test(ScanByKeyFun scan_by_key_fun)
 
     ASSERT_EQ(0, incorrect_flag);
 
-    if (UseGraphs)
+    if(UseGraphs)
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
@@ -1613,7 +1652,7 @@ void testLargeIndicesInclusiveScanByKey()
                                     int /*seed_value*/) -> hipError_t
     {
         const check_run_inclusive_iterator output_it(
-                                                     rocprim::make_tuple(run_length, d_incorrect_flag));
+            rocprim::make_tuple(run_length, d_incorrect_flag));
 
         return rocprim::inclusive_scan_by_key(d_temp_storage,
                                               temp_storage_size_bytes,
@@ -1626,7 +1665,8 @@ void testLargeIndicesInclusiveScanByKey()
                                               stream,
                                               debug_synchronous);
     };
-    large_indices_scan_by_key_test<decltype(inclusive_scan_by_key), UseGraphs>(inclusive_scan_by_key);
+    large_indices_scan_by_key_test<decltype(inclusive_scan_by_key), UseGraphs>(
+        inclusive_scan_by_key);
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanByKey)
@@ -1655,7 +1695,7 @@ void testLargeIndicesExclusiveScanByKey()
     {
         const size_t initial_value = test_utils::get_random_value<size_t>(0, 10000, seed_value);
         const check_run_exclusive_iterator output_it(
-                                                     rocprim::make_tuple(run_length, initial_value, d_incorrect_flag));
+            rocprim::make_tuple(run_length, initial_value, d_incorrect_flag));
         return rocprim::exclusive_scan_by_key(d_temp_storage,
                                               temp_storage_size_bytes,
                                               keys_input,
@@ -1668,7 +1708,8 @@ void testLargeIndicesExclusiveScanByKey()
                                               stream,
                                               debug_synchronous);
     };
-    large_indices_scan_by_key_test<decltype(exclusive_scan_by_key), UseGraphs>(exclusive_scan_by_key);
+    large_indices_scan_by_key_test<decltype(exclusive_scan_by_key), UseGraphs>(
+        exclusive_scan_by_key);
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanByKey)
@@ -1690,10 +1731,9 @@ using RocprimDeviceScanFutureTestsParams = ::testing::Types<
     DeviceScanParams<test_utils::custom_test_array_type<long long, 5>>,
     DeviceScanParams<int, int, ::rocprim::plus<int>, false, default_config_helper, true>>;
 
-template <typename Params>
+template<typename Params>
 class RocprimDeviceScanFutureTests : public RocprimDeviceScanTests<Params>
-{
-};
+{};
 
 TYPED_TEST_SUITE(RocprimDeviceScanFutureTests, RocprimDeviceScanFutureTestsParams);
 
@@ -1739,7 +1779,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             }
 
             hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 // Default stream does not support hipGraph stream capture, so create one
                 HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1760,12 +1800,16 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             // scan function
             scan_op_type scan_op;
 
-            const acc_type initial_value = std::accumulate(future_input.begin(), future_input.end(), T(0));
+            const acc_type initial_value
+                = std::accumulate(future_input.begin(), future_input.end(), T(0));
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            test_utils::host_exclusive_scan(
-                input.begin(), input.end(), initial_value, expected.begin(), scan_op);
+            test_utils::host_exclusive_scan(input.begin(),
+                                            input.end(),
+                                            initial_value,
+                                            expected.begin(),
+                                            scan_op);
 
             const auto future_iter = test_utils::wrap_in_identity_iterator<use_identity_iterator>(
                 d_initial_value.get());
@@ -1845,7 +1889,7 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, precision));
 
-            if (TestFixture::use_graphs)
+            if(TestFixture::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
                 HIP_CHECK(hipStreamDestroy(stream));
