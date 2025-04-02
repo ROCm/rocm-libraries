@@ -533,7 +533,11 @@ namespace rocRoller
         {
             auto allScaleLoads = findScaleLoads(graph, arg);
             if(allScaleLoads.empty())
+            {
+                // TODO: Change this to let RR know that the SwizzleScale transform was applied but didn't do anything
+                Log::debug("Unable to find SwizzleScale candidates");
                 return;
+            }
 
             auto sampleLoad     = allScaleLoads.begin()->first;
             auto unrollK        = graph.mapper.get<Unroll>(sampleLoad, 2);
@@ -641,6 +645,14 @@ namespace rocRoller
 
         KernelGraph SwizzleScale::apply(KernelGraph const& original)
         {
+            if(!m_params->swizzleScale)
+                return original;
+
+            // TODO: enable SwizzleScale when transA == T or transB == N
+            AssertFatal(m_params->transposeMemoryAccess[LayoutType::MATRIX_A]
+                            && !m_params->transposeMemoryAccess[LayoutType::MATRIX_B],
+                        "Non-TN is not supported by SwizzleScale");
+
             TIMER(t, "KernelGraph::SwizzleScale");
             auto newGraph = original;
 

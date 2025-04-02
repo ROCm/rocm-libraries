@@ -249,6 +249,7 @@ scale_A: None
 scale_B: None
 loadScaleLDS_A: false
 loadScaleLDS_B: false
+swizzleScale: false
 ...
 
 """

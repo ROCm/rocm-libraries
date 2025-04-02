@@ -358,8 +358,9 @@ namespace rocRoller
                         params->setDimensionInfo(*m_tagLoadScaleB, macTileBScale);
                     }
 
-                    params->unrollX = solutionParams.unrollX;
-                    params->unrollY = solutionParams.unrollY;
+                    params->unrollX      = solutionParams.unrollX;
+                    params->unrollY      = solutionParams.unrollY;
+                    params->swizzleScale = solutionParams.swizzleScale;
 
                     if(solutionParams.prefetch)
                     {
@@ -367,7 +368,6 @@ namespace rocRoller
                         params->unrollK           = solutionParams.prefetchInFlight;
                         params->prefetchInFlight  = solutionParams.prefetchInFlight;
                         params->prefetchLDSFactor = solutionParams.prefetchLDSFactor;
-
                         params->prefetchMixMemOps = false;
 
                         if(solutionParams.prefetchLDSFactor != 0)

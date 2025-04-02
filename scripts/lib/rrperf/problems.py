@@ -138,6 +138,7 @@ class GEMMSolution:
 
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
+    swizzleScale: bool = False
 
     streamK: bool = False
     numWGs: int = 0

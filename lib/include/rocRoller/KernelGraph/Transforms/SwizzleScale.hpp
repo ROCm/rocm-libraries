@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #pragma once
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
@@ -37,8 +38,9 @@ namespace rocRoller
         class SwizzleScale : public GraphTransform
         {
         public:
-            SwizzleScale(ContextPtr context)
-                : m_context(context)
+            SwizzleScale(CommandParametersPtr params, ContextPtr context)
+                : m_params(params)
+                , m_context(context)
             {
             }
 
@@ -49,7 +51,9 @@ namespace rocRoller
             }
 
         private:
-            ContextPtr m_context;
+            // TODO: remove m_params when enable prefetchLDSFactor > 0 for LDSScaleA/B
+            CommandParametersPtr m_params;
+            ContextPtr           m_context;
         };
     }
 }

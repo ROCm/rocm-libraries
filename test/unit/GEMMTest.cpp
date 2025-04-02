@@ -2119,6 +2119,119 @@ namespace GEMMDriverTest
         }
     }
 
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchLDSGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = true;
+        gemm.loadLDSScaleB = true;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.swizzleScale = true;
+
+        basicGEMM<FP8, FP8, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_read_u8 "), 0);
+    }
+
+    TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+
+        auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
+
+        int waveM = (MFMAK == 128) ? 16 : 32;
+        int waveN = (MFMAK == 128) ? 16 : 32;
+        int waveK = MFMAK;
+
+        auto gemm = setup_GEMMF8F6F4(waveM, waveN, waveK);
+
+        std::tie(gemm.transA, gemm.transB) = transOp;
+
+        // TODO: enable the test when the code generation time is reduced
+        if(waveK == 128)
+            GTEST_SKIP() << "Skip 16x16x128 MFMA instruction due to long code generation time"
+                         << std::endl;
+        // TODO: enable the tests when SwizzleScale supports non-TN data layout
+        if(gemm.transA != "T" || gemm.transB != "N")
+            GTEST_SKIP() << "Non-TN test not yet supported for SwizzleScale" << std::endl;
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.swizzleScale = true;
+
+        switch(typeAB)
+        {
+        case DataType::FP8:
+            basicGEMM<FP8, FP8, float>(gemm);
+            break;
+        case DataType::BF8:
+            basicGEMM<BF8, BF8, float>(gemm);
+            break;
+        case DataType::FP6:
+            basicGEMM<FP6, FP6, float>(gemm);
+            break;
+        case DataType::BF6:
+            basicGEMM<BF6, BF6, float>(gemm);
+            break;
+        case DataType::FP4:
+            basicGEMM<FP4, FP4, float>(gemm);
+            break;
+        default:
+            Throw<FatalError>(
+                fmt::format("Unexpected data type: {}. (Allowed FP8, BF8, FP6, BF6, and FP4)",
+                            toString(typeAB)));
+        }
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+    }
+
     TEST_P(GEMMTestGPU, GPU_StoreHazardScaledGEMMMXF8TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);

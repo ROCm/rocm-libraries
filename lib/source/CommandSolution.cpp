@@ -322,10 +322,8 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::RemoveDuplicates>());
         transforms.push_back(std::make_shared<KernelGraph::OrderEpilogueBlocks>());
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
-        if(m_commandParameters->swizzleScale)
-        {
-            transforms.push_back(std::make_shared<KernelGraph::SwizzleScale>(m_context));
-        }
+        transforms.push_back(
+            std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::AddPrefetch>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddF6LDSPadding>(m_context));

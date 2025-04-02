@@ -92,6 +92,7 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
         iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
         iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
+        iot::mapRequired(io, "swizzleScale", result.solutionParams.swizzleScale);
 
         iot::mapRequired(io, "mac_m", result.solutionParams.macM);
         iot::mapRequired(io, "mac_n", result.solutionParams.macN);
@@ -186,6 +187,7 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "scale_B", params.scaleB);
         iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
         iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
+        iot::mapRequired(io, "swizzleScale", params.swizzleScale);
 
         iot::mapRequired(io, "streamK", params.streamK);
         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
@@ -974,6 +976,8 @@ int main(int argc, const char* argv[])
         .loadLDSScaleA = false,
         .loadLDSScaleB = false,
 
+        .swizzleScale = false,
+
         .loadLDSA  = true,
         .loadLDSB  = true,
         .storeLDSD = true,
@@ -1192,6 +1196,9 @@ int main(int argc, const char* argv[])
 
     app.add_flag("--loadLDSScale_A", solution.loadLDSScaleA, "Use LDS when loading A scale.");
     app.add_flag("--loadLDSScale_B", solution.loadLDSScaleB, "Use LDS when loading B scale.");
+
+    app.add_flag(
+        "--swizzleScale", solution.swizzleScale, "Use Swizzle when loading A and B scale.");
 
     //
     // Benchmarking options
