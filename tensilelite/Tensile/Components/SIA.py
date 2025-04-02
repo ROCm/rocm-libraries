@@ -30,12 +30,11 @@ from rocisa.instruction import SWaitCnt, DSStoreB128, DSStoreB64, DSStoreB32
 
 from ..TensileInstructions import replaceHolder
 
-from ..Common import roundUp
+from ..Common import roundUp, print2
 from ..Component import SIA
 
-import copy
 from copy import deepcopy
-from math import ceil
+from typing import Tuple
 
 PRECISION = 100
 class SIA3(SIA):
@@ -57,7 +56,7 @@ class SIA3(SIA):
         else:
             numLocalWriteModPerMfma = roundUp(kernel["LocalWritePerMfma"]*PRECISION)
 
-        AssignGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma)
+        writer.states.numGlobalReadInsPerMfma, writer.states.numLocalWriteModPerMfma = calculateGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma)
         localWriteEndIter = fixLocalWriteEndMfmaIndex(writer, kernel, tensorParametersA, tensorParametersB, \
             globalReadIncACode, globalReadIncBCode, numMfmaBetweenLWandBarrier, lastLoop)
         numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParamMfma(writer)
@@ -417,7 +416,7 @@ def getNumLocalWritePerMfma(writer, kernel, lwStartMfmaIndex):
         newValue = roundUp((writesToSched+1 + (oldValue - (writesToSched+1) % oldValue) + oldValue%PRECISION) / numMfmaCanSched)
     return newValue
 
-def AssignGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma):
+def calculateGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma) -> Tuple[int, int]:
     #####
     # Assign GRPM and LWPM
     #####
@@ -427,8 +426,7 @@ def AssignGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma):
     #   Ex. GRPM = 0.5
     #        GR ---------99--------- GR --------99---------- GR
     #   mfma --49-- mfma --49-- mfma --49-- mfma --49-- mfma --49--
-    writer.states.numGlobalReadInsPerMfma = roundUp(kernel["GlobalReadPerMfma"]*PRECISION)
-
+    numGlobalReadInsPerMfma = roundUp(kernel["GlobalReadPerMfma"]*PRECISION)
     # HOW THIS WORK
     # padding each globalReadInstruction to 100 with empty instruction,
     # each mfma will schedule intructions GRPM*100 times from padded globalReadInstruction.
@@ -441,11 +439,11 @@ def AssignGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma):
         #   However, larger LWPM may cause mfma bubbles
         #   we set LWPM to 1 unless it requires larger LWPM to enable 1LDSB
         if kernel["1LDSBuffer"]:
-            writer.states.numLocalWriteModPerMfma = max(numLocalWriteModPerMfma,PRECISION)
+            numLocalWriteModPerMfma = max(numLocalWriteModPerMfma, PRECISION)
         else:
-            writer.states.numLocalWriteModPerMfma = PRECISION
-    else:
-        writer.states.numLocalWriteModPerMfma = numLocalWriteModPerMfma
+            numLocalWriteModPerMfma = PRECISION
+
+    return numGlobalReadInsPerMfma, numLocalWriteModPerMfma
 
 def getScheduleParamMfma(writer):
     numMfmaPerIter = writer.states.numMfmaPerIter
@@ -792,7 +790,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
         for idx in newAdditionalIndexList:
             additionalIndexList[idx - itemPerIter] = newAdditionalIndexList[idx]
 
-        if u==(localWriteEndIter):
+        if u == localWriteEndIter:
             itemPerIter = len(itemsLWToSched) # schedule all remaining activity
         else:
             itemPerIter = numLocalWriteModPerIter
@@ -812,8 +810,18 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                 if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                     writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                 if writesPerItem:
+                    writesPerItem = countLocalWrite(item)
+                    if kernel["ProblemType"]["Sparse"] and not writesPerItem:
+                        writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                     # Split into several dsStore32
-                    itemNew, numItemNew, globalReadInstOffset = splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, len(itemsLWToSched), itemsLWToSchedIndex)
+                    syncEndExpandedNumIndex = len(itemsLWToSched)
+
+                    if writer.states.numMfmaPerIter and u == (writer.states.lwEndMfmaIndex // writer.states.numMfmaPerIter):
+                        syncEndExpandedNumIndex = numLocalWriteModPerIter
+                        syncEndExpandedNumIndex *= ((writer.states.syncPlrMfmaIndex % writer.states.numMfmaPerIter) / writer.states.numMfmaPerIter)
+                        syncEndExpandedNumIndex = roundUp(syncEndExpandedNumIndex)
+
+                    itemNew, numItemNew, globalReadInstOffset = splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, syncEndExpandedNumIndex, itemsLWToSchedIndex) if writer.do["AutoSplitDsWrite"] else (None, 0, 0)
                     if itemsLWToSchedIndex + globalReadInstOffset <= len(itemsLWToSched):
                         additionalIndexList = {}
                         for i in range(numItemNew): 
@@ -931,16 +939,8 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         # only support one b128
         return None, 0, 0
 
-    instruction = None
     itemList = item.flatitems()
-    for inst in itemList:
-        if isinstance(inst, DSStoreB128):
-            instruction = inst
-            break
-    if instruction == None:
-        assert 0, "no instructions to be splitted"
-
-    lwLatency = DSStoreB128.issueLatency()
+    instruction = next(filter(lambda inst: isinstance(inst, DSStoreB128), itemList))
     miLatency = writer.states.miLatency
     div       = 1
     dsOffset  = 0
@@ -997,6 +997,8 @@ def splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, 
         r1.regNum //= div
         r1.regName.addOffset(4 // div * d)
         writeInst.append(LocalWriteX(dstAddr=addr, src=r1, ds=ds1, comment=instruction.comment + " splitted"))
+
+    print2(f"Split ds_write_b128 to 4xds_write_b32 for {str(instruction)}")
     
     return writeInst, len(writeInst), numLocalWritesPerSched * (div - 1)
 
