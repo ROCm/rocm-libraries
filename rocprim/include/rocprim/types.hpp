@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,8 @@
 #include "types/key_value_pair.hpp"
 #include "types/tuple.hpp"
 #include "types/uninitialized_array.hpp"
+
+#include "intrinsics/arch.hpp"
 
 /// \addtogroup utilsmodule
 /// @{
@@ -76,12 +78,9 @@ using bfloat16 = ::hip_bfloat16;
 ///
 /// The total number of bits is equal to the total number of threads in a
 /// warp. Used to for warp-level operations.
-/// \note This is defined only on the device side, see `ROCPRIM_WAVEFRONT_SIZE` for details.
-#if ROCPRIM_WAVEFRONT_SIZE == 32
-using lane_mask_type = unsigned int;
-#elif ROCPRIM_WAVEFRONT_SIZE == 64
-using lane_mask_type = unsigned long long int;
-#endif
+/// \note This is defined only on the device side.
+using lane_mask_type
+    = std::conditional_t<arch::wavefront::min_size() == 32, unsigned int, unsigned long long int>;
 
 /// \brief Native half-precision floating point type
 using native_half = _Float16;

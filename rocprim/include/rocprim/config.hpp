@@ -128,6 +128,8 @@
     #define ROCPRIM_TARGET_RDNA1 1
 #elif defined(__GFX8__)
     #define ROCPRIM_TARGET_GCN3 1
+#elif defined(__SPIRV__)
+    #define ROCPRIM_TARGET_SPIRV 1
 #endif
 
 // DPP is supported only after Volcanic Islands (GFX8+)
@@ -234,21 +236,6 @@
         static_assert(expression, message)
 #else
     #define ROCPRIM_DETAIL_DEVICE_STATIC_ASSERT(expression, message)
-#endif
-
-/// \brief Clang predefined macro for device code on AMD GPU targets, either 32 or 64.
-///   It is undefined behavior to use this macro in host code when compiling with Clang.
-#ifndef __AMDGCN_WAVEFRONT_SIZE
-    #define __AMDGCN_WAVEFRONT_SIZE 64
-#endif
-
-/// \brief Wavefront size, either 32 or 64. May be defined by compiler flags when compiling
-///   with Clang if the value is equal to the wavefront size of all AMD GPU architectures
-///   currently being compiled for.
-///
-///   Only defined in device code unless defined by compiler flags as described above.
-#ifndef ROCPRIM_WAVEFRONT_SIZE
-    #define ROCPRIM_WAVEFRONT_SIZE __AMDGCN_WAVEFRONT_SIZE
 #endif
 
 // Helper macros to disable warnings in clang

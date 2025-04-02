@@ -50,12 +50,15 @@ ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
-#if ROCPRIM_WAVEFRONT_SIZE == 32
-    c = ::__builtin_amdgcn_mbcnt_lo(x, add);
-#else
-    c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
-    c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
-#endif
+    if ROCPRIM_IF_CONSTEXPR(arch::wavefront::min_size() == 32)
+    {
+        c = ::__builtin_amdgcn_mbcnt_lo(x, add);
+    }
+    else
+    {
+        c = ::__builtin_amdgcn_mbcnt_lo(static_cast<int>(x), add);
+        c = ::__builtin_amdgcn_mbcnt_hi(static_cast<int>(x >> 32), c);
+    }
     return c;
 }
 

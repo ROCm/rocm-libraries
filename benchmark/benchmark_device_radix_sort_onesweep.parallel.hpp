@@ -280,7 +280,7 @@ struct device_radix_sort_onesweep_benchmark_generator
     template<unsigned int ItemsPerThread, rocprim::block_radix_rank_algorithm RadixRankAlgorithm>
     static constexpr bool is_buildable()
     {
-        // Calculation uses `rocprim::arch::wavefront::min_size()`, which is 64 on host side unless overridden.
+        // Calculation uses `rocprim::arch::wavefront::min_size()`, which is 32 on host side unless overridden.
         //   However, this does not affect the total size of shared memory for the current configuration space.
         //   Were the implementation to change, causing retuning, this needs to be re-evaluated and possibly taken into account.
         using sharedmem_storage = typename rocprim::detail::onesweep_iteration_helper<

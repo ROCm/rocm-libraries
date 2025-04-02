@@ -41,7 +41,7 @@ unsigned int size()
 {
     // This function is **not** constexpr because it will
     // be using '__builtin_amdgcn_wavefrontsize()'.
-    return ROCPRIM_WAVEFRONT_SIZE;
+    return warpSize;
 }
 
 /// \brief Return the minimum number of threads in the wavefront.
@@ -66,7 +66,10 @@ unsigned int size()
 constexpr unsigned int min_size()
 {
 #if __HIP_DEVICE_COMPILE__
-    return ROCPRIM_WAVEFRONT_SIZE;
+    #if ROCPRIM_NAVI
+    return 32u;
+    #endif
+    return 64u;
 #else
     return ROCPRIM_WARP_SIZE_32;
 #endif
@@ -93,7 +96,7 @@ constexpr unsigned int min_size()
 constexpr unsigned int max_size()
 {
 #if __HIP_DEVICE_COMPILE__
-    return ROCPRIM_WAVEFRONT_SIZE;
+    return min_size();
 #else
     return ROCPRIM_WARP_SIZE_64;
 #endif

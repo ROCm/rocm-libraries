@@ -41,7 +41,6 @@ This is a complete list of affected functions and how their default accumulator 
 * Removed `rocprim::detail::float_bit_mask` and relative tests, use `rocprim::traits::float_bit_mask` instead.
 * Removed `rocprim::traits::is_fundamental`, please use `rocprim::traits::get<T>::is_fundamental()` directly.
 * Removed the deprecated parameters `short_radix_bits` and `ShortRadixBits` from the `segmented_radix_sort` config. They were unused, it is only an API change.
-* Removed the deprecated function `rocprim::warp_size()`. Use `rocprim::host_warp_size()` and `rocprim::device_warp_size()` instead.
 * Removed the deprecated `operator<<` from the iterators.
 * Removed the deprecated `TwiddleIn` and `TwiddleOut`. Use `radix_key_codec` instead.
 * Removed the deprecated flags API of `block_adjacent_difference`. Use `subtract_left()` or `block_discontinuity::flag_heads()` instead.
@@ -53,6 +52,16 @@ This is a complete list of affected functions and how their default accumulator 
   * This header included `rocprim::detail::invoke_result_binary_op`. Use `rocprim::invoke_result_binary_op` instead.
   * This header included `rocprim::detail::match_result_type`. Use `rocprim::invoke_result_binary_op_t` instead.
 * Removed the deprecated `rocprim::detail::radix_key_codec` function. Use `rocprim::radix_key_codec` instead.
+* Due to the removal of `__AMDGCN_WAVEFRONT_SIZE` in the compiler, the following deprecated warp size-related symbols have been removed:
+  * `rocprim::device_warp_size()`
+    * For compile-time constants, this is replaced with `rocprim::arch::wavefront::min_size()` and `rocprim::arch::wavefront::max_size()`. Use this when allocating global or shared memory.
+    * For run-time constants, this is replaced with `rocprim::arch::wavefront::size().`
+  * `rocprim::warp_size()`
+    * Use `rocprim::host_warp_size()`, `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
+  * `ROCPRIM_WAVEFRONT_SIZE`
+    * Use `rocprim::arch::wavefront::min_size()` or `rocprim::arch::wavefront::max_size()` instead.
+  * `__AMDGCN_WAVEFRONT_SIZE`
+    * This was a fallback define for the compiler's removed symbol, having the same name. 
 
 ## rocPRIM 3.5.0 for ROCm 6.5.0
 
