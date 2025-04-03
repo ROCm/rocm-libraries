@@ -113,36 +113,67 @@ struct dispatch_binary_search_helper<rocprim::default_config>
     }
 };
 
-template<typename SubAlgorithm, typename T, typename OutputType, typename Config>
-struct device_binary_search_benchmark : public config_autotune_interface
+template<typename Config>
+std::string binary_search_config_name()
+{
+    return "{bs:" + std::to_string(Config::block_size)
+           + ",ipt:" + std::to_string(Config::items_per_thread) + "}";
+}
+
+template<>
+inline std::string binary_search_config_name<rocprim::default_config>()
+{
+    return "default_config";
+}
+
+template<typename SubAlgorithm,
+         typename T,
+         typename OutputType,
+         size_t K,
+         bool   SortedNeedles,
+         typename Config = rocprim::default_config>
+struct device_binary_search_benchmark : public benchmark_utils::autotune_interface
 {
     std::string name() const override
     {
         return bench_naming::format_name("{lvl:device,algo:" + SubAlgorithm{}.name()
                                          + ",value_type:" + std::string(Traits<T>::name())
                                          + ",output_type:" + std::string(Traits<OutputType>::name())
-                                         + ",cfg:{bs:" + std::to_string(Config::block_size)
-                                         + ",ipt:" + std::to_string(Config::items_per_thread)
-                                         + "}}");
+                                         + ",cfg:" + binary_search_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State&   state,
-             size_t              haystack_size,
-             const managed_seed& seed,
-             hipStream_t         stream) const override
+    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
     {
-        using compare_op_t        = rocprim::less<T>;
-        const auto   needles_size = haystack_size / 10;
-        compare_op_t compare_op;
+        const auto& bytes  = state.bytes;
+        const auto& seed   = state.seed;
+        const auto& stream = state.stream;
 
+        size_t needles_bytes = bytes * K / 100;
+
+        using compare_op_type = typename std::
+            conditional<std::is_same<T, rocprim::half>::value, half_less, rocprim::less<T>>::type;
+
+        // Calculate the number of elements from byte size
+        size_t haystack_size = bytes / sizeof(T);
+        size_t needles_size  = needles_bytes / sizeof(T);
+
+        compare_op_type compare_op;
+
+        // Generate data
         std::vector<T> haystack(haystack_size);
         std::iota(haystack.begin(), haystack.end(), 0);
 
-        const auto     random_range = limit_random_range<T>(0, haystack_size);
-        std::vector<T> needles      = get_random_data<T>(needles_size,
+        const auto random_range = limit_random_range<T>(0, haystack_size);
+
+        std::vector<T> needles = get_random_data<T>(needles_size,
                                                     random_range.first,
                                                     random_range.second,
                                                     seed.get_0());
+        if(SortedNeedles)
+        {
+            std::sort(needles.begin(), needles.end(), compare_op);
+        }
+
         common::device_ptr<T>          d_haystack(haystack);
         common::device_ptr<T>          d_needles(needles);
         common::device_ptr<OutputType> d_output(needles_size);
@@ -162,55 +193,22 @@ struct device_binary_search_benchmark : public config_autotune_interface
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-        // Warm-up
-        HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                         d_temporary_storage.get(),
-                                                         temporary_storage_bytes,
-                                                         d_haystack.get(),
-                                                         d_needles.get(),
-                                                         d_output.get(),
-                                                         haystack_size,
-                                                         needles_size,
-                                                         compare_op,
-                                                         stream));
-        HIP_CHECK(hipDeviceSynchronize());
+        state.run(gbench_state,
+                  [&]
+                  {
+                      HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
+                                                                       d_temporary_storage.get(),
+                                                                       temporary_storage_bytes,
+                                                                       d_haystack.get(),
+                                                                       d_needles.get(),
+                                                                       d_output.get(),
+                                                                       haystack_size,
+                                                                       needles_size,
+                                                                       compare_op,
+                                                                       stream));
+                  });
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                             d_temporary_storage.get(),
-                                                             temporary_storage_bytes,
-                                                             d_haystack.get(),
-                                                             d_needles.get(),
-                                                             d_output.get(),
-                                                             haystack_size,
-                                                             needles_size,
-                                                             compare_op,
-                                                             stream));
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * needles_size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * needles_size);
+        state.set_items_processed_per_iteration<T>(gbench_state, needles_size);
     }
 };
 

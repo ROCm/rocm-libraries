@@ -41,16 +41,14 @@
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(T, SEGMENTS)                                                            \
-    {                                                                                            \
-        const device_segmented_reduce_benchmark<T> instance;                                     \
-        executor.queue_fn(bench_naming::format_name(                                             \
-                              "{lvl:device,algo:reduce_segmented,key_type:" #T ",segment_count:" \
-                              + std::to_string(SEGMENTS) + ",cfg:default_config}")               \
-                              .c_str(),                                                          \
-                          [=](benchmark::State& gbench_state, benchmark_utils::state& state)     \
-                          { instance.run_benchmark(gbench_state, state, SEGMENTS); });           \
-    }
+#define CREATE_BENCHMARK(T, SEGMENTS)                                                  \
+    executor.queue_fn(                                                                 \
+        bench_naming::format_name("{lvl:device,algo:reduce_segmented,key_type:" #T     \
+                                  ",segment_count:"                                    \
+                                  + std::to_string(SEGMENTS) + ",cfg:default_config}") \
+            .c_str(),                                                                  \
+        [=](benchmark::State& gbench_state, benchmark_utils::state& state)             \
+        { device_segmented_reduce_benchmark<T>().run_benchmark(gbench_state, state, SEGMENTS); });
 
 #define BENCHMARK_TYPE(type)     \
     CREATE_BENCHMARK(type, 1)    \
