@@ -1,24 +1,26 @@
 .. meta::
-  :description: Install rocDecode
-  :keywords: install, rocDecode, AMD, ROCm
+  :description: Quick start installation guide for hipFORT.
+  :keywords: install, hipFORT, AMD, ROCm, quick start
 
 
-Installation
+Quick start installation guide
 *********************************
 
+This topic discusses how to quickly build hipFORT from source.
 
 Prerequisites
 ===============
 
-* GFortran version 7.5.0 or newer. For more information, refer to the `GFortran website. <https://fortran-lang.org/learn/os_setup/install_gfortran/>`_
+hipFORT requires GFortran version 7.5.0 or newer.
+For more information, see the `GFortran website. <https://fortran-lang.org/learn/os_setup/install_gfortran/>`_
 
 Building and testing hipFORT from source
 ==========================================
 
-1. Ensure you have ``gfortran``, ``git``, ``cmake``, and HIP installed.
-2. Build, install, and test hipFORT from the source with the following commands: 
+1. Ensure you have installed ``gfortran``, ``git``, ``cmake``, and :doc:`HIP <hip:index>`.
+2. Build, install, and test hipFORT from source using the following commands:
 
-   .. code-block:: 
+   .. code-block:: shell
 
       git clone https://github.com/ROCm/hipfort.git
       cd hipfort

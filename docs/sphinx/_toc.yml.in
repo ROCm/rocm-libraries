@@ -8,17 +8,25 @@ subtrees:
       - file: install/quick-start.rst
         title: Quick start installation guide
       - file: install/install.rst
-        title: Installation guide
-  - caption: API reference
+        title: Detailed install
+
+  - caption: How to
     entries:
-      - file: doxygen/html/index
-      - file: reference/index.md
-        title: Supported APIs
-       
+      - file: how-to/using-hipfort.rst
+        title: Use hipFORT
+
   - caption: Tutorials
     entries:
       - file: tutorials/examples.rst
         title: Examples
+
+  - caption: API reference
+    entries:
+      - file: doxygen/html/index
+        title: hipFORT API reference
+      - file: reference/index.md
+        title: Supported APIs
+       
 
   - caption: About
     entries:

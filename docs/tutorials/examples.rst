@@ -1,12 +1,12 @@
 .. meta::
   :description: hipFORT examples and API references
-  :keywords: hipfort, ROCm, API, documentation, examples, tutorials
+  :keywords: hipFORT, ROCm, API, documentation, examples, tutorials
 
-*************
-Examples
-*************
+****************
+hipFORT Examples
+****************
 
-Use the following examples to express `f2003` interfaces:
+Use the following examples to express Fortran 2003 (`f2003`) interfaces:
 
 **Example 1**
 
@@ -41,7 +41,7 @@ Use the following examples to express `f2003` interfaces:
 
 .. note::
 
-The `f2008` interfaces also overload `hipMalloc`, similar to the Fortran 2008 `ALLOCATE` intrinsic. For example,
+   The Fortran 2008 (`f2008`) interfaces also overload ``hipMalloc``, similar to the Fortran 2008 ``ALLOCATE`` intrinsic. For example:
 
 .. code-block:: 
 
@@ -51,4 +51,4 @@ The `f2008` interfaces also overload `hipMalloc`, similar to the Fortran 2008 `A
         !
         ierr = hipMalloc(a_d,source=a_h)       ! take shape (incl. bounds) of a_h and perform a blocking copy to device
 
-In addition to `source`, there is also `dsource` in case the source is a device array.
+In addition to ``source``, there is also ``dsource``, which is used if the source is a device array.
