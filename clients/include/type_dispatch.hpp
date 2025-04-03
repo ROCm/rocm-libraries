@@ -239,21 +239,19 @@ auto rocblas_blas1_dispatch(const Arguments& arg)
     else if(strstr(arg.function, "scal"))
     {
         // s, d, c, cs, z, zd
-        if(Ti == To && Ti == Tb && Ti == Tc)
+        if(Ti == To && Ti == Tb)
         {
             // z, d, c, z
             if(Ti == rocblas_datatype_f32_r || Ti == rocblas_datatype_f64_r
                || Ti == rocblas_datatype_f32_c || Ti == rocblas_datatype_f64_c)
                 return rocblas_simple_dispatch<TEST>(arg);
         }
-        else if(Ti == rocblas_datatype_f32_c && Tb == rocblas_datatype_f32_r
-                && Tc == rocblas_datatype_f32_r)
+        else if(Ti == rocblas_datatype_f32_c && Tb == rocblas_datatype_f32_r)
         {
             // cs
             return TEST<rocblas_float_complex, float>{}(arg);
         }
-        else if(Ti == rocblas_datatype_f64_c && Tb == rocblas_datatype_f64_r
-                && Tc == rocblas_datatype_f64_r)
+        else if(Ti == rocblas_datatype_f64_c && Tb == rocblas_datatype_f64_r)
         {
             // zd
             return TEST<rocblas_double_complex, double>{}(arg);

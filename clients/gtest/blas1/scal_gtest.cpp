@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -46,22 +46,19 @@ namespace
             RocBLAS_TestName<scal_test_template> name(arg.name);
             name << rocblas_datatype2string(arg.a_type);
 
+            if(arg.a_type != arg.b_type)
+                name << '_' << rocblas_datatype2string(arg.b_type);
+
             if(strstr(arg.function, "_bad_arg") != nullptr)
             {
                 name << "_bad_arg";
             }
             else
             {
-                constexpr bool is_scal    = (BLAS1 == blas1::scal || BLAS1 == blas1::scal_batched
-                                          || BLAS1 == blas1::scal_strided_batched);
                 constexpr bool is_batched = (BLAS1 == blas1::scal_batched);
                 constexpr bool is_strided = (BLAS1 == blas1::scal_strided_batched);
 
-                if((is_scal) && arg.a_type != arg.b_type)
-                    name << '_' << rocblas_datatype2string(arg.b_type);
-
-                if(is_scal)
-                    name << '_' << arg.N << '_' << arg.alpha << "_" << arg.alphai;
+                name << '_' << arg.N << '_' << arg.alpha << "_" << arg.alphai;
 
                 name << '_' << arg.incx;
 
@@ -90,63 +87,59 @@ namespace
     };
 
     // This tells whether the BLAS1 tests are enabled
-    template <blas1 BLAS1, typename Ti, typename To, typename Tc>
-    using scal_enabled
-        = std::
-            integral_constant<
-                bool,
-                ((BLAS1 == blas1::scal || BLAS1 == blas1::scal_batched
-                  || BLAS1 == blas1::scal_strided_batched)
-                 && std::is_same_v<
-                     To,
-                     Tc> && ((std::is_same_v<Ti, rocblas_float_complex> && std::is_same_v<Ti, To>) || (std::is_same_v<Ti, rocblas_double_complex> && std::is_same_v<Ti, To>) || (std::is_same_v<Ti, float> && std::is_same_v<Ti, To>) || (std::is_same_v<Ti, double> && std::is_same_v<Ti, To>) || (std::is_same_v<Ti, rocblas_float_complex> && std::is_same_v<To, float>) || (std::is_same_v<Ti, rocblas_double_complex> && std::is_same_v<To, double>)))>;
+    template <blas1 BLAS1, typename Ti, typename To>
+    using scal_enabled = std::integral_constant<
+        bool,
+        ((BLAS1 == blas1::scal || BLAS1 == blas1::scal_batched
+          || BLAS1 == blas1::scal_strided_batched)
+         && (((sizeof(Ti) >= 4) && std::is_same_v<Ti, To>)
+             || (std::is_same_v<Ti, rocblas_double_complex> && std::is_same_v<To, double>)
+             || (std::is_same_v<Ti, rocblas_float_complex> && std::is_same_v<To, float>)))>;
 
 // Creates tests for one of the BLAS 1 functions
 // ARG passes 1-3 template arguments to the testing_* function
-#define BLAS1_TESTING(NAME, ARG)                                                              \
-    struct blas1_##NAME                                                                       \
-    {                                                                                         \
-        template <typename Ti, typename To = Ti, typename Tc = To, typename = void>           \
-        struct testing : rocblas_test_invalid                                                 \
-        {                                                                                     \
-        };                                                                                    \
-                                                                                              \
-        template <typename Ti, typename To, typename Tc>                                      \
-        struct testing<Ti, To, Tc, std::enable_if_t<scal_enabled<blas1::NAME, Ti, To, Tc>{}>> \
-            : rocblas_test_valid                                                              \
-        {                                                                                     \
-            void operator()(const Arguments& arg)                                             \
-            {                                                                                 \
-                if(!strcmp(arg.function, #NAME))                                              \
-                    testing_##NAME<ARG(Ti, To, Tc)>(arg);                                     \
-                else if(!strcmp(arg.function, #NAME "_bad_arg"))                              \
-                    testing_##NAME##_bad_arg<ARG(Ti, To, Tc)>(arg);                           \
-                else                                                                          \
-                    FAIL() << "Internal error: Test called with unknown function: "           \
-                           << arg.function;                                                   \
-            }                                                                                 \
-        };                                                                                    \
-    };                                                                                        \
-                                                                                              \
-    using NAME = scal_test_template<blas1_##NAME::template testing, blas1::NAME>;             \
-                                                                                              \
-    template <>                                                                               \
-    inline bool NAME::function_filter(const Arguments& arg)                                   \
-    {                                                                                         \
-        return !strcmp(arg.function, #NAME) || !strcmp(arg.function, #NAME "_bad_arg");       \
-    }                                                                                         \
-                                                                                              \
-    TEST_P(NAME, blas1)                                                                       \
-    {                                                                                         \
-        RUN_TEST_ON_THREADS_STREAMS(                                                          \
-            rocblas_blas1_dispatch<blas1_##NAME::template testing>(GetParam()));              \
-    }                                                                                         \
-                                                                                              \
+#define BLAS1_TESTING(NAME, ARG)                                                        \
+    struct blas1_##NAME                                                                 \
+    {                                                                                   \
+        template <typename Ti, typename To = Ti, typename = void>                       \
+        struct testing : rocblas_test_invalid                                           \
+        {                                                                               \
+        };                                                                              \
+                                                                                        \
+        template <typename Ti, typename To>                                             \
+        struct testing<Ti, To, std::enable_if_t<scal_enabled<blas1::NAME, Ti, To>{}>>   \
+            : rocblas_test_valid                                                        \
+        {                                                                               \
+            void operator()(const Arguments& arg)                                       \
+            {                                                                           \
+                if(!strcmp(arg.function, #NAME))                                        \
+                    testing_##NAME<ARG(Ti, To)>(arg);                                   \
+                else if(!strcmp(arg.function, #NAME "_bad_arg"))                        \
+                    testing_##NAME##_bad_arg<ARG(Ti, To)>(arg);                         \
+                else                                                                    \
+                    FAIL() << "Internal error: Test called with unknown function: "     \
+                           << arg.function;                                             \
+            }                                                                           \
+        };                                                                              \
+    };                                                                                  \
+                                                                                        \
+    using NAME = scal_test_template<blas1_##NAME::template testing, blas1::NAME>;       \
+                                                                                        \
+    template <>                                                                         \
+    inline bool NAME::function_filter(const Arguments& arg)                             \
+    {                                                                                   \
+        return !strcmp(arg.function, #NAME) || !strcmp(arg.function, #NAME "_bad_arg"); \
+    }                                                                                   \
+                                                                                        \
+    TEST_P(NAME, blas1)                                                                 \
+    {                                                                                   \
+        RUN_TEST_ON_THREADS_STREAMS(                                                    \
+            rocblas_blas1_dispatch<blas1_##NAME::template testing>(GetParam()));        \
+    }                                                                                   \
+                                                                                        \
     INSTANTIATE_TEST_CATEGORIES(NAME)
 
-#define ARG1(Ti, To, Tc) Ti
-#define ARG2(Ti, To, Tc) Ti, To
-#define ARG3(Ti, To, Tc) Ti, To, Tc
+#define ARG2(Ti, To) Ti, To
 
     BLAS1_TESTING(scal, ARG2)
     BLAS1_TESTING(scal_batched, ARG2)
