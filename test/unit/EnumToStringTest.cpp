@@ -157,8 +157,6 @@ TEST(EnumToStringTest, ALL)
         {GPUArchitectureGFX::UNKNOWN, "gfxunknown"},
         {GPUArchitectureGFX::GFX908, "gfx908"},
         {GPUArchitectureGFX::GFX90A, "gfx90a"},
-        {GPUArchitectureGFX::GFX940, "gfx940"},
-        {GPUArchitectureGFX::GFX941, "gfx941"},
         {GPUArchitectureGFX::GFX942, "gfx942"},
         {GPUArchitectureGFX::GFX1012, "gfx1012"},
         {GPUArchitectureGFX::GFX1030, "gfx1030"},

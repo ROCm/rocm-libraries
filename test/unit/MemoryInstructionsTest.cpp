@@ -171,8 +171,6 @@ namespace MemoryInstructionsTest
         ScalarMemoryInstructionsTest,
         ::testing::Combine(::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX90A},
                                              GPUArchitectureTarget{GPUArchitectureGFX::GFX908},
-                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX940},
-                                             GPUArchitectureTarget{GPUArchitectureGFX::GFX941},
                                              GPUArchitectureTarget{GPUArchitectureGFX::GFX942}),
                            ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
 

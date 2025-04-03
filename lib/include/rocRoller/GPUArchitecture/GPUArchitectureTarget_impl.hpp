@@ -50,10 +50,6 @@ namespace rocRoller
             return "gfx908";
         case GPUArchitectureGFX::GFX90A:
             return "gfx90a";
-        case GPUArchitectureGFX::GFX940:
-            return "gfx940";
-        case GPUArchitectureGFX::GFX941:
-            return "gfx941";
         case GPUArchitectureGFX::GFX942:
             return "gfx942";
         case GPUArchitectureGFX::GFX950:
@@ -88,8 +84,6 @@ namespace rocRoller
             return "AMD CDNA 1";
         case GPUArchitectureGFX::GFX90A:
             return "AMD CDNA 2";
-        case GPUArchitectureGFX::GFX940:
-        case GPUArchitectureGFX::GFX941:
         case GPUArchitectureGFX::GFX942:
             return "AMD CDNA 3";
         case GPUArchitectureGFX::GFX950:

@@ -192,10 +192,6 @@ namespace GPUArchitectureGenerator
             {
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX908},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
-                                                 {.sramecc = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
                                                  {.sramecc = true}},
@@ -217,10 +213,6 @@ namespace GPUArchitectureGenerator
                                                  {.xnack = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A,
                                                  {.sramecc = true}},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
-                                                 {.sramecc = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
                                                  {.sramecc = true}},
@@ -234,10 +226,6 @@ namespace GPUArchitectureGenerator
             {
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX90A,
-                                                 {.sramecc = true}},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX940},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941},
-                rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX941,
                                                  {.sramecc = true}},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942},
                 rocRoller::GPUArchitectureTarget{rocRoller::GPUArchitectureGFX::GFX942,
@@ -977,7 +965,7 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo("v_mfma_i32_32x32x32_i8", 0, {}, 8),
                  // V_MFMA_F64_{*}_F64
                  rocRoller::GPUInstructionInfo("v_mfma_f64_16x16x4_f64", 0, {}, 8),
-                 // gfx950 increases the cycles of v_mfma_f64_16x16x4f64 to 64 (32 in gfx940)
+                 // gfx950 increases the cycles of v_mfma_f64_16x16x4f64 to 64 (32 in gfx942)
                  rocRoller::GPUInstructionInfo("v_mfma_f64_16x16x4f64", 0, {}, 16),
                  rocRoller::GPUInstructionInfo("v_mfma_f64_4x4x4_4b_f64", 0, {}, 4),
                  rocRoller::GPUInstructionInfo("v_mfma_f64_4x4x4f64", 0, {}, 4),
