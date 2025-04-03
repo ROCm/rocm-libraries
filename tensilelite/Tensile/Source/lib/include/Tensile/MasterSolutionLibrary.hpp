@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -116,7 +116,7 @@ namespace TensileLite
                 return std::shared_ptr<MySolution>();
             }
             auto       solution = solutions.at(index);
-            const bool streamK  = Debug::Instance().useExperimentalSelection() == 2;
+            const bool streamK  = Debug::Instance().useExperimentalSelection() >= 1;
             if(solution->isStreamK() && !streamK)
                 return std::shared_ptr<MySolution>();
 
@@ -231,7 +231,19 @@ namespace TensileLite
                                                             Hardware const&  hardware,
                                                             int numSolutions) const override
         {
-            return library->findTopSolutions(problem, hardware, numSolutions);
+            if(Debug::Instance().printSolutionSelectionTime())
+            {
+                auto start  = std::chrono::steady_clock::now();
+                auto result = library->findTopSolutions(problem, hardware, numSolutions);
+                auto end    = std::chrono::steady_clock::now();
+                double time = std::chrono::duration<double, std::micro>(end - start).count();
+                std::cout << "Solution selection time: " << time << " us" << std::endl;
+                return result;
+            }
+            else
+            {
+                return library->findTopSolutions(problem, hardware, numSolutions);
+            }
         }
 
         virtual SolutionVector<MySolution>
