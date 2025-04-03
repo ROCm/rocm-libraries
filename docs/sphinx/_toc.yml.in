@@ -23,7 +23,7 @@ subtrees:
     title: Client samples
 
 - caption: Examples
-  entries: 
+  entries:
   - file: reference/reference
     title: API reference
     subtrees:
@@ -32,6 +32,8 @@ subtrees:
         title: Exported functions
       - file: reference/types.rst
         title: hipSPARSE datatypes
+      - file: reference/precision.rst
+        title: hipSPARSE precision support
       - file: reference/auxiliary.rst
         title: Sparse auxiliary functions
       - file: reference/level1.rst

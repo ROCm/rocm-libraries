@@ -8,7 +8,7 @@
 hipSPARSE documentation
 ********************************************************************
 
-hipSPARSE presents a common interface for 
+hipSPARSE presents a common interface for
 supporting both :doc:`rocSPARSE <rocsparse:index>` and NVIDIA CUDA cuSPARSE as backends.
 It's a SPARSE marshalling library that provides basic linear algebra subroutines
 for sparse computation. hipSPARSE uses the :doc:`HIP <hip:index>` library and is implemented on top
@@ -22,11 +22,11 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/hipSPARS
   :gutter: 3
 
   .. grid-item-card:: Install
-  
+
     * :doc:`Installation guide <./install/install>`
-  
+
   .. grid-item-card:: How to
-  
+
     * :doc:`Use hipSPARSE <./howto/using-hipsparse>`
 
   .. grid-item-card:: Examples
@@ -34,9 +34,10 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/hipSPARS
     * `Client samples <https://github.com/ROCm/hipSPARSE/tree/develop/clients/samples>`_
 
   .. grid-item-card:: API reference
-  
+
     * :doc:`Exported functions <./reference/api>`
     * :doc:`hipSPARSE datatypes <./reference/types>`
+    * :doc:`hipSPARSE precision support <./reference/precision>`
     * :doc:`Sparse auxiliary functions <./reference/auxiliary>`
     * :doc:`Sparse level 1 functions <./reference/level1>`
     * :doc:`Sparse level 2 functions <./reference/level2>`
