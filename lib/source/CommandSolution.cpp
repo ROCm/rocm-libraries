@@ -185,7 +185,7 @@ namespace rocRoller
     {
     }
 
-    KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
+    KernelGraph::KernelGraphPtr CommandKernel::getKernelGraph() const
     {
         return m_kernelGraph;
     }
@@ -205,10 +205,10 @@ namespace rocRoller
         return m_context->instructions()->toString();
     }
 
-    Generator<Instruction> CommandKernel::commandComments()
+    Generator<Instruction> commandComments(CommandPtr command)
     {
-        co_yield Instruction::Comment(m_command->toString());
-        co_yield Instruction::Comment(m_command->argInfo());
+        co_yield Instruction::Comment(command->toString());
+        co_yield Instruction::Comment(command->argInfo());
     }
 
     void CommandKernel::generateKernelGraph(std::string name)
@@ -245,15 +245,15 @@ namespace rocRoller
         if(!m_context->kernelOptions().lazyAddArguments)
             m_context->kernel()->addCommandArguments(m_command->getArguments());
 
-        m_kernelGraph = KernelGraph::translate(m_command);
+        auto kernelGraph = KernelGraph::translate(m_command);
 
         if(Settings::getInstance()->get(Settings::LogGraphs))
             Log::debug("CommandKernel::generateKernel: post translate: {}",
-                       m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
+                       kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
 
         if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
         {
-            check = m_kernelGraph.checkConstraints();
+            check = kernelGraph.checkConstraints();
             AssertFatal(
                 check.satisfied,
                 concatenate("CommandKernel::generateKernel: post translate:\n", check.explanation));
@@ -343,30 +343,33 @@ namespace rocRoller
 
         for(auto const& t : transforms)
         {
-            m_kernelGraph = m_kernelGraph.transform(t);
+            kernelGraph = kernelGraph.transform(t);
         }
+
+        m_kernelGraph = std::make_shared<KernelGraph::KernelGraph>(kernelGraph);
     }
 
-    Generator<Instruction> CommandKernel::kernelInstructions()
+    Generator<Instruction> kernelInstructions(ContextPtr                  context,
+                                              CommandPtr                  command,
+                                              KernelGraph::KernelGraphPtr kernelGraph)
     {
-        co_yield commandComments();
-        co_yield m_context->kernel()->preamble();
-        co_yield m_context->kernel()->prolog();
+        co_yield commandComments(command);
+        co_yield context->kernel()->preamble();
+        co_yield context->kernel()->prolog();
 
-        co_yield KernelGraph::generate(m_kernelGraph, m_context->kernel());
+        co_yield KernelGraph::generate(*kernelGraph, context->kernel());
 
-        co_yield m_context->kernel()->postamble();
-        co_yield m_context->kernel()->amdgpu_metadata();
+        co_yield context->kernel()->postamble();
+        co_yield context->kernel()->amdgpu_metadata();
     }
 
     void CommandKernel::generateKernelSource()
     {
         TIMER(t, "CommandKernel::generateKernelSource");
-        m_context->kernel()->setKernelGraphMeta(
-            std::make_shared<KernelGraph::KernelGraph>(m_kernelGraph));
+        m_context->kernel()->setKernelGraphMeta(m_kernelGraph);
         m_context->kernel()->setCommandMeta(m_command);
 
-        m_context->schedule(kernelInstructions());
+        m_context->schedule(kernelInstructions(m_context, m_command, m_kernelGraph));
     }
 
     std::vector<char> CommandKernel::assembleKernel()
@@ -546,5 +549,10 @@ namespace rocRoller
                     ShowValue(toString(amount)));
 
         return getUnsignedInt(evaluate(amount, args));
+    }
+
+    std::array<unsigned int, 3> const& CommandKernel::getWorkgroupSize() const
+    {
+        return m_context->kernel()->workgroupSize();
     }
 }

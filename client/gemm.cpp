@@ -31,6 +31,7 @@
 #include <hip/hip_runtime.h>
 #endif /* ROCROLLER_USE_HIP */
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>

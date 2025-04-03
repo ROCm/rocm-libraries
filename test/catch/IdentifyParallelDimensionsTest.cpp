@@ -30,6 +30,8 @@
 
 #include "TestContext.hpp"
 
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>

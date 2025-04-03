@@ -30,6 +30,8 @@
 #include <string>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #include "BenchmarkSolution.hpp"

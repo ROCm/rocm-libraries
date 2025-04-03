@@ -29,8 +29,6 @@
 #include <ostream>
 #include <string>
 
-#include <rocRoller/DataTypes/DataTypes.hpp>
-
 #include <rocRoller/AssertOpKinds_fwd.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>

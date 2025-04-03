@@ -134,7 +134,7 @@ namespace rocRoller
             CommandKernel&   m_kernel;
             CommandArguments m_runtimeArgs;
 
-            KernelGraph::KernelGraph                                       m_kgraph;
+            KernelGraph::KernelGraphPtr                                    m_kgraph;
             std::shared_ptr<KernelGraph::CoordinateGraph::CoordinateGraph> m_coords;
 
             KernelGraph::CoordinateGraph::Transformer m_tx;

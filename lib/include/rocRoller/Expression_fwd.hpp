@@ -169,7 +169,13 @@ namespace rocRoller
         template <typename T>
         concept CExpression = std::constructible_from<Expression, T>;
 
-        enum class EvaluationTime : int;
+        enum class EvaluationTime : int
+        {
+            Translate = 0, //< An expression where all the values come from CommandArgumentValues.
+            KernelLaunch, //< An expression where values may come from CommandArguments or CommandArgumentValues.
+            KernelExecute, // An expression that depends on at least one Register::Value.
+            Count
+        };
 
         enum class Category : int;
 

@@ -155,6 +155,8 @@ namespace rocRoller
         }
 
         Throw<FatalError>("Unsupported data type");
+
+        return {};
     }
 
     template <typename rrDT>

@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 

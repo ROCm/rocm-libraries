@@ -115,8 +115,7 @@ namespace rocRoller
                                 == (hipError_t)HIP_SUCCESS);
                     auto numWGs = deviceProperties.multiProcessorCount;
 
-                    auto flatWorkgroupSize
-                        = product(commandKernel->getContext()->kernel()->workgroupSize());
+                    auto flatWorkgroupSize = product(commandKernel->getWorkgroupSize());
 
                     // Determine the occupancy for the kernel
                     int occupancy;

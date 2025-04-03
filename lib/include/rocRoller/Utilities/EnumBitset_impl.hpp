@@ -38,7 +38,10 @@ namespace rocRoller
         size_t rv = 0;
 
         for(auto const& entry : items)
+        {
+            // cppcheck-suppress useStlAlgorithm
             rv |= (1UL << static_cast<size_t>(entry));
+        }
 
         return rv;
     }

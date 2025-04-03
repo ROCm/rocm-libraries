@@ -27,6 +27,7 @@
 #pragma once
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 

@@ -53,6 +53,7 @@ namespace rocRoller
         using Base::operator[];
 
         constexpr EnumBitset(std::initializer_list<Enum> items);
+        // cppcheck-suppress noExplicitConstructor
         constexpr EnumBitset(Base const& val);
 
         /**

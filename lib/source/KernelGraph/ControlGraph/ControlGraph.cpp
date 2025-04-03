@@ -28,6 +28,7 @@
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include <cmath>
+#include <iomanip>
 
 namespace rocRoller::KernelGraph::ControlGraph
 {

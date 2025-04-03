@@ -27,6 +27,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Expression.hpp>
 
 namespace rocRoller::KernelGraph::ControlGraph
 {

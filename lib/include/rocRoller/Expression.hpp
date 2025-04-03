@@ -41,13 +41,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-        enum class EvaluationTime : int
-        {
-            Translate = 0, //< An expression where all the values come from CommandArgumentValues.
-            KernelLaunch, //< An expression where values may come from CommandArguments or CommandArgumentValues.
-            KernelExecute, // An expression that depends on at least one Register::Value.
-            Count
-        };
         std::string   toString(EvaluationTime t);
         std::ostream& operator<<(std::ostream&, EvaluationTime const&);
 

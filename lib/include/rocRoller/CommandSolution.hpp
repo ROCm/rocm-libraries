@@ -28,10 +28,19 @@
 
 #include <memory>
 
-#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/CommandSolution_fwd.hpp>
+
+#include <rocRoller/AssemblyKernel_fwd.hpp>
+#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/ExecutableKernel_fwd.hpp>
+#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension_fwd.hpp>
+#include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
+#include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
@@ -264,7 +273,7 @@ namespace rocRoller
          */
         void launchKernel(RuntimeArguments const& args, hipStream_t stream = 0);
 
-        KernelGraph::KernelGraph getKernelGraph() const;
+        KernelGraph::KernelGraphPtr getKernelGraph() const;
 
         std::string getInstructions() const;
 
@@ -298,6 +307,11 @@ namespace rocRoller
         size_t scratchSpaceRequired(RuntimeArguments const& args) const;
 
         /**
+         * @brief Returns the workgroup size
+         */
+        std::array<unsigned int, 3> const& getWorkgroupSize() const;
+
+        /**
          * @brief Returns the hipFunction for the kernel
          */
         hipFunction_t getHipFunction() const;
@@ -308,18 +322,14 @@ namespace rocRoller
 
         std::vector<Expression::ExpressionPtr> m_predicates;
 
-        KernelGraph::KernelGraph          m_kernelGraph;
+        KernelGraph::KernelGraphPtr       m_kernelGraph;
         ContextPtr                        m_context;
         std::shared_ptr<ExecutableKernel> m_executableKernel;
         CommandParametersPtr              m_commandParameters;
         CommandLaunchParametersPtr        m_launchParameters;
 
-        Generator<Instruction> commandComments();
-
         void generateKernelGraph(std::string name);
         void generateKernelSource();
-
-        Generator<Instruction> kernelInstructions();
 
         /**
          * @brief Determines launch bounds and arguments, and launches the kernel with
@@ -342,7 +352,7 @@ namespace rocRoller
     class CommandSolution
     {
     public:
-        CommandSolution(CommandPtr command);
+        explicit CommandSolution(CommandPtr command);
 
         void                                 appendKernel(CommandKernelPtr kernel);
         std::vector<CommandKernelPtr> const& kernels() const;

@@ -39,7 +39,7 @@ namespace rocRoller
             , m_runtimeArgs(runtimeArgs)
             , m_kgraph(kernel.getKernelGraph())
             , m_coords(std::make_shared<KernelGraph::CoordinateGraph::CoordinateGraph>(
-                  m_kgraph.coordinates))
+                  m_kgraph->coordinates))
             , m_tx(m_coords.get())
             , m_invocation(kernel.getKernelInvocation(runtimeArgs.runtimeArguments()))
         {
@@ -133,11 +133,11 @@ namespace rocRoller
 
             for(auto const& macroTileTag :
                 m_kernel.getKernelGraph()
-                    .coordinates.getNodes<KernelGraph::CoordinateGraph::MacroTile>()
+                    ->coordinates.getNodes<KernelGraph::CoordinateGraph::MacroTile>()
                     .to<std::vector>())
             {
                 auto macroTile = m_kernel.getKernelGraph()
-                                     .coordinates.getNode<KernelGraph::CoordinateGraph::MacroTile>(
+                                     ->coordinates.getNode<KernelGraph::CoordinateGraph::MacroTile>(
                                          macroTileTag);
                 if(macroTile.layoutType == LayoutType::MATRIX_A)
                 {
