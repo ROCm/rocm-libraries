@@ -216,10 +216,12 @@ def runPerformanceCommand (platform, project)
         if (env.CHANGE_ID)
         {
             // either a label or a parameter can block comparison to master branch
-            def masterCompare = !pullRequest.labels.any { it == "ci:no-build-master"}
-            if (masterCompare && params?."Build master branch for comparison" != null)
+            def masterCompare = !(
+                pullRequest.labels.any { it == "ci:no-build-master" || it == "ci:no-build-target" }
+            )
+            if (masterCompare && (params?."Build target branch for comparison" != null))
             {
-                masterCompare = params."Build master branch for comparison"
+                masterCompare = params."Build target branch for comparison"
             }
             String masterCompareCommand
             if (masterCompare)
