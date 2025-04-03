@@ -24,6 +24,9 @@
  #
  ###############################################################################
 
+#Prevent CMake to add building path to RUNPATH
+set(CMAKE_SKIP_RPATH  TRUE)
+
 # Check whether building within hiptensor context
 if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
     # Target that will trigger build of all samples
@@ -40,7 +43,8 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
 
         # Sample must propagate the build interface includes to make sure
         # hiptensor includes are captured at runtime.
-        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor "-L${HIP_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+        target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor "-L${HIP_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+                              "-fno-rtlib-add-rpath")
         target_include_directories(${BINARY_NAME} PRIVATE
                                 ${CMAKE_CURRENT_SOURCE_DIR}
                                 ${PROJECT_SOURCE_DIR}/samples

@@ -66,6 +66,9 @@ add_custom_target(hiptensor_tests)
 set(HIPTENSOR_COMMON_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hip_resource.cpp
                                   ${CMAKE_CURRENT_SOURCE_DIR}/hiptensor_gtest_main.cpp)
 
+#Prevent CMake to add building path to RUNPATH
+set(CMAKE_SKIP_RPATH  TRUE)
+
 # Create test executables and deploy
 function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
@@ -100,7 +103,8 @@ function(add_hiptensor_test BINARY_NAME YAML_CONFIG_FILE TEST_SOURCES)
 
     # Test must propagate the build interface includes to make sure
     # hiptensor includes are captured at runtime.
-    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIP_CLANG_ROOT}/lib" "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+    target_link_libraries(${BINARY_NAME} PRIVATE hiptensor::hiptensor hiptensor_llvm gtest "-L${HIP_CLANG_ROOT}/lib"
+                          "-Wl,-rpath=$ORIGIN/../${CMAKE_INSTALL_LIBDIR}" "-fno-rtlib-add-rpath")
 
     target_include_directories(${BINARY_NAME} PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}
