@@ -91,7 +91,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
             + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -173,17 +173,17 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
         temporary_storage_bytes = max_temporary_storage_bytes;
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
-                      {
-                          for(size_t keys_size : keys_sizes)
-                          {
-                              run(keys_size, d_inputs[fi]);
-                          }
-                      }
-                  });
+        state.run(
+            [&]
+            {
+                for(size_t fi = 0; fi < first_occurrences.size(); ++fi)
+                {
+                    for(size_t keys_size : keys_sizes)
+                    {
+                        run(keys_size, d_inputs[fi]);
+                    }
+                }
+            });
 
         // Only a part of data (before the first occurrence) must be actually processed. In ideal
         // cases when no thread blocks do unneeded work (i.e. exit early once the match is found),
@@ -199,14 +199,14 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
             sum_keys_size += keys_size;
         }
 
-        state.set_items_processed_per_iteration<type>(gbench_state, sum_effective_size);
+        state.set_items_processed_per_iteration<type>(sum_effective_size);
 
         // Each input is read once but all keys are read by all threads so performance is likely
         // compute-bound or bound by cache bandwidth for reading keys rather than reading inputs.
         // Let's additionally report the rate of comparisons to see if it reaches a plateau with
         // increasing keys_size.
-        gbench_state.counters["comparisons_per_second"] = benchmark::Counter(
-            static_cast<double>(gbench_state.iterations() * state.batch_iterations
+        state.gbench_state.counters["comparisons_per_second"] = benchmark::Counter(
+            static_cast<double>(state.gbench_state.iterations() * state.batch_iterations
                                 * sum_effective_size * sum_keys_size),
             benchmark::Counter::kIsRate);
 

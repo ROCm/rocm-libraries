@@ -79,7 +79,7 @@ struct device_merge_benchmark : public benchmark_utils::autotune_interface
 
     // keys benchmark
     template<typename val = ValueType>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -132,27 +132,27 @@ struct device_merge_benchmark : public benchmark_utils::autotune_interface
 
         d_temporary_storage.resize(temporary_storage_bytes);
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                                       temporary_storage_bytes,
-                                                       d_keys_input1.get(),
-                                                       d_keys_input2.get(),
-                                                       d_keys_output.get(),
-                                                       size1,
-                                                       size2,
-                                                       compare_op,
-                                                       stream,
-                                                       false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                                 temporary_storage_bytes,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
+                                                 size1,
+                                                 size2,
+                                                 compare_op,
+                                                 stream,
+                                                 false));
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 
     // pairs benchmark
     template<typename val = ValueType>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -216,23 +216,23 @@ struct device_merge_benchmark : public benchmark_utils::autotune_interface
         d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
-                                                       temporary_storage_bytes,
-                                                       d_keys_input1.get(),
-                                                       d_keys_input2.get(),
-                                                       d_keys_output.get(),
-                                                       d_values_input1.get(),
-                                                       d_values_input2.get(),
-                                                       d_values_output.get(),
-                                                       size1,
-                                                       size2,
-                                                       compare_op,
-                                                       stream,
-                                                       false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::merge<Config>(d_temporary_storage.get(),
+                                                 temporary_storage_bytes,
+                                                 d_keys_input1.get(),
+                                                 d_keys_input2.get(),
+                                                 d_keys_output.get(),
+                                                 d_values_input1.get(),
+                                                 d_values_input2.get(),
+                                                 d_values_output.get(),
+                                                 size1,
+                                                 size2,
+                                                 compare_op,
+                                                 stream,
+                                                 false));
+            });
 
 #pragma pack(push, 1)
         struct combined
@@ -241,12 +241,12 @@ struct device_merge_benchmark : public benchmark_utils::autotune_interface
             value_type b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(gbench_state, state);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 

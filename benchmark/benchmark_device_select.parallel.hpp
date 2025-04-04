@@ -102,7 +102,7 @@ struct device_select_flag_benchmark : public benchmark_utils::autotune_interface
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -174,9 +174,9 @@ struct device_select_flag_benchmark : public benchmark_utils::autotune_interface
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -196,7 +196,7 @@ struct device_select_predicate_benchmark : public benchmark_utils::autotune_inte
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -249,9 +249,9 @@ struct device_select_predicate_benchmark : public benchmark_utils::autotune_inte
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -273,7 +273,7 @@ struct device_select_predicated_flag_benchmark : public benchmark_utils::autotun
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -347,9 +347,9 @@ struct device_select_predicated_flag_benchmark : public benchmark_utils::autotun
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -388,7 +388,7 @@ struct device_select_unique_benchmark : public benchmark_utils::autotune_interfa
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -452,9 +452,9 @@ struct device_select_unique_benchmark : public benchmark_utils::autotune_interfa
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -476,7 +476,7 @@ struct device_select_unique_by_key_benchmark : public benchmark_utils::autotune_
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -554,7 +554,7 @@ struct device_select_unique_by_key_benchmark : public benchmark_utils::autotune_
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
 #pragma pack(push, 1)
         struct combined
@@ -563,7 +563,7 @@ struct device_select_unique_by_key_benchmark : public benchmark_utils::autotune_
             ValueType b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;

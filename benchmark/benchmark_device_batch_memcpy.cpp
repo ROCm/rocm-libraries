@@ -258,7 +258,7 @@ template<typename ValueType,
          int32_t NumTlevBuffers,
          int32_t NumWlevBuffers,
          int32_t NumBlevBuffers>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& seed   = state.seed;
@@ -283,19 +283,19 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
                                                              NumWlevBuffers,
                                                              NumBlevBuffers);
 
-    state.run(gbench_state,
-              [&]
-              {
-                  batch_copy<IsMemCpy>(d_temp_storage.get(),
-                                       temp_storage_bytes,
-                                       data.d_buffer_srcs.get(),
-                                       data.d_buffer_dsts.get(),
-                                       data.d_buffer_sizes.get(),
-                                       num_buffers,
-                                       stream);
-              });
+    state.run(
+        [&]
+        {
+            batch_copy<IsMemCpy>(d_temp_storage.get(),
+                                 temp_storage_bytes,
+                                 data.d_buffer_srcs.get(),
+                                 data.d_buffer_dsts.get(),
+                                 data.d_buffer_sizes.get(),
+                                 num_buffers,
+                                 stream);
+        });
 
-    state.set_items_processed_per_iteration<ValueType>(gbench_state, data.total_num_elements);
+    state.set_items_processed_per_iteration<ValueType>(data.total_num_elements);
 }
 
 // Naive implementation used for comparison
@@ -343,7 +343,7 @@ template<typename ValueType,
          int32_t NumTlevBuffers,
          int32_t NumWlevBuffers,
          int32_t NumBlevBuffers>
-void run_naive_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_naive_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& seed   = state.seed;
@@ -356,16 +356,16 @@ void run_naive_benchmark(benchmark::State& gbench_state, benchmark_utils::state&
 
     constexpr size_t num_buffers = NumTlevBuffers + NumWlevBuffers + NumBlevBuffers;
 
-    state.run(gbench_state,
-              [&]
-              {
-                  naive_kernel<BufferSizeType, 256>
-                      <<<num_buffers, 256, 0, stream>>>((void**)data.d_buffer_srcs.get(),
-                                                        (void**)data.d_buffer_dsts.get(),
-                                                        data.d_buffer_sizes.get());
-              });
+    state.run(
+        [&]
+        {
+            naive_kernel<BufferSizeType, 256>
+                <<<num_buffers, 256, 0, stream>>>((void**)data.d_buffer_srcs.get(),
+                                                  (void**)data.d_buffer_dsts.get(),
+                                                  data.d_buffer_sizes.get());
+        });
 
-    state.set_items_processed_per_iteration<ValueType>(gbench_state, data.total_num_elements);
+    state.set_items_processed_per_iteration<ValueType>(data.total_num_elements);
 }
 
     #define CREATE_NAIVE_BENCHMARK(item_size,                                                     \
@@ -380,14 +380,14 @@ void run_naive_benchmark(benchmark::State& gbench_state, benchmark_utils::state&
                               ",algo:naive_memcpy,num_tlev:" #num_tlev ",num_wlev:" #num_wlev     \
                               ",num_blev:" #num_blev ",cfg:default_config}")                      \
                               .c_str(),                                                           \
-                          [=](benchmark::State& gbench_state, benchmark_utils::state& state)      \
+                          [=](benchmark_utils::state&& state)                                     \
                           {                                                                       \
                               run_naive_benchmark<custom_aligned_type<item_size, item_alignment>, \
                                                   size_type,                                      \
                                                   true,                                           \
                                                   num_tlev,                                       \
                                                   num_wlev,                                       \
-                                                  num_blev>(gbench_state, state);                 \
+                                                  num_blev>(state);                               \
                           });
 
 #endif // BUILD_NAIVE_BENCHMARK
@@ -398,20 +398,20 @@ void run_naive_benchmark(benchmark::State& gbench_state, benchmark_utils::state&
                           ",size_type:" #size_type ",algo:batch_memcpy,num_tlev:" #num_tlev      \
                           ",num_wlev:" #num_wlev ",num_blev:" #num_blev ",cfg:default_config}")  \
                           .c_str(),                                                              \
-                      [=](benchmark::State& gbench_state, benchmark_utils::state& state)         \
+                      [=](benchmark_utils::state&& state)                                        \
                       {                                                                          \
                           run_benchmark<custom_aligned_type<item_size, item_alignment>,          \
                                         size_type,                                               \
                                         true,                                                    \
                                         num_tlev,                                                \
                                         num_wlev,                                                \
-                                        num_blev>(gbench_state, state);                          \
+                                        num_blev>(std::forward<benchmark_utils::state>(state));  \
                           run_benchmark<custom_aligned_type<item_size, item_alignment>,          \
                                         size_type,                                               \
                                         false,                                                   \
                                         num_tlev,                                                \
                                         num_wlev,                                                \
-                                        num_blev>(gbench_state, state);                          \
+                                        num_blev>(std::forward<benchmark_utils::state>(state));  \
                       });
 
 #ifndef BUILD_NAIVE_BENCHMARK

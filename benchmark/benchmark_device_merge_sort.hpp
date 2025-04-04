@@ -56,7 +56,7 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rp::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -99,20 +99,20 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                                       temporary_storage_bytes,
-                                                       d_keys_input,
-                                                       d_keys_output,
-                                                       size,
-                                                       lesser_op,
-                                                       stream,
-                                                       false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 size,
+                                                 lesser_op,
+                                                 stream,
+                                                 false));
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -120,7 +120,7 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rp::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -178,20 +178,20 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
-                                                       temporary_storage_bytes,
-                                                       d_keys_input,
-                                                       d_keys_output,
-                                                       d_values_input,
-                                                       d_values_output,
-                                                       size,
-                                                       lesser_op,
-                                                       stream,
-                                                       false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rp::merge_sort<Config>(d_temporary_storage,
+                                                 temporary_storage_bytes,
+                                                 d_keys_input,
+                                                 d_keys_output,
+                                                 d_values_input,
+                                                 d_values_output,
+                                                 size,
+                                                 lesser_op,
+                                                 stream,
+                                                 false));
+            });
 
 #pragma pack(push, 1)
         struct combined
@@ -200,7 +200,7 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
             value_type b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -208,9 +208,9 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(gbench_state, state);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 

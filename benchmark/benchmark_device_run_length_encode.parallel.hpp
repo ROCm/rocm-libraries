@@ -74,7 +74,7 @@ struct device_run_length_encode_benchmark : public benchmark_utils::autotune_int
                                          + ",keys_max_length:" + std::to_string(MaxLength)
                                          + ",cfg:" + run_length_encode_config_name<Config>() + "}");
     }
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -129,20 +129,20 @@ struct device_run_length_encode_benchmark : public benchmark_utils::autotune_int
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::run_length_encode<Config>(d_temporary_storage.get(),
-                                                                   temporary_storage_bytes,
-                                                                   d_input.get(),
-                                                                   size,
-                                                                   d_unique_output.get(),
-                                                                   d_counts_output.get(),
-                                                                   d_runs_count_output.get(),
-                                                                   stream,
-                                                                   false));
-                  });
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::run_length_encode<Config>(d_temporary_storage.get(),
+                                                             temporary_storage_bytes,
+                                                             d_input.get(),
+                                                             size,
+                                                             d_unique_output.get(),
+                                                             d_counts_output.get(),
+                                                             d_runs_count_output.get(),
+                                                             stream,
+                                                             false));
+            });
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 };
 

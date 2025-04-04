@@ -81,7 +81,7 @@ struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_inte
             + ",cfg:" + non_trivial_runs_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -151,8 +151,7 @@ struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_inte
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&] { dispatch(d_temporary_storage.get(), temporary_storage_bytes); });
+        state.run([&] { dispatch(d_temporary_storage.get(), temporary_storage_bytes); });
 
 #pragma pack(push, 1)
 
@@ -164,7 +163,7 @@ struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_inte
         };
 #pragma pack(pop)
 
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
     static constexpr bool is_tuning = !std::is_same<Config, rocprim::default_config>::value;
 };

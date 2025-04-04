@@ -215,7 +215,7 @@ public:
             <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input, d_output);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -241,12 +241,11 @@ public:
 
         static constexpr auto stable_tag = rocprim::detail::bool_constant<stable>{};
 
-        state.run(gbench_state,
-                  [&] { dispatch_block_sort(stable_tag, size, stream, d_input, d_output); });
+        state.run([&] { dispatch_block_sort(stable_tag, size, stream, d_input, d_output); });
 
-        state.set_items_processed_per_iteration<KeyType>(gbench_state, size);
+        state.set_items_processed_per_iteration<KeyType>(size);
 
-        gbench_state.counters["sorted_size"]
+        state.gbench_state.counters["sorted_size"]
             = benchmark::Counter(BlockSize * ItemsPerThread,
                                  benchmark::Counter::kDefaults,
                                  benchmark::Counter::OneK::kIs1024);

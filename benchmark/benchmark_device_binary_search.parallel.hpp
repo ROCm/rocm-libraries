@@ -142,7 +142,7 @@ struct device_binary_search_benchmark : public benchmark_utils::autotune_interfa
                                          + ",cfg:" + binary_search_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& bytes  = state.bytes;
         const auto& seed   = state.seed;
@@ -193,22 +193,22 @@ struct device_binary_search_benchmark : public benchmark_utils::autotune_interfa
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
-                                                                       d_temporary_storage.get(),
-                                                                       temporary_storage_bytes,
-                                                                       d_haystack.get(),
-                                                                       d_needles.get(),
-                                                                       d_output.get(),
-                                                                       haystack_size,
-                                                                       needles_size,
-                                                                       compare_op,
-                                                                       stream));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(dispatch_helper.dispatch_binary_search(SubAlgorithm{},
+                                                                 d_temporary_storage.get(),
+                                                                 temporary_storage_bytes,
+                                                                 d_haystack.get(),
+                                                                 d_needles.get(),
+                                                                 d_output.get(),
+                                                                 haystack_size,
+                                                                 needles_size,
+                                                                 compare_op,
+                                                                 stream));
+            });
 
-        state.set_items_processed_per_iteration<T>(gbench_state, needles_size);
+        state.set_items_processed_per_iteration<T>(needles_size);
     }
 };
 

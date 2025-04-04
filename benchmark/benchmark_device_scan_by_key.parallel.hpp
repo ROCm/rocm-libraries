@@ -182,7 +182,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
         }
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -225,21 +225,21 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
                                           debug)));
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK((run_device_scan_by_key(d_temp_storage.get(),
-                                                        temp_storage_size_bytes,
-                                                        d_keys.get(),
-                                                        d_input.get(),
-                                                        d_output.get(),
-                                                        initial_value,
-                                                        size,
-                                                        scan_op,
-                                                        compare_op,
-                                                        stream,
-                                                        debug)));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK((run_device_scan_by_key(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  d_keys.get(),
+                                                  d_input.get(),
+                                                  d_output.get(),
+                                                  initial_value,
+                                                  size,
+                                                  scan_op,
+                                                  compare_op,
+                                                  stream,
+                                                  debug)));
+            });
 
 #pragma pack(push, 1)
         struct combined
@@ -248,7 +248,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
             Value b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
 };
 

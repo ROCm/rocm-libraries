@@ -101,7 +101,7 @@ struct device_radix_sort_onesweep_benchmark : public benchmark_utils::autotune_i
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -148,34 +148,34 @@ struct device_radix_sort_onesweep_benchmark : public benchmark_utils::autotune_i
         d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                          d_temporary_storage.get(),
-                          temporary_storage_bytes,
-                          d_keys_input.get(),
-                          nullptr,
-                          d_keys_output.get(),
-                          d_values_ptr,
-                          nullptr,
-                          d_values_ptr,
-                          size,
-                          is_result_in_output,
-                          rocprim::identity_decomposer{},
-                          0,
-                          sizeof(key_type) * 8,
-                          stream,
-                          false,
-                          false)));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
+                    d_temporary_storage.get(),
+                    temporary_storage_bytes,
+                    d_keys_input.get(),
+                    nullptr,
+                    d_keys_output.get(),
+                    d_values_ptr,
+                    nullptr,
+                    d_values_ptr,
+                    size,
+                    is_result_in_output,
+                    rocprim::identity_decomposer{},
+                    0,
+                    sizeof(key_type) * 8,
+                    stream,
+                    false,
+                    false)));
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -231,27 +231,27 @@ struct device_radix_sort_onesweep_benchmark : public benchmark_utils::autotune_i
         d_temporary_storage.resize(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
-                          d_temporary_storage.get(),
-                          temporary_storage_bytes,
-                          d_keys_input.get(),
-                          nullptr,
-                          d_keys_output.get(),
-                          d_values_input.get(),
-                          nullptr,
-                          d_values_output.get(),
-                          size,
-                          is_result_in_output,
-                          rocprim::identity_decomposer{},
-                          0,
-                          sizeof(key_type) * 8,
-                          stream,
-                          false,
-                          false)));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK((rocprim::detail::radix_sort_onesweep_impl<Config, false>(
+                    d_temporary_storage.get(),
+                    temporary_storage_bytes,
+                    d_keys_input.get(),
+                    nullptr,
+                    d_keys_output.get(),
+                    d_values_input.get(),
+                    nullptr,
+                    d_values_output.get(),
+                    size,
+                    is_result_in_output,
+                    rocprim::identity_decomposer{},
+                    0,
+                    sizeof(key_type) * 8,
+                    stream,
+                    false,
+                    false)));
+            });
 
 #pragma pack(push, 1)
         struct combined
@@ -260,12 +260,12 @@ struct device_radix_sort_onesweep_benchmark : public benchmark_utils::autotune_i
             value_type b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(gbench_state, state);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 

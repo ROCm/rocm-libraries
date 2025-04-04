@@ -60,7 +60,7 @@ struct device_partial_sort_benchmark : public benchmark_utils::autotune_interfac
             + ",key_type:" + std::string(Traits<Key>::name()) + ",cfg:default_config}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
 
         const auto& stream = state.stream;
@@ -118,20 +118,20 @@ struct device_partial_sort_benchmark : public benchmark_utils::autotune_interfac
                                     hipMemcpyDeviceToDevice));
             });
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::partial_sort(d_temporary_storage,
-                                                      temporary_storage_bytes,
-                                                      d_keys_input,
-                                                      middle,
-                                                      size,
-                                                      lesser_op,
-                                                      stream,
-                                                      false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::partial_sort(d_temporary_storage,
+                                                temporary_storage_bytes,
+                                                d_keys_input,
+                                                middle,
+                                                size,
+                                                lesser_op,
+                                                stream,
+                                                false));
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));

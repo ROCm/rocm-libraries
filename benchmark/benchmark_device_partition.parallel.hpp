@@ -134,7 +134,7 @@ struct device_partition_flag_benchmark : public benchmark_utils::autotune_interf
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -222,9 +222,9 @@ struct device_partition_flag_benchmark : public benchmark_utils::autotune_interf
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
 
         HIP_CHECK(hipFree(d_input));
         if(is_tuning)
@@ -255,7 +255,7 @@ struct device_partition_predicate_benchmark : public benchmark_utils::autotune_i
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -315,9 +315,9 @@ struct device_partition_predicate_benchmark : public benchmark_utils::autotune_i
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));
@@ -344,7 +344,7 @@ struct device_partition_two_way_flag_benchmark : public benchmark_utils::autotun
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -436,9 +436,9 @@ struct device_partition_two_way_flag_benchmark : public benchmark_utils::autotun
         void* d_temp_storage = nullptr;
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
 
         HIP_CHECK(hipFree(d_input));
         if(is_tuning)
@@ -470,7 +470,7 @@ struct device_partition_two_way_predicate_benchmark : public benchmark_utils::au
             + get_probability_name(Probability) + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -533,9 +533,9 @@ struct device_partition_two_way_predicate_benchmark : public benchmark_utils::au
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output_selected));
@@ -561,7 +561,7 @@ struct device_partition_three_way_benchmark : public benchmark_utils::autotune_i
                                          + ",cfg:" + partition_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -646,9 +646,9 @@ struct device_partition_three_way_benchmark : public benchmark_utils::autotune_i
         void* d_temp_storage{};
         HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage, temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(gbench_state, size);
+        state.set_items_processed_per_iteration<DataType>(size);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output_first));

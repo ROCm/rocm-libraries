@@ -128,7 +128,7 @@ template<bool AllReduce,
          unsigned int WarpSize,
          unsigned int BlockSize,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -150,18 +150,18 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<T>         d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
-                      d_input.get(),
-                      d_output.get(),
-                      d_flags.get(),
-                      size,
-                      stream);
-              });
+    state.run(
+        [&]
+        {
+            execute_warp_reduce_kernel<AllReduce, Segmented, WarpSize, BlockSize, Trials>(
+                d_input.get(),
+                d_output.get(),
+                d_flags.get(),
+                size,
+                stream);
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, Trials * size);
+    state.set_items_processed_per_iteration<T>(Trials * size);
 }
 
 #define CREATE_BENCHMARK(T, WS, BS)                                                           \

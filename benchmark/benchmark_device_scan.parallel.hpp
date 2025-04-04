@@ -166,7 +166,7 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
         }
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -198,20 +198,20 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK((run_device_scan(d_temp_storage.get(),
-                                                 temp_storage_size_bytes,
-                                                 d_input.get(),
-                                                 d_output.get(),
-                                                 initial_value,
-                                                 size,
-                                                 scan_op,
-                                                 stream)));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK((run_device_scan(d_temp_storage.get(),
+                                           temp_storage_size_bytes,
+                                           d_input.get(),
+                                           d_output.get(),
+                                           initial_value,
+                                           size,
+                                           scan_op,
+                                           stream)));
+            });
 
-        state.set_items_processed_per_iteration<T>(gbench_state, size);
+        state.set_items_processed_per_iteration<T>(size);
     }
 };
 

@@ -45,17 +45,17 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(T, K, SORTED, SUBALGORITHM)                                               \
-    executor.queue_fn(                                                                             \
-        bench_naming::format_name("{lvl:device,algo:" + SUBALGORITHM{}.name()                      \
-                                  + ",key_type:" #T ",subalgo:" #K "_percent_"                     \
-                                  + std::string(SORTED ? "sorted" : "random")                      \
-                                  + "_needles,cfg:default_config}")                                \
-            .c_str(),                                                                              \
-        [=](benchmark::State& gbench_state, benchmark_utils::state& state)                         \
-        {                                                                                          \
-            device_binary_search_benchmark<SUBALGORITHM, T, size_t, K, SORTED>().run(gbench_state, \
-                                                                                     state);       \
+#define CREATE_BENCHMARK(T, K, SORTED, SUBALGORITHM)                                  \
+    executor.queue_fn(                                                                \
+        bench_naming::format_name("{lvl:device,algo:" + SUBALGORITHM{}.name()         \
+                                  + ",key_type:" #T ",subalgo:" #K "_percent_"        \
+                                  + std::string(SORTED ? "sorted" : "random")         \
+                                  + "_needles,cfg:default_config}")                   \
+            .c_str(),                                                                 \
+        [=](benchmark_utils::state&& state)                                           \
+        {                                                                             \
+            device_binary_search_benchmark<SUBALGORITHM, T, size_t, K, SORTED>().run( \
+                std::forward<benchmark_utils::state>(state));                         \
         });
 
 #define BENCHMARK_ALGORITHMS(T, K, SORTED)                     \

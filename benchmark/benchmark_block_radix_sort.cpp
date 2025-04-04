@@ -123,7 +123,7 @@ template<typename T,
          unsigned int    RadixBitsPerPass,
          unsigned int    ItemsPerThread,
          unsigned int    Trials = 10>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -144,27 +144,25 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_keys)
-                  {
-                      sort_keys_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
-                          <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(
-                              d_input.get(),
-                              d_output.get());
-                  }
-                  else if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_pairs)
-                  {
-                      sort_pairs_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
-                          <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(
-                              d_input.get(),
-                              d_output.get());
-                  }
-                  HIP_CHECK(hipGetLastError());
-              });
+    state.run(
+        [&]
+        {
+            if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_keys)
+            {
+                sort_keys_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
+                    <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                                   d_output.get());
+            }
+            else if ROCPRIM_IF_CONSTEXPR(BenchmarkKind == benchmark_kinds::sort_pairs)
+            {
+                sort_pairs_kernel<T, BlockSize, RadixBitsPerPass, ItemsPerThread, Trials>
+                    <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                                   d_output.get());
+            }
+            HIP_CHECK(hipGetLastError());
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
+    state.set_items_processed_per_iteration<T>(size * Trials);
 }
 
 #define CREATE_BENCHMARK(T, BS, RB, IPT)                                                       \

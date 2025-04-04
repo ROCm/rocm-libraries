@@ -87,9 +87,7 @@ struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_inte
                                          + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run_benchmark(benchmark::State&       gbench_state,
-                       benchmark_utils::state& state,
-                       size_t                  desired_segment) const
+    void run_benchmark(benchmark_utils::state&& state, size_t desired_segment) const
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -147,31 +145,31 @@ struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_inte
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage.get(),
-                                                             temporary_storage_bytes,
-                                                             d_values_input.get(),
-                                                             d_aggregates_output.get(),
-                                                             segments_count,
-                                                             d_offsets.get(),
-                                                             d_offsets.get() + 1,
-                                                             reduce_op,
-                                                             init,
-                                                             stream));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rp::segmented_reduce<Config>(d_temporary_storage.get(),
+                                                       temporary_storage_bytes,
+                                                       d_values_input.get(),
+                                                       d_aggregates_output.get(),
+                                                       segments_count,
+                                                       d_offsets.get(),
+                                                       d_offsets.get() + 1,
+                                                       reduce_op,
+                                                       init,
+                                                       stream));
+            });
 
-        state.set_items_processed_per_iteration<value_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<value_type>(size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         constexpr std::array<size_t, 5> desired_segments{1, 10, 100, 1000, 10000};
 
         for(const auto desired_segment : desired_segments)
         {
-            run_benchmark(gbench_state, state, desired_segment);
+            run_benchmark(std::forward<benchmark_utils::state>(state), desired_segment);
         }
     }
 };

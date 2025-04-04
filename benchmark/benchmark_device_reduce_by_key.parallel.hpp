@@ -84,7 +84,7 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
             + std::to_string(MaxSegmentLength) + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -179,7 +179,7 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
         dispatch(nullptr, temp_storage_size_bytes);
         common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
 
-        state.run(gbench_state, [&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
+        state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
 #pragma pack(push, 1)
         struct combined
@@ -188,7 +188,7 @@ struct device_reduce_by_key_benchmark : public benchmark_utils::autotune_interfa
             ValueType b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, size);
+        state.set_items_processed_per_iteration<combined>(size);
     }
 
     static constexpr bool is_tuning = !std::is_same<Config, rocprim::default_config>::value;

@@ -207,7 +207,7 @@ template<typename Benchmark,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -239,18 +239,17 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<T>            d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>
-                      <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(
-                          d_input.get(),
-                          d_ranks.get(),
-                          d_output.get());
-                  HIP_CHECK(hipGetLastError());
-              });
+    state.run(
+        [&]
+        {
+            kernel<Benchmark, T, BlockSize, ItemsPerThread, Trials>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                               d_ranks.get(),
+                                                                               d_output.get());
+            HIP_CHECK(hipGetLastError());
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
+    state.set_items_processed_per_iteration<T>(size * Trials);
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT)                                                           \

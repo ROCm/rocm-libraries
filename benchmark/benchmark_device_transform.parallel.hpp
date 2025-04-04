@@ -72,7 +72,7 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
             + std::string(Traits<T>::name()) + ",cfg:" + transform_config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -104,9 +104,9 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
                                                                       debug_synchronous);
         };
 
-        state.run(gbench_state, [&] { HIP_CHECK(launch()); });
+        state.run([&] { HIP_CHECK(launch()); });
 
-        state.set_items_processed_per_iteration<T>(gbench_state, size);
+        state.set_items_processed_per_iteration<T>(size);
     }
 };
 

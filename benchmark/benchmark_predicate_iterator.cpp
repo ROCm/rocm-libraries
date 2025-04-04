@@ -101,7 +101,7 @@ struct write_predicate_it
 };
 
 template<typename IteratorBenchmark>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -122,9 +122,9 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run(gbench_state, [&] { IteratorBenchmark{}(d_input, d_output, size, stream); });
+    state.run([&] { IteratorBenchmark{}(d_input, d_output, size, stream); });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size);
+    state.set_items_processed_per_iteration<T>(size);
 
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_output));

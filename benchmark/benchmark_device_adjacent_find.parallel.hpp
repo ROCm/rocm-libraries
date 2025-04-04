@@ -79,7 +79,7 @@ struct device_adjacent_find_benchmark : public benchmark_utils::autotune_interfa
             + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -159,9 +159,9 @@ struct device_adjacent_find_benchmark : public benchmark_utils::autotune_interfa
         launch_adjacent_find();
         HIP_CHECK(hipMalloc(&d_tmp_storage, tmp_storage_size));
 
-        state.run(gbench_state, [&] { launch_adjacent_find(); });
+        state.run([&] { launch_adjacent_find(); });
 
-        state.set_items_processed_per_iteration<input_type>(gbench_state, first_adj_index);
+        state.set_items_processed_per_iteration<input_type>(first_adj_index);
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));

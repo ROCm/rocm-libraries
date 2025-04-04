@@ -61,7 +61,7 @@ struct device_nth_element_benchmark : public benchmark_utils::autotune_interface
             + ",key_type:" + std::string(Traits<Key>::name()) + ",cfg:default_config}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -103,21 +103,21 @@ struct device_nth_element_benchmark : public benchmark_utils::autotune_interface
 
         common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::nth_element(d_temporary_storage.get(),
-                                                     temporary_storage_bytes,
-                                                     d_keys_input.get(),
-                                                     d_keys_output.get(),
-                                                     nth,
-                                                     size,
-                                                     lesser_op,
-                                                     stream,
-                                                     false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::nth_element(d_temporary_storage.get(),
+                                               temporary_storage_bytes,
+                                               d_keys_input.get(),
+                                               d_keys_output.get(),
+                                               nth,
+                                               size,
+                                               lesser_op,
+                                               stream,
+                                               false));
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 };
 #endif // ROCPRIM_BENCHMARK_DEVICE_NTH_ELEMENT_PARALLEL_HPP_

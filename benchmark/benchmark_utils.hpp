@@ -1176,12 +1176,11 @@ constexpr size_t GiB = 1024 * MiB;
 class state
 {
 public:
-    state() {}
-
     state(hipStream_t         stream,
           size_t              size,
           const managed_seed& seed,
           size_t              batch_iterations,
+          benchmark::State&   gbench_state,
           size_t              warmup_iterations,
           bool                cold,
           bool                record_as_whole)
@@ -1190,6 +1189,7 @@ public:
         , bytes(size)
         , seed(seed)
         , batch_iterations(batch_iterations)
+        , gbench_state(gbench_state)
         , warmup_iterations(warmup_iterations)
         , cold(cold)
         , record_as_whole(record_as_whole)
@@ -1207,7 +1207,7 @@ public:
         reset_total_gbench_iterations_every_run = false;
     }
 
-    void run(benchmark::State& gbench_state, std::function<void()> kernel)
+    void run(std::function<void()> kernel)
     {
         for(auto& event : events)
         {
@@ -1307,18 +1307,19 @@ public:
     }
 
     template<typename T>
-    void set_items_processed_per_iteration(benchmark::State& gbench_state, size_t actual_size)
+    void set_items_processed_per_iteration(size_t actual_size)
     {
         gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
                                        * sizeof(T));
         gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
     }
 
-    hipStream_t  stream;
-    size_t       size;
-    size_t       bytes;
-    managed_seed seed;
-    size_t       batch_iterations;
+    hipStream_t       stream;
+    size_t            size;
+    size_t            bytes;
+    managed_seed      seed;
+    size_t            batch_iterations;
+    benchmark::State& gbench_state;
 
 private:
     // Zeros a 256 MiB buffer, used to clear the cache before each kernel call.
@@ -1338,6 +1339,7 @@ private:
     size_t                  warmup_iterations;
     bool                    cold;
     bool                    record_as_whole;
+
     std::vector<hipEvent_t> events;
     std::function<void()>   run_before_every_iteration_lambda = nullptr;
     size_t                  total_gbench_iterations;
@@ -1351,8 +1353,8 @@ struct autotune_interface
     {
         return name();
     };
-    virtual ~autotune_interface()                                  = default;
-    virtual void run(benchmark::State& gbench_state, state& state) = 0;
+    virtual ~autotune_interface()   = default;
+    virtual void run(state&& state) = 0;
 };
 
 class executor
@@ -1387,11 +1389,9 @@ public:
     template<typename T>
     void queue_fn(const std::string& name, T bench_fn)
     {
-        apply_settings(benchmark::RegisterBenchmark(
-            name,
-            [bench_fn](benchmark::State& gbench_state, state state)
-            { bench_fn(gbench_state, state); },
-            m_state));
+        apply_settings(benchmark::RegisterBenchmark(name,
+                                                    [=](benchmark::State& gbench_state)
+                                                    { bench_fn(new_state(gbench_state)); }));
     }
 
     template<typename Benchmark>
@@ -1399,14 +1399,13 @@ public:
     {
         apply_settings(benchmark::RegisterBenchmark(
             instance.name().c_str(),
-            [instance](benchmark::State& gbench_state, benchmark_utils::state state)
+            [=](benchmark::State& gbench_state)
             {
                 // run() requires a mutable instance, so create a mutable copy.
                 // Using [&instance] doesn't work, as it creates a dangling reference at runtime.
                 // Marking the lambda mutable doesn't work, as the &&instance it copies is const.
-                Benchmark(std::move(instance)).run(gbench_state, state);
-            },
-            m_state));
+                Benchmark(std::move(instance)).run(new_state(gbench_state));
+            }));
     }
 
     template<typename Benchmark>
@@ -1426,7 +1425,6 @@ public:
     void run()
     {
         register_sorted_subset(parallel_instance, parallel_instances);
-
         benchmark::RunSpecifiedBenchmarks();
     }
 
@@ -1478,24 +1476,17 @@ private:
 
     void parse(cli::Parser& parser)
     {
-        size_t size = parser.get<size_t>("size");
+        size = parser.get<size_t>("size");
 
         const std::string seed_type = parser.get<std::string>("seed");
-        managed_seed      seed      = managed_seed(seed_type);
 
-        size_t batch_iterations  = parser.get<size_t>("batch_iterations");
-        size_t warmup_iterations = parser.get<size_t>("warmup_iterations");
+        seed = managed_seed(seed_type);
 
-        bool cold            = !parser.get<bool>("hot");
-        bool record_as_whole = parser.get<bool>("record_as_whole");
+        batch_iterations  = parser.get<size_t>("batch_iterations");
+        warmup_iterations = parser.get<size_t>("warmup_iterations");
 
-        m_state = state(hipStreamDefault,
-                        size,
-                        seed,
-                        batch_iterations,
-                        warmup_iterations,
-                        cold,
-                        record_as_whole);
+        cold            = !parser.get<bool>("hot");
+        record_as_whole = parser.get<bool>("record_as_whole");
 
         trials             = parser.get<int>("trials");
         parallel_instance  = parser.get<int>("parallel_instance");
@@ -1508,6 +1499,18 @@ private:
     {
         static std::vector<std::unique_ptr<autotune_interface>> sorted_benchmarks;
         return sorted_benchmarks;
+    }
+
+    state new_state(benchmark::State& gbench_state)
+    {
+        return state(stream,
+                     size,
+                     seed,
+                     batch_iterations,
+                     gbench_state,
+                     warmup_iterations,
+                     cold,
+                     record_as_whole);
     }
 
     void apply_settings(benchmark::internal::Benchmark* b)
@@ -1543,16 +1546,21 @@ private:
 
             apply_settings(benchmark::RegisterBenchmark(
                 benchmark->name().c_str(),
-                [benchmark](benchmark::State& gbench_state, state state)
-                { benchmark->run(gbench_state, state); },
-                m_state));
+                [=](benchmark::State& gbench_state) { benchmark->run(new_state(gbench_state)); }));
         }
     }
 
-    state m_state;
-    int   trials;
-    int   parallel_instance;
-    int   parallel_instances;
+    hipStream_t  stream = hipStreamDefault;
+    size_t       size;
+    managed_seed seed;
+    size_t       batch_iterations;
+    size_t       warmup_iterations;
+    bool         cold;
+    bool         record_as_whole;
+
+    int trials;
+    int parallel_instance;
+    int parallel_instances;
 };
 
 } // namespace benchmark_utils

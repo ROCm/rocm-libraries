@@ -85,7 +85,7 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
 
     // keys benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -148,8 +148,8 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                                                          false);
         if(err == hipError_t::hipErrorAssert)
         {
-            gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
-                                       "block_merge_items_per_block does not hold");
+            state.gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
+                                             "block_merge_items_per_block does not hold");
             return;
         }
         else if(err != hipSuccess)
@@ -169,11 +169,10 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                          stream));
             });
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(
-                          rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
                                                                           temporary_storage_bytes,
                                                                           d_keys.get(),
                                                                           values_ptr,
@@ -182,14 +181,14 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                                                           lesser_op,
                                                                           stream,
                                                                           false));
-                  });
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 
     // pairs benchmark
     template<typename val = Value>
-    auto do_run(benchmark::State& gbench_state, benchmark_utils::state& state) const ->
+    auto do_run(benchmark_utils::state&& state) const ->
         typename std::enable_if<!std::is_same<val, ::rocprim::empty_type>::value, void>::type
     {
         const auto& stream = state.stream;
@@ -259,8 +258,8 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                                                          false);
         if(err == hipError_t::hipErrorAssert)
         {
-            gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
-                                       "block_merge_items_per_block does not hold");
+            state.gbench_state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
+                                             "block_merge_items_per_block does not hold");
             return;
         }
         else if(err != hipSuccess)
@@ -285,11 +284,10 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                          stream));
             });
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(
-                          rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::detail::merge_sort_block_merge<Config>(d_temporary_storage.get(),
                                                                           temporary_storage_bytes,
                                                                           d_keys.get(),
                                                                           d_values.get(),
@@ -298,14 +296,14 @@ struct device_merge_sort_block_merge_benchmark : public benchmark_utils::autotun
                                                                           lesser_op,
                                                                           stream,
                                                                           false));
-                  });
+            });
 
-        state.set_items_processed_per_iteration<key_type>(gbench_state, size);
+        state.set_items_processed_per_iteration<key_type>(size);
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
-        do_run(gbench_state, state);
+        do_run(std::forward<benchmark_utils::state>(state));
     }
 };
 

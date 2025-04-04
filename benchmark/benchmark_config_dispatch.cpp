@@ -17,7 +17,7 @@ enum class stream_kind
 };
 
 template<stream_kind StreamKind>
-static void BM_host_target_arch(benchmark::State& gbench_state, benchmark_utils::state& state)
+static void BM_host_target_arch(benchmark_utils::state&& state)
 {
     const hipStream_t stream = []() -> hipStream_t
     {
@@ -33,15 +33,15 @@ static void BM_host_target_arch(benchmark::State& gbench_state, benchmark_utils:
         }
     }();
 
-    state.run(gbench_state,
-              [&]
-              {
-                  rocprim::detail::target_arch target_arch;
-                  HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-                  benchmark::DoNotOptimize(target_arch);
-              });
+    state.run(
+        [&]
+        {
+            rocprim::detail::target_arch target_arch;
+            HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
+            benchmark::DoNotOptimize(target_arch);
+        });
 
-    state.set_items_processed_per_iteration<char>(gbench_state, 1);
+    state.set_items_processed_per_iteration<char>(1);
 
     if(StreamKind != stream_kind::default_stream && StreamKind != stream_kind::per_thread_stream)
     {
@@ -54,18 +54,18 @@ void empty_kernel()
 {}
 
 // An empty kernel launch for baseline
-static void BM_kernel_launch(benchmark::State& gbench_state, benchmark_utils::state& state)
+static void BM_kernel_launch(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
 
-    state.run(gbench_state,
-              [&]
-              {
-                  empty_kernel<<<dim3(1), dim3(1), 0, stream>>>();
-                  HIP_CHECK(hipGetLastError());
-              });
+    state.run(
+        [&]
+        {
+            empty_kernel<<<dim3(1), dim3(1), 0, stream>>>();
+            HIP_CHECK(hipGetLastError());
+        });
 
-    state.set_items_processed_per_iteration<char>(gbench_state, 1);
+    state.set_items_processed_per_iteration<char>(1);
 }
 
 #define CREATE_BENCHMARK(ST, SK)                                                       \

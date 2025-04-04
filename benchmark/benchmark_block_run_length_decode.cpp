@@ -94,7 +94,7 @@ template<typename ItemT,
          unsigned RunsPerThread,
          unsigned DecodedItemsPerThread,
          unsigned Trials = 100>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -134,24 +134,24 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
 
     common::device_ptr<ItemT> d_output(output_length);
 
-    state.run(gbench_state,
-              [&]
-              {
-                  block_run_length_decode_kernel<ItemT,
-                                                 OffsetT,
-                                                 BlockSize,
-                                                 RunsPerThread,
-                                                 DecodedItemsPerThread,
-                                                 Trials>
-                      <<<dim3(num_runs / runs_per_block), dim3(BlockSize), 0, stream>>>(
-                          d_run_items.get(),
-                          d_run_offsets.get(),
-                          d_output.get());
-                  HIP_CHECK(hipPeekAtLastError());
-                  HIP_CHECK(hipDeviceSynchronize());
-              });
+    state.run(
+        [&]
+        {
+            block_run_length_decode_kernel<ItemT,
+                                           OffsetT,
+                                           BlockSize,
+                                           RunsPerThread,
+                                           DecodedItemsPerThread,
+                                           Trials>
+                <<<dim3(num_runs / runs_per_block), dim3(BlockSize), 0, stream>>>(
+                    d_run_items.get(),
+                    d_run_offsets.get(),
+                    d_output.get());
+            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipDeviceSynchronize());
+        });
 
-    state.set_items_processed_per_iteration<ItemT>(gbench_state, output_length * Trials);
+    state.set_items_processed_per_iteration<ItemT>(output_length * Trials);
 }
 
 #define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                      \

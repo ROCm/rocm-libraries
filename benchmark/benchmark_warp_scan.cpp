@@ -125,7 +125,7 @@ template<typename T,
          unsigned int WarpSize,
          class Type,
          unsigned int Trials = 100>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -141,20 +141,20 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Type, T, WarpSize, Trials>),
-                                     dim3(size / BlockSize),
-                                     dim3(BlockSize),
-                                     0,
-                                     stream,
-                                     d_input.get(),
-                                     d_output.get(),
-                                     input[0]);
-              });
+    state.run(
+        [&]
+        {
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Type, T, WarpSize, Trials>),
+                               dim3(size / BlockSize),
+                               dim3(BlockSize),
+                               0,
+                               stream,
+                               d_input.get(),
+                               d_output.get(),
+                               input[0]);
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, Trials * size);
+    state.set_items_processed_per_iteration<T>(Trials * size);
 }
 
 #define CREATE_BENCHMARK(T, BS, WS)                                                              \

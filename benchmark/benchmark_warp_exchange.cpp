@@ -165,7 +165,7 @@ template<typename T,
          unsigned int ItemsPerThread,
          unsigned int LogicalWarpSize,
          typename Op>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -179,15 +179,15 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
 
     common::device_ptr<T> d_output(size);
 
-    state.run(gbench_state,
-              [&]
-              {
-                  warp_exchange_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Op>
-                      <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_output.get(),
-                                                                                     trials);
-              });
+    state.run(
+        [&]
+        {
+            warp_exchange_kernel<BlockSize, ItemsPerThread, LogicalWarpSize, Op>
+                <<<dim3(size / items_per_block), dim3(BlockSize), 0, stream>>>(d_output.get(),
+                                                                               trials);
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, trials * size);
+    state.set_items_processed_per_iteration<T>(trials * size);
 }
 
 #define CREATE_BENCHMARK(T, BS, IT, WS, OP)                                                  \

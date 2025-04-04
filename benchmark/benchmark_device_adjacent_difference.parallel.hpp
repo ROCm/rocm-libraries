@@ -78,7 +78,7 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
             + std::string(Traits<T>::name()) + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         const auto& stream = state.stream;
         const auto& bytes  = state.bytes;
@@ -125,9 +125,9 @@ struct device_adjacent_difference_benchmark : public benchmark_utils::autotune_i
         HIP_CHECK(launch());
         d_temp_storage.resize(temp_storage_size);
 
-        state.run(gbench_state, [&] { HIP_CHECK(launch()); });
+        state.run([&] { HIP_CHECK(launch()); });
 
-        state.set_items_processed_per_iteration<T>(gbench_state, size);
+        state.set_items_processed_per_iteration<T>(size);
     }
 };
 

@@ -331,7 +331,7 @@ template<typename T,
          unsigned int            ItemsPerThread,
          memory_operation_method MemOp,
          kernel_operation        KernelOp = no_operation>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -351,25 +351,25 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
 
     operation<KernelOp, T, ItemsPerThread, BlockSize> selected_operation;
 
-    state.run(gbench_state,
-              [&]
-              {
-                  hipLaunchKernelGGL(
-                      HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
-                      dim3(grid_size),
-                      dim3(BlockSize),
-                      0,
-                      stream,
-                      d_input.get(),
-                      d_output.get(),
-                      selected_operation);
-              });
+    state.run(
+        [&]
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(operation_kernel<T, BlockSize, ItemsPerThread, MemOp>),
+                dim3(grid_size),
+                dim3(BlockSize),
+                0,
+                stream,
+                d_input.get(),
+                d_output.get(),
+                selected_operation);
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size);
+    state.set_items_processed_per_iteration<T>(size);
 }
 
 template<typename T>
-void run_benchmark_memcpy(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark_memcpy(benchmark_utils::state&& state)
 {
     const auto& bytes = state.bytes;
 
@@ -382,16 +382,16 @@ void run_benchmark_memcpy(benchmark::State& gbench_state, benchmark_utils::state
     common::device_ptr<T> d_input(size);
     common::device_ptr<T> d_output(size);
 
-    state.run(gbench_state,
-              [&]
-              {
-                  HIP_CHECK(hipMemcpy(d_output.get(),
-                                      d_input.get(),
-                                      size * sizeof(T),
-                                      hipMemcpyDeviceToDevice));
-              });
+    state.run(
+        [&]
+        {
+            HIP_CHECK(hipMemcpy(d_output.get(),
+                                d_input.get(),
+                                size * sizeof(T),
+                                hipMemcpyDeviceToDevice));
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size);
+    state.set_items_processed_per_iteration<T>(size);
 }
 
 #define CREATE_BENCHMARK(METHOD, OPERATION, T, BLOCK_SIZE, IPT)                            \

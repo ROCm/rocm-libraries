@@ -239,7 +239,7 @@ template<typename Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+auto run_benchmark(benchmark_utils::state&& state)
     -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial>::value
                         && !std::is_same<Benchmark, subtract_right_partial>::value>
 {
@@ -262,17 +262,17 @@ auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<T> d_input(input);
     common::device_ptr<T> d_output(input.size());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
-                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
-                                                                         d_output.get(),
-                                                                         Trials);
-                  HIP_CHECK(hipGetLastError());
-              });
+    state.run(
+        [&]
+        {
+            kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+                <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                   d_output.get(),
+                                                                   Trials);
+            HIP_CHECK(hipGetLastError());
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
+    state.set_items_processed_per_iteration<T>(size * Trials);
 }
 
 template<typename Benchmark,
@@ -281,7 +281,7 @@ template<typename Benchmark,
          unsigned int ItemsPerThread,
          bool         WithTile,
          unsigned int Trials = 100>
-auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+auto run_benchmark(benchmark_utils::state&& state)
     -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial>::value
                         || std::is_same<Benchmark, subtract_right_partial>::value>
 {
@@ -313,18 +313,18 @@ auto run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     common::device_ptr<unsigned int> d_tile_sizes(tile_sizes);
     common::device_ptr<T>            d_output(input.size());
 
-    state.run(gbench_state,
-              [&]
-              {
-                  kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
-                      <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
-                                                                         d_tile_sizes.get(),
-                                                                         d_output.get(),
-                                                                         Trials);
-                  HIP_CHECK(hipGetLastError());
-              });
+    state.run(
+        [&]
+        {
+            kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>
+                <<<dim3(num_blocks), dim3(BlockSize), 0, stream>>>(d_input.get(),
+                                                                   d_tile_sizes.get(),
+                                                                   d_output.get(),
+                                                                   Trials);
+            HIP_CHECK(hipGetLastError());
+        });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
+    state.set_items_processed_per_iteration<T>(size * Trials);
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                         \

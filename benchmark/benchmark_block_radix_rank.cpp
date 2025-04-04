@@ -92,7 +92,7 @@ template<typename T,
          size_t                              RadixBits  = 4,
          bool                                Descending = false,
          size_t                              Trials     = 10>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& bytes  = state.bytes;
     const auto& seed   = state.seed;
@@ -114,7 +114,6 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
-        gbench_state,
         [&]
         {
             rank_kernel<T, BlockSize, ItemsPerThread, RadixBits, Descending, Algorithm, Trials>
@@ -122,7 +121,7 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
             HIP_CHECK(hipGetLastError());
         });
 
-    state.set_items_processed_per_iteration<T>(gbench_state, size * Trials);
+    state.set_items_processed_per_iteration<T>(size * Trials);
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                    \

@@ -89,7 +89,7 @@ template<typename Key,
          typename Value              = Key,
          bool         SortByKey      = false,
          unsigned int Trials         = 100>
-void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_benchmark(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& bytes  = state.bytes;
@@ -132,7 +132,6 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
-        gbench_state,
         [&]
         {
             if(SortByKey)
@@ -180,9 +179,8 @@ void run_benchmark(benchmark::State& gbench_state, benchmark_utils::state& state
         Value b;
     };
 #pragma pack(pop)
-    state.set_items_processed_per_iteration<std::conditional_t<SortByKey, combined, Key>>(
-        gbench_state,
-        size * Trials);
+    state.set_items_processed_per_iteration<std::conditional_t<SortByKey, combined, Key>>(size
+                                                                                          * Trials);
 
     HIP_CHECK(hipFree(d_input_key));
     HIP_CHECK(hipFree(d_output_key));

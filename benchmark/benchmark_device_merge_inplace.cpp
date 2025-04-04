@@ -135,7 +135,7 @@ struct inplace_runner
 };
 
 template<class ValueT, class RunnerT>
-void run_merge_inplace_benchmarks(benchmark::State& gbench_state, benchmark_utils::state& state)
+void run_merge_inplace_benchmarks(benchmark_utils::state&& state)
 {
     const auto& stream = state.stream;
     const auto& size_a = state.bytes;
@@ -171,9 +171,9 @@ void run_merge_inplace_benchmarks(benchmark::State& gbench_state, benchmark_util
 
     state.run_before_every_iteration([&] { d_data.store(h_data); });
 
-    state.run(gbench_state, [&] { runner.run(); });
+    state.run([&] { runner.run(); });
 
-    state.set_items_processed_per_iteration<value_type>(gbench_state, total_size);
+    state.set_items_processed_per_iteration<value_type>(total_size);
 }
 
 #define CREATE_BENCHMARK(Value)                                                       \
@@ -181,8 +181,11 @@ void run_merge_inplace_benchmarks(benchmark::State& gbench_state, benchmark_util
         bench_naming::format_name("{lvl:device,algo:merge_inplace,value_type:" #Value \
                                   ",cfg:default_config}")                             \
             .c_str(),                                                                 \
-        [=](benchmark::State& gbench_state, benchmark_utils::state& state)            \
-        { run_merge_inplace_benchmarks<Value, inplace_runner<Value>>(gbench_state, state); });
+        [=](benchmark_utils::state&& state)                                           \
+        {                                                                             \
+            run_merge_inplace_benchmarks<Value, inplace_runner<Value>>(               \
+                std::forward<benchmark_utils::state>(state));                         \
+        });
 
 int main(int argc, char* argv[])
 {

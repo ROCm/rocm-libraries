@@ -114,10 +114,9 @@ public:
             + ",cfg:" + config_name<Config>() + "}");
     }
 
-    void run_benchmark(benchmark::State&       gbench_state,
-                       benchmark_utils::state& state,
-                       size_t                  num_segments,
-                       size_t                  mean_segment_length)
+    void run_benchmark(benchmark_utils::state&& state,
+                       size_t                   num_segments,
+                       size_t                   mean_segment_length)
     {
         const auto& stream = state.stream;
         const auto& seed   = state.seed;
@@ -209,24 +208,24 @@ public:
         HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
         HIP_CHECK(hipDeviceSynchronize());
 
-        state.run(gbench_state,
-                  [&]
-                  {
-                      HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temporary_storage,
-                                                                            temporary_storage_bytes,
-                                                                            d_keys_input,
-                                                                            d_keys_output,
-                                                                            d_values_input,
-                                                                            d_values_output,
-                                                                            size,
-                                                                            segments_count,
-                                                                            d_offsets,
-                                                                            d_offsets + 1,
-                                                                            0,
-                                                                            sizeof(key_type) * 8,
-                                                                            stream,
-                                                                            false));
-                  });
+        state.run(
+            [&]
+            {
+                HIP_CHECK(rocprim::segmented_radix_sort_pairs<Config>(d_temporary_storage,
+                                                                      temporary_storage_bytes,
+                                                                      d_keys_input,
+                                                                      d_keys_output,
+                                                                      d_values_input,
+                                                                      d_values_output,
+                                                                      size,
+                                                                      segments_count,
+                                                                      d_offsets,
+                                                                      d_offsets + 1,
+                                                                      0,
+                                                                      sizeof(key_type) * 8,
+                                                                      stream,
+                                                                      false));
+            });
 
         total_size += size;
 
@@ -238,11 +237,13 @@ public:
         HIP_CHECK(hipFree(d_values_output));
     }
 
-    void run(benchmark::State& gbench_state, benchmark_utils::state& state) override
+    void run(benchmark_utils::state&& state) override
     {
         if(segment_counts.size() == 1)
         {
-            run_benchmark(gbench_state, state, segment_counts[0], segment_lengths[0]);
+            run_benchmark(std::forward<benchmark_utils::state>(state),
+                          segment_counts[0],
+                          segment_lengths[0]);
         }
         else
         {
@@ -261,7 +262,9 @@ public:
                         continue;
                     }
 
-                    run_benchmark(gbench_state, state, segment_count, segment_length);
+                    run_benchmark(std::forward<benchmark_utils::state>(state),
+                                  segment_count,
+                                  segment_length);
                 }
             }
         }
@@ -273,7 +276,7 @@ public:
             Value b;
         };
 #pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(gbench_state, total_size);
+        state.set_items_processed_per_iteration<combined>(total_size);
     }
 };
 
