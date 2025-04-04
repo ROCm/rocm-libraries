@@ -27,8 +27,8 @@
 #ifndef ROCWMMA_UTILITY_VECTOR_HPP
 #define ROCWMMA_UTILITY_VECTOR_HPP
 
-#include <rocwmma/internal/types.hpp>
-#include <rocwmma/internal/utility/vector_impl.hpp>
+#include "../types.hpp"
+#include "vector_impl.hpp"
 
 namespace rocwmma
 {
@@ -80,8 +80,7 @@ namespace rocwmma
     * @param v Input vector
     * @tparam VecT Templated input vector class
     */
-    template <template<typename, uint32_t> class VecT,
-    typename DataT>
+    template <template <typename, uint32_t> class VecT, typename DataT>
     ROCWMMA_HOST_DEVICE constexpr static inline auto swap(VecT<DataT, 2> const& v);
 
     /*! \brief Splits input vector into sub-vectors. Func is applied to each sub-vector, which are then
@@ -94,8 +93,9 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline auto vector_for_each(VecT&& v, Func&& func, ArgsT&&... args);
+    template <uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline auto
+        vector_for_each(VecT&& v, Func&& func, ArgsT&&... args);
 
     /*! \brief Splits input vector into sub-vectors. Func is applied to each sub-vector in-place. Returns
     * a reference to modified input vector.
@@ -107,8 +107,9 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline decltype(auto) vector_mutate_for_each(VecT&& v, Func&& func,  ArgsT&&... args);
+    template <uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline decltype(auto)
+        vector_mutate_for_each(VecT&& v, Func&& func, ArgsT&&... args);
 
     /*! \brief Splits input vector into sub-vectors. Func is applied to each sub-vector and updates the accumulator.
     * Returns the final accumulator result.
@@ -122,8 +123,13 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize = 1u, typename VecT, typename AccumT, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline auto vector_reduce(VecT&& v, AccumT&& init, Func&& func, ArgsT&&... args);
+    template <uint32_t SubVecSize = 1u,
+              typename VecT,
+              typename AccumT,
+              class Func,
+              typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline auto
+        vector_reduce(VecT&& v, AccumT&& init, Func&& func, ArgsT&&... args);
 
     /*! \brief Splits input vector into sub-vectors. Func is applied to each sub-vector and updates the accumulator.
     * Returns the final accumulator result. Initial accumulator of VecT<DataT, SubVecSize>{0} is assumed.
@@ -135,8 +141,9 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline auto vector_reduce(VecT&& v, Func&& func, ArgsT&&... args);
+    template <uint32_t SubVecSize = 1u, typename VecT, class Func, typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline auto
+        vector_reduce(VecT&& v, Func&& func, ArgsT&&... args);
 
     /*! \brief Splits two input vector into sub-vectors. Func is applied to each sub-vector and updates the accumulator.
     * Input vectors may be different lengths, provided their size / subvecsize is the same.
@@ -154,8 +161,15 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize0 = 1u, uint32_t SubVecSize1 = SubVecSize0, typename VecT0, typename VecT1, typename AccumT, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline auto vector_reduce2(VecT0&& v0, VecT1&& v1, AccumT&& init, Func&& func, ArgsT&&... args);
+    template <uint32_t SubVecSize0 = 1u,
+              uint32_t SubVecSize1 = SubVecSize0,
+              typename VecT0,
+              typename VecT1,
+              typename AccumT,
+              class Func,
+              typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline auto
+        vector_reduce2(VecT0&& v0, VecT1&& v1, AccumT&& init, Func&& func, ArgsT&&... args);
 
     /*! \brief Splits two input vector into sub-vectors. Func is applied to each sub-vector and updates the accumulator.
     * Input vectors may be different lengths, provided their size / subvecsize is the same.
@@ -172,8 +186,14 @@ namespace rocwmma
     * @tparam Func Type of functor
     * @tparam ArgsT Type of forwarded arguments to functor
     */
-    template<uint32_t SubVecSize0 = 1u, uint32_t SubVecSize1 = SubVecSize0, typename VecT0, typename VecT1, class Func, typename... ArgsT>
-    ROCWMMA_HOST_DEVICE constexpr static inline auto vector_reduce2(VecT0&& v0, VecT1&& v1, Func&& func, ArgsT&&... args);
+    template <uint32_t SubVecSize0 = 1u,
+              uint32_t SubVecSize1 = SubVecSize0,
+              typename VecT0,
+              typename VecT1,
+              class Func,
+              typename... ArgsT>
+    ROCWMMA_HOST_DEVICE constexpr static inline auto
+        vector_reduce2(VecT0&& v0, VecT1&& v1, Func&& func, ArgsT&&... args);
 
 } // namespace rocwmma
 

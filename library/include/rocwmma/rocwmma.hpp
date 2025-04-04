@@ -160,8 +160,8 @@ namespace rocwmma
                           "Unable to pack fragment elements");
         };
 
-        ROCWMMA_DEVICE           fragment() = default;
-        ROCWMMA_DEVICE           fragment(const fragment& other);
+        ROCWMMA_DEVICE fragment() = default;
+        ROCWMMA_DEVICE fragment(const fragment& other);
         ROCWMMA_DEVICE fragment& operator=(const fragment& other);
 
         //! @param index Element index
@@ -309,12 +309,12 @@ namespace rocwmma
               typename LayoutD>
     ROCWMMA_DEVICE void
         mma_sync(fragment<accumulator, BlockM, BlockN, BlockK, ComputeT, LayoutD>&       d,
-                 fragment<matrix_a, BlockM, BlockN, BlockK, InputTA, LayoutA> const&      a,
-                 fragment<matrix_b, BlockM, BlockN, BlockK, InputTB, LayoutB> const&      b,
+                 fragment<matrix_a, BlockM, BlockN, BlockK, InputTA, LayoutA> const&     a,
+                 fragment<matrix_b, BlockM, BlockN, BlockK, InputTB, LayoutB> const&     b,
                  fragment<accumulator, BlockM, BlockN, BlockK, ComputeT, LayoutC> const& c);
 
     //! Synchronization point for all wavefronts in a workgroup. Guarantees pending reads / writes to LDS are flushed.
-    ROCWMMA_DEVICE void synchronize_workgroup();
+    ROCWMMA_DEVICE ROCWMMA_INLINE void synchronize_workgroup();
 
     /** @}*/
 } // namespace rocwmma
