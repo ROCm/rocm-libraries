@@ -22,7 +22,7 @@ The test suite includes validation and benchmarking projects that focus on unit 
 rocWMMA currently supports the following AMD GPU architectures:
 
 * CDNA class GPU featuring matrix core support: gfx908, gfx90a, gfx942, gfx950 as 'gfx9'
-* RDNA3 class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102 as 'gfx11'; gfx1200, gfx1201 as 'gfx12'
+* RDNA class GPU featuring AI acceleration support: gfx1100, gfx1101, gfx1102 as 'gfx11'; gfx1200, gfx1201 as 'gfx12'
 
 Dependencies:
 

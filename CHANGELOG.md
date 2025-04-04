@@ -3,7 +3,29 @@
 Documentation for rocWMMA is available at
 [https://rocm.docs.amd.com/projects/rocWMMA/en/latest](https://rocm.docs.amd.com/projects/rocWMMA/en/latest).
 
-## (Unreleased) rocWMMA 1.7.0 for ROCm 6.4.0
+## (Unreleased) rocWMMA 1.8.0 for ROCm 6.5.0
+
+### Added
+
+* Added internal flow control barriers to improve asm code layout and improve overall performance
+* Added internal register layout transforms and tests to support interleaved MMA layouts
+* Added support for the gfx950 target
+* Added mixed input `bf8` / `fp8` types for MMA support
+
+### Changed
+
+* Removed support for the gfx940 and gfx941 targets
+* Augmented load / store / MMA internals with static loop unrolling
+* Switched to use interleaved layouts in MMA to improve overall performance
+* rocWMMA mma_sync API now supports `wave tile` fragment sizes
+
+### Resolved issues
+
+* Fixed a validation issue for small precision compute types `< B32` on gfx9
+* Fixed CMake validation of compiler support for `bf8` / `fp8` types
+* Fixed linkage of rocwmma::synchronize_workgroup to inline
+
+## rocWMMA 1.7.0 for ROCm 6.4.0
 
 ### Added
 
@@ -13,7 +35,7 @@ Documentation for rocWMMA is available at
 ### Changed
 
 * Used GPU_TARGETS instead of AMDGPU_TARGETS in `cmakelists.txt`
-* Used `--offload-compress` flag for supported compilers
+* The binary sizes can be reduced on supported compilers by using the `--offload-compress` compiler flag
 
 ### Resolved issues
 
@@ -39,6 +61,10 @@ Documentation for rocWMMA is available at
 * Fixed a bug in f64 validation due to faulty typecasting
 * Fixed a bug causing runtime compilation errors with hipRTC
 * Various documentation updates and fixes
+
+### Upcoming changes
+
+* rocWMMA 2.x plans to augment fragment API objects with additional meta-properties which will improve API expressiveness and configurability of parameters including multiple-wave cooperation. As part of this change, cooperative rocWMMA API functions `load_matrix_coop_sync` and `store_matrix_coop_sync` will become deprecated in a future ROCm release.
 
 ## rocWMMA 1.5.0 for ROCm 6.2.0
 

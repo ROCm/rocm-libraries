@@ -242,7 +242,7 @@ Here are some other example project configurations:
 +===================================+================================================================================================================================================================+
 |               Basic               |                                      :code:`CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir>`                                       |
 +-----------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------+
-|         Targeting gfx908          |                      :code:`CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DGPU_TARGETS=gfx908:xnack-`                      |
+|         Targeting gfx908          |                      :code:`CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DGPU_TARGETS=gfx908:xnack-`                         |
 +-----------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------+
 |            Debug build            |                         :code:`CC=/opt/rocm/bin/amdclang CXX=/opt/rocm/bin/amdclang++ cmake -B <build_dir> . -DCMAKE_BUILD_TYPE=Debug`                         |
 +-----------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------+
@@ -343,11 +343,13 @@ Executable Name                               Description
 ``unit/io_shape_test``                          Tests input and output shape meta data
 ``unit/io_traits_test``                         Tests input and output logistical meta data
 ``unit/layout_test``                            Tests accuracy of internal matrix layout patterns
+``unit/layout_traits_test``                     Tests accuracy of internal matrix layout traits
 ``unit/load_store_matrix_sync_test``            Tests ``load_matrix_sync`` and ``store_matrix_sync`` API functions
 ``unit/load_store_matrix_coop_sync_test``       Tests ``load_matrix_coop_sync`` and ``store_matrix_coop_sync`` API functions
 ``unit/map_util_test``                          Tests mapping utilities used in rocWMMA implementations
 ``unit/pack_util_test``                         Tests vector packing utilities used in rocWMMA implementations
 ``unit/transforms_test``                        Tests transform utilities used in rocWMMA implementations
+``unit/tuple_test``                             Tests additional transform utilities used in rocWMMA implementations
 ``unit/unpack_util_test``                       Tests vector un-packing utilities used in rocWMMA implementations
 ``unit/vector_iterator_test``                   Tests internal vector storage iteration implementation
 ``unit/vector_test``                            Tests internal vector storage implementation
@@ -453,6 +455,8 @@ When building rocWMMA during the ``make`` step, we can specify make targets inst
 |                                   | contamination_test                       |
 |                                   +------------------------------------------+
 |                                   | layout_test                              |
+|                                   +------------------------------------------+
+|                                   | layout_traits_test                       |
 |                                   +------------------------------------------+
 |                                   | map_util_test                            |
 |                                   +------------------------------------------+

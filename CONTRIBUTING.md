@@ -203,6 +203,10 @@ rocWMMA has a set of required deliverables for every pull request that are as fo
             - Native Data Types: int8, f16
             - Non-Native Data Types: h16, bf16
 
+        - **Supported Datatypes (gfx12)**
+            - Native Data Types: int8, f16
+            - Non-Native Data Types: h16, bf16, f8**, bf8**
+
 		| *Only on gfx90a, gfx942 & gfx950. |
 		|-----------------------------------|
 
