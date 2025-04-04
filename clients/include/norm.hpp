@@ -109,9 +109,9 @@ template <
 #ifdef ROCM_USE_FLOAT8
                        || std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}
 #endif
-                       || std::is_same<T, hipblaslt_f6>{} || std::is_same<T, hipblaslt_bf6>{}
-                       || std::is_same<T, hipblaslt_f4>{}),
-                     int> = 0>
+                       ),
+                     int>
+    = 0>
 double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
 {
     if(M * N == 0)
@@ -151,7 +151,8 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
 template <typename T,
           std::enable_if_t<(std::is_same<T, hipblaslt_f8_fnuz>{}
                             || std::is_same<T, hipblaslt_bf8_fnuz>{}),
-                           int> = 0>
+                           int>
+          = 0>
 double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
 {
     if(M * N == 0)
@@ -186,11 +187,10 @@ double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* 
 }
 
 #ifdef ROCM_USE_FLOAT8
-template <typename T,
-          std::enable_if_t<(std::is_same<T, hipblaslt_f6>{} || std::is_same<T, hipblaslt_bf6>{}
-                            || std::is_same<T, hipblaslt_f4>{} || std::is_same<T, hipblaslt_f8>{}
-                            || std::is_same<T, hipblaslt_bf8>{}),
-                           int> = 0>
+template <
+    typename T,
+    std::enable_if_t<(std::is_same<T, hipblaslt_f8>{} || std::is_same<T, hipblaslt_bf8>{}), int>
+    = 0>
 double norm_check_general(char norm_type, int64_t M, int64_t N, int64_t lda, T* hCPU, T* hGPU)
 {
     if(M * N == 0)
@@ -520,33 +520,6 @@ double norm_check_general(char        norm_type,
                                                  static_cast<hipblasLtInt8*>(hCPU),
                                                  static_cast<hipblasLtInt8*>(hGPU),
                                                  batch_count);
-    case HIP_R_6F_E2M3_EXT:
-        return norm_check_general<hipblaslt_f6>(norm_type,
-                                                M,
-                                                N,
-                                                lda,
-                                                stride_a,
-                                                static_cast<hipblaslt_f6*>(hCPU),
-                                                static_cast<hipblaslt_f6*>(hGPU),
-                                                batch_count);
-    case HIP_R_6F_E3M2_EXT:
-        return norm_check_general<hipblaslt_bf6>(norm_type,
-                                                 M,
-                                                 N,
-                                                 lda,
-                                                 stride_a,
-                                                 static_cast<hipblaslt_bf6*>(hCPU),
-                                                 static_cast<hipblaslt_bf6*>(hGPU),
-                                                 batch_count);
-    case HIP_R_4F_E2M1_EXT:
-        return norm_check_general<hipblaslt_f4>(norm_type,
-                                                M,
-                                                N,
-                                                lda,
-                                                stride_a,
-                                                static_cast<hipblaslt_f4*>(hCPU),
-                                                static_cast<hipblaslt_f4*>(hGPU),
-                                                batch_count);
     default:
         hipblaslt_cerr << "Error type in norm_check_general" << std::endl;
         return 0;
@@ -578,13 +551,6 @@ bool norm_check(double norm_error)
     if(std::is_same<T, hipblaslt_bf8>{})
         return norm_error < 0.25;
 #endif
-    // TODO: find a suitable rnom value for f6 and f4
-    if(std::is_same<T, hipblaslt_f6>{})
-        return norm_error < 0.5;
-    if(std::is_same<T, hipblaslt_bf6>{})
-        return norm_error < 0.5;
-    if(std::is_same<T, hipblaslt_f4>{})
-        return norm_error < 0.5;
     return false;
 }
 
