@@ -56,7 +56,10 @@ set(${ROCWMMA_TARGET_SOURCES} ${${ROCWMMA_TARGET_SOURCES}}
 
                               ${CMAKE_CURRENT_SOURCE_DIR}/emulation/smoketest_2x2.cpp
 
-                              ${CMAKE_CURRENT_SOURCE_DIR}/emulation/regressiontest-16x16_2x2.cpp
+                              ${CMAKE_CURRENT_SOURCE_DIR}/emulation/regressiontest-16x16_nn_2x2.cpp
+                              ${CMAKE_CURRENT_SOURCE_DIR}/emulation/regressiontest-16x16_nt_2x2.cpp
+                              ${CMAKE_CURRENT_SOURCE_DIR}/emulation/regressiontest-16x16_tn_2x2.cpp
+                              ${CMAKE_CURRENT_SOURCE_DIR}/emulation/regressiontest-16x16_tt_2x2.cpp
                               )
 
 if(ROCWMMA_BUILD_EXTENDED_TESTS)
