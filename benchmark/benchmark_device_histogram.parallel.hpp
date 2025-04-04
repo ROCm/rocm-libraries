@@ -171,8 +171,11 @@ inline std::string config_name<rocprim::default_config>()
     return "default_config";
 }
 
-template<typename T, unsigned int Channels, unsigned int ActiveChannels, typename Config>
-struct device_histogram_benchmark : public config_autotune_interface
+template<typename T,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         typename Config = rocprim::default_config>
+struct device_histogram_benchmark : public benchmark_utils::autotune_interface
 {
     std::vector<unsigned int> cases;
 
@@ -187,14 +190,11 @@ struct device_histogram_benchmark : public config_autotune_interface
             + ",cfg:" + config_name<Config>() + "}");
     }
 
-    static constexpr unsigned int batch_size  = 3;
-    static constexpr unsigned int warmup_size = 5;
-
-    void run(benchmark::State& state,
-             size_t            full_size,
-             const managed_seed&,
-             hipStream_t stream) const override
+    void run(benchmark_utils::state&& state) override
     {
+        const auto& stream = state.stream;
+        const auto& bytes  = state.bytes;
+
         using counter_type = unsigned int;
         using level_type   = typename std::
             conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
@@ -206,17 +206,17 @@ struct device_histogram_benchmark : public config_autotune_interface
             level_type   lower_level[ActiveChannels]{};
             level_type   upper_level[ActiveChannels]{};
             unsigned int num_levels[ActiveChannels]{};
-            T*           get_d_input(size_t full_size)
+            T*           get_d_input(size_t bytes)
             {
                 return input_cache::instance().get_or_generate<T>(
                     std::string(Traits<T>::name()),
                     std::to_string(bins) + "_" + std::to_string(entropy_reduction),
-                    full_size,
-                    [&]() { return generate<T>(full_size, entropy_reduction, 0, bins); });
+                    bytes,
+                    [&]() { return generate<T>(bytes, entropy_reduction, 0, bins); });
             };
         };
 
-        const std::size_t size = full_size / Channels;
+        const std::size_t size = bytes / Channels;
 
         size_t        temporary_storage_bytes = 0;
         void*         d_temporary_storage     = nullptr;
@@ -247,7 +247,7 @@ struct device_histogram_benchmark : public config_autotune_interface
                 HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                     d_temporary_storage,
                     current_temporary_storage_bytes,
-                    data.get_d_input(full_size),
+                    data.get_d_input(bytes),
                     size,
                     d_histogram,
                     data.num_levels,
@@ -269,42 +269,14 @@ struct device_histogram_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
-        // Warm-up
-        for(size_t i = 0; i < warmup_size; ++i)
+        size_t total_size = 0;
+
+        for(auto& data : cases_data)
         {
-            for(auto& data : cases_data)
-            {
-                HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
-                    d_temporary_storage,
-                    temporary_storage_bytes,
-                    data.get_d_input(full_size),
-                    size,
-                    d_histogram,
-                    data.num_levels,
-                    data.lower_level,
-                    data.upper_level,
-                    stream,
-                    false)));
-            }
-        }
-        HIP_CHECK(hipDeviceSynchronize());
+            T* d_input = data.get_d_input(bytes);
 
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        for(auto _ : state)
-        {
-            float elapsed_mseconds = 0;
-            for(auto& data : cases_data)
-            {
-                T*    d_input = data.get_d_input(full_size);
-                float partial_elapsed_mseconds;
-                // Record start event
-                HIP_CHECK(hipEventRecord(start, stream));
-
-                for(size_t i = 0; i < batch_size; ++i)
+            state.run(
+                [&]
                 {
                     HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels, Config>(
                         d_temporary_storage,
@@ -317,26 +289,12 @@ struct device_histogram_benchmark : public config_autotune_interface
                         data.upper_level,
                         stream,
                         false)));
-                }
+                });
 
-                // Record stop event and wait until it completes
-                HIP_CHECK(hipEventRecord(stop, stream));
-                HIP_CHECK(hipEventSynchronize(stop));
-
-                HIP_CHECK(hipEventElapsedTime(&partial_elapsed_mseconds, start, stop));
-                elapsed_mseconds += partial_elapsed_mseconds;
-            }
-            state.SetIterationTime(elapsed_mseconds / 1000);
+            total_size += size * Channels;
         }
 
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * cases_data.size() * batch_size * size
-                                * Channels * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * cases_data.size() * batch_size * size
-                                * Channels);
+        state.set_items_processed_per_iteration<T>(total_size);
 
         HIP_CHECK(hipFree(d_temporary_storage));
         for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
@@ -369,8 +327,8 @@ struct device_histogram_benchmark_generator
             template<unsigned int Channels,
                      unsigned int ActiveChannels,
                      unsigned int items_per_thread = ItemsPerThread>
-            auto create(std::vector<std::unique_ptr<config_autotune_interface>>& storage,
-                        const std::vector<unsigned int>&                         cases) ->
+            auto create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage,
+                        const std::vector<unsigned int>&                                   cases) ->
                 typename std::enable_if<(items_per_thread * Channels <= max_items_per_thread),
                                         void>::type
             {
@@ -383,14 +341,16 @@ struct device_histogram_benchmark_generator
             template<unsigned int Channels,
                      unsigned int ActiveChannels,
                      unsigned int items_per_thread = ItemsPerThread>
-            auto create(std::vector<std::unique_ptr<config_autotune_interface>>& /*storage*/,
-                        const std::vector<unsigned int>& /*cases*/) ->
+            auto create(
+                std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& /*storage*/,
+                const std::vector<unsigned int>& /*cases*/) ->
                 typename std::enable_if<!(items_per_thread * Channels <= max_items_per_thread),
                                         void>::type
             {}
 
-            void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage,
-                            const std::vector<unsigned int>&                         cases)
+            void operator()(
+                std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage,
+                const std::vector<unsigned int>&                                   cases)
             {
                 // Tune histograms for single-channel data (histogram_even)
                 create<1, 1>(storage, cases);
@@ -402,8 +362,8 @@ struct device_histogram_benchmark_generator
             }
         };
 
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage,
-                        const std::vector<unsigned int>&                         cases)
+        void operator()(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage,
+                        const std::vector<unsigned int>&                                   cases)
         {
             static_for_each<make_index_range<unsigned int,
                                              min_shared_impl_histograms,
@@ -412,7 +372,7 @@ struct device_histogram_benchmark_generator
         }
     };
 
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
+    static void create(std::vector<std::unique_ptr<benchmark_utils::autotune_interface>>& storage)
     {
         // Benchmark multiple cases (with various sample distributions) and use sum of all cases
         // as a measurement for autotuning
