@@ -60,12 +60,6 @@ constexpr auto hipblaslt_type2datatype()
         return HIP_R_32I;
     if(std::is_same<T, hipblasLtInt8>{})
         return HIP_R_8I;
-    if(std::is_same<T, hipblaslt_f6>{})
-        return static_cast<hipDataType>(HIP_R_6F_E2M3_EXT);
-    if(std::is_same<T, hipblaslt_bf6>{})
-        return static_cast<hipDataType>(HIP_R_6F_E3M2_EXT);
-    if(std::is_same<T, hipblaslt_f4>{})
-        return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
 
     return HIP_R_16F; // testing purposes we default to f32 ex
 }
