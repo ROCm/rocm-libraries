@@ -81,8 +81,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    [[deprecated("splitCount argument is deprecated and will be removed in a future "
-                 "release")]] ROCWMMA_DEVICE inline void
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -116,7 +115,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE inline void
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -147,7 +146,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE inline void
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm);
@@ -185,8 +184,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    [[deprecated("SplitCount argument is deprecated and will be removed in a future "
-                 "release")]] ROCWMMA_DEVICE inline void
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -223,7 +221,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void
         load_matrix_coop_sync(fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& frag,
                               const DataT*                                                   data,
                               uint32_t                                                       ldm,
@@ -257,15 +255,13 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    [[deprecated("splitCount argument is deprecated and will be removed in a future "
-                 "release")]] ROCWMMA_DEVICE inline void
-        store_matrix_coop_sync(
-            DataT*                                                               data,
-            fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
-            uint32_t                                                             ldm,
-            uint32_t                                                             waveIndex,
-            uint32_t                                                             waveCount,
-            uint32_t                                                             splitCount);
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void store_matrix_coop_sync(
+        DataT*                                                               data,
+        fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
+        uint32_t                                                             ldm,
+        uint32_t                                                             waveIndex,
+        uint32_t                                                             waveCount,
+        uint32_t                                                             splitCount);
 
     //! Cooperative Store Matrix - Stores the entire fragment to data address cooperatively across waves.
     //! Each cooperative wave is responsible in storing a portion of the final fragment.
@@ -294,7 +290,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm,
@@ -326,7 +322,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE inline void store_matrix_coop_sync(
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm);
@@ -365,13 +361,11 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    [[deprecated("SplitCount argument is deprecated and will be removed in a future "
-                 "release")]] ROCWMMA_DEVICE inline void
-        store_matrix_coop_sync(
-            DataT*                                                               data,
-            fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
-            uint32_t                                                             ldm,
-            uint32_t                                                             waveIndex);
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void store_matrix_coop_sync(
+        DataT*                                                               data,
+        fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
+        uint32_t                                                             ldm,
+        uint32_t                                                             waveIndex);
     // @endcond
 
     //! Cooperative Store Matrix - Stores the entire fragment to data address cooperatively across waves.
@@ -405,7 +399,7 @@ namespace rocwmma
               uint32_t BlockK,
               typename DataT,
               typename DataLayoutT>
-    ROCWMMA_DEVICE void store_matrix_coop_sync(
+    ROCWMMA_DEVICE ROCWMMA_DEPRECATED inline void store_matrix_coop_sync(
         DataT*                                                               data,
         fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT> const& frag,
         uint32_t                                                             ldm,

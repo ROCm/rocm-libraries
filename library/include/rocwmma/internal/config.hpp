@@ -208,4 +208,13 @@ static_assert((bool)(ROCWMMA_BLOCK_DIM_16_SUPPORTED) && !(bool)(ROCWMMA_BLOCK_DI
 
 #define ROCWMMA_KERNEL __global__
 
+#define ROCWMMA_INLINE __forceinline__
+
+#if !NDEBUG
+#define ROCWMMA_DEPRECATED \
+    [[deprecated("This function is deprecated and will be removed in a future rocWMMA release")]]
+#else
+#define ROCWMMA_DEPRECATED
+#endif // !NDEBUG
+
 #endif // ROCWMMA_CONFIG_HPP

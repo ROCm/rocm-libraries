@@ -79,7 +79,7 @@ namespace rocwmma
               typename DataT,
               typename DataLayoutT>
     ROCWMMA_DEVICE fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>&
-                   fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>::operator=(
+        fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>::operator=(
             const fragment<MatrixT, BlockM, BlockN, BlockK, DataT, DataLayoutT>& other)
     {
         mStorage = other.mStorage;
@@ -368,7 +368,7 @@ namespace rocwmma
                                                      PackC::pack(XC::exec(c.mAccess)))));
     }
 
-    ROCWMMA_DEVICE void synchronize_workgroup()
+    ROCWMMA_DEVICE ROCWMMA_INLINE void synchronize_workgroup()
     {
         __syncthreads();
     }
