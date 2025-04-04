@@ -167,7 +167,7 @@ namespace ExpressionTest
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
     }
 
-    TEST_CASE("BFE Expressions", "[expression][codegen]")
+    TEST_CASE("BFE Expressions", "[expression][codegen][bfe]")
     {
         auto context = TestContext::ForDefaultTarget();
 
@@ -202,6 +202,8 @@ namespace ExpressionTest
         auto dest5 = create_output_reg(8, );
         auto dest6 = create_output_reg(32, );
         auto dest7 = create_output_reg(64, );
+
+#undef create_output_reg
 
         context.get()->schedule(Expression::generate(dest1, expr1, context.get()));
         context.get()->schedule(Expression::generate(dest2, expr2, context.get()));
@@ -240,6 +242,86 @@ namespace ExpressionTest
             v_bfe_i32 v9, v0, 6, 23
             v_ashrrev_i64 v[8:9], 32, v[8:9]
         )";
+
+        // Test extraction of packed data types
+        for(auto const& packedDT : {DataType::Halfx2,
+                                    DataType::BFloat16x2,
+                                    DataType::FP8x4,
+                                    DataType::BF8x4,
+                                    DataType::FP4x8})
+        {
+            auto packedDTInfo   = rocRoller::DataTypeInfo::Get(packedDT);
+            auto unpackedDT     = packedDTInfo.segmentVariableType.dataType;
+            auto unpackedDTInfo = rocRoller::DataTypeInfo::Get(unpackedDT);
+            ;
+
+            auto rArg = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, packedDT, 1);
+            rArg->setName("rArg");
+            rArg->allocateNow();
+            auto argExpr = rArg->expression();
+            auto expr8   = bfe(unpackedDT, argExpr, 0, unpackedDTInfo.elementBits);
+            auto dest8   = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, unpackedDT, packedDTInfo.packing);
+
+            context.get()->schedule(Expression::generate(dest8, expr8, context.get()));
+        }
+
+        expected += R"(
+             // BitFieldExtract<0,16>(rb: VGPR Value: Halfx2 x 1: v1)
+             // Allocated : 2 VGPRs (Value: Half): v3, v2
+              v_bfe_u32 v11, v7, 0, 16
+              v_bfe_u32 v10, v7, 16, 16
+
+             // BitFieldExtract<0,16>(rb: VGPR Value: BFloat16x2 x 1: v1)
+             // Allocated : 2 VGPRs (Value: BFloat16): v3, v2
+             v_bfe_u32 v11, v7, 0, 16
+             v_bfe_u32 v10, v7, 16, 16
+
+             // BitFieldExtract<0,8>(rb: VGPR Value: FP8x4 x 1: v1)
+             // Allocated : 4 VGPRs (Value: FP8): v5, v4, v3, v2
+             v_bfe_u32 v13, v7, 0, 8
+             v_bfe_u32 v12, v7, 8, 8
+             v_bfe_u32 v11, v7, 16, 8
+             v_bfe_u32 v10, v7, 24, 8
+
+             // BitFieldExtract<0,8>(rb: VGPR Value: BF8x4 x 1: v1)
+             // Allocated : 4 VGPRs (Value: BF8): v5, v4, v3, v2
+             v_bfe_u32 v13, v7, 0, 8
+             v_bfe_u32 v12, v7, 8, 8
+             v_bfe_u32 v11, v7, 16, 8
+             v_bfe_u32 v10, v7, 24, 8
+
+             // BitFieldExtract<0,4>(rb: VGPR Value: FP4x8 x 1: v1)
+             // Allocated : 8 VGPRs (Value: FP4): v9, v8, v7, v6, v5, v4, v3, v2
+             v_bfe_u32 v17, v7, 0, 4
+             v_bfe_u32 v16, v7, 4, 4
+             v_bfe_u32 v15, v7, 8, 4
+             v_bfe_u32 v14, v7, 12, 4
+             v_bfe_u32 v13, v7, 16, 4
+             v_bfe_u32 v12, v7, 20, 4
+             v_bfe_u32 v11, v7, 24, 4
+             v_bfe_u32 v10, v7, 28, 4
+        )";
+
+        {
+            // Extract to a SGPR
+            auto rArg = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Halfx2, 1);
+            rArg->setName("rArg");
+            rArg->allocateNow();
+            auto argExpr = rArg->expression();
+            auto expr9   = bfe(DataType::Half, argExpr, 0, 16);
+            auto dest9   = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Scalar, DataType::Half, 1);
+            context.get()->schedule(Expression::generate(dest9, expr9, context.get()));
+        }
+
+        expected += R"(
+         // BitFieldExtract<0,16>(rArg: VGPR Value: Halfx2 x 1: v7)
+         // Allocated : 1 SGPR (Value: Half): s0
+         s_bfe_u32 s0, v7, 1048576 //    expr.offset = 0
+         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
     }

@@ -52,7 +52,6 @@ namespace rocRoller
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitFieldExtract>> GetGenerator(
         Register::ValuePtr dst, Register::ValuePtr arg, Expression::BitFieldExtract const&)
     {
-
         return Component::Get<UnaryArithmeticGenerator<Expression::BitFieldExtract>>(
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
     }
@@ -114,6 +113,8 @@ namespace rocRoller
             AssertFatal(expr.width <= dstInfo.elementBits);
             AssertFatal(!dst->isBitfield(),
                         "Cannot write to a bitfield, the whole register is written.");
+            AssertFatal(dst->valueCount() == 1);
+            AssertFatal(arg->valueCount() == 1);
 
             const char* op_v32;
             const char* op_s32;
@@ -241,6 +242,8 @@ namespace rocRoller
                 if(dstInfo.elementBits < dst->registerCount() * Register::bitsPerRegister
                    && DO_SIGNED)
                 {
+                    AssertFatal(dstInfo.elementBits < 32,
+                                "Shift left by 32-bit is undefined behavior");
                     // Ensure we only sign-extend into the bits we're actually expecting for this datatype
                     resultExpr = Expression::literal((1u << dstInfo.elementBits) - 1) & resultExpr;
                 }
@@ -269,6 +272,7 @@ namespace rocRoller
                     dstType.dataType,
                     " or packed ",
                     dstType.dataType);
+
         AssertFatal(expr.width == dstInfo.elementBits && expr.offset % dstInfo.elementBits == 0);
         AssertFatal(dst->valueCount() <= srcInfo.packing);
 
