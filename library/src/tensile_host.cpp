@@ -1061,21 +1061,16 @@ namespace
     /**************************************************************************
     * We normally print error messages only once, to avoid excessive logging *
     **************************************************************************/
-    void print_once(const rocblas_internal_ostream& msg)
+    void print_if_verbose(const rocblas_internal_ostream& msg)
     {
         if(rocblas_suppress_tensile_error_messages())
             return;
         static constexpr char varname[] = "ROCBLAS_VERBOSE_TENSILE_ERROR";
         static const char*    verbose   = getenv(varname);
-        if(!verbose)
+        if(verbose)
         {
-            static auto& once = rocblas_cerr
-                                << msg
-                                << "\nThis message will be only be displayed once, unless the "
-                                << varname << " environment variable is set." << std::endl;
+            rocblas_cerr << std::endl << msg << std::endl;
         }
-        else
-            rocblas_cerr << msg << std::endl;
     }
 
     inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
@@ -1099,8 +1094,8 @@ inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
     if(tensile_prob.f32XdlMathOp() != Tensile::DataType::Float)
     {
         rocblas_internal_ostream msg;
-        print_once(
-            msg << "\nrocBLAS warning: No Tensile solution found for XF32, fall back to FP32");
+        print_if_verbose(
+            msg << "rocBLAS warning: No Tensile solution found for XF32, fall back to FP32");
         tensile_prob.setF32XdlMathOp(Tensile::DataType::Float);
         return true;
     }
@@ -1159,15 +1154,15 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc
                 else
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg
-                               << "\nrocBLAS warning: hipBlasLT failed, falling back to tensile. ");
+                    print_if_verbose(
+                        msg << "rocBLAS warning: hipBlasLT failed, falling back to tensile. ");
                 }
             }
             catch(...)
             {
                 rocblas_internal_ostream msg;
-                print_once(msg << "\nrocBLAS warning: hipBlasLT exception encountered, falling "
-                                  "back to tensile. ");
+                print_if_verbose(msg << "rocBLAS warning: hipBlasLT exception encountered, falling "
+                                        "back to tensile. ");
             }
         }
 #endif
@@ -1220,7 +1215,8 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc
                 else
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "\nrocBLAS error: No Tensile solution found for " << prob);
+                    print_if_verbose(msg << "rocBLAS error: No Tensile solution found for "
+                                         << prob);
                     status = rocblas_status_not_implemented;
                 }
             }
@@ -1278,15 +1274,16 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc
         catch(const std::exception& e)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "\nrocBLAS error: " << (solution ? "" : "No ")
-                           << "Tensile solution found, but exception thrown for " << prob
-                           << e.what());
+            print_if_verbose(msg << "rocBLAS error: " << (solution ? "" : "No ")
+                                 << "Tensile solution found, but exception thrown for " << prob
+                                 << e.what());
         }
         catch(...)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "\nrocBLAS error: " << (solution ? "" : "No ")
-                           << "Tensile solution found, but unknown exception thrown for " << prob);
+            print_if_verbose(msg << "rocBLAS error: " << (solution ? "" : "No ")
+                                 << "Tensile solution found, but unknown exception thrown for "
+                                 << prob);
         }
     }
 
@@ -1464,12 +1461,12 @@ rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>
     catch(const std::exception& e)
     {
         rocblas_internal_ostream msg;
-        print_once(msg << "\nrocBLAS error: exception thrown for " << prob << e.what());
+        print_if_verbose(msg << "rocBLAS error: exception thrown for " << prob << e.what());
     }
     catch(...)
     {
         rocblas_internal_ostream msg;
-        print_once(msg << "\nrocBLAS error: unknown exception thrown for " << prob);
+        print_if_verbose(msg << "rocBLAS error: unknown exception thrown for " << prob);
     }
 
     return status;
