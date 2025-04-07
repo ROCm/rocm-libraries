@@ -271,7 +271,17 @@ static constexpr unsigned int items[n_items] = {
         static constexpr unsigned int block_size = Params::block_size; \
     };
 
+#define block_store_test_suite_type_def_helper(name, suffix) \
+    template<class Params> \
+    class name ## suffix : public ::testing::Test { \
+    public: \
+        using DataType = typename Params::input_type; \
+        static constexpr unsigned int block_size = Params::block_size; \
+    };
+
 #define block_sort_test_suite_type_def(name, suffix) block_sort_test_suite_type_def_helper(name, suffix)
+
+#define block_store_test_suite_type_def(name, suffix) block_store_test_suite_type_def_helper(name, suffix)
 
 #define typed_test_suite_def_helper(name, suffix, params) TYPED_TEST_SUITE(name ## suffix, params)
 
