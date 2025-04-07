@@ -294,7 +294,9 @@ class StateValues:
   numReadsPerIterB: int                  = 0
   numReadsPerIterMetadata: int           = 0
   localReadDoCntA: int                   = 0
+  localReadDoCntMXSA: int                = 0
   localReadDoCntB: int                   = 0
+  localReadDoCntMXSB: int                = 0
   localReadDoCntMetadata: int            = 0
   savedLocalReadDoCntA: int              = 0
   savedLocalReadDoCntB: int              = 0
@@ -6645,6 +6647,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ForceUnrollSubIter"]:
         numA = numA // factorSubIterA
 
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.numReadsPerUnrollMXSA = 1
+        numMXSA = kernel["InnerUnroll"] * kernel["MIWaveTile"][0] // tensorParametersMXSA["localReadInstruction"].numOffsets
+        if self.states.lrvwTileMXSA > 1:
+          numMXSA = numMXSA // kernel["VectorWidthA"]
+
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         if kernel["UnrollMajorLDSMetadata"]:
           self.states.numReadsPerUnrollMetadata = ceil(tensorParametersM["bpe"] * kernel["MIInputPerThreadMetadata"] / int(tensorParametersM["localReadInstruction"].blockWidth * 4))
@@ -6669,16 +6677,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ForceUnrollSubIter"]:
         numB = numB // factorSubIterB
 
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.numReadsPerUnrollMXSB = 1
+        numMXSB = kernel["InnerUnroll"] * kernel["MIWaveTile"][1] // tensorParametersMXSB["localReadInstruction"].numOffsets
+        if self.states.lrvwTileMXSB > 1:
+          numMXSB = numMXSB // kernel["VectorWidthB"]
+
       # wider localread has 2 mode
       # 1. using larger IU to coalesced localread, only half of local reads in 1 iteration
       # 2. using larger PLR to read more iterations, same number local reads in 1 iteration
       if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedA:
         numA //= self.states.numReadsIterCoalescedA
+      if kernel["ProblemType"]["MXBlockA"]:
+        if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedMXSA:
+          numMXSA //= self.states.numReadsIterCoalescedMXSA
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedMetadata:
           numM //= self.states.numReadsIterCoalescedMetadata
       if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedB:
         numB //= self.states.numReadsIterCoalescedB
+      if kernel["ProblemType"]["MXBlockB"]:
+        if kernel["InnerUnroll"] >= self.states.numReadsIterCoalescedMXSB:
+          numMXSB //= self.states.numReadsIterCoalescedMXSB
 
     else: # mac instruction
       if kernel["UseDotInstruction"]:
@@ -6691,10 +6711,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if not kernel["DirectToVgprA"]:
       self.states.numReadsPerIterA = numA
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.states.numReadsPerIterMXSA = numMXSA
     if not kernel["DirectToVgprB"]:
       self.states.numReadsPerIterB = numB
-    self.states.localReadDoCntA   = 0
-    self.states.localReadDoCntB   = 0
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.states.numReadsPerIterMXSB = numMXSB
+
+    self.states.localReadDoCntA = 0
+    if kernel["ProblemType"]["MXBlockA"]:
+      self.states.localReadDoCntMXSA = 0
+    self.states.localReadDoCntB = 0
+    if kernel["ProblemType"]["MXBlockB"]:
+      self.states.localReadDoCntMXSB = 0
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       self.states.numReadsPerIterMetadata = numM
       self.states.localReadDoCntMetadata  = 0
