@@ -221,9 +221,14 @@ build:spirv:
     - .build:common
   variables:
     GPU_TARGETS: "amdgcnspirv"
-    BUILD_VERSION: 17
   image: "registry.streamhpc.internal/unstable-rocm:main"
   allow_failure: true
+  parallel:
+    # Debug builds disabled due to excessive build times for debug test builds
+    matrix:
+      - BUILD_TYPE: Release
+        BUILD_TARGET: [BENCHMARK, TEST]
+        BUILD_VERSION: 17
 
 build:cmake-latest:
   stage: build
