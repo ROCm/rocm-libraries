@@ -213,6 +213,18 @@ build:cmake-minimum-apt:
       - $BUILD_DIR/test/test_*
     expire_in: 1 day
 
+build:spirv:
+  stage: build
+  needs: []
+  extends:
+    - .cmake-minimum
+    - .build:common
+  variables:
+    GPU_TARGETS: "amdgcnspirv"
+    BUILD_VERSION: 17
+  image: "registry.streamhpc.internal/unstable-rocm:main"
+  allow_failure: true
+
 build:cmake-latest:
   stage: build
   needs: []
