@@ -271,7 +271,7 @@ function(_fetch_yaml-cpp VERSION HASH)
     set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
     set(YAML_CPP_BUILD_TOOLS OFF)
     set(YAML_CPP_INSTALL ON)
-    # set(YAML_BUILD_SHARED_LIBS OFF)
+    set(YAML_BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(
         yaml_cpp
         GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
@@ -364,6 +364,7 @@ function(_fetch_boost VERSION HASH)
     set(BUILD_TESTING OFF)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS OFF)
+    set(Boost_USE_STATIC_LIBS ON)
     FetchContent_MakeAvailable(boost)
     _restore_var(BUILD_SHARED_LIBS)
     _restore_var(BUILD_TESTING)

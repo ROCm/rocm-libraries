@@ -324,7 +324,6 @@ set_source_files_properties(
 
 if(YAML_BACKEND STREQUAL "YAML_CPP")
     target_link_libraries(rocroller PUBLIC yaml-cpp)
-    set(yaml_export_dependency PACKAGE yaml-cpp VERSION 0.7.0)
 endif()
 
 target_link_libraries(
@@ -356,5 +355,4 @@ rocm_export_targets(
     EXPORT rocroller_targets
     DEPENDS
         PACKAGE msgpack VERSION 3.3.0
-        ${yaml_export_dependency}
 )
