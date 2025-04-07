@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -45,7 +46,6 @@
 #include <random>
 #include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 template<typename T>
@@ -156,51 +156,39 @@ public:
                                         common::generate_limits<key_type>::max(),
                                         seed.get_0());
 
-        offset_type* d_offsets;
-        HIP_CHECK(hipMalloc(&d_offsets, offsets.size() * sizeof(offset_type)));
-        HIP_CHECK(hipMemcpy(d_offsets,
-                            offsets.data(),
-                            offsets.size() * sizeof(offset_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<offset_type> d_offsets(offsets);
 
-        key_type* d_keys_input;
-        key_type* d_keys_output;
-        HIP_CHECK(hipMalloc(&d_keys_input, size * sizeof(key_type)));
-        HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
-        HIP_CHECK(hipMemcpy(d_keys_input,
-                            keys_input.data(),
-                            size * sizeof(key_type),
-                            hipMemcpyHostToDevice));
+        common::device_ptr<key_type> d_keys_input(keys_input);
+        common::device_ptr<key_type> d_keys_output(size);
 
-        void*  d_temporary_storage     = nullptr;
         size_t temporary_storage_bytes = 0;
-        HIP_CHECK(rocprim::segmented_radix_sort_keys<Config>(d_temporary_storage,
+        HIP_CHECK(rocprim::segmented_radix_sort_keys<Config>(nullptr,
                                                              temporary_storage_bytes,
-                                                             d_keys_input,
-                                                             d_keys_output,
+                                                             d_keys_input.get(),
+                                                             d_keys_output.get(),
                                                              size,
                                                              segments_count,
-                                                             d_offsets,
-                                                             d_offsets + 1,
+                                                             d_offsets.get(),
+                                                             d_offsets.get() + 1,
                                                              0,
                                                              sizeof(key_type) * 8,
                                                              stream,
                                                              false));
 
-        HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+        common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
         HIP_CHECK(hipDeviceSynchronize());
 
         state.run(
             [&]
             {
-                HIP_CHECK(rocprim::segmented_radix_sort_keys<Config>(d_temporary_storage,
+                HIP_CHECK(rocprim::segmented_radix_sort_keys<Config>(d_temporary_storage.get(),
                                                                      temporary_storage_bytes,
-                                                                     d_keys_input,
-                                                                     d_keys_output,
+                                                                     d_keys_input.get(),
+                                                                     d_keys_output.get(),
                                                                      size,
                                                                      segments_count,
-                                                                     d_offsets,
-                                                                     d_offsets + 1,
+                                                                     d_offsets.get(),
+                                                                     d_offsets.get() + 1,
                                                                      0,
                                                                      sizeof(key_type) * 8,
                                                                      stream,
@@ -208,11 +196,6 @@ public:
             });
 
         total_size += size;
-
-        HIP_CHECK(hipFree(d_temporary_storage));
-        HIP_CHECK(hipFree(d_offsets));
-        HIP_CHECK(hipFree(d_keys_input));
-        HIP_CHECK(hipFree(d_keys_output));
     }
 
     void run(benchmark_utils::state&& state) override

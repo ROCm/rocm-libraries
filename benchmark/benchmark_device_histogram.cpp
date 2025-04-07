@@ -23,6 +23,8 @@
 #include "benchmark_device_histogram.parallel.hpp"
 #include "benchmark_utils.hpp"
 
+#include "../common/utils_device_ptr.hpp"
+
 // Google Benchmark
 #include <benchmark/benchmark.h>
 
@@ -73,36 +75,32 @@ void run_even_benchmark(benchmark_utils::state&& state,
     // Generate data
     std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
 
-    T*            d_input;
-    counter_type* d_histogram;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<counter_type> d_histogram(size);
 
-    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(rocprim::histogram_even(d_temporary_storage,
+    HIP_CHECK(rocprim::histogram_even(nullptr,
                                       temporary_storage_bytes,
-                                      d_input,
+                                      d_input.get(),
                                       size,
-                                      d_histogram,
+                                      d_histogram.get(),
                                       bins + 1,
                                       lower_level,
                                       upper_level,
                                       stream,
                                       false));
 
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
         [&]
         {
-            HIP_CHECK(rocprim::histogram_even(d_temporary_storage,
+            HIP_CHECK(rocprim::histogram_even(d_temporary_storage.get(),
                                               temporary_storage_bytes,
-                                              d_input,
+                                              d_input.get(),
                                               size,
-                                              d_histogram,
+                                              d_histogram.get(),
                                               bins + 1,
                                               lower_level,
                                               upper_level,
@@ -111,10 +109,6 @@ void run_even_benchmark(benchmark_utils::state&& state,
         });
 
     state.set_items_processed_per_iteration<T>(size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_histogram));
 }
 
 template<typename T, unsigned int Channels, unsigned int ActiveChannels>
@@ -147,20 +141,17 @@ void run_multi_even_benchmark(benchmark_utils::state&& state,
     std::vector<T> input
         = generate<T>(size * Channels, entropy_reduction, lower_level[0], upper_level[0]);
 
-    T*            d_input;
-    counter_type* d_histogram[ActiveChannels];
-    HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
+    common::device_ptr<T> d_input(input);
+    counter_type*         d_histogram[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMalloc(&d_histogram[channel], bins * sizeof(counter_type)));
     }
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * Channels * sizeof(T), hipMemcpyHostToDevice));
 
-    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
+    HIP_CHECK((rocprim::multi_histogram_even<Channels, ActiveChannels>(nullptr,
                                                                        temporary_storage_bytes,
-                                                                       d_input,
+                                                                       d_input.get(),
                                                                        size,
                                                                        d_histogram,
                                                                        num_levels,
@@ -169,16 +160,16 @@ void run_multi_even_benchmark(benchmark_utils::state&& state,
                                                                        stream,
                                                                        false)));
 
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
         [&]
         {
             HIP_CHECK(
-                (rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage,
+                (rocprim::multi_histogram_even<Channels, ActiveChannels>(d_temporary_storage.get(),
                                                                          temporary_storage_bytes,
-                                                                         d_input,
+                                                                         d_input.get(),
                                                                          size,
                                                                          d_histogram,
                                                                          num_levels,
@@ -190,8 +181,6 @@ void run_multi_even_benchmark(benchmark_utils::state&& state,
 
     state.set_items_processed_per_iteration<T>(size * Channels);
 
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_input));
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipFree(d_histogram[channel]));
@@ -223,51 +212,39 @@ void run_range_benchmark(benchmark_utils::state&& state, size_t bins)
         levels[i] = static_cast<level_type>(i);
     }
 
-    T*            d_input;
-    level_type*   d_levels;
-    counter_type* d_histogram;
-    HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(level_type)));
-    HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(
-        hipMemcpy(d_levels, levels.data(), (bins + 1) * sizeof(level_type), hipMemcpyHostToDevice));
+    common::device_ptr<T>            d_input(input);
+    common::device_ptr<level_type>   d_levels(levels);
+    common::device_ptr<counter_type> d_histogram(size);
 
-    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK(rocprim::histogram_range(d_temporary_storage,
+    HIP_CHECK(rocprim::histogram_range(nullptr,
                                        temporary_storage_bytes,
-                                       d_input,
+                                       d_input.get(),
                                        size,
-                                       d_histogram,
+                                       d_histogram.get(),
                                        bins + 1,
-                                       d_levels,
+                                       d_levels.get(),
                                        stream,
                                        false));
 
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
         [&]
         {
-            HIP_CHECK(rocprim::histogram_range(d_temporary_storage,
+            HIP_CHECK(rocprim::histogram_range(d_temporary_storage.get(),
                                                temporary_storage_bytes,
-                                               d_input,
+                                               d_input.get(),
                                                size,
-                                               d_histogram,
+                                               d_histogram.get(),
                                                bins + 1,
-                                               d_levels,
+                                               d_levels.get(),
                                                stream,
                                                false));
         });
 
     state.set_items_processed_per_iteration<T>(size);
-
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_levels));
-    HIP_CHECK(hipFree(d_histogram));
 }
 
 template<typename T, unsigned int Channels, unsigned int ActiveChannels>
@@ -304,17 +281,15 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
                                               random_range.second,
                                               seed.get_0());
 
-    T*            d_input;
+    common::device_ptr<T> d_input(input);
     level_type*   d_levels[ActiveChannels];
-    counter_type* d_histogram[ActiveChannels];
-    HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
+    counter_type*         d_histogram[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(level_type)));
         HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
     }
 
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * Channels * sizeof(T), hipMemcpyHostToDevice));
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipMemcpy(d_levels[channel],
@@ -323,11 +298,10 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
                             hipMemcpyHostToDevice));
     }
 
-    void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
-    HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
+    HIP_CHECK((rocprim::multi_histogram_range<Channels, ActiveChannels>(nullptr,
                                                                         temporary_storage_bytes,
-                                                                        d_input,
+                                                                        d_input.get(),
                                                                         size,
                                                                         d_histogram,
                                                                         num_levels,
@@ -335,16 +309,16 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
                                                                         stream,
                                                                         false)));
 
-    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
     HIP_CHECK(hipDeviceSynchronize());
 
     state.run(
         [&]
         {
             HIP_CHECK(
-                (rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage,
+                (rocprim::multi_histogram_range<Channels, ActiveChannels>(d_temporary_storage.get(),
                                                                           temporary_storage_bytes,
-                                                                          d_input,
+                                                                          d_input.get(),
                                                                           size,
                                                                           d_histogram,
                                                                           num_levels,
@@ -355,8 +329,6 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
 
     state.set_items_processed_per_iteration<T>(size * Channels);
 
-    HIP_CHECK(hipFree(d_temporary_storage));
-    HIP_CHECK(hipFree(d_input));
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
         HIP_CHECK(hipFree(d_levels[channel]));

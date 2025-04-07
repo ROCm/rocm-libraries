@@ -26,6 +26,7 @@
 #include "benchmark_utils.hpp"
 
 #include "../common/utils_data_generation.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
@@ -232,16 +233,14 @@ public:
                                        common::generate_limits<KeyType>::max(),
                                        seed.get_0());
 
-        KeyType* d_input;
-        KeyType* d_output;
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(KeyType)));
-        HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(KeyType)));
-        HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(KeyType), hipMemcpyHostToDevice));
+        common::device_ptr<KeyType> d_input(input);
+        common::device_ptr<KeyType> d_output(size);
         HIP_CHECK(hipDeviceSynchronize());
 
         static constexpr auto stable_tag = rocprim::detail::bool_constant<stable>{};
 
-        state.run([&] { dispatch_block_sort(stable_tag, size, stream, d_input, d_output); });
+        state.run(
+            [&] { dispatch_block_sort(stable_tag, size, stream, d_input.get(), d_output.get()); });
 
         state.set_items_processed_per_iteration<KeyType>(size);
 
@@ -249,9 +248,6 @@ public:
             = benchmark::Counter(BlockSize * ItemsPerThread,
                                  benchmark::Counter::kDefaults,
                                  benchmark::Counter::OneK::kIs1024);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_output));
     }
 };
 

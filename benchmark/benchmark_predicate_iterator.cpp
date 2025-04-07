@@ -24,6 +24,7 @@
 
 #include "../common/predicate_iterator.hpp"
 #include "../common/utils_custom_type.hpp"
+#include "../common/utils_device_ptr.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -115,19 +116,13 @@ void run_benchmark(benchmark_utils::state&& state)
     const auto     random_range = limit_random_range<T>(0, 99);
     std::vector<T> input
         = get_random_data<T>(size, random_range.first, random_range.second, seed.get_0());
-    T* d_input;
-    T* d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), size * sizeof(T)));
-    HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
+    common::device_ptr<T> d_input(input);
+    common::device_ptr<T> d_output(size);
     HIP_CHECK(hipDeviceSynchronize());
 
-    state.run([&] { IteratorBenchmark{}(d_input, d_output, size, stream); });
+    state.run([&] { IteratorBenchmark{}(d_input.get(), d_output.get(), size, stream); });
 
     state.set_items_processed_per_iteration<T>(size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
 }
 
 #define CREATE_BENCHMARK(B, T, C)                                                                \
