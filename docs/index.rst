@@ -8,12 +8,18 @@
  rocPRIM documentation
 ********************************************************************
 
-rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to ease the maintainability of performant, yet portable GPU-accelerated code on the AMD ROCm platform. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs. For more information refer to :ref:`rocprim-intro`.
+rocPRIM is a header-only library that provides HIP parallel primitives. The purpose of the library is to help maintain  GPU-accelerated code on the AMD ROCm platform. rocPRIM is written in HIP and has been optimized for AMD's latest discrete GPUs. 
 
-The code is open and hosted at: https://github.com/ROCmSoftwarePlatform/rocPRIM
+The rocPRIM public repository is located at https://github.com/ROCmSoftwarePlatform/rocPRIM.
 
-The rocPRIM documentation is structured as follows:
+.. grid:: 2
 
+  .. grid-item-card:: Installation
+
+    * :doc:`rocPRIM prerequisites <install/rocPRIM-prerequisites>`
+    * :doc:`Install rocPRIM on Linux <install/rocPRIM-build-install-linux>`
+    * :doc:`Install rocPRIM on Windows <install/rocPRIM-build-install-windows>`
+  
 .. grid:: 2
 
   .. grid-item-card:: Conceptual
@@ -23,7 +29,7 @@ The rocPRIM documentation is structured as follows:
     * :ref:`tuning`
     * :ref:`developer`
 
-  .. grid-item-card:: API reference
+  .. grid-item-card:: Reference
 
     * :ref:`ops-summary`
     * :ref:`data-type-support`

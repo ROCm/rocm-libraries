@@ -1,15 +1,12 @@
 .. meta::
-  :description: rocPRIM documentation and API reference library
-  :keywords: rocPRIM, ROCm, API, documentation
+  :description: rocPRIM operations 
+  :keywords: rocPRIM, ROCm, API, documentation, operations
 
 .. _rocprim-intro:
 
 ********************************************************************
- Introduction to rocPRIM
+rocPRIM operations
 ********************************************************************
-
-Operations and Sequences
-========================
 
 A rocPRIM operation is a computation over a sequence of objects. A rocPRIM operation can return a single value like the ``reduce`` operation; return another sequence like the ``sort`` operation; or return multiple sequences like the ``partition`` operation. The elements of the sequence could be of any type or class, although template specialization allows rocPRIM to optimize the computations over the usual numerical datatypes. Operations accept input in the form of ``iterators`` that point to a sequence of objects to process, and write output to a mutable ``iterator``.
 
@@ -17,9 +14,6 @@ A high level view of the available operations can be found on :ref:`ops-summary`
 
 .. note::
   Refer to :ref:`data-type-support` for information on supported datatypes.
-
-Scope
-======
 
 An important property of a rocPRIM operation is its scope, which determines the level of the computing model used for processing the operation. The scope determines which parts of the GPU will cooperate to compute the result. The scope has a direct influence on how the data will be subdivided and processed by the computing units or VALUs. The rocPRIM operation scopes are:  
 
