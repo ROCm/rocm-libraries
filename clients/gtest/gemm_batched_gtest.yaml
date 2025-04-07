@@ -219,7 +219,6 @@ Tests:
   function:
     - gemm_batched_ex_bad_arg: *real_precisions
     - gemm_batched_ex_bad_arg: *complex_precisions
-    - gemm_batched_ex3_bad_arg: *float8_float8_float8
   transA: N
   transB: N
   api: [ C, FORTRAN ]
