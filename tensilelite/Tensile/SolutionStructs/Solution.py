@@ -2649,9 +2649,9 @@ class Solution(collections.abc.Mapping):
     state["LdsOffsetB_Blk"]=0
     # todo, can the alignment be a power of 2?
     state["LdsOffsetA"] = 0
+    state["LdsNumElementsAlignedA"] = ldsNumBytesAlignedA
+    state["LdsNumElementsAlignedB"] = ldsNumBytesAlignedB
     if state["PrefetchGlobalRead"]:
-      state["LdsNumElementsAlignedA"] = ldsNumBytesAlignedA
-      state["LdsNumElementsAlignedB"] = ldsNumBytesAlignedB
       state["LdsNumElementsAlignedMetadata"] = ldsNumBytesAlignedMetadata
       state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
       state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
