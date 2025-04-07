@@ -798,12 +798,29 @@ Tests:
   category: stress
   function:
     - gemm_batched: *half_precision
+    - gemm_batched_ex: *nonint8_real_precisions
+    - gemm_batched_ex: *int8_precision
   matrix_size:
-    - { M: 2, N: 2, K: 2, lda: 2, ldb:    2, ldc:    2 }
+    - { M: 8, N: 8, K: 8, lda: 8, ldb:    8, ldc:    8 }
   pointer_mode_device: false
   transA: [ T ]
   transB: [ N ]
   batch_count: *c_grid_yz_require_passes
+  alpha: 1
+  beta: 1
+  api: [ C_64 ]
+  os_flags: LINUX
+
+- name: gemm_batched_ex_ILP64
+  category: pre_checkin
+  function:
+    - gemm_batched_ex: *nonint8_real_precisions
+    - gemm_batched_ex: *int8_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, batch_count: 511 }
+  pointer_mode_device: false
+  transA: [ N ]
+  transB: [ T ]
   alpha: 1
   beta: 1
   api: [ C_64 ]
