@@ -151,7 +151,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
         }
 
         // Parse the NAL unit
-        if (nal_unit_size_) {
+        if (nal_unit_size_ >= 4) {
             // start code + NAL unit header = 4 bytes
             int ebsp_size = nal_unit_size_ - 4 > RBSP_BUF_SIZE ? RBSP_BUF_SIZE : nal_unit_size_ - 4; // only copy enough bytes for header parsing
 
@@ -160,7 +160,9 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                 case kAvcNalTypeSeq_Parameter_Set: {
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
-                    ParseSps(rbsp_buf_, rbsp_size_);
+                    if ((ret2 = ParseSps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
+                        ERR("Error occurred in SPS parsing. This SPS NAL unit is skipped.");
+                    }
                     break;
                 }
 
@@ -168,7 +170,7 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     if ((ret2 = ParsePps(rbsp_buf_, rbsp_size_)) != PARSER_OK) {
-                        return ret2;
+                        ERR("Error occurred in PPS parsing. This PPS NAL unit is skipped.");
                     }
                     break;
                 }
@@ -186,15 +188,15 @@ ParserResult AvcVideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
                         slice_info_list_.resize(num_slices_ + 1, {{0}});
                     }
 
-                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
-                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
-
                     memcpy(rbsp_buf_, (pic_data_buffer_ptr_ + curr_start_code_offset_ + 4), ebsp_size);
                     rbsp_size_ = EbspToRbsp(rbsp_buf_, 0, ebsp_size);
                     AvcSliceHeader *p_slice_header = &slice_info_list_[num_slices_].slice_header;
                     if ((ret2 = ParseSliceHeader(rbsp_buf_, rbsp_size_, p_slice_header)) != PARSER_OK) {
-                        return ret2;
+                        ERR("Error occurred in slice header parsing. This slice NAL unit is skipped.");
+                        break;      // ignore and continue to next nal_unit
                     }
+                    slice_info_list_[num_slices_].slice_data_offset = curr_start_code_offset_;
+                    slice_info_list_[num_slices_].slice_data_size = nal_unit_size_;
 
                     // Start decode process
                     if (num_slices_ == 0) {
@@ -776,7 +778,7 @@ const int Default_8x8_Inter[64] = {
     30, 30, 32, 32, 32, 33, 33, 35
 };
 
-void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
+ParserResult AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     size_t offset = 0;  // current bit offset
     AvcSeqParameterSet *p_sps = nullptr;
 
@@ -791,6 +793,7 @@ void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     uint32_t reserved_zero_2bits = Parser::ReadBits(p_stream, offset, 2);
     uint32_t level_idc = Parser::ReadBits(p_stream, offset, 8);
     uint32_t seq_parameter_set_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("seq_parameter_set_id", seq_parameter_set_id, 0, 31);
 
     p_sps = &sps_list_[seq_parameter_set_id];
     memset(p_sps, 0, sizeof(AvcSeqParameterSet));
@@ -820,22 +823,30 @@ void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
         p_sps->profile_idc == 134 ||
         p_sps->profile_idc == 135) {
         p_sps->chroma_format_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("chroma_format_idc", p_sps->chroma_format_idc, 0, 3);
         if (p_sps->chroma_format_idc == 3) {
             p_sps->separate_colour_plane_flag = Parser::GetBit(p_stream, offset);
         }
         
         p_sps->bit_depth_luma_minus8 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("bit_depth_luma_minus8", p_sps->bit_depth_luma_minus8, 0, 0);
         p_sps->bit_depth_chroma_minus8 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("bit_depth_chroma_minus8", p_sps->bit_depth_chroma_minus8, 0, 0);
         p_sps->qpprime_y_zero_transform_bypass_flag = Parser::GetBit(p_stream, offset);
         p_sps->seq_scaling_matrix_present_flag = Parser::GetBit(p_stream, offset);
         if (p_sps->seq_scaling_matrix_present_flag == 1) {
             for (int i = 0; i < ((p_sps->chroma_format_idc != 3) ? 8 : 12); i++) {
                 p_sps->seq_scaling_list_present_flag[i] = Parser::GetBit(p_stream, offset);
                 if (p_sps->seq_scaling_list_present_flag[i] == 1) {
+                    ParserResult ret;
                     if ( i < 6 ) {
-                        GetScalingList(p_stream, offset, p_sps->scaling_list_4x4[i], 16, &p_sps->use_default_scaling_matrix_4x4_flag[i]);
+                        if ((ret = GetScalingList(p_stream, offset, p_sps->scaling_list_4x4[i], 16, &p_sps->use_default_scaling_matrix_4x4_flag[i])) != PARSER_OK) {
+                            return ret;
+                        }
                     } else {
-                        GetScalingList(p_stream, offset, p_sps->scaling_list_8x8[i - 6], 64, &p_sps->use_default_scaling_matrix_8x8_flag[i - 6]);
+                        if ((ret = GetScalingList(p_stream, offset, p_sps->scaling_list_8x8[i - 6], 64, &p_sps->use_default_scaling_matrix_8x8_flag[i - 6])) != PARSER_OK) {
+                            return ret;
+                        }
                     }
                 }
             }
@@ -921,20 +932,25 @@ void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     }
 
     p_sps->log2_max_frame_num_minus4 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("log2_max_frame_num_minus4", p_sps->log2_max_frame_num_minus4, 0, 12);
     p_sps->pic_order_cnt_type = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("pic_order_cnt_type", p_sps->pic_order_cnt_type, 0, 2);
     if (p_sps->pic_order_cnt_type == 0 ) {
         p_sps->log2_max_pic_order_cnt_lsb_minus4 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("log2_max_pic_order_cnt_lsb_minus4", p_sps->log2_max_pic_order_cnt_lsb_minus4, 0, 12);
     } else if (p_sps->pic_order_cnt_type == 1) {
         p_sps->delta_pic_order_always_zero_flag = Parser::GetBit(p_stream, offset);
         p_sps->offset_for_non_ref_pic = Parser::ExpGolomb::ReadSe(p_stream, offset);
         p_sps->offset_for_top_to_bottom_field = Parser::ExpGolomb::ReadSe(p_stream, offset);
         p_sps->num_ref_frames_in_pic_order_cnt_cycle = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("num_ref_frames_in_pic_order_cnt_cycle", p_sps->num_ref_frames_in_pic_order_cnt_cycle, 0, 255);
         for (int i = 0; i < p_sps->num_ref_frames_in_pic_order_cnt_cycle; i++) {
             p_sps->offset_for_ref_frame[i] = Parser::ExpGolomb::ReadSe(p_stream, offset);
         }
     }
 
     p_sps->max_num_ref_frames = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("max_num_ref_frames", p_sps->max_num_ref_frames, 0, AVC_MAX_DPB_FRAMES - 1);
     p_sps->gaps_in_frame_num_value_allowed_flag = Parser::GetBit(p_stream, offset);
     p_sps->pic_width_in_mbs_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
     p_sps->pic_height_in_map_units_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
@@ -946,15 +962,50 @@ void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
     p_sps->direct_8x8_inference_flag = Parser::GetBit(p_stream, offset);
     p_sps->frame_cropping_flag = Parser::GetBit(p_stream, offset);
     if (p_sps->frame_cropping_flag) {
+        int chroma_array_type = p_sps->separate_colour_plane_flag == 0 ? p_sps->chroma_format_idc : 0;
+        int sub_width_c = 0, sub_height_c = 0;
+        switch (p_sps->chroma_format_idc) {
+            case 1:
+                sub_width_c = 2;
+                sub_height_c = 2;
+                break;
+            case 2:
+                sub_width_c = 2;
+                sub_height_c = 1;
+                break;
+            case 3:
+                sub_width_c = 1;
+                sub_height_c = 1;
+                break;
+            default:
+                sub_width_c = 0;
+                sub_height_c = 0;
+                break;
+        }
+        int crop_unit_x, crop_unit_y;
+        if (chroma_array_type == 0) {
+            crop_unit_x = 1;
+            crop_unit_y = 2 - p_sps->frame_mbs_only_flag;
+        } else {
+            crop_unit_x = sub_width_c;
+            crop_unit_y = sub_height_c * (2 - p_sps->frame_mbs_only_flag);
+        }
+        uint32_t pic_width_in_samples_l = (p_sps->pic_width_in_mbs_minus1 + 1) * AVC_MACRO_BLOCK_SIZE;
+        uint32_t frame_height_in_samples_l = (2 - p_sps->frame_mbs_only_flag) * (p_sps->pic_height_in_map_units_minus1 + 1) * AVC_MACRO_BLOCK_SIZE;
         p_sps->frame_crop_left_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_right_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_MAX("frame_crop_left_offset + frame_crop_right_offset", p_sps->frame_crop_left_offset + p_sps->frame_crop_right_offset + 1, pic_width_in_samples_l / crop_unit_x);
         p_sps->frame_crop_top_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_sps->frame_crop_bottom_offset = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_MAX("frame_crop_top_offset + frame_crop_bottom_offset", p_sps->frame_crop_top_offset + p_sps->frame_crop_bottom_offset + 1, frame_height_in_samples_l / crop_unit_y);
     }
 
     p_sps->vui_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_sps->vui_parameters_present_flag == 1) {
-        GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters);
+        ParserResult ret;
+        if ((ret = GetVuiParameters(p_stream, offset, &p_sps->vui_seq_parameters)) != PARSER_OK) {
+            return ret;
+        }
     }
 
     p_sps->is_received = 1;  // confirm SPS with seq_parameter_set_id received (but not activated)
@@ -962,6 +1013,7 @@ void AvcVideoParser::ParseSps(uint8_t *p_stream, size_t size) {
 #if DBGINFO
     PrintSps(p_sps);
 #endif // DBGINFO
+    return PARSER_OK;
 }
 
 ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_byte) {
@@ -971,15 +1023,19 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
 
     // Parse and temporarily store
     uint32_t pic_parameter_set_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("pic_parameter_set_id", pic_parameter_set_id, 0, 255);
     uint32_t seq_parameter_set_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
-
+    CHECK_ALLOWED_RANGE("seq_parameter_set_id", seq_parameter_set_id, 0, 31);
+    if (sps_list_[seq_parameter_set_id].is_received == 0) {
+        ERR("Empty SPS is referred.");
+        return PARSER_WRONG_STATE;
+    }
     p_sps = &sps_list_[seq_parameter_set_id];
     p_pps = &pps_list_[pic_parameter_set_id];
     memset(p_pps, 0, sizeof(AvcPicParameterSet));	
 
     p_pps->pic_parameter_set_id = pic_parameter_set_id;
     p_pps->seq_parameter_set_id = seq_parameter_set_id;
-
     p_pps->entropy_coding_mode_flag = Parser::GetBit(p_stream, offset);
     p_pps->bottom_field_pic_order_in_frame_present_flag = Parser::GetBit(p_stream, offset);
 
@@ -991,12 +1047,17 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
     }
 
     p_pps->num_ref_idx_l0_default_active_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("num_ref_idx_l0_default_active_minus1", p_pps->num_ref_idx_l0_default_active_minus1, 0, 31);
     p_pps->num_ref_idx_l1_default_active_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("num_ref_idx_l1_default_active_minus1", p_pps->num_ref_idx_l1_default_active_minus1, 0, 31);
     p_pps->weighted_pred_flag = Parser::GetBit(p_stream, offset);
     p_pps->weighted_bipred_idc = Parser::ReadBits(p_stream, offset, 2);
     p_pps->pic_init_qp_minus26 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("pic_init_qp_minus26", p_pps->pic_init_qp_minus26, static_cast<int>(-(26 + 6 * p_sps->bit_depth_luma_minus8)), 25);
     p_pps->pic_init_qs_minus26 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("pic_init_qs_minus26", p_pps->pic_init_qs_minus26, -26, 25);
     p_pps->chroma_qp_index_offset = Parser::ExpGolomb::ReadSe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("chroma_qp_index_offset", p_pps->chroma_qp_index_offset, -12, 12);
     p_pps->deblocking_filter_control_present_flag = Parser::GetBit(p_stream, offset);
     p_pps->constrained_intra_pred_flag = Parser::GetBit(p_stream, offset);
     p_pps->redundant_pic_cnt_present_flag = Parser::GetBit(p_stream, offset);
@@ -1009,15 +1070,21 @@ ParserResult AvcVideoParser::ParsePps(uint8_t *p_stream, size_t stream_size_in_b
             for (int i = 0; i < 6 + count * p_pps->transform_8x8_mode_flag; i++) {
                 p_pps->pic_scaling_list_present_flag [i] = Parser::GetBit(p_stream, offset);
                 if (p_pps->pic_scaling_list_present_flag[i] == 1) {
+                    ParserResult ret;
                     if ( i < 6 ) {
-                        GetScalingList(p_stream, offset, p_pps->scaling_list_4x4[i], 16, &p_pps->use_default_scaling_matrix_4x4_flag[i]);
+                        if ((ret = GetScalingList(p_stream, offset, p_pps->scaling_list_4x4[i], 16, &p_pps->use_default_scaling_matrix_4x4_flag[i])) != PARSER_OK) {
+                            return ret;
+                        }
                     } else {
-                        GetScalingList(p_stream, offset, p_pps->scaling_list_8x8[i - 6], 64, &p_pps->use_default_scaling_matrix_8x8_flag[i - 6]);
+                        if ((ret = GetScalingList(p_stream, offset, p_pps->scaling_list_8x8[i - 6], 64, &p_pps->use_default_scaling_matrix_8x8_flag[i - 6])) != PARSER_OK) {
+                            return ret;
+                        }
                     }
                 }
             }
         }
         p_pps->second_chroma_qp_index_offset = Parser::ExpGolomb::ReadSe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("second_chroma_qp_index_offset", p_pps->second_chroma_qp_index_offset, -12, 12);
     } else {
         /// When second_chroma_qp_index_offset is not present, it shall be inferred to be equal to chroma_qp_index_offset.
         p_pps->second_chroma_qp_index_offset = p_pps->chroma_qp_index_offset;
@@ -1140,15 +1207,24 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
     curr_has_mmco_5_ = 0;
     memset(p_slice_header, 0, sizeof(AvcSliceHeader));
 
-    p_slice_header->first_mb_in_slice = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    p_slice_header->first_mb_in_slice = Parser::ExpGolomb::ReadUe(p_stream, offset); // range check below
     p_slice_header->slice_type = Parser::ExpGolomb::ReadUe(p_stream, offset);
-    p_slice_header->pic_parameter_set_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("slice_type", p_slice_header->slice_type, 0, 9);
 
     // Set active SPS and PPS for the current slice
-    active_pps_id_ = p_slice_header->pic_parameter_set_id;
-    p_pps = &pps_list_[active_pps_id_];
-    if (p_pps->is_received == 0) {
+    int32_t active_pps_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
+    CHECK_ALLOWED_RANGE("pic_parameter_set_id", active_pps_id, 0, 255);
+    if (pps_list_[active_pps_id].is_received == 0) {
         ERR("Empty PPS is referred.");
+        return PARSER_WRONG_STATE;
+    }
+    active_pps_id_ = active_pps_id;
+    p_slice_header->pic_parameter_set_id = active_pps_id;
+    p_pps = &pps_list_[active_pps_id_];
+
+    int32_t active_sps_id = p_pps->seq_parameter_set_id;
+    if (sps_list_[active_sps_id].is_received == 0) {
+        ERR("Empty SPS is referred.");
         return PARSER_WRONG_STATE;
     }
     if (active_sps_id_ != p_pps->seq_parameter_set_id) {
@@ -1209,6 +1285,15 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         p_slice_header->field_pic_flag = 0;
         p_slice_header->bottom_field_flag = 0;
     }
+    int mbaff_frame_flag = p_sps->mb_adaptive_frame_field_flag && !p_slice_header->field_pic_flag; // MbaffFrameFlag
+    int frame_height_in_mbs = (2 - p_sps->frame_mbs_only_flag) * (p_sps->pic_height_in_map_units_minus1 + 1); // FrameHeightInMbs
+    int pic_height_in_mbs = frame_height_in_mbs / (1 + p_slice_header->field_pic_flag); // PicHeightInMbs
+    int pic_size_in_mbs = (p_sps->pic_width_in_mbs_minus1 + 1) * pic_height_in_mbs; // PicSizeInMbs
+    if (mbaff_frame_flag == 0) {
+        CHECK_ALLOWED_RANGE("first_mb_in_slice", p_slice_header->first_mb_in_slice, 0, pic_size_in_mbs - 1);
+    } else {
+        CHECK_ALLOWED_RANGE("first_mb_in_slice", p_slice_header->first_mb_in_slice, 0, pic_size_in_mbs / 2 - 1);
+    }
 
     if ( nal_unit_header_.nal_ref_idc ) {
         curr_ref_pic_bottom_field_ = p_slice_header->bottom_field_flag;
@@ -1216,6 +1301,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
     
     if (nal_unit_header_.nal_unit_type == kAvcNalTypeSlice_IDR) {
         p_slice_header->idr_pic_id = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("idr_pic_id", p_slice_header->idr_pic_id, 0, 65535);
     }
 
     if (p_sps->pic_order_cnt_type == 0) {
@@ -1234,6 +1320,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
 
     if (p_pps->redundant_pic_cnt_present_flag == 1) {
         p_slice_header->redundant_pic_cnt = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("redundant_pic_cnt", p_slice_header->redundant_pic_cnt, 0, 127);
     }
 
     if (p_slice_header->slice_type == kAvcSliceTypeB || p_slice_header->slice_type == kAvcSliceTypeB_6 ) { // B-Slice
@@ -1253,7 +1340,14 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
             p_slice_header->num_ref_idx_l0_active_minus1 = p_pps->num_ref_idx_l0_default_active_minus1;
             p_slice_header->num_ref_idx_l1_active_minus1 = p_pps->num_ref_idx_l1_default_active_minus1;
         }
-    }
+        if (p_slice_header->field_pic_flag == 0) {
+            CHECK_ALLOWED_RANGE("num_ref_idx_l0_active_minus1", p_slice_header->num_ref_idx_l0_active_minus1, 0, 15);
+            CHECK_ALLOWED_RANGE("num_ref_idx_l1_active_minus1", p_slice_header->num_ref_idx_l1_active_minus1, 0, 15);
+        } else {
+            CHECK_ALLOWED_RANGE("num_ref_idx_l0_active_minus1", p_slice_header->num_ref_idx_l0_active_minus1, 0, 31);
+            CHECK_ALLOWED_RANGE("num_ref_idx_l1_active_minus1", p_slice_header->num_ref_idx_l1_active_minus1, 0, 31);
+        }
+}
 
     // Bail out for NAL unit type 20/21
     if ( nal_unit_header_.nal_unit_type == 21 || nal_unit_header_.nal_unit_type == 21) {
@@ -1262,6 +1356,8 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
 
     // Ref picture list modification
     int modification_of_pic_nums_idc;
+    int max_frame_num = 1 << (p_sps->log2_max_frame_num_minus4 + 4); // MaxFrameNum
+    int max_pic_num = p_slice_header->field_pic_flag ? 2 * max_frame_num : max_frame_num;
     if (p_slice_header->slice_type != kAvcSliceTypeI && p_slice_header->slice_type != kAvcSliceTypeSI &&
         p_slice_header->slice_type != kAvcSliceTypeI_7 && p_slice_header->slice_type != kAvcSliceTypeSI_9) {
         p_slice_header->ref_pic_list.ref_pic_list_modification_flag_l0 = Parser::GetBit(p_stream, offset);
@@ -1269,9 +1365,11 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
             i = 0;
             do {
                 modification_of_pic_nums_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                CHECK_ALLOWED_RANGE("modification_of_pic_nums_idc", modification_of_pic_nums_idc, 0, 3);
                 p_slice_header->ref_pic_list.modification_l0[i].modification_of_pic_nums_idc = modification_of_pic_nums_idc;
                 if (modification_of_pic_nums_idc == 0 || modification_of_pic_nums_idc == 1) {
                     p_slice_header->ref_pic_list.modification_l0[i].abs_diff_pic_num_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                    CHECK_ALLOWED_RANGE("abs_diff_pic_num_minus1", p_slice_header->ref_pic_list.modification_l0[i].abs_diff_pic_num_minus1, 0, max_pic_num - 1);
                 } else if (modification_of_pic_nums_idc == 2) {
                     p_slice_header->ref_pic_list.modification_l0[i].long_term_pic_num = Parser::ExpGolomb::ReadUe(p_stream, offset);
                 }
@@ -1286,9 +1384,11 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
             i = 0;
             do {
                 modification_of_pic_nums_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                CHECK_ALLOWED_RANGE("modification_of_pic_nums_idc", modification_of_pic_nums_idc, 0, 3);
                 p_slice_header->ref_pic_list.modification_l1[i].modification_of_pic_nums_idc = modification_of_pic_nums_idc;
                 if (modification_of_pic_nums_idc == 0 || modification_of_pic_nums_idc == 1) {
                     p_slice_header->ref_pic_list.modification_l1[i].abs_diff_pic_num_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                    CHECK_ALLOWED_RANGE("abs_diff_pic_num_minus1", p_slice_header->ref_pic_list.modification_l1[i].abs_diff_pic_num_minus1, 0, max_pic_num - 1);
                 } else if(modification_of_pic_nums_idc == 2) {
                     p_slice_header->ref_pic_list.modification_l1[i].long_term_pic_num = Parser::ExpGolomb::ReadUe(p_stream, offset);
                 }
@@ -1304,28 +1404,34 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         (p_pps->weighted_bipred_idc == 1 &&
             (p_slice_header->slice_type == kAvcSliceTypeB || p_slice_header->slice_type == kAvcSliceTypeB_6))) {
         p_slice_header->pred_weight_table.luma_log2_weight_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("luma_log2_weight_denom", p_slice_header->pred_weight_table.luma_log2_weight_denom, 0, 7);
         
-        int ChromaArrayType = p_sps->separate_colour_plane_flag == 0 ? p_sps->chroma_format_idc : 0;
-        if (ChromaArrayType != 0) {
+        int chroma_array_type = p_sps->separate_colour_plane_flag == 0 ? p_sps->chroma_format_idc : 0;
+        if (chroma_array_type != 0) {
             p_slice_header->pred_weight_table.chroma_log2_weight_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
+            CHECK_ALLOWED_RANGE("chroma_log2_weight_denom", p_slice_header->pred_weight_table.chroma_log2_weight_denom, 0, 7);
         }
         
         for (i = 0; i <= p_slice_header->num_ref_idx_l0_active_minus1; i++) {
             p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l0_flag = Parser::GetBit(p_stream, offset);
             if (p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l0_flag == 1) {
                 p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l0 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                CHECK_ALLOWED_RANGE("luma_weight_l0", p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l0, -128, 127);
                 p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l0 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                CHECK_ALLOWED_RANGE("luma_offset_l0", p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l0, -128, 127);
             } else {
                 p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l0 = 1 << p_slice_header->pred_weight_table.luma_log2_weight_denom;
                 p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l0 = 0;
             }
             
-            if (ChromaArrayType != 0) {
+            if (chroma_array_type != 0) {
                 p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l0_flag = Parser::GetBit(p_stream, offset);
                 if (p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l0_flag == 1) {
                     for (int j = 0; j < 2; j++) {
                         p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l0[j] = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                        CHECK_ALLOWED_RANGE("chroma_weight_l0", p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l0[j], -128, 127);
                         p_slice_header->pred_weight_table.weight_factor[i].chroma_offset_l0[j] = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                        CHECK_ALLOWED_RANGE("chroma_offset_l0", p_slice_header->pred_weight_table.weight_factor[i].chroma_offset_l0[j], -128, 127);
                     }
                 } else {
                     for (int j = 0; j < 2; j++) {
@@ -1341,18 +1447,22 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
                 p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l1_flag = Parser::GetBit(p_stream, offset);
                 if (p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l1_flag == 1) {
                     p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l1 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                    CHECK_ALLOWED_RANGE("luma_weight_l1", p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l1, -128, 127);
                     p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l1 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                    CHECK_ALLOWED_RANGE("luma_offset_l1", p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l1, -128, 127);
                 } else {
                     p_slice_header->pred_weight_table.weight_factor[i].luma_weight_l1 = 1 << p_slice_header->pred_weight_table.luma_log2_weight_denom;
                     p_slice_header->pred_weight_table.weight_factor[i].luma_offset_l1 = 0;
                 }
 
-                if (ChromaArrayType != 0 ) {
+                if (chroma_array_type != 0 ) {
                     p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l1_flag = Parser::GetBit(p_stream, offset);
                     if (p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l1_flag == 1) {
                         for (int j = 0; j < 2; j++) {
                             p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l1[j] = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                            CHECK_ALLOWED_RANGE("chroma_weight_l1", p_slice_header->pred_weight_table.weight_factor[i].chroma_weight_l1[j], -128, 127);
                             p_slice_header->pred_weight_table.weight_factor[i].chroma_offset_l1[j] = Parser::ExpGolomb::ReadSe(p_stream, offset);
+                            CHECK_ALLOWED_RANGE("chroma_offset_l1", p_slice_header->pred_weight_table.weight_factor[i].chroma_offset_l1[j], -128, 127);
                         }
                     } else {
                         for (int j = 0; j < 2; j++) {
@@ -1377,6 +1487,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
                 i = 0;
                 do {
                     memory_management_control_operation = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                    CHECK_ALLOWED_RANGE("memory_management_control_operation", memory_management_control_operation, 0, 6);
                     p_slice_header->dec_ref_pic_marking.mmco[i].memory_management_control_operation = memory_management_control_operation;
                     
                     if (memory_management_control_operation == 1 || memory_management_control_operation == 3) {
@@ -1390,6 +1501,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
                     }
                     if (memory_management_control_operation == 4) {
                         p_slice_header->dec_ref_pic_marking.mmco[i].max_long_term_frame_idx_plus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+                        CHECK_ALLOWED_RANGE("max_long_term_frame_idx_plus1", p_slice_header->dec_ref_pic_marking.mmco[i].max_long_term_frame_idx_plus1, 0, p_sps->max_num_ref_frames);
                     }
                     if ( memory_management_control_operation == 5) {
                         curr_has_mmco_5_ = 1;
@@ -1405,21 +1517,29 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         p_slice_header->slice_type != kAvcSliceTypeI && p_slice_header->slice_type != kAvcSliceTypeSI &&
         p_slice_header->slice_type != kAvcSliceTypeI_7 && p_slice_header->slice_type != kAvcSliceTypeSI_9) {
         p_slice_header->cabac_init_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("cabac_init_idc", p_slice_header->cabac_init_idc, 0, 2);
     }
     p_slice_header->slice_qp_delta = Parser::ExpGolomb::ReadSe(p_stream, offset);
+    int slice_qp_y = 26 + p_pps->pic_init_qp_minus26 + p_slice_header->slice_qp_delta; // SliceQPY
+    CHECK_ALLOWED_RANGE("SliceQPY", slice_qp_y, static_cast<int>(-6 * p_sps->bit_depth_luma_minus8), 51);
     if (p_slice_header->slice_type == kAvcSliceTypeSP || p_slice_header->slice_type == kAvcSliceTypeSI ||
         p_slice_header->slice_type == kAvcSliceTypeSP_8 || p_slice_header->slice_type == kAvcSliceTypeSI_9) {
         if (p_slice_header->slice_type == kAvcSliceTypeSP || p_slice_header->slice_type == kAvcSliceTypeSP_8) {
             p_slice_header->sp_for_switch_flag = Parser::GetBit(p_stream, offset);
         }
         p_slice_header->slice_qs_delta = Parser::ExpGolomb::ReadSe(p_stream, offset);
+        int qs_y = 26 + p_pps->pic_init_qs_minus26 + p_slice_header->slice_qs_delta; // QSY
+        CHECK_ALLOWED_RANGE("QSY", qs_y, 0, 51);
     }
 
     if (p_pps->deblocking_filter_control_present_flag == 1) {
         p_slice_header->disable_deblocking_filter_idc = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("disable_deblocking_filter_idc", p_slice_header->disable_deblocking_filter_idc, 0, 2);
         if (p_slice_header->disable_deblocking_filter_idc != 1) {
             p_slice_header->slice_alpha_c0_offset_div2 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+            CHECK_ALLOWED_RANGE("slice_alpha_c0_offset_div2", p_slice_header->slice_alpha_c0_offset_div2, -6, 6);
             p_slice_header->slice_beta_offset_div2 = Parser::ExpGolomb::ReadSe(p_stream, offset);
+            CHECK_ALLOWED_RANGE("slice_beta_offset_div2", p_slice_header->slice_beta_offset_div2, -6, 6);
         }
     }
     if (p_pps->num_slice_groups_minus1 > 0 && p_pps->slice_group_map_type >= 3 && p_pps->slice_group_map_type <= 5) {
@@ -1433,7 +1553,7 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
     return PARSER_OK;
 }
 
-void AvcVideoParser::GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t *scaling_list, uint32_t list_size, uint32_t *use_default_scaling_matrix_flag) {
+ParserResult AvcVideoParser::GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t *scaling_list, uint32_t list_size, uint32_t *use_default_scaling_matrix_flag) {
     int32_t last_scale, next_scale, delta_scale;
 
     last_scale = 8;
@@ -1441,6 +1561,7 @@ void AvcVideoParser::GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t 
     for (int j = 0; j < list_size; j++) {
         if (next_scale != 0) {
             delta_scale = Parser::ExpGolomb::ReadSe(p_stream, offset);
+            CHECK_ALLOWED_RANGE("delta_scale", delta_scale, -128, 127);
             next_scale = (last_scale + delta_scale + 256) % 256;
             *use_default_scaling_matrix_flag = (j == 0 && next_scale == 0);
         }
@@ -1448,9 +1569,10 @@ void AvcVideoParser::GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t 
         scaling_list[j] = (next_scale == 0) ? last_scale : next_scale;
         last_scale = scaling_list[j];
     }
+    return PARSER_OK;
 }
 
-void AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiSeqParameters *p_vui_params) {
+ParserResult AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiSeqParameters *p_vui_params) {
     p_vui_params->aspect_ratio_info_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->aspect_ratio_info_present_flag == 1) {
         p_vui_params->aspect_ratio_idc = Parser::ReadBits(p_stream, offset, 8);
@@ -1480,7 +1602,9 @@ void AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiS
     p_vui_params->chroma_loc_info_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->chroma_loc_info_present_flag == 1) {
         p_vui_params->chroma_sample_loc_type_top_field = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_top_field", p_vui_params->chroma_sample_loc_type_top_field, 0, 5);
         p_vui_params->chroma_sample_loc_type_bottom_field = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("chroma_sample_loc_type_bottom_field", p_vui_params->chroma_sample_loc_type_bottom_field, 0, 5);
     }
 
     p_vui_params->timing_info_present_flag = Parser::GetBit(p_stream, offset);
@@ -1493,6 +1617,7 @@ void AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiS
     p_vui_params->nal_hrd_parameters_present_flag = Parser::GetBit(p_stream, offset);
     if (p_vui_params->nal_hrd_parameters_present_flag == 1 ) {
         p_vui_params->nal_hrd_parameters.cpb_cnt_minus1 = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("cpb_cnt_minus1", p_vui_params->nal_hrd_parameters.cpb_cnt_minus1, 0, 31);
         p_vui_params->nal_hrd_parameters.bit_rate_scale = Parser::ReadBits(p_stream, offset, 4);
         p_vui_params->nal_hrd_parameters.cpb_size_scale = Parser::ReadBits(p_stream, offset, 4);
         for (int SchedSelIdx = 0; SchedSelIdx <= p_vui_params->nal_hrd_parameters.cpb_cnt_minus1; SchedSelIdx ++) {
@@ -1530,12 +1655,17 @@ void AvcVideoParser::GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiS
     if (p_vui_params->bitstream_restriction_flag) {
         p_vui_params->motion_vectors_over_pic_boundaries_flag = Parser::GetBit(p_stream, offset);
         p_vui_params->max_bytes_per_pic_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("max_bytes_per_pic_denom", p_vui_params->max_bytes_per_pic_denom, 0, 16);
         p_vui_params->max_bits_per_mb_denom = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("max_bits_per_mb_denom", p_vui_params->max_bits_per_mb_denom, 0, 16);
         p_vui_params->log2_max_mv_length_horizontal = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("log2_max_mv_length_horizontal", p_vui_params->log2_max_mv_length_horizontal, 0, 15);
         p_vui_params->log2_max_mv_length_vertical = Parser::ExpGolomb::ReadUe(p_stream, offset);
-        p_vui_params->num_reorder_frames = Parser::ExpGolomb::ReadUe(p_stream, offset);
+        CHECK_ALLOWED_RANGE("log2_max_mv_length_vertical", p_vui_params->log2_max_mv_length_vertical, 0, 15);
+        p_vui_params->max_num_reorder_frames = Parser::ExpGolomb::ReadUe(p_stream, offset);
         p_vui_params->max_dec_frame_buffering = Parser::ExpGolomb::ReadUe(p_stream, offset);
     }
+    return PARSER_OK;
 }
 
 bool AvcVideoParser::MoreRbspData(uint8_t *p_stream, size_t stream_size_in_byte, size_t bit_offset) {

@@ -164,7 +164,7 @@ typedef struct {
     uint32_t            max_bits_per_mb_denom;                                  // ue(v)
     uint32_t            log2_max_mv_length_vertical;                            // ue(v)
     uint32_t            log2_max_mv_length_horizontal;                          // ue(v)
-    uint32_t            num_reorder_frames;                                     // ue(v)
+    uint32_t            max_num_reorder_frames;                                 // ue(v)
     uint32_t            max_dec_frame_buffering;                                // ue(v)
 } AvcVuiSeqParameters;
 

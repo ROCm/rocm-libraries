@@ -172,9 +172,9 @@ protected:
     /*! \brief Function to parse Sequence Parameter Set 
      * \param [in] p_stream A pointer of <tt>uint8_t</tt> for the input stream to be parsed
      * \param [in] size Size of the input stream
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void ParseSps(uint8_t *p_stream, size_t size);
+    ParserResult ParseSps(uint8_t *p_stream, size_t size);
 
     /*! \brief Function to parse Picture Parameter Set 
      * \param [in] p_stream A pointer of <tt>uint8_t</tt> for the input stream to be parsed
@@ -197,16 +197,17 @@ protected:
      * \param [out] scaling_list Pointer to the output scaling list
      * \param [in] list_size Scaling list size
      * \param [out] use_default_scaling_matrix_flag Array of flags that indicate whether to use default values
+     * \return <tt>ParserResult</tt>
      */
-    void GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t *scaling_list, uint32_t list_size, uint32_t *use_default_scaling_matrix_flag);
+    ParserResult GetScalingList(uint8_t *p_stream, size_t &offset, uint32_t *scaling_list, uint32_t list_size, uint32_t *use_default_scaling_matrix_flag);
 
     /*! \brief Function to parse vidio usability information (VUI) parameters
      * \param [in] p_stream The pointer to the input bit stream
      * \param [in/out] offset Current bit offset
      * \param [out] p_vui_params The pointer to VUI structure
-     * \return No return value
+     * \return <tt>ParserResult</tt>
      */
-    void GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiSeqParameters *p_vui_params);
+    ParserResult GetVuiParameters(uint8_t *p_stream, size_t &offset, AvcVuiSeqParameters *p_vui_params);
 
     /*! \brief Function to check if there is more data in RBSP
      * \param [in] p_stream The pointer to the input bit stream
