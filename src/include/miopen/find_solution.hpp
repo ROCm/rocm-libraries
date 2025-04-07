@@ -67,8 +67,8 @@ auto FindSolutionImpl(rank<1>,
         if(options && options->find_enforce)
             return *options->find_enforce;
         const auto& handle = context.GetStream();
-        if(handle.tuning_policy != miopenTuningPolicyNone)
-            return FindEnforce{static_cast<FindEnforceAction>(handle.tuning_policy)};
+        if(handle.GetTuningPolicy() != miopenTuningPolicyNone)
+            return FindEnforce{static_cast<FindEnforceAction>(handle.GetTuningPolicy())};
         return FindEnforce{};
     }();
 
