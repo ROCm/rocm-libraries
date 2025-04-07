@@ -746,10 +746,10 @@ namespace MatrixMultiplyTest
     {
     };
 
-    // Params are: AB type, waveK, (transA, transB)
+    // Params are: (AB type, waveK), (transA, transB)
     class MatrixMultiplyWMMATestGPU
         : public BaseMatrixMultiplyContextFixture<
-              std::tuple<rocRoller::DataType, int, std::pair<std::string, std::string>>>
+              std::tuple<std::pair<rocRoller::DataType, int>, std::pair<std::string, std::string>>>
     {
     };
 
@@ -798,8 +798,9 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMA)
     {
-        const auto [typeAB, waveK, transOp] = std::get<1>(GetParam());
-        const auto [transA, transB]         = transOp;
+        const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
+        const auto [typeAB, waveK]         = typeAndWaveK;
+        const auto [transA, transB]        = transOp;
         auto typeStr{"f16"};
         switch(typeAB)
         {
@@ -824,8 +825,9 @@ namespace MatrixMultiplyTest
 
     TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMA)
     {
-        const auto [typeAB, waveK, transOp] = std::get<1>(GetParam());
-        const auto [transA, transB]         = transOp;
+        const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
+        const auto [typeAB, waveK]         = typeAndWaveK;
+        const auto [transA, transB]        = transOp;
         auto typeStr{"f16"};
         switch(typeAB)
         {
@@ -1480,13 +1482,13 @@ namespace MatrixMultiplyTest
         ::testing::Combine(
             ::testing::Values(GPUArchitectureTarget{GPUArchitectureGFX::GFX1200},
                               GPUArchitectureTarget{GPUArchitectureGFX::GFX1201}),
-            ::testing::Combine(::testing::Values(rocRoller::DataType::Half,
-                                                 rocRoller::DataType::BFloat16),
-                               ::testing::Values(/*waveK*/ 16),
-                               ::testing::Values(std::pair<std::string, std::string>("N", "N"),
-                                                 std::pair<std::string, std::string>("N", "T"),
-                                                 std::pair<std::string, std::string>("T", "N"),
-                                                 std::pair<std::string, std::string>("T", "T")))));
+            ::testing::Combine(
+                ::testing::Values(std::make_pair(rocRoller::DataType::Half, /*waveK*/ 16),
+                                  std::make_pair(rocRoller::DataType::BFloat16, /*waveK*/ 16)),
+                ::testing::Values(std::pair<std::string, std::string>("N", "N"),
+                                  std::pair<std::string, std::string>("N", "T"),
+                                  std::pair<std::string, std::string>("T", "N"),
+                                  std::pair<std::string, std::string>("T", "T")))));
 
     INSTANTIATE_TEST_SUITE_P(
         MatrixMultiply120X,

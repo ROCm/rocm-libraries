@@ -68,7 +68,7 @@ mp_pool = None
 
 
 def instantiate_gpus(idxs: List[int]):
-    global gpus, mp_pool
+    global gpus, mp_pool  # noqa: disable=F824
     for idx in idxs:
         gpus[idx] = multiprocessing.Lock()
     if mp_pool is not None:
@@ -77,7 +77,7 @@ def instantiate_gpus(idxs: List[int]):
 
 
 def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
-    global gpus
+    global gpus  # noqa: disable=unused-variable
     for i in range(100):
         for id, lock in gpus.items():
             locked = lock.acquire(False)
@@ -88,14 +88,14 @@ def acquire_lock() -> Tuple[int, multiprocessing.Lock]:
 
 
 def pool() -> multiprocessing.Pool:
-    global mp_pool, gpus
+    global mp_pool, gpus  # noqa: disable=F824
     if mp_pool is None:
         mp_pool = multiprocessing.Pool(len(gpus))
     return mp_pool
 
 
 def terminate_pool():
-    global mp_pool
+    global mp_pool  # noqa: disable=F824
 
     if mp_pool is not None:
         mp_pool.terminate()
@@ -103,7 +103,7 @@ def terminate_pool():
 
 
 def close_pool():
-    global mp_pool
+    global mp_pool  # noqa: disable=F824
 
     if mp_pool is not None:
         mp_pool.close()
@@ -341,7 +341,7 @@ prev_results = {}
 
 
 def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
-    global prev_results
+    global prev_results  # noqa: disable=F824
 
     already_ran = []
     to_run = []
@@ -357,7 +357,7 @@ def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
 def generation(
     output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
 ) -> List[Result]:
-    global prev_results
+    global prev_results  # noqa: disable=F824
 
     already_ran, to_run = split_old_new_results(weights)
 

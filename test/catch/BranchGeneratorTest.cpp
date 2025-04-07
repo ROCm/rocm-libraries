@@ -135,10 +135,10 @@ namespace BranchGeneratorTest
             if(arch.HasCapability(GPUCapability::HasSplitWaitCounters))
             {
                 expected = std::string("s_wait_loadcnt 0\ns_wait_storecnt 0\ns_wait_kmcnt "
-                                       "0\ns_wait_dscnt 0\n");
+                                       "0\ns_wait_dscnt 0");
                 if(arch.HasCapability(GPUCapability::HasExpcnt))
                 {
-                    expected += std::string("s_wait_expcnt 0");
+                    expected += std::string("\ns_wait_expcnt 0");
                 }
                 expected += std::string("\n") + std::string("s_branch");
             }
