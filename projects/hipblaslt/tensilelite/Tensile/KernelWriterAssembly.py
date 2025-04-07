@@ -287,7 +287,7 @@ class KernelWriterAssembly(KernelWriter):
     dim is index 0...max indices and is in global index space.
     """
     problemType = self.states.kernel["ProblemType"]
-    if tc in ['A','B', "Metadata"]:
+    if tc in ['A','B', "MXSA", "MXSB", "Metadata"]:
       if not problemType["UseInitialStridesAB"] and \
           dim == problemType["IndexAssignments%s"%tc][0]:
         return ("constStride%s%s"%(tc,self.states.indexChars[dim]))
@@ -1316,6 +1316,10 @@ class KernelWriterAssembly(KernelWriter):
     tcList = ["A", "B"]
     if kernel["ProblemType"]["Sparse"]:
       tcList.append("Metadata")
+    if kernel["ProblemType"]["MXBlockA"]:
+      tcList += ["MXSA"]
+    if kernel["ProblemType"]["MXBlockB"]:
+      tcList += ["MXSB"]
     for tc in tcList:
       for i, idx in enumerate(problemType["IndexAssignments%s"%tc]):
         idxChar= self.states.indexChars[idx]
@@ -1334,7 +1338,11 @@ class KernelWriterAssembly(KernelWriter):
 
     module.addComment0("Number of elements to shift-left SRD")
     module.add(ValueSet("SrdShiftLeftA", self.states.srdShiftLeft['A']))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.add(ValueSet("SrdShiftLeftMXSA", self.states.srdShiftLeft['MXSA']))
     module.add(ValueSet("SrdShiftLeftB", self.states.srdShiftLeft['B']))
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.add(ValueSet("SrdShiftLeftMXSB", self.states.srdShiftLeft['MXSB']))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(ValueSet("SrdShiftLeftMetadata", self.states.srdShiftLeft["Metadata"]))
     if kernel["BufferLoad"] or kernel["BufferStore"]:
@@ -1373,6 +1381,10 @@ class KernelWriterAssembly(KernelWriter):
         ("C", list(range(0, kernel["ProblemType"]["NumIndicesC"])), kernel["BufferStore"], None, False), \
         ("A", kernel["ProblemType"]["IndexAssignmentsA"], kernel["BufferLoad"], tPA, False), \
         ("B", kernel["ProblemType"]["IndexAssignmentsB"], kernel["BufferLoad"], tPB, False) ]
+    if kernel["ProblemType"]["MXBlockA"]:
+      GOList.append(("MXSA", kernel["ProblemType"]["IndexAssignmentsMXSA"], kernel["BufferLoad"], tPMXSA, False))
+    if kernel["ProblemType"]["MXBlockB"]:
+      GOList.append(("MXSB", kernel["ProblemType"]["IndexAssignmentsMXSB"], kernel["BufferLoad"], tPMXSB, False))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       GOList.append(("Metadata", kernel["ProblemType"]["IndexAssignmentsMetadata"], kernel["BufferLoad"], tPM, False))
     if kernel["ProblemType"]["SwizzleTensorA"]:
