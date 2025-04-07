@@ -112,7 +112,7 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
                                                  false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));
@@ -193,14 +193,8 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
                                                  false));
             });
 
-#pragma pack(push, 1)
-        struct combined
-        {
-            key_type   a;
-            value_type b;
-        };
-#pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(size);
+        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
+
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));
         HIP_CHECK(hipFree(d_keys_output));

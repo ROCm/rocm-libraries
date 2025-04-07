@@ -365,7 +365,7 @@ void run_benchmark(benchmark_utils::state&& state)
                 selected_operation);
         });
 
-    state.set_items_processed_per_iteration<T>(size);
+    state.set_throughput(size, sizeof(T));
 }
 
 template<typename T>
@@ -391,7 +391,7 @@ void run_benchmark_memcpy(benchmark_utils::state&& state)
                                 hipMemcpyDeviceToDevice));
         });
 
-    state.set_items_processed_per_iteration<T>(size);
+    state.set_throughput(size, sizeof(T));
 }
 
 #define CREATE_BENCHMARK(METHOD, OPERATION, T, BLOCK_SIZE, IPT)                            \

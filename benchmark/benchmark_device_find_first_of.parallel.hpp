@@ -199,7 +199,7 @@ struct device_find_first_of_benchmark : public benchmark_utils::autotune_interfa
             sum_keys_size += keys_size;
         }
 
-        state.set_items_processed_per_iteration<type>(sum_effective_size);
+        state.set_throughput(sum_effective_size, sizeof(type));
 
         // Each input is read once but all keys are read by all threads so performance is likely
         // compute-bound or bound by cache bandwidth for reading keys rather than reading inputs.

@@ -208,7 +208,7 @@ struct device_binary_search_benchmark : public benchmark_utils::autotune_interfa
                                                                  stream));
             });
 
-        state.set_items_processed_per_iteration<T>(needles_size);
+        state.set_throughput(needles_size, sizeof(T));
     }
 };
 

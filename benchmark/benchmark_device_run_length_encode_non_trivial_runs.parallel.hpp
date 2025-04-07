@@ -153,17 +153,7 @@ struct device_non_trivial_runs_benchmark : public benchmark_utils::autotune_inte
 
         state.run([&] { dispatch(d_temporary_storage.get(), temporary_storage_bytes); });
 
-#pragma pack(push, 1)
-
-        struct combined
-        {
-            T           a;
-            offset_type b;
-            count_type  c;
-        };
-#pragma pack(pop)
-
-        state.set_items_processed_per_iteration<combined>(size);
+        state.set_throughput(size, sizeof(T) + sizeof(offset_type) + sizeof(count_type));
     }
     static constexpr bool is_tuning = !std::is_same<Config, rocprim::default_config>::value;
 };

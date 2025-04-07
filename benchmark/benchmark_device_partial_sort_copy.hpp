@@ -117,7 +117,7 @@ struct device_partial_sort_copy_benchmark : public benchmark_utils::autotune_int
                                                      false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
     }
 };
 

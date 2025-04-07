@@ -294,7 +294,7 @@ struct device_histogram_benchmark : public benchmark_utils::autotune_interface
             total_size += size * Channels;
         }
 
-        state.set_items_processed_per_iteration<T>(total_size);
+        state.set_throughput(total_size, sizeof(T));
 
         for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
         {

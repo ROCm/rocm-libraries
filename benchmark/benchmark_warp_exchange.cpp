@@ -187,7 +187,7 @@ void run_benchmark(benchmark_utils::state&& state)
                                                                                trials);
         });
 
-    state.set_items_processed_per_iteration<T>(trials * size);
+    state.set_throughput(trials * size, sizeof(T));
 }
 
 #define CREATE_BENCHMARK(T, BS, IT, WS, OP)                                                  \

@@ -241,14 +241,7 @@ struct device_scan_by_key_benchmark : public benchmark_utils::autotune_interface
                                                   debug)));
             });
 
-#pragma pack(push, 1)
-        struct combined
-        {
-            Key   a;
-            Value b;
-        };
-#pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(size);
+        state.set_throughput(size, sizeof(Key) + sizeof(Value));
     }
 };
 

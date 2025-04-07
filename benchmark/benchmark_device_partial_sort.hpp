@@ -131,7 +131,7 @@ struct device_partial_sort_benchmark : public benchmark_utils::autotune_interfac
                                                 false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
 
         HIP_CHECK(hipFree(d_temporary_storage));
         HIP_CHECK(hipFree(d_keys_input));

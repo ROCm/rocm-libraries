@@ -160,7 +160,7 @@ struct device_segmented_reduce_benchmark : public benchmark_utils::autotune_inte
                                                        stream));
             });
 
-        state.set_items_processed_per_iteration<value_type>(size);
+        state.set_throughput(size, sizeof(value_type));
     }
 
     void run(benchmark_utils::state&& state) override

@@ -295,7 +295,7 @@ void run_benchmark(benchmark_utils::state&& state)
                                  stream);
         });
 
-    state.set_items_processed_per_iteration<ValueType>(data.total_num_elements);
+    state.set_throughput(data.total_num_elements, sizeof(ValueType));
 }
 
 // Naive implementation used for comparison
@@ -365,7 +365,7 @@ void run_naive_benchmark(benchmark_utils::state&& state)
                                                   data.d_buffer_sizes.get());
         });
 
-    state.set_items_processed_per_iteration<ValueType>(data.total_num_elements);
+    state.set_throughput(data.total_num_elements, sizeof(ValueType));
 }
 
     #define CREATE_NAIVE_BENCHMARK(item_size,                                                     \

@@ -140,7 +140,7 @@ struct device_find_end_benchmark : public benchmark_utils::autotune_interface
                                             false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
     }
 };
 

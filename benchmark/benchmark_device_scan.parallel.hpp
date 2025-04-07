@@ -211,7 +211,7 @@ struct device_scan_benchmark : public benchmark_utils::autotune_interface
                                            stream)));
             });
 
-        state.set_items_processed_per_iteration<T>(size);
+        state.set_throughput(size, sizeof(T));
     }
 };
 

@@ -108,7 +108,7 @@ void run_even_benchmark(benchmark_utils::state&& state,
                                               false));
         });
 
-    state.set_items_processed_per_iteration<T>(size);
+    state.set_throughput(size, sizeof(T));
 }
 
 template<typename T, unsigned int Channels, unsigned int ActiveChannels>
@@ -179,7 +179,7 @@ void run_multi_even_benchmark(benchmark_utils::state&& state,
                                                                          false)));
         });
 
-    state.set_items_processed_per_iteration<T>(size * Channels);
+    state.set_throughput(size * Channels, sizeof(T));
 
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {
@@ -244,7 +244,7 @@ void run_range_benchmark(benchmark_utils::state&& state, size_t bins)
                                                false));
         });
 
-    state.set_items_processed_per_iteration<T>(size);
+    state.set_throughput(size, sizeof(T));
 }
 
 template<typename T, unsigned int Channels, unsigned int ActiveChannels>
@@ -327,7 +327,7 @@ void run_multi_range_benchmark(benchmark_utils::state&& state, size_t bins)
                                                                           false)));
         });
 
-    state.set_items_processed_per_iteration<T>(size * Channels);
+    state.set_throughput(size * Channels, sizeof(T));
 
     for(unsigned int channel = 0; channel < ActiveChannels; ++channel)
     {

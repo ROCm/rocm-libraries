@@ -1306,11 +1306,10 @@ public:
         }
     }
 
-    template<typename T>
-    void set_items_processed_per_iteration(size_t actual_size)
+    void set_throughput(size_t actual_size, size_t type_size)
     {
         gbench_state.SetBytesProcessed(total_gbench_iterations * batch_iterations * actual_size
-                                       * sizeof(T));
+                                       * type_size);
         gbench_state.SetItemsProcessed(total_gbench_iterations * batch_iterations * actual_size);
     }
 

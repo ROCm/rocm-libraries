@@ -210,7 +210,7 @@ struct device_partition_flag_benchmark : public benchmark_utils::autotune_interf
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -287,7 +287,7 @@ struct device_partition_predicate_benchmark : public benchmark_utils::autotune_i
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -386,7 +386,7 @@ struct device_partition_two_way_flag_benchmark : public benchmark_utils::autotun
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -465,7 +465,7 @@ struct device_partition_two_way_predicate_benchmark : public benchmark_utils::au
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == partition_probability::tuning;
@@ -565,7 +565,7 @@ struct device_partition_three_way_benchmark : public benchmark_utils::autotune_i
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == partition_three_way_probability::tuning;

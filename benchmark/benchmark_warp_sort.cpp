@@ -171,16 +171,9 @@ void run_benchmark(benchmark_utils::state&& state)
             }
         });
 
-    // SortByKey also transfers values
-#pragma pack(push, 1)
-    struct combined
-    {
-        Key   a;
-        Value b;
-    };
-#pragma pack(pop)
-    state.set_items_processed_per_iteration<std::conditional_t<SortByKey, combined, Key>>(size
-                                                                                          * Trials);
+    auto type_size = SortByKey ? sizeof(Key) + sizeof(Value) : sizeof(Key);
+
+    state.set_throughput(size * Trials, type_size);
 
     HIP_CHECK(hipFree(d_input_key));
     HIP_CHECK(hipFree(d_output_key));

@@ -106,7 +106,7 @@ struct device_transform_benchmark : public benchmark_utils::autotune_interface
 
         state.run([&] { HIP_CHECK(launch()); });
 
-        state.set_items_processed_per_iteration<T>(size);
+        state.set_throughput(size, sizeof(T));
     }
 };
 

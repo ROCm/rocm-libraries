@@ -272,7 +272,7 @@ auto run_benchmark(benchmark_utils::state&& state)
             HIP_CHECK(hipGetLastError());
         });
 
-    state.set_items_processed_per_iteration<T>(size * Trials);
+    state.set_throughput(size * Trials, sizeof(T));
 }
 
 template<typename Benchmark,
@@ -324,7 +324,7 @@ auto run_benchmark(benchmark_utils::state&& state)
             HIP_CHECK(hipGetLastError());
         });
 
-    state.set_items_processed_per_iteration<T>(size * Trials);
+    state.set_throughput(size * Trials, sizeof(T));
 }
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE)                                         \

@@ -173,7 +173,7 @@ void run_merge_inplace_benchmarks(benchmark_utils::state&& state)
 
     state.run([&] { runner.run(); });
 
-    state.set_items_processed_per_iteration<value_type>(total_size);
+    state.set_throughput(total_size, sizeof(value_type));
 }
 
 #define CREATE_BENCHMARK(Value)                                                       \

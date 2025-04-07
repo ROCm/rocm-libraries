@@ -41,7 +41,7 @@ static void BM_host_target_arch(benchmark_utils::state&& state)
             benchmark::DoNotOptimize(target_arch);
         });
 
-    state.set_items_processed_per_iteration<char>(1);
+    state.set_throughput(1, sizeof(char));
 
     if(StreamKind != stream_kind::default_stream && StreamKind != stream_kind::per_thread_stream)
     {
@@ -65,7 +65,7 @@ static void BM_kernel_launch(benchmark_utils::state&& state)
             HIP_CHECK(hipGetLastError());
         });
 
-    state.set_items_processed_per_iteration<char>(1);
+    state.set_throughput(1, sizeof(char));
 }
 
 #define CREATE_BENCHMARK(ST, SK)                                                       \

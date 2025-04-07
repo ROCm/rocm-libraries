@@ -117,7 +117,7 @@ struct device_nth_element_benchmark : public benchmark_utils::autotune_interface
                                                false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
     }
 };
 #endif // ROCPRIM_BENCHMARK_DEVICE_NTH_ELEMENT_PARALLEL_HPP_

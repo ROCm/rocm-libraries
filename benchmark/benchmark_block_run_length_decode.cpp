@@ -151,7 +151,7 @@ void run_benchmark(benchmark_utils::state&& state)
             HIP_CHECK(hipDeviceSynchronize());
         });
 
-    state.set_items_processed_per_iteration<ItemT>(output_length * Trials);
+    state.set_throughput(output_length * Trials, sizeof(ItemT));
 }
 
 #define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT)                                      \

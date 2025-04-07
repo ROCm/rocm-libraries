@@ -230,7 +230,7 @@ public:
             }
         }
 
-        state.set_items_processed_per_iteration<Key>(total_size);
+        state.set_throughput(total_size, sizeof(Key));
     }
 };
 

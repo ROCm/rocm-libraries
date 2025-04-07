@@ -132,7 +132,7 @@ struct device_merge_sort_block_sort_benchmark : public benchmark_utils::autotune
                                                                          false));
             });
 
-        state.set_items_processed_per_iteration<key_type>(size);
+        state.set_throughput(size, sizeof(key_type));
     }
 
     // pairs benchmark
@@ -184,14 +184,7 @@ struct device_merge_sort_block_sort_benchmark : public benchmark_utils::autotune
                                                                          false));
             });
 
-#pragma pack(push, 1)
-        struct combined
-        {
-            key_type   a;
-            value_type b;
-        };
-#pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(size);
+        state.set_throughput(size, sizeof(key_type) + sizeof(value_type));
     }
 
     void run(benchmark_utils::state&& state) override

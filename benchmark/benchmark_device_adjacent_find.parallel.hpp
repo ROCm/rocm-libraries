@@ -161,7 +161,7 @@ struct device_adjacent_find_benchmark : public benchmark_utils::autotune_interfa
 
         state.run([&] { launch_adjacent_find(); });
 
-        state.set_items_processed_per_iteration<input_type>(first_adj_index);
+        state.set_throughput(first_adj_index, sizeof(input_type));
 
         HIP_CHECK(hipFree(d_input));
         HIP_CHECK(hipFree(d_output));

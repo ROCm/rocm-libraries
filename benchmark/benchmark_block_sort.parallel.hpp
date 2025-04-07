@@ -242,7 +242,7 @@ public:
         state.run(
             [&] { dispatch_block_sort(stable_tag, size, stream, d_input.get(), d_output.get()); });
 
-        state.set_items_processed_per_iteration<KeyType>(size);
+        state.set_throughput(size, sizeof(KeyType));
 
         state.gbench_state.counters["sorted_size"]
             = benchmark::Counter(BlockSize * ItemsPerThread,

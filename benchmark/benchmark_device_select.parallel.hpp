@@ -176,7 +176,7 @@ struct device_select_flag_benchmark : public benchmark_utils::autotune_interface
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -251,7 +251,7 @@ struct device_select_predicate_benchmark : public benchmark_utils::autotune_inte
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -349,7 +349,7 @@ struct device_select_predicated_flag_benchmark : public benchmark_utils::autotun
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -454,7 +454,7 @@ struct device_select_unique_benchmark : public benchmark_utils::autotune_interfa
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-        state.set_items_processed_per_iteration<DataType>(size);
+        state.set_throughput(size, sizeof(DataType));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;
@@ -556,14 +556,7 @@ struct device_select_unique_by_key_benchmark : public benchmark_utils::autotune_
 
         state.run([&] { dispatch(d_temp_storage.get(), temp_storage_size_bytes); });
 
-#pragma pack(push, 1)
-        struct combined
-        {
-            KeyType   a;
-            ValueType b;
-        };
-#pragma pack(pop)
-        state.set_items_processed_per_iteration<combined>(size);
+        state.set_throughput(size, sizeof(KeyType) + sizeof(ValueType));
     }
 
     static constexpr bool is_tuning = Probability == select_probability::tuning;

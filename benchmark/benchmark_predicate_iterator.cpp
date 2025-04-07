@@ -122,7 +122,7 @@ void run_benchmark(benchmark_utils::state&& state)
 
     state.run([&] { IteratorBenchmark{}(d_input.get(), d_output.get(), size, stream); });
 
-    state.set_items_processed_per_iteration<T>(size);
+    state.set_throughput(size, sizeof(T));
 }
 
 #define CREATE_BENCHMARK(B, T, C)                                                                \
