@@ -39,6 +39,51 @@
 #include "../driver.hpp"
 #include "../lib_env_var.hpp"
 
+template <typename T>
+class ScopedEnvironment
+{
+public:
+    explicit ScopedEnvironment(lib_env::LibEnvVar ename, T val) : env_name(ename) { SetValue(val); }
+
+    ScopedEnvironment()                         = delete;
+    ScopedEnvironment(const ScopedEnvironment&) = delete;
+    ScopedEnvironment(ScopedEnvironment&&)      = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+    ScopedEnvironment& operator=(ScopedEnvironment&&) = delete;
+
+    ~ScopedEnvironment()
+    {
+        if(restore)
+        {
+            lib_env::update(env_name, prev_val);
+        }
+        else
+        {
+            lib_env::clear(env_name);
+        }
+    }
+
+private:
+    lib_env::LibEnvVar env_name;
+    T prev_val;
+    bool restore = false;
+
+    void SetValue(T value)
+    {
+        const auto val = miopen::debug::env::GetEnvVariable(env_name.name);
+        if(val)
+        {
+            restore  = true;
+            prev_val = lib_env::value<T>(env_name);
+            if(prev_val == value)
+            {
+                return;
+            }
+        }
+        lib_env::update(env_name, value);
+    }
+};
+
 inline void default_check(const std::string& err) { std::cout << err; }
 
 inline void tuning_check(const std::string& err)
@@ -242,10 +287,6 @@ MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM)
 MIOPEN_LIB_ENV_VAR(MIOPEN_LOG_LEVEL)
 MIOPEN_LIB_ENV_VAR(MIOPEN_FIND_ENFORCE)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1_XDLOPS)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_FWD_V4R1)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V4R1_XDLOPS)
 
 /// \todo Remove workarounds
 namespace wa {
