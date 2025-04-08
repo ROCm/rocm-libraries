@@ -35,7 +35,8 @@ from Tensile.SolutionStructs.Problem import ProblemType
 from typing import NamedTuple, List, Dict
 import os
 import sys
-
+import subprocess
+import re
 
 try:
     import orjson as json
@@ -471,6 +472,17 @@ def rawLibraryLogic(data):
 #################
 # Other functions
 #################
+def getCUCount() -> int:
+    """Return the number of CU Count in current Hardware."""
+    CU = os.environ.get("CU", None)
+    if CU is None:
+        res = subprocess.run("rocminfo | grep Compute", stdout=subprocess.PIPE, shell=True, env={"ROCR_VISIBLE_DEVICES":"0"})
+        CU_RE = r"Compute Unit:(?P<COMPUTE_UNIT>[\w ]+)"
+        match = re.search(CU_RE, res.stdout.decode("utf-8").split('\n')[-2])
+        if match:
+            CU = int(match.group('COMPUTE_UNIT').strip())
+    return CU
+
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
     """Creates the data for a library logic file suitable for writing to YAML."""
     problemType = logicTuple[0]
@@ -488,7 +500,9 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     data.append({"MinimumRequiredVersion": __version__})
     # schedule name
     data.append(schedulePrefix)  # change from Tensile to vega10
-    data.append(architectureName)
+    # schedule architecture name and get CU count
+    CUCount=getCUCount()
+    data.append({"Architecture": architectureName, "CUCount": CUCount} if architectureName=="gfx942" and CUCount and CUCount!=304 else architectureName)
     # schedule device names
     data.append(deviceNames)
     # problem type
