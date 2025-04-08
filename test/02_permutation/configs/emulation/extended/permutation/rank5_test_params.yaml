@@ -8,10 +8,9 @@ Alphas:
   - 2.3
 Lengths:
   - [ 5, 2, 3, 4, 5]
-  - [ 15, 12, 23, 11, 2]
 Operators:
-  - [HIPTENSOR_OP_IDENTITY, HIPTENSOR_OP_IDENTITY]
-  - [HIPTENSOR_OP_NEG, HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_IDENTITY]
+  - [HIPTENSOR_OP_NEG]
 Permuted Dims:
   - [0, 1, 2, 3, 4]
   - [0, 1, 2, 4, 3]

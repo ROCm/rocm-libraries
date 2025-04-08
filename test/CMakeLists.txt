@@ -199,6 +199,22 @@ add_subdirectory(01_contraction)
 add_subdirectory(02_permutation)
 add_subdirectory(03_reduction)
 
+include(../cmake/Functions/CopyYamlFolder.cmake)
+
+# Copy multiple configuration folders
+copy_config_folders(
+    SOURCE_FOLDERS
+        "01_contraction/configs/emulation"
+        "02_permutation/configs/emulation"
+        "03_reduction/configs/emulation"
+    SOURCE_SCRIPTS
+        "../rtest.py"
+        "../rtest.xml"
+    DESTINATION_PREFIX
+        "test_emulation"
+)
+
+
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"

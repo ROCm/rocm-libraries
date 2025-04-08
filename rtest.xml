@@ -3,119 +3,150 @@
     <var name="SMOKE_PARAMS">--hot_runs 1 --cold_runs 0 </var>
     <var name="REGRESSION_PARAMS">--hot_runs 1 --cold_runs 0 </var>
     <var name="EXTENDED_PARAMS">--hot_runs 1 --cold_runs 0 </var>
-    <var name="CONTRACTION_CONFIGS">../test/01_contraction/configs/emulation</var>
-    <var name="PERMUTE_CONFIGS">../test/02_permutation/configs/emulation</var>
-    <var name="REDUCTION_CONFIGS">../test/03_reduction/configs/emulation</var>
+    <var name="CONTRACTION_CONFIGS">./test_emulation/01_contraction</var>
+    <var name="PERMUTE_CONFIGS">./test_emulation/02_permutation</var>
+    <var name="REDUCTION_CONFIGS">./test_emulation/03_reduction</var>
     <emulation sets="smoke">
-        <run name="smoke01">./bin/logger_test {SMOKE_PARAMS} </run>
+        <run name="smoke001">./bin/logger_test {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke02">./bin/yaml_test {SMOKE_PARAMS} </run>
+        <run name="smoke002">./bin/yaml_test {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke03">./bin/bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke101">./bin/bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke04">./bin/bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke102">./bin/bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke05">./bin/bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke103">./bin/bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke06">./bin/bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke104">./bin/bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke07">./bin/bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke105">./bin/bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
     </emulation>
 	<emulation sets="smoke">
-		<run name="smoke08">./bin/bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+		<run name="smoke106">./bin/bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
 	</emulation>
     <emulation sets="smoke">
-        <run name="smoke09">./bin/complex_bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke111">./bin/complex_bilinear_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke10">./bin/complex_bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke112">./bin/complex_bilinear_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke11">./bin/complex_bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke113">./bin/complex_bilinear_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke12">./bin/complex_bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke114">./bin/complex_bilinear_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank4.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke13">./bin/complex_bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke115">./bin/complex_bilinear_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank5.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke14">./bin/complex_bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke116">./bin/complex_bilinear_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_bilinear_test_params_rank6.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke15">./bin/scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke121">./bin/scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke16">./bin/scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke122">./bin/scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke17">./bin/scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke123">./bin/scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke18">./bin/scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke124">./bin/scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke19">./bin/scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke125">./bin/scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke20">./bin/scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke126">./bin/scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke21">./bin/complex_scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke131">./bin/complex_scale_contraction_test_m1n1k1 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank1.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke22">./bin/complex_scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke132">./bin/complex_scale_contraction_test_m2n2k2 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank2.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke23">./bin/complex_scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke133">./bin/complex_scale_contraction_test_m3n3k3 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank3.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke24">./bin/complex_scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke134">./bin/complex_scale_contraction_test_m4n4k4 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank4.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke25">./bin/complex_scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke135">./bin/complex_scale_contraction_test_m5n5k5 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank5.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke26">./bin/complex_scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke136">./bin/complex_scale_contraction_test_m6n6k6 -y {CONTRACTION_CONFIGS}/smoke/complex_scale_test_params_rank6.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke27">./bin/rank2_permutation_test -y {PERMUTE_CONFIGS}/smoke/rank2_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke201">./bin/rank2_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank2_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke28">./bin/rank3_permutation_test -y {PERMUTE_CONFIGS}/smoke/rank3_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke202">./bin/rank3_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank3_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke29">./bin/rank4_permutation_test -y {PERMUTE_CONFIGS}/smoke/rank4_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke203">./bin/rank4_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank4_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke30">./bin/rank5_permutation_test -y {PERMUTE_CONFIGS}/smoke/rank5_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke204">./bin/rank5_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank5_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke31">./bin/rank6_permutation_test -y {PERMUTE_CONFIGS}/smoke/rank6_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke205">./bin/rank6_permutation_test -y {PERMUTE_CONFIGS}/smoke/permutation/rank6_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke32">./bin/rank1_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank1_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke211">./bin/rank2_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank2_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke33">./bin/rank2_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank2_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke212">./bin/rank3_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank3_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke34">./bin/rank3_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank3_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke213">./bin/rank4_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank4_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke35">./bin/rank4_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank4_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke214">./bin/rank5_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank5_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke36">./bin/rank5_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank5_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke215">./bin/rank6_elementwise_binary_op_test -y {PERMUTE_CONFIGS}/smoke/binary_op/rank6_binary_op_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
     <emulation sets="smoke">
-        <run name="smoke37">./bin/rank6_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank6_test_params.yaml {SMOKE_PARAMS} </run>
+        <run name="smoke221">./bin/rank2_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank2_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke222">./bin/rank3_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank3_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke223">./bin/rank4_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank4_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke224">./bin/rank5_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank5_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke225">./bin/rank6_elementwise_trinary_op_test -y {PERMUTE_CONFIGS}/smoke/trinary_op/rank6_trinary_op_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+
+    <emulation sets="smoke">
+        <run name="smoke301">./bin/rank1_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank1_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke302">./bin/rank2_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank2_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke303">./bin/rank3_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank3_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke304">./bin/rank4_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank4_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke305">./bin/rank5_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank5_test_params.yaml {SMOKE_PARAMS} </run>
+    </emulation>
+    <emulation sets="smoke">
+        <run name="smoke306">./bin/rank6_reduction_test -y {REDUCTION_CONFIGS}/smoke/rank6_test_params.yaml {SMOKE_PARAMS} </run>
     </emulation>
 
     <emulation sets="regression">

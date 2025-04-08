@@ -69,6 +69,7 @@ if( CMAKE_PROJECT_NAME STREQUAL "hiptensor" )
   option( HIPTENSOR_BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
   option( HIPTENSOR_DEFAULT_STRIDES_COL_MAJOR "Set hiptensor default strides to column major" ON )
   option(BUILD_OFFLOAD_COMPRESS "Build hiptensor with offload compression" ON)
+  option( HIPTENSOR_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
 endif()
 
 # Setup output paths
@@ -168,6 +169,11 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
   message(STATUS "Adding -amdgpu-early-inline-all=true and -amdgpu-function-calls=false")
   add_compile_options("SHELL: -mllvm -amdgpu-early-inline-all=true")
   add_compile_options("SHELL: -mllvm -amdgpu-function-calls=false")
+endif()
+
+if(HIPTENSOR_CODE_COVERAGE)
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate)
 endif()
 
 find_package( composable_kernel 1.0.0 REQUIRED PATHS $ENV{CK_DIR}/lib/cmake /opt/rocm /opt/rocm/ck COMPONENTS device_contraction_operations device_reduction_operations device_other_operations)
