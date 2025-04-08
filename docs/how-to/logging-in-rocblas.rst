@@ -79,6 +79,20 @@ When profile logging is enabled, memory usage increases. If the
 program exits abnormally, it is possible that profile logging will
 not sent to the output before the program exits.
 
+GEMM backend logging
+====================
+
+To generate additional logging to analyze non-success return codes,
+you can enable verbose error messages for the two backend systems used to perform GEMMs.
+
+.. code-block:: shell
+
+   export ROCBLAS_VERBOSE_TENSILE_ERROR=1
+   export ROCBLAS_VERBOSE_HIPBLASLT_ERROR=1
+
+These can be used in conjunction with ``ROCBLAS_LAYER=8`` for a better understanding of an error,
+or even with a success status to understand why a backend was not used.
+
 
 rocTX support in rocBLAS
 ========================

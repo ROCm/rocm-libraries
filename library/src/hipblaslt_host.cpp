@@ -115,21 +115,16 @@ namespace
     /**************************************************************************
     * We normally print error messages only once, to avoid excessive logging *
     **************************************************************************/
-    void print_once(const rocblas_internal_ostream& msg)
+    void print_if_verbose(const rocblas_internal_ostream& msg)
     {
         if(rocblas_suppress_tensile_error_messages())
             return;
         static constexpr char varname[] = "ROCBLAS_VERBOSE_HIPBLASLT_ERROR";
         static const char*    verbose   = getenv(varname);
-        if(!verbose)
+        if(verbose)
         {
-            static auto& once = rocblas_cerr
-                                << msg
-                                << "\nThis message will be only be displayed once, unless the "
-                                << varname << " environment variable is set." << std::endl;
+            rocblas_cerr << std::endl << msg << std::endl;
         }
-        else
-            rocblas_cerr << msg << std::endl;
     }
 
     /****************************************************************
@@ -308,7 +303,8 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "hipBLASLt error: Cannot find specified solution index!");
+                    print_if_verbose(
+                        msg << "rocBLAS warning: hipBLASLt cannot find specified solution index!");
                     return rocblas_status_invalid_value;
                 }
                 else
@@ -320,7 +316,7 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "rocBLAS error: No hipBLASLt solution found");
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
                     return rocblas_status_invalid_value;
                 }
                 else
@@ -336,7 +332,7 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "hipBLASLt error: Heuristic Fetch Failed!");
+                    print_if_verbose(msg << "rocBLAS error: hipBLASLt heuristic fetch failed!");
                     return rocblas_status_internal_error;
                 }
                 else
@@ -348,7 +344,7 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "rocBLAS error: No hipBLASLt solution found");
+                    print_if_verbose(msg << "rocBLAS warning: No hipBLASLt solution found");
                     return rocblas_status_not_implemented;
                 }
                 else
@@ -369,7 +365,7 @@ namespace
                     if(!solution_query)
                     {
                         rocblas_internal_ostream msg;
-                        print_once(msg << "hipBLASLt error: algo not supported.");
+                        print_if_verbose(msg << "rocBLAS warning: hipBLASLt algo not supported.");
                         return rocblas_status_invalid_value;
                     }
                     else
@@ -388,7 +384,8 @@ namespace
                 if(!solution_query)
                 {
                     rocblas_internal_ostream msg;
-                    print_once(msg << "hipblaslt: algo not supported: insufficient workspace.");
+                    print_if_verbose(msg << "rocBLAS warning: hipBLASLt algo not supported: "
+                                            "insufficient workspace.");
                     return rocblas_status_invalid_value;
                 }
                 else
@@ -451,13 +448,13 @@ rocblas_status runContractionProblemHipBlasLT(
         if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "hipBLASLt error: hipBLASLt Initialization Failed!");
+            print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
             return rocblas_status_internal_error;
         }
         if(gemm.run(prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "hipBLASLt error: hipBLASLt Execution Failed!");
+            print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
             return rocblas_status_internal_error;
         }
     }
@@ -497,7 +494,7 @@ rocblas_status runContractionProblemHipBlasLT(
         if(gemm.initialize(heuristicResult.algo, d_workspace, false) != HIPBLAS_STATUS_SUCCESS)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "hipBLASLt error: hipBLASLt Initialization Failed!");
+            print_if_verbose(msg << "rocBLAS error: hipBLASLt initialization failed!");
             return rocblas_status_internal_error;
         }
 
@@ -540,7 +537,7 @@ rocblas_status runContractionProblemHipBlasLT(
         if(gemm.run(d_userArgs, prob.handle->get_stream()) != HIPBLAS_STATUS_SUCCESS)
         {
             rocblas_internal_ostream msg;
-            print_once(msg << "hipBLASLt error: hipBLASLt Execution Failed!");
+            print_if_verbose(msg << "rocBLAS warning: hipBLASLt execution failed!");
             return rocblas_status_internal_error;
         }
     }
