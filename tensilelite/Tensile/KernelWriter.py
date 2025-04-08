@@ -24,13 +24,12 @@
 
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countDSStoreB256
-from rocisa.code import StructuredModule, ValueSet, RegSet
+from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer
 from rocisa.label import LabelManager
+from rocisa.asmpass import rocIsaPass, rocIsaPassOption
 from .TensileInstructions import replaceHolder, \
-                          KernelBody, Module, TextBlock, Dump, \
-                          RegisterPool, Assert, TensileInstructionsPassOptions, \
-                          TensileInstructionsPass, \
+                          Dump, RegisterPool, Assert, \
                           SLongBranchPositive, SBranch, SCBranchSCC0, SCBranchSCC1
 from .TensileInstructions.Instructions import *
 from .KernelWriterModules import *
@@ -3248,10 +3247,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Tensile instruction pass, temporarily disable due to build time.
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
-    tipo = TensileInstructionsPassOptions()
+    ripo = rocIsaPassOption()
     if kernel["ProblemType"]["ActivationType"] == "all":
-      tipo.removeDupAssign = False
-    TensileInstructionsPass(moduleKernelBody, tipo)
+      ripo.removeDupAssign = False
+    rocIsaPass(moduleKernelBody, ripo)
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")

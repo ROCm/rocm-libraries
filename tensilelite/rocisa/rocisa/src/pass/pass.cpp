@@ -20,28 +20,38 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "pass.hpp"
+
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/shared_ptr.h>
 
 namespace nb = nanobind;
 
-void init_base(nb::module_ m);
-void init_containers(nb::module_ m);
-void init_label(nb::module_ m);
-void init_enum(nb::module_ m);
-void init_inst(nb::module_ m);
-void init_code(nb::module_ m);
-void init_count(nb::module_ m);
-void init_pass(nb::module_ m);
-
-NB_MODULE(rocisa, m)
+namespace rocisa
 {
-    m.doc() = "Module rocisa.";
-    init_base(m);
-    init_containers(m);
-    init_label(m);
-    init_enum(m);
-    init_inst(m);
-    init_code(m);
-    init_count(m);
-    init_pass(m);
+    void rocIsaPass(std::shared_ptr<KernelBody>& kernel, const rocIsaPassOption& option)
+    {
+        auto assignDict = getAssignmentDict(kernel->body);
+        compositeToInstruction(kernel->body);
+        if(option.doOpt())
+        {
+            auto maxVgpr = kernel->totalVgprs;
+            auto maxSgpr = kernel->totalSgprs;
+            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr, assignDict);
+            if(option.removeDupAssign)
+            {
+                removeDuplicateAssignment(graph);
+            }
+        }
+    }
+} // namespace rocisa
+
+void init_pass(nb::module_ m)
+{
+    auto m_pass = m.def_submodule("asmpass", "rocIsa pass submodule.");
+    m_pass.def("rocIsaPass", &rocisa::rocIsaPass, "rocIsaPass.");
+
+    nb::class_<rocisa::rocIsaPassOption>(m_pass, "rocIsaPassOption")
+        .def(nb::init<>())
+        .def_rw("removeDupAssign", &rocisa::rocIsaPassOption::removeDupAssign);
 }

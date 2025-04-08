@@ -20,10 +20,11 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
 
+from rocisa.code import Module, Label, RegSet
 from rocisa.container import DSModifiers
-from ..TensileInstructions import Module, Label, RegisterPoolResource, SCmpEQU32, \
-    SMovB32, log2, ceilDivide, SCBranchSCC0, Instruction, \
-    SAndB32, RegSet, vectorStaticDivide
+from ..TensileInstructions import RegisterPoolResource, SCmpEQU32, \
+    SMovB32, log2, ceilDivide, SCBranchSCC0, \
+    SAndB32, vectorStaticDivide
 from ..Component import Component
 from ..KernelWriterModules import *
 from ..AsmStoreState import StoreState, VectorDataTypes
