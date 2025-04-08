@@ -20,6 +20,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 * Added additional unit tests for `test_block_scan.hpp`
 * Added additional unit tests for `test_block_sort.hpp`
+* Added additional unit tests for `test_block_load.hpp`
 
 ### Changed
 
