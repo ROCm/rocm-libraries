@@ -71,6 +71,9 @@ rocDecStatus AvcVideoParser::ParseVideoData(RocdecSourceDataPacket *p_data) {
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
+            if (FlushDpb() != PARSER_OK) {
+                return ROCDEC_RUNTIME_ERROR;
+            }
             if (NotifyNewSps(&sps_list_[active_sps_id_]) != PARSER_OK) {
                 return ROCDEC_RUNTIME_ERROR;
             }
@@ -2762,7 +2765,7 @@ ParserResult AvcVideoParser::MarkDecodedRefPics() {
         }
         // Output the remaining picutres in DPB
         if (FlushDpb() != PARSER_OK) {
-                return PARSER_FAIL;
+            return PARSER_FAIL;
         }
         dpb_buffer_.num_long_term = 0;
         dpb_buffer_.num_short_term = 0;
