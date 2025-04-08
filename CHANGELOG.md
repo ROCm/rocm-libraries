@@ -5,6 +5,10 @@ Documentation for hipFFT is available at
 
 ## hipFFT 1.0.20 (unreleased)
 
+### Removed
+
+* Removed hipfft-rider legacy compatibility from clients
+
 ## hipFFT 1.0.19 for ROCm 6.5.0
 
 ### Added

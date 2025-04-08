@@ -93,19 +93,3 @@ set_target_properties( hipfft-bench
   ${BENCH_OUT_DIR} )
 
 rocm_install(TARGETS hipfft-bench COMPONENT benchmarks)
-
-# install compatibility for old name of bench program - symlink on
-# unix, hardlink on windows (since privilege is required to create
-# symlinks there)
-if( WIN32 )
-  set( BENCH_LINK_COMMAND create_hardlink )
-  set( BENCH_NEW_NAME ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/hipfft-bench${CMAKE_EXECUTABLE_SUFFIX} )
-  set( BENCH_OLD_NAME ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/hipfft-rider${CMAKE_EXECUTABLE_SUFFIX} )
-else()
-  set( BENCH_LINK_COMMAND create_symlink )
-  set( BENCH_NEW_NAME hipfft-bench )
-  set( BENCH_OLD_NAME ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/hipfft-rider )
-endif()
-install(
-  CODE "execute_process( COMMAND \"${CMAKE_COMMAND}\" -E ${BENCH_LINK_COMMAND} \"${BENCH_NEW_NAME}\" \"${BENCH_OLD_NAME}\" )"
-)
