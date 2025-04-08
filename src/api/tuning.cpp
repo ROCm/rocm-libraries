@@ -32,11 +32,12 @@
 miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle, miopenTuningPolicy_t newValue)
 {
     return miopen::try_([&] {
-        if(newValue < miopenTuningPolicyNone || newValue > miopenTuningPolicyDbClean || newValue == 4)
+        if(newValue < miopenTuningPolicyNone || newValue > miopenTuningPolicyDbClean ||
+           newValue == 4)
             MIOPEN_THROW(miopenStatusBadParm,
                          "miopenSetTuningPolicy called with invalid value of newValue");
 
-        auto& handle_deref         = miopen::deref(handle);
+        auto& handle_deref = miopen::deref(handle);
         handle_deref.SetTuningPolicy(newValue);
     });
 }

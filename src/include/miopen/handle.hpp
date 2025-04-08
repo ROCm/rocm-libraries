@@ -297,10 +297,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     }
     std::string GetDeviceNameImpl() const;
 
-    miopenTuningPolicy_t GetTuningPolicy() const {return tuning_policy;}
-    void SetTuningPolicy(miopenTuningPolicy_t new_val) {
-        tuning_policy = new_val;
-    };
+    miopenTuningPolicy_t GetTuningPolicy() const { return tuning_policy; }
+    void SetTuningPolicy(miopenTuningPolicy_t new_val) { tuning_policy = new_val; };
 
 #if MIOPEN_USE_ROCBLAS
     const rocblas_handle_ptr& rhandle() const;
