@@ -40,6 +40,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// of items into a blocked/striped arrangement on continuous memory
 enum class block_store_method
 {
+    /// A blocked arrangement of items is stored into a blocked arrangement on continuous
+    /// memory.
     /// \par Performance Notes:
     /// * Performance decreases with increasing number of items per thread (stride
     /// between reads), because of reduced memory coalescing.
