@@ -50,43 +50,6 @@ def MacroVMagicDiv(magicDivAlg) -> Module:
     module.add(macro)
     return module
 
-def MacroVDynamicScalarDiv(wavefrontSize) -> Module:
-    module = Module("Dynamic scalar divide macros")
-    module.addComment1("Dynamic Scalar Divide: vgprQuotient=vgprDividend/vgprDivisor; vgprRemainder=vgprDividend%vgprDivisor;")
-    macro = Macro("DYNAMIC_VECTOR_DIVIDE", ["vgprQuotient", "vgprRemainder", "vgprDividend", "vgprDivisor", "vgprTmp0", "vgprTmp1", "sgprTmp"])
-    sTmpStr = sgpr("Tmp", isMacro=True) if (wavefrontSize == 32) else sgpr("Tmp", 2, isMacro=True)
-    macro.add(VCvtU32toF32(dst=vgpr("Quotient", isMacro=True), src="v[\\vgprDivisor]"))
-    macro.add(VRcpF32(dst=vgpr("Quotient", isMacro=True), src="v[\\vgprQuotient]"))
-    macro.add(VMulF32(dst=vgpr("Quotient", isMacro=True), src0=hex(0x4f800000), src1="v[\\vgprQuotient]"))
-    macro.add(VCvtF32toU32(dst=vgpr("Quotient", isMacro=True), src="v[\\vgprQuotient]"))
-    macro.add(VMulLOU32(dst=vgpr("Remainder", isMacro=True), src0="v[\\vgprDivisor]", src1="v[\\vgprQuotient]"))
-    macro.add(VMulHIU32(dst=vgpr("Tmp0", isMacro=True), src0="v[\\vgprDivisor]", src1="v[\\vgprQuotient]"))
-    macro.add(VSubCoU32(dst=vgpr("Tmp1", isMacro=True), dst1=VCC(), src0=0, src1="v[\\vgprRemainder]"))
-    macro.add(VCmpNeI32(dst=sTmpStr, src0=0, src1="v[\\vgprTmp0]"))
-    macro.add(VCndMaskB32(dst=vgpr("Remainder", isMacro=True), src0="v[\\vgprTmp1]", src1="v[\\vgprRemainder]", src2=sTmpStr)) # type: ignore
-    macro.add(VMulHIU32(dst=vgpr("Remainder", isMacro=True), src0="v[\\vgprRemainder]", src1="v[\\vgprQuotient]"))
-    macro.add(VSubCoU32(dst=vgpr("Tmp0", isMacro=True), dst1=VCC(), src0="v[\\vgprQuotient]", src1="v[\\vgprRemainder]"))
-    macro.add(VAddCOU32(dst=vgpr("Quotient", isMacro=True), dst1=VCC(), src0="v[\\vgprQuotient]", src1="v[\\vgprRemainder]"))
-    macro.add(VCndMaskB32(dst=vgpr("Quotient", isMacro=True), src0="v[\\vgprQuotient]", src1="v[\\vgprTmp0]", src2=sTmpStr)) # type: ignore
-    macro.add(VMulHIU32(dst=vgpr("Quotient", isMacro=True), src0="v[\\vgprQuotient]", src1="v[\\vgprDividend]"))
-    macro.add(VMulLOU32(dst=vgpr("Remainder", isMacro=True), src0="v[\\vgprQuotient]", src1="v[\\vgprDivisor]"))
-    macro.add(VSubCoU32(dst=vgpr("Tmp0", isMacro=True), dst1=VCC(), src0="v[\\vgprDividend]", src1="v[\\vgprRemainder]"))
-    macro.add(VCmpGEU32(dst=sTmpStr, src0="v[\\vgprDividend]", src1="v[\\vgprRemainder]"))
-    macro.add(VAddCOU32(dst=vgpr("Remainder", isMacro=True), dst1=VCC(), src0=hex(1), src1="v[\\vgprQuotient]"))
-    macro.add(VAddCOU32(dst=vgpr("Tmp1", isMacro=True), dst1=VCC(), src0=-1, src1="v[\\vgprQuotient]"))
-    macro.add(VCmpLeU32(dst=VCC(), src0="v[\\vgprDivisor]", src1="v[\\vgprTmp0]"))
-    SAndBX = SAndB32 if wavefrontSize == 32 else SAndB64
-    macro.add(SAndBX(dst=VCC(), src0=sTmpStr, src1=VCC()))
-    macro.add(VCndMaskB32(dst=vgpr("Quotient", isMacro=True), src0="v[\\vgprQuotient]", src1="v[\\vgprRemainder]", src2=VCC()))
-    macro.add(VCndMaskB32(dst=vgpr("Quotient", isMacro=True), src0="v[\\vgprTmp1]",     src1="v[\\vgprQuotient]", src2=sTmpStr)) # type: ignore
-    macro.add(VCmpNeI32(dst=VCC(), src0=0, src1="v[\\vgprDivisor]"))
-    macro.add(VCndMaskB32(dst=vgpr("Quotient", isMacro=True), src0=-1, src1="v[\\vgprQuotient]", src2=VCC(), comment="final result" ))
-    macro.add(VMulLOU32(dst=vgpr("Remainder", isMacro=True), src0="v[\\vgprQuotient]", src1="v[\\vgprDivisor]"))
-    macro.add(VSubCoU32(dst=vgpr("Remainder", isMacro=True), dst1=VCC(), src0="v[\\vgprDividend]", src1="v[\\vgprRemainder]", comment="final result" ))
-    module.add(macro)
-    return module
-
-
 def PseudoRandomGenerator() -> Module:
     ### modified from Tensile/.../PseudoRandomGenerator.py
 

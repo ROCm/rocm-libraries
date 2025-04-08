@@ -38,7 +38,7 @@ from .TensileInstructions import SelectBit, SGetPositivePCOffset, \
                           vectorStaticDivide, vectorStaticRemainder, scalarStaticRemainder, \
                           scalarUInt32RegDivide, scalarUInt32DivideAndRemainder, vectorUInt32CeilDivideAndRemainder, \
                           scalarStaticDivideAndRemainder, scalarStaticCeilDivide, sMagicDiv, staticMultiply, staticMultiplyAdd, \
-                          scalarStaticMultiply, MacroVMagicDiv, MacroVDynamicScalarDiv, \
+                          scalarStaticMultiply, MacroVMagicDiv, \
                           RegisterPool, allocTmpGpr, allocTmpGprList, RegisterPoolResource, \
                           log2, ceilDivide, DataType, \
                           dataTypeToMfmaInstTypePair, dataTypeNameAbbrevToInstType, PseudoRandomGenerator, \
@@ -1209,8 +1209,6 @@ class KernelWriterAssembly(KernelWriter):
             src="v[\\vgprAddr+0:\\vgprAddr+1]", \
             comment="offset *= bytes/element"))
       module.add(macro)
-
-    module.add(MacroVDynamicScalarDiv(kernel["WavefrontSize"]))
 
     if kernel["ProblemType"]["StochasticRounding"] and not self.states.asmCaps["v_prng_b32"] :
       module.add(PseudoRandomGenerator())
