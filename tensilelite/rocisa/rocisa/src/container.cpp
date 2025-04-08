@@ -52,7 +52,7 @@ namespace rocisa
 
     // Helper function to create GPR containers
     std::shared_ptr<RegisterContainer>
-        createGPR(const std::string& gprType, const Holder& holder, float regNum = 1.f)
+        createGPR(const std::string& gprType, const Holder& holder, float regNum)
     {
         if(holder.idx == -1)
         {
@@ -61,8 +61,7 @@ namespace rocisa
         return std::make_shared<HolderContainer>(gprType, holder.idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer>
-        createGPR(const std::string& gprType, int idx, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> createGPR(const std::string& gprType, int idx, float regNum)
     {
         return std::make_shared<RegisterContainer>(gprType, std::nullopt, idx, regNum);
     }
@@ -77,64 +76,62 @@ namespace rocisa
     }
 
     // Overloaded functions to create specific GPR containers with default regNum = 1.f
-    std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> vgpr(const Holder& holder, float regNum)
     {
         return createGPR("v", holder, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> vgpr(int idx, float regNum)
     {
         return createGPR("v", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer>
-        vgpr(const std::string& name, float regNum = 1.f, bool isMacro = false)
+    std::shared_ptr<RegisterContainer> vgpr(const std::string& name, float regNum, bool isMacro)
     {
         return createGPR("v", name, regNum, isMacro);
     }
 
-    std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum)
     {
         return createGPR("s", holder, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum)
     {
         return createGPR("s", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer>
-        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false)
+    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro)
     {
         return createGPR("s", name, regNum, isMacro);
     }
 
-    std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum)
     {
         return createGPR("acc", holder, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> accvgpr(int idx, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> accvgpr(int idx, float regNum)
     {
         return createGPR("acc", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> accvgpr(const std::string& name, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> accvgpr(const std::string& name, float regNum)
     {
         return createGPR("acc", name, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum)
     {
         return createGPR("m", holder, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum)
     {
         return createGPR("m", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum = 1.f)
+    std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum)
     {
         return createGPR("m", name, regNum);
     }

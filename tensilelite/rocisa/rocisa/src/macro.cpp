@@ -20,30 +20,14 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
+#include "macro.hpp"
+
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/shared_ptr.h>
 
-namespace nb = nanobind;
-
-void init_base(nb::module_ m);
-void init_containers(nb::module_ m);
-void init_label(nb::module_ m);
-void init_enum(nb::module_ m);
-void init_inst(nb::module_ m);
-void init_code(nb::module_ m);
-void init_count(nb::module_ m);
-void init_pass(nb::module_ m);
-void init_macro(nb::module_ m);
-
-NB_MODULE(rocisa, m)
+void init_macro(nb::module_ m)
 {
-    m.doc() = "Module rocisa.";
-    init_base(m);
-    init_containers(m);
-    init_label(m);
-    init_enum(m);
-    init_inst(m);
-    init_code(m);
-    init_count(m);
-    init_pass(m);
-    init_macro(m);
+    auto m_macro = m.def_submodule("macro", "Macro module");
+    m_macro.def("MacroVMagicDiv", &rocisa::MacroVMagicDiv);
+    m_macro.def("PseudoRandomGenerator", &rocisa::PseudoRandomGenerator);
 }

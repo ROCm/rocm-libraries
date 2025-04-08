@@ -70,6 +70,7 @@ nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/count.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/enum.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/label.cpp
+                        ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/macro.cpp
                         ${ROCISAINST_SOURCE}
                         ${ROCISAPASS_SOURCE})
 target_include_directories(rocisa PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/include)

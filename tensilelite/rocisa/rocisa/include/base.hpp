@@ -40,6 +40,8 @@
 
 namespace nb = nanobind;
 
+#define MAKE(FUNCTION, ...) std::make_shared<FUNCTION>(__VA_ARGS__)
+
 namespace rocisa
 {
     struct KernelInfo

@@ -262,6 +262,20 @@ namespace rocisa
             return item;
         }
 
+        template <typename T, typename... Args>
+        const std::shared_ptr<Item> addT(Args&&... args)
+        {
+            auto item = std::make_shared<T>(std::forward<Args>(args)...);
+            return add(item);
+        }
+
+        template <typename T, typename... Args>
+        const std::shared_ptr<Item> addT(int pos, Args&&... args)
+        {
+            auto item = std::make_shared<T>(std::forward<Args>(args)...);
+            return add(item, pos);
+        }
+
         const void addItems(const std::vector<std::shared_ptr<Item>>& items)
         {
             for(const auto& item : items)
@@ -625,6 +639,13 @@ namespace rocisa
                 throw std::runtime_error("unknown item type for Macro.add: " + item->toString());
             }
             return item;
+        }
+
+        template <typename T, typename... Args>
+        const std::shared_ptr<Item> addT(Args&&... args)
+        {
+            auto item = std::make_shared<T>(std::forward<Args>(args)...);
+            return add(item);
         }
 
         void addComment0(const std::string& comment)

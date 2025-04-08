@@ -32,7 +32,6 @@ from .DataType import *
 from .ExtInstructions import *
 from .Formatting import *
 from .Instructions import *
-from .Macros import *
 from .Math import *
 from .RegisterPool import *
 from .Utils import *
