@@ -198,7 +198,10 @@ namespace detail
         ROCPRIM_ATOMIC_LOAD("ds_read_b128", "", "s_waitcnt lgkmcnt(0)", ptr)
     // This architecture doesn't support atomics on the global AS.
     #define ROCPRIM_ATOMIC_LOAD_GLOBAL(ptr) ROCPRIM_ATOMIC_LOAD_FLAT(ptr)
-#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_CDNA2 || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5
+#elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_CDNA2 || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5 \
+    || ROCPRIM_TARGET_SPIRV
+    // We don't really know what architecture we are on when targeting
+    // SPIR-V. Lets just assume it's one of these.
     #define ROCPRIM_ATOMIC_LOAD_FLAT(ptr) \
         ROCPRIM_ATOMIC_LOAD("flat_load_dwordx4", "glc", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_LOAD_SHARED(ptr) \
@@ -302,7 +305,9 @@ namespace detail
     // This architecture doesn't support atomics on the global AS.
     #define ROCPRIM_ATOMIC_STORE_GLOBAL(ptr) ROCPRIM_ATOMIC_STORE_FLAT(ptr)
 #elif ROCPRIM_TARGET_RDNA3 || ROCPRIM_TARGET_RDNA2 || ROCPRIM_TARGET_RDNA1 || ROCPRIM_TARGET_CDNA2 \
-    || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5
+    || ROCPRIM_TARGET_CDNA1 || ROCPRIM_TARGET_GCN5 || ROCPRIM_TARGET_SPIRV
+    // We don't really know what architecture we are on when targeting
+    // SPIR-V. Lets just assume it's one of these.
     #define ROCPRIM_ATOMIC_STORE_FLAT(ptr) \
         ROCPRIM_ATOMIC_STORE("flat_store_dwordx4", "", "s_waitcnt vmcnt(0)", ptr)
     #define ROCPRIM_ATOMIC_STORE_SHARED(ptr) \

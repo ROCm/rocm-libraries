@@ -36,7 +36,6 @@
 #include "../intrinsics/thread.hpp"
 #include "../thread/thread_search.hpp"
 
-#include <hip/hip_cooperative_groups.h>
 #include <hip/hip_runtime.h>
 
 #include <chrono>
