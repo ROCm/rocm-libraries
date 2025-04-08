@@ -527,4 +527,27 @@ void init_containers(nb::module_ m)
                  self.regIdx     = std::get<5>(t);
                  self.regNum     = std::get<6>(t);
              });
+
+    nb::class_<rocisa::ContinuousRegister>(m_con, "ContinuousRegister")
+        .def(
+            "__init__",
+            [](rocisa::ContinuousRegister& self, uint32_t idx, uint32_t size) {
+                new(&self) rocisa::ContinuousRegister(idx, size);
+            },
+            nb::arg("idx"),
+            nb::arg("size"))
+        .def_ro("idx", &rocisa::ContinuousRegister::idx)
+        .def_ro("size", &rocisa::ContinuousRegister::size)
+        .def("__deepcopy__",
+             [](const rocisa::ContinuousRegister& self, nb::dict&) {
+                 return rocisa::ContinuousRegister(self);
+             })
+        .def("__getstate__",
+             [](const rocisa::ContinuousRegister& self) {
+                 return std::make_tuple(self.idx, self.size);
+             })
+        .def("__setstate__",
+             [](rocisa::ContinuousRegister& self, std::tuple<uint32_t, uint32_t> t) {
+                 new(&self) rocisa::ContinuousRegister(std::get<0>(t), std::get<1>(t));
+             });
 }

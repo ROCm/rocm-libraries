@@ -28,9 +28,10 @@ from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
+from rocisa.instruction import SLongBranchPositive
 from .TensileInstructions import replaceHolder, \
                           Dump, RegisterPool, Assert, \
-                          SLongBranchPositive, SBranch, SCBranchSCC0, SCBranchSCC1
+                          SBranch, SCBranchSCC0, SCBranchSCC1
 from .TensileInstructions.Instructions import *
 from .KernelWriterModules import *
 from .TensilePass import TensilePass, TensilePassOptions

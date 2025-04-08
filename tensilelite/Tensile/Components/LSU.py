@@ -21,8 +21,8 @@
 ################################################################################
 
 from rocisa.code import Module, Label, RegSet
-from rocisa.container import DSModifiers
-from ..TensileInstructions import RegisterPoolResource, SCmpEQU32, \
+from rocisa.container import DSModifiers, ContinuousRegister
+from ..TensileInstructions import SCmpEQU32, \
     SMovB32, log2, ceilDivide, SCBranchSCC0, \
     SAndB32, vectorStaticDivide
 from ..Component import Component
@@ -178,7 +178,7 @@ class LSUOn(LSU):
         lsu_id = writer.vgprPool.checkOut(1,"lsu_id")
         wave_id = writer.vgprPool.checkOut(1,"wave_id")
         tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, "tmpVgpr")
-        tmpVgprRes = RegisterPoolResource(tmpVgpr, 2)
+        tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
 
         module.add(vectorStaticDivide(wave_id, "Serial", \
             kernel["WavefrontSize"], tmpVgprRes))
@@ -369,7 +369,7 @@ class LSUOn(LSU):
         strideD1 = "StrideD%s" % (writer.states.indexChars[packedC1[0]])
         wave_id = writer.vgprPool.checkOut(1, "tmpWaveID")
         tmpVgpr1 = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr1")
-        tmpVgpr1Res = RegisterPoolResource(tmpVgpr1, 2)
+        tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         module.add(vectorStaticDivide(wave_id, "Serial", kernel["WavefrontSize"], tmpVgpr1Res))
         numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
         module.add(vectorStaticDivide(wave_id, wave_id, numWaves, tmpVgpr1Res))

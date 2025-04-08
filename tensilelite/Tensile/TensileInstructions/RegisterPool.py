@@ -24,7 +24,7 @@
 
 from rocisa.instruction import SMovB32, VMovB32
 from rocisa.code import Module
-from rocisa.container import vgpr, sgpr
+from rocisa.container import vgpr, sgpr, ContinuousRegister
 from .Formatting import print2, printExit, printWarning
 from .Utils import roundUpToNearestMultiple
 
@@ -424,11 +424,6 @@ class RegisterPool:
     for t in tl:
       self.checkIn(t)
 
-@dataclass
-class RegisterPoolResource:
-    idx: int
-    size: int
-
 @contextmanager
 def allocTmpGpr(pool: RegisterPool, num: int, upperLimit: int, alignment: Optional[int]=None, tag: Optional[str]=None, overflowListener=None):
   """
@@ -458,7 +453,7 @@ def allocTmpGpr(pool: RegisterPool, num: int, upperLimit: int, alignment: Option
       else:
         raise exception
 
-    yield RegisterPoolResource(idx=allocatedSgprIdx, size=num)
+    yield ContinuousRegister(idx=allocatedSgprIdx, size=num)
   finally:
     pool.checkIn(allocatedSgprIdx) # type: ignore
 
@@ -512,7 +507,7 @@ def allocTmpGprList(pool: RegisterPool, nums: List[int], upperLimit: int, alignm
 
     registerPoolResourceList = []
     for allocatedSgprIdx, num in allocatedSgprIdxList:
-      registerPoolResourceList.append(RegisterPoolResource(idx=allocatedSgprIdx, size=num))
+      registerPoolResourceList.append(ContinuousRegister(idx=allocatedSgprIdx, size=num))
 
     yield registerPoolResourceList
   finally:

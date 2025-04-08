@@ -31,7 +31,7 @@ from ..TensileInstructions import Module, VDot2F32F16, SMovB32, VAddU32, VCmpXEq
     VLShiftLeftB32, VMovB32, VAddF32, SBarrier, SDWAModifiers, SelectBit, VCvtPkFP8toF32, VCvtPkBF8toF32, \
     staticMultiply, vectorStaticDivide, vectorStaticRemainder, \
     DSModifiers, SSetMask, DSStoreB16, DSStoreB32, DSStoreB64, \
-    RegisterPoolResource, log2
+    ContinuousRegister, log2
 
 class SumUnrollMfma(SumUnroll):
     kernel = {"EnableMatrixInstruction": True}
@@ -192,7 +192,7 @@ class SumUnrollMfma(SumUnroll):
         tReg    = writer.vgprPool.checkOut(1,"tReg") # remainder
         kReg    = writer.vgprPool.checkOut(1,"kReg") # remainder
         tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
-        tmpVgprRes = RegisterPoolResource(tmpVgpr, 2)
+        tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
         ldsVgpr = writer.vgprPool.checkOut(1,"ldsVgpr")
         ldsVgpr1 = writer.vgprPool.checkOut(1,"ldsVgpr1")
         dummy   = writer.vgprPool.checkOut(1,"dummy")

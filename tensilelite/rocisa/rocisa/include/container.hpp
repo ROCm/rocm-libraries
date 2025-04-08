@@ -1099,4 +1099,10 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> mgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> mgpr(const std::string& name, float regNum = 1.f);
+
+    struct ContinuousRegister
+    {
+        uint32_t idx;
+        uint32_t size;
+    };
 } // namespace rocisa

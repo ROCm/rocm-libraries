@@ -22,9 +22,10 @@
 #
 ################################################################################
 
+from rocisa.container import ContinuousRegister
 from ..TensileInstructions import Module, SMulI32, VAddLShiftLeftU32, VAddU32, VMulLOU32, \
                             VMovB32, VAddCOU32, staticMultiply, vectorStaticDivide, \
-                            vectorStaticRemainder, RegisterPoolResource, vgpr, sgpr, log2, \
+                            vectorStaticRemainder, vgpr, sgpr, log2, \
                             vectorStaticDivideAndRemainder
 from ..Component import ComputeStoreVgprs
 from ..Common import DataDirection
@@ -72,7 +73,7 @@ class ComputeStoreVgprsVALU(ComputeStoreVgprs):
             tmpS1 = tmpS0+1
             wgMT1 = tmpS0+2
             tmpVgpr = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr")
-            tmpVgprRes = RegisterPoolResource(tmpVgpr, 2)
+            tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             # dot2: consecutive NumWaveSplitK threads compute the same element, divide it first before computing tile indices
             if kernel["NumWaveSplitK"] > 1:
                 newSerial = writer.vgprPool.checkOut(1, "newSerial")
@@ -164,8 +165,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
 
         tmpVgpr0 = writer.vgprPool.checkOut(1,"tmpVgpr0")
         tmpVgpr1 = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr1")
-        tmpVgpr0Res = RegisterPoolResource(tmpVgpr0, 1)
-        tmpVgpr1Res = RegisterPoolResource(tmpVgpr1, 2)
+        tmpVgpr0Res = ContinuousRegister(tmpVgpr0, 1)
+        tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
@@ -285,7 +286,7 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
         tmpVgpr0 = writer.vgprPool.checkOut(1,"tmpVgpr0")
         tmpVgpr1 = writer.vgprPool.checkOutAligned(2,2,"tmpVgpr1")
         #lsu_id   = tmpVgpr1
-        tmpVgpr1Res = RegisterPoolResource(tmpVgpr1, 2)
+        tmpVgpr1Res = ContinuousRegister(tmpVgpr1, 2)
         dummy    = writer.vgprPool.checkOut(1,"dummy")
 
         with writer.allocTmpSgpr(1) as tmpSgprInfo:

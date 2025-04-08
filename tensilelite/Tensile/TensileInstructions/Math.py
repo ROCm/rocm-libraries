@@ -26,7 +26,7 @@ from rocisa.instruction import *
 
 from typing import Optional
 from .ExtInstructions import SMulInt64to32
-from .RegisterPool import RegisterPoolResource
+from .RegisterPool import ContinuousRegister
 from .Utils import log2
 
 ########################################
@@ -34,7 +34,7 @@ from .Utils import log2
 # quotient register, remainder register, dividend register, divisor, tmpVgprx2
 ########################################
 
-def vectorStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Optional[RegisterPoolResource], doRemainder=True, comment=""):
+def vectorStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Optional[ContinuousRegister], doRemainder=True, comment=""):
     dComment = "%s = %s / %s"    % (vgpr(qReg), vgpr(dReg), divisor) if (comment=="") else comment
     rComment = "%s = %s %% %s" % (vgpr(rReg), vgpr(dReg), divisor) if (comment=="") else comment
 
@@ -82,7 +82,7 @@ def vectorStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Option
             
     return module
 
-def vectorStaticDivide(qReg, dReg, divisor, tmpVgprRes: Optional[RegisterPoolResource], comment=""):
+def vectorStaticDivide(qReg, dReg, divisor, tmpVgprRes: Optional[ContinuousRegister], comment=""):
     rReg = -1 # unused
     module = vectorStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpVgprRes, False, comment)
     module.name = "vectorStaticDivide (reg=-1)"
@@ -127,8 +127,8 @@ def vectorUInt32CeilDivideAndRemainder(qReg, dReg, divReg, rReg, doRemainder=Tru
         module.add(SMovB64(dst=EXEC(), src=-1, comment=dComment))
     return module
 
-def vectorStaticRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Optional[RegisterPoolResource], \
-                        tmpSgprRes: Optional[RegisterPoolResource], comment=""):
+def vectorStaticRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Optional[ContinuousRegister], \
+                        tmpSgprRes: Optional[ContinuousRegister], comment=""):
     if comment == "":
         comment = "%s = %s %% %s" % (vgpr(rReg), vgpr(dReg), divisor)
 
@@ -180,7 +180,7 @@ def vectorStaticRemainder(qReg, rReg, dReg, divisor, tmpVgprRes: Optional[Regist
 # dreg == dividend
 # tmpSgpr must be 2 SPGRs
 # qReg and dReg can be "sgpr[..]" or names of sgpr (will call sgpr)
-def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoolResource], \
+def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[ContinuousRegister], \
         doRemainder=1):
 
     qRegSgpr = qReg if isinstance(qReg, RegisterContainer) and qReg.regType == 's' else sgpr(qReg)
@@ -230,7 +230,7 @@ def scalarStaticDivideAndRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Option
             module.add(SSubU32(dst=sgpr(rReg), src0=dRegSgpr, src1=sgpr(tmpSgpr), comment="rReg = dividend - quotient*divisor"))
     return module
 
-def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoolResource]):
+def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes: Optional[ContinuousRegister]):
 
     qRegSgpr = qReg if isinstance(qReg, RegisterContainer) and qReg.regType == 's' else sgpr(qReg)
 
@@ -277,7 +277,7 @@ def scalarStaticCeilDivide(qReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoo
         module.add(SAddCU32(dst=qRegSgpr, src0=sgpr(tmpSgpr), src1=0, comment="if (quotient * divisor != dividend), result+=1"))
     return module
 
-def scalarStaticRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[RegisterPoolResource], comment=""):
+def scalarStaticRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[ContinuousRegister], comment=""):
     if comment == "":
         comment = "%s = %s %% %s" % (sgpr(rReg), sgpr(dReg), divisor)
 
@@ -320,7 +320,7 @@ def scalarStaticRemainder(qReg, rReg, dReg, divisor, tmpSgprRes: Optional[Regist
         module.add(SSubU32(dst=sgpr(rReg), src0=sgpr(dReg), src1=sgpr(tmpSgpr), comment=comment))
     return module
 
-def scalarUInt32RegDivide(qReg, dReg, divReg, tmpSgprRes: RegisterPoolResource, tmpVgprRes: RegisterPoolResource, TransOpWait: bool, setReg: bool = True, restoreReg: bool = True, comment=""):
+def scalarUInt32RegDivide(qReg, dReg, divReg, tmpSgprRes: ContinuousRegister, tmpVgprRes: ContinuousRegister, TransOpWait: bool, setReg: bool = True, restoreReg: bool = True, comment=""):
     dComment = "%s = %s / %s"    % (sgpr(qReg), sgpr(dReg), sgpr(divReg)) if (comment=="") else comment
 
     assert tmpVgprRes.size >= 2
@@ -346,7 +346,7 @@ def scalarUInt32RegDivide(qReg, dReg, divReg, tmpSgprRes: RegisterPoolResource, 
     module.add(VReadfirstlaneB32(dst=sgpr(qReg), src=vgpr(tmpVgpr0)))
     return module
 
-def scalarUInt32DivideAndRemainder(qReg, dReg, divReg, rReg, tmpVgprRes: RegisterPoolResource, wavewidth, doRemainder=True, comment=""):
+def scalarUInt32DivideAndRemainder(qReg, dReg, divReg, rReg, tmpVgprRes: ContinuousRegister, wavewidth, doRemainder=True, comment=""):
     dComment = "%s = %s / %s"    % (sgpr(qReg), sgpr(dReg), sgpr(divReg)) if (comment=="") else comment
     if doRemainder:
         rComment = "%s = %s %% %s" % (sgpr(rReg), sgpr(dReg), sgpr(divReg)) if (comment=="") else comment
@@ -446,7 +446,7 @@ def sMagicDivAlg2(dest, dividend, magicNumber, magicShiftAbit):
 # product register, operand register, multiplier
 ########################################
 
-def staticMultiply(product, operand, multiplier, tmpSgprRes: Optional[RegisterPoolResource], comment=""):
+def staticMultiply(product, operand, multiplier, tmpSgprRes: Optional[ContinuousRegister], comment=""):
     if comment == "":
         comment = "%s = %s * %s" % (product, operand, multiplier)
 
@@ -474,7 +474,7 @@ def staticMultiply(product, operand, multiplier, tmpSgprRes: Optional[RegisterPo
 # product register, operand register, multiplier, accumulator
 ########################################
 
-def staticMultiplyAdd(product, operand, multiplier, accumulator, tmpSgprRes: Optional[RegisterPoolResource], comment=""):
+def staticMultiplyAdd(product, operand, multiplier, accumulator, tmpSgprRes: Optional[ContinuousRegister], comment=""):
     if comment == "":
         comment = "%s = %s * %s" % (product, operand, multiplier)
 

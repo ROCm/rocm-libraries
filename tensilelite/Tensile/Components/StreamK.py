@@ -22,10 +22,10 @@
 
 from rocisa.code import Module, Label
 from rocisa.container import sgpr, SMEMModifiers
-from ..TensileInstructions import SAddU32, RegisterPoolResource, scalarStaticDivideAndRemainder, \
+from ..TensileInstructions import SAddU32, ContinuousRegister, scalarStaticDivideAndRemainder, \
     SCmpLtU32, SCSelectB32, sMagicDivAlg2, SMulI32, SSubU32, SMinU32, SMovB32, SMovB64, SCBranchSCC1, SCmpLeU32, VMovB32, \
     vgpr, SAddCU32, SCmpGtU32, SCMovB32, SAddI32, SCmpEQU32, SCBranchSCC0, SLShiftLeftB32, SLoadB32, SWaitCnt, \
-    log2, SBarrier, SStoreB32, SLongBranchPositive, SBranch, ceilDivide, replaceHolder, SNop, staticMultiply, SSleep, \
+    log2, SBarrier, SStoreB32, SBranch, ceilDivide, replaceHolder, SNop, staticMultiply, SSleep, \
     VAddU32, VAddF32, VAddF64, SAndB32, SLShiftRightB32, VReadfirstlaneB32, SBranchIfNotZero
 from ..Common import print2
 # from ..TensileInstructions.Containers import SMEMModifiers
@@ -68,7 +68,7 @@ class XCCMappingOn(XCCMapping):
             divisor = kernel["StreamKXCCMapping"]
             if ((divisor & (divisor - 1)) != 0): # Need temp registers if not power of 2
                 sTmp = writer.sgprPool.checkOutAligned(2, 2, "sTmp", preventOverflow=False)
-                sTmpRes  = RegisterPoolResource(idx=sTmp, size=2)
+                sTmpRes  = ContinuousRegister(idx=sTmp, size=2)
 
             # sGridC = ceil(grid / xccm)
             module.add(SAddU32(dst=sgpr(sGridC), src0=sgpr("skGrid"), src1=hex(kernel["StreamKXCCMapping"] - 1), comment="ceil(grid/xccm)"))
@@ -766,7 +766,7 @@ class StreamK(Component):
             storeWidth = kernel["StoreVectorWidth"]
             # storeWidth = 2
             if batchIdx == 0 and elementIdx == 0:
-                tmpSgprRes = RegisterPoolResource(idx=tmpS01, size=1)
+                tmpSgprRes = ContinuousRegister(idx=tmpS01, size=1)
                 module.add(staticMultiply(vgpr(addr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, tmpSgprRes))
                 # kStr += inst("v_mul_lo_u32", , "Partials buffer address")
                 module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="Init sgpr offset"))

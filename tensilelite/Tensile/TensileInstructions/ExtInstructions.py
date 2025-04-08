@@ -27,7 +27,7 @@ from rocisa.enum import SelectBit
 from rocisa.instruction import *
 
 from .DataType import DataType
-from .RegisterPool import RegisterPoolResource
+from .RegisterPool import ContinuousRegister
 from .Utils import log2
 
 from enum import Enum 
@@ -43,153 +43,6 @@ import sys
 ###
 ################################################################################
 ################################################################################
-
-########################################
-# Branch
-########################################
-##############################################################################
-# longBranch - 32 bit offset
-# s_branch class instructions take a label operand which is truncated to 16 bit
-# If the target label address offset is greater than 16 bits, then
-# we must use a longer 32 bit version.
-# Use when erroring out "invalid operand due to label > SIMM16"
-##############################################################################
-def SLongBranch(label: Label, tmpSgprRes: RegisterPoolResource, postiveLabelStr: str, comment=""):
-    labelName = label.getLabelName()
-    module = Module("SLongBranch %s"%labelName)
-    if comment:
-        module.addComment(comment)
-
-    assert tmpSgprRes.size >= 3
-    tmpSgpr = tmpSgprRes.idx
-    positiveLabel = Label(postiveLabelStr, "")
-    module.add(SGetPCB64(dst=sgpr(tmpSgpr,2), comment="addr of next instr"))
-    module.add(SAddI32(dst=sgpr(tmpSgpr+2), src0=labelName, src1=hex(4), comment="target branch offset"))
-    module.add(SCmpGeI32(src0=sgpr(tmpSgpr+2), src1=0, comment="check positive or negative"))
-    module.add(SCBranchSCC1(labelName=positiveLabel.getLabelName(), comment="jump when positive"))
-
-    # negative offset
-    module.add(SAbsI32(dst=sgpr(tmpSgpr+2), src=sgpr(tmpSgpr+2), comment="abs offset"))
-    module.add(SSubU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(tmpSgpr+2), comment="sub target branch offset"))
-    module.add(SSubBU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=0, comment="sub high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgpr,2), comment="branch to %s"%labelName))
-
-    # positive offset
-    module.add(positiveLabel)
-    module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr(tmpSgpr+2), comment="add target branch offset"))
-    module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=0, comment="add high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgpr,2), comment="branch to %s"%labelName))
-    return module
-
-##############################################################################
-# longBranchPositive - 32 bit offset (positive offset only)
-# s_branch class instructions take a label operand which is truncated to 16 bit
-# If the target label address offset is greater than 16 bits, then
-# we must use a longer 32 bit version.
-# Use when erroring out "invalid operand due to label > SIMM16"
-##############################################################################
-def SGetPositivePCOffset(sgprIdx, label: Label, tmpSgprRes: RegisterPoolResource):
-    labelName = label.getLabelName()
-    module = Module("SGetPositivePCOffset %s"%labelName)
-    assert tmpSgprRes.size >= 1
-    tmpSgpr = tmpSgprRes.idx
-    module.add(SGetPCB64(dst=sgpr(sgprIdx,2), comment="addr of next instr"))
-    module.add(SAddI32(dst=sgpr(tmpSgpr), src0=labelName, src1=hex(4), comment="target branch offset"))
-
-    # positive offset
-    module.add(SAddU32(dst=sgpr(sgprIdx), src0=sgpr(sgprIdx), src1=sgpr(tmpSgpr), comment="add target branch offset"))
-    module.add(SAddCU32(dst=sgpr(sgprIdx+1), src0=sgpr(sgprIdx+1), src1=0, comment="add high and carry"))
-    return module
-
-def SLongBranchPositive(label: Label, tmpSgprRes: RegisterPoolResource, comment=""):
-    labelName = label.getLabelName()
-    module = Module("SLongBranchPositive %s"%labelName)
-    if comment:
-        module.addComment(comment)
-
-    assert tmpSgprRes.size >= 3
-    if tmpSgprRes.idx % 2 == 0:
-        tmpSgprX2 = tmpSgprRes.idx
-        tmpSgprX1 = tmpSgprRes.idx+2
-    else:
-        tmpSgprX2 = tmpSgprRes.idx+1
-        tmpSgprX1 = tmpSgprRes.idx
-    module.addModuleAsFlatItems(SGetPositivePCOffset(tmpSgprX2, label, RegisterPoolResource(tmpSgprX1, 1)))
-    module.add(SSetPCB64(src=sgpr(tmpSgprX2,2), comment="branch to %s"%labelName))
-    return module
-
-##############################################################################
-# longBranchNegative - 32 bit offset (negative offset only)
-# s_branch class instructions take a label operand which is truncated to 16 bit
-# If the target label address offset is greater than 16 bits, then
-# we must use a longer 32 bit version.
-# Use when erroring out "invalid operand due to label > SIMM16"
-##############################################################################0
-def SLongBranchNegative(label: Label, tmpSgprRes: RegisterPoolResource, comment=""):
-    labelName = label.getLabelName()
-    module = Module("SLongBranchNegative %s"%labelName)
-    if comment:
-        module.addComment(comment)
-
-    assert tmpSgprRes.size >= 3
-    if tmpSgprRes.idx % 2 == 0:
-        tmpSgprX2 = tmpSgprRes.idx
-        tmpSgprX1 = tmpSgprRes.idx+2
-    else:
-        tmpSgprX2 = tmpSgprRes.idx+1
-        tmpSgprX1 = tmpSgprRes.idx
-    module.add(SGetPCB64(dst=sgpr(tmpSgprX2,2), comment="addr of next instr"))
-    module.add(SAddI32(dst=sgpr(tmpSgprX1), src0=labelName, src1=hex(4), comment="target branch offset"))
-
-    # negative offset
-    module.add(SAbsI32(dst=sgpr(tmpSgprX1), src=sgpr(tmpSgprX1), comment="abs offset"))
-    module.add(SSubU32(dst=sgpr(tmpSgprX2), src0=sgpr(tmpSgprX2), src1=sgpr(tmpSgprX1), comment="sub target branch offset"))
-    module.add(SSubBU32(dst=sgpr(tmpSgprX2+1), src0=sgpr(tmpSgprX2+1), src1=0, comment="sub high and carry"))
-    module.add(SSetPCB64(src=sgpr(tmpSgprX2,2), comment="branch to %s"%labelName))
-    return module
-
-##############################################################################
-# longBranchScc0 - 32 bit offset
-# Conditional branch to label when SCC == 0
-# Use when erroring out "invalid operand due to label > SIMM16"
-##############################################################################
-def SCLongBranchScc0(label: Label, tmpSgprRes: RegisterPoolResource, \
-                     noBranchLabelStr: str, postiveLabelStr: str, \
-                     posNeg: int = 0, comment=""):
-    module = Module("SCLongBranchScc0 %s"%label.getLabelName())
-    noBranchLabel = Label(noBranchLabelStr, "")
-    module.add(SCBranchSCC1(labelName=noBranchLabel.getLabelName(), \
-                            comment="Only branch on scc0"))
-    if posNeg > 0:
-        module.add(SLongBranchPositive(label, tmpSgprRes, comment=comment))
-    elif posNeg < 0:
-        module.add(SLongBranchNegative(label, tmpSgprRes, comment=comment))
-    else:
-        module.add(SLongBranch(label, tmpSgprRes, postiveLabelStr, comment=comment))
-    module.add(noBranchLabel)
-    return module
-
-##############################################################################
-# longBranchScc1 - 32 bit offset
-# Conditional branch to label when SCC == 1
-# Use when erroring out "invalid operand due to label > SIMM16"
-##############################################################################
-def SCLongBranchScc1(label: Label, tmpSgprRes: RegisterPoolResource, \
-                     noBranchLabelStr: str, postiveLabelStr: str, \
-                     posNeg: int = 0, comment=""):
-    module = Module("SCLongBranchScc1 %s"%label.getLabelName())
-    noBranchLabel = Label(noBranchLabelStr, "")
-    module.add(SCBranchSCC0(labelName=noBranchLabel.getLabelName(), \
-                            comment="Only branch on scc1"))
-    if posNeg > 0:
-        module.add(SLongBranchPositive(label, tmpSgprRes, comment=comment))
-    elif posNeg < 0:
-        module.add(SLongBranchNegative(label, tmpSgprRes, comment=comment))
-    else:
-        module.add(SLongBranch(label, tmpSgprRes, postiveLabelStr, comment=comment))
-    module.add(noBranchLabel)
-    return module
-
 ########################################
 # If else
 ########################################
@@ -350,7 +203,7 @@ def VCvtBF16toFP32(dst, src, vgprMask, vi, additionalCmts=""):
 ########################################
 # init lds state
 ########################################
-def DSInit(tmpVgprRes: RegisterPoolResource, numThreads: int, \
+def DSInit(tmpVgprRes: ContinuousRegister, numThreads: int, \
             ldsNumElements: int, initValue):
     assert tmpVgprRes.size > 1
     tmp = tmpVgprRes.idx
@@ -633,7 +486,7 @@ class Dump:
 
         return module
 
-    def dumpLds(self, startU: int, numU: int, tmpVgprRes: RegisterPoolResource, bpeAB: int, \
+    def dumpLds(self, startU: int, numU: int, tmpVgprRes: ContinuousRegister, bpeAB: int, \
                 numThreads: int, labelName: str) -> Module:
         module = Module("dump lds")
         if self.enableDump:
@@ -655,7 +508,7 @@ class Dump:
                 module.add(self.dumpVgpr(tmp, labelName))
         return module
 
-    def dumpSgpr(self, sgprStore: Union[int, str], tmpVgprRes: RegisterPoolResource, \
+    def dumpSgpr(self, sgprStore: Union[int, str], tmpVgprRes: ContinuousRegister, \
                 labelName: str) -> Module:
         module = Module("dump sgpr[%s]"%sgprStore)
         if self.enableDump:

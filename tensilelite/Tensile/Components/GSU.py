@@ -21,7 +21,8 @@
 ################################################################################
 
 from rocisa import countInstruction
-from ..TensileInstructions import Module, Label, RegisterPoolResource, SAddU32, SAddCU32, SCmpEQU32, SCBranchSCC1, \
+from rocisa.container import ContinuousRegister
+from ..TensileInstructions import Module, Label, SAddU32, SAddCU32, SCmpEQU32, SCBranchSCC1, \
     scalarUInt32DivideAndRemainder, SMovB32, SMulI32, SBranch, SMovB64, SLShiftRightB32, sgpr, log2, \
     SCmpLtU32, SCMovB32, SSubU32, SLShiftLeftB64, SCBranchSCC0, Instruction, SCmpLgU32, \
     SCSelectB32, SAndB32
@@ -183,7 +184,7 @@ class GSUOn(GSU):
             % (writer.states.tileChar1, writer.states.tileChar1, writer.states.tileChar1))
 
         tmpVgpr = writer.vgprPool.checkOut(2, "tmp")
-        tmpVgprRes = RegisterPoolResource(idx=tmpVgpr, size=2)
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         gsuwgmrrLabel    = Label(label=writer.labels.getNameInc("GSUWGMRR"), comment="")
         gsuwgmrrLabelEnd = Label(label=writer.labels.getNameInc("GSUWGMRR_End"), comment="")
         with writer.allocTmpSgpr(1) as tmpSgprInfo:
@@ -247,7 +248,7 @@ class GSUOn(GSU):
         loopCounterName = writer.loopCounterName(kernel, writer.states.unrollIdx)
         module.add(SLShiftRightB32(dst=sgpr(loopCounterName), src=sgpr("SizesSum"), shiftHex=log2(depthU), \
                                     comment="s[%s] = s[sgprSizesSum] / %s"%(loopCounterName, depthU)))
-        tmpSgprInfo = RegisterPoolResource(idx=stmp, size=2)
+        tmpSgprInfo = ContinuousRegister(idx=stmp, size=2)
         module.add(writer.calculateLoopNumIterOffsetGsu(kernel, loopCounterName, tmpSgprInfo))
         module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(stmp+0), sgpr(stmp+1), sgpr(stmp+0), depthUDiv, gsuOffsetStr))
         module.add(gsucLabelEnd)
@@ -338,7 +339,7 @@ class GSUOn(GSU):
     # Output: SGPR(destName) contains the number of unroll iterations for
     # this workgroup.
     ##############################################################################
-    def calculateLoopNumIterGsu(self, writer, kernel, destName, tmpSgprRes: RegisterPoolResource):
+    def calculateLoopNumIterGsu(self, writer, kernel, destName, tmpSgprRes: ContinuousRegister):
         module = Module("calculateLoopNumIterGsu")
 
         loopCounter = sgpr(destName)
@@ -347,7 +348,7 @@ class GSUOn(GSU):
         dividend = destName
 
         tmpVgpr = writer.vgprPool.checkOut(2,"tmp")
-        tmpVgprRes = RegisterPoolResource(idx=tmpVgpr, size=2)
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
         module.add(scalarUInt32DivideAndRemainder(quotient, dividend, "GSU", remainder, tmpVgprRes, wavewidth=kernel["WavefrontSize"]))
         writer.vgprPool.checkIn(tmpVgpr)
 
@@ -478,7 +479,7 @@ class GSUOn(GSU):
             module.add(gsucLabel)
             # calculate the lastWg
             tmpVgpr = writer.vgprPool.checkOut(2,"tmp")
-            tmpVgprRes = RegisterPoolResource(idx=tmpVgpr, size=2)
+            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
             module.add(SLShiftRightB32(dst=sgpr(tmpSgpr+1), src=sgpr("SizesSum"), shiftHex=log2(kernel["DepthU"]), \
                                             comment="s%s = s[sgprSizesSum] / %s"%(tmpSgpr+1,kernel["DepthU"])))
             module.add(SAndB32(dst=sgpr(tmpSgpr+2), src0=sgpr("GSU"), src1=hex(0x3FFF), comment="Restore GSU"))

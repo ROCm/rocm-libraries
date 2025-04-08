@@ -31,7 +31,7 @@ from rocisa.instruction import DSBPermuteB32, SBranch, SCBranchVCCNZ, \
                                 VAndB32, VCmpEQU32, VCmpLtU32, VCmpXEqU32, \
                                 VCndMaskB32, VMovB32, VMulI32I24, VLShiftLeftB32, \
                                 VLShiftRightB32, VSubU32
-from ..TensileInstructions import RegisterPoolResource, staticMultiply, vectorStaticDivide, \
+from ..TensileInstructions import ContinuousRegister, staticMultiply, vectorStaticDivide, \
                                 vectorStaticRemainder, log2
 from ..Component import ShiftVectorComponents
 from ..KernelWriterModules import *
@@ -176,7 +176,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             # wgMT value
             tmpSgpr = tmpSgprInfo.idx
             tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
-            tmpVgprRes = RegisterPoolResource(tmpVgpr, 2)
+            tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             dummy   = writer.vgprPool.checkOut(1)
             wgMT    = writer.vgprPool.checkOut(1)
             wg      = tP["wg"]
@@ -413,7 +413,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
             # wgMT value
             tmpSgpr = tmpSgprInfo.idx
             tmpVgpr = writer.vgprPool.checkOutAligned(2,2)
-            tmpVgprRes = RegisterPoolResource(tmpVgpr, 2)
+            tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
             dummy   = writer.vgprPool.checkOut(1)
             wgMT    = writer.vgprPool.checkOut(1)
             wg      = tP["wg"]
