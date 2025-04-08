@@ -5,7 +5,7 @@
 .. _lapack-like:
 
 ********************************
-rocSOLVER LAPACK-like Functions
+rocSOLVER LAPACK-like functions
 ********************************
 
 Other Lapack-like routines provided by rocSOLVER. These are divided into the following subcategories:

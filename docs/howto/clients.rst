@@ -5,7 +5,7 @@
 .. _clients:
 
 ******************************
-rocSOLVER Client Applications
+rocSOLVER client applications
 ******************************
 
 rocSOLVER has an infrastructure for testing and benchmarking similar to that of

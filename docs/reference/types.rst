@@ -5,7 +5,7 @@
 .. _rocsolver-types:
 
 ********************************************************************
-rocSOLVER Types
+rocSOLVER types
 ********************************************************************
 
 rocSOLVER uses most types and enumerations defined in rocBLAS for the general operation and

@@ -81,7 +81,7 @@ The parameter types (``float``, ``double``, ``rocblas_float_complex``, or ``rocb
 to the function prefix and indicate the precision used by that specific function variant.
 
 Real versus complex precision
---------------------------
+-----------------------------
 
 Some LAPACK functions have different behaviors or names when operating on real versus complex data:
 

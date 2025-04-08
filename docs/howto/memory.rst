@@ -5,7 +5,7 @@
 .. _memory:
 
 *******************************
-rocSOLVER Memory Model
+rocSOLVER memory model
 *******************************
 
 Almost all LAPACK and rocSOLVER routines require workspace memory in order to compute their results. In contrast to LAPACK, however, pointers to the workspace are not explicitly passed to rocSOLVER functions as arguments; instead, they are managed behind-the-scenes using a configurable device memory model.

@@ -5,7 +5,7 @@
 .. _logging-label:
 
 ******************************
-rocSOLVER Multi-level Logging
+rocSOLVER multi-level logging
 ******************************
 
 rocSOLVER provides logging facilities that can be used to output information on rocSOLVER function calls, 

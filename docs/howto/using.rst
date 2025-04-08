@@ -5,11 +5,11 @@
 
 .. _using:
 
-*************************
-Using rocSOLVER Library
-*************************
+***************************
+Using the rocSOLVER library
+***************************
 
-Once installed, rocSOLVER can be used just like any other library with a C API.
+Once installed, rocSOLVER can be used like any other library with a C API.
 The header file will need to be included in the user code, and both the rocBLAS and rocSOLVER shared libraries
 will become link-time and run-time dependencies for the user application.
 

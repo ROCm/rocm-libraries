@@ -5,7 +5,7 @@
 .. _refactor:
 
 **********************************************
-rocSOLVER Re-Factorization and Direct Solvers
+rocSOLVER refactorization and direct solvers
 **********************************************
 
 These are functions that implement direct solvers for sparse systems with

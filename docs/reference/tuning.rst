@@ -5,7 +5,7 @@
 .. _tuning_label:
 
 *******************************
-Tuning rocSOLVER Performance
+Tuning rocSOLVER performance
 *******************************
 
 Some compile-time parameters in rocSOLVER can be modified to tune the performance

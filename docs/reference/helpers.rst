@@ -5,7 +5,7 @@
 .. _helpers:
 
 *****************************************************
-rocSOLVER Library and Logging Functions
+rocSOLVER library and logging functions
 *****************************************************
 
 These are helper functions that retrieve information and control some functions of the library.
