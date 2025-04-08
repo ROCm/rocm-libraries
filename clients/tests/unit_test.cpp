@@ -27,6 +27,7 @@
 #include "hip/hip_runtime_api.h"
 #include <boost/scope_exit.hpp>
 #include <condition_variable>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -597,8 +598,17 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 
     // extra scope to control lifetime of env vars
     {
-        // rtc test harness writes to system's temp directory
-        auto tmp_path = fs::temp_directory_path();
+        // create a temporary directory to hold all of the temp files
+        // that get created
+        const fs::path tmp_path = std::tmpnam(nullptr);
+        try
+        {
+            fs::create_directory(tmp_path);
+        }
+        catch(fs::filesystem_error& e)
+        {
+            GTEST_SKIP() << "unable to create temp dir for test harnesses: " << e.what();
+        }
 
         // activate writing of rtc test harnesses
         EnvironmentSetTemp env_harness("ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS", "1");
@@ -612,17 +622,6 @@ TEST(rocfft_UnitTest, rtc_test_harness)
         EnvironmentSetTemp env_sys_cache("ROCFFT_RTC_SYS_CACHE_PATH", ":memory:");
 
         rocfft_setup();
-
-        // ensure stale files from previous runs of this test won't cause
-        // problems - clean up any rocfft_kernel_harness_*.cpp files that
-        // might be left behind
-        for(const auto& entry : std::filesystem::directory_iterator{tmp_path})
-        {
-            auto filename = entry.path().filename();
-            if(filename.string().compare(0, 22, "rocfft_kernel_harness_") == 0
-               && filename.extension().string() == ".cpp")
-                fs::remove(entry);
-        }
 
         // construct a few different types of plans to try to get all
         // different kernels compiled
@@ -704,6 +703,19 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 
         // check that all compiles succeeded
         for(const auto& file : files)
+        {
             ASSERT_EQ(file.second, 0);
+        }
+
+        // clean up temporary files
+        try
+        {
+            fs::remove_all(tmp_path);
+        }
+        catch(fs::filesystem_error&)
+        {
+            // this should work, but ignore errors as the build
+            // status is what matters for this test
+        }
     }
 }
