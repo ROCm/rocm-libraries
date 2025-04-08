@@ -325,6 +325,7 @@ add_rocprim_test("rocprim.warp_scan" test_warp_scan.cpp)
 add_rocprim_test("rocprim.warp_sort" test_warp_sort.cpp)
 add_rocprim_test("rocprim.warp_store" test_warp_store.cpp)
 add_rocprim_test("rocprim.zip_iterator" test_zip_iterator.cpp)
+add_rocprim_test("rocprim.accumulator_t" test_accumulator_t.cpp)
 
 if(NOT WIN32)
   # Linking tests check if all external rocPRIM symbols are in the inline namespace, kernel are not

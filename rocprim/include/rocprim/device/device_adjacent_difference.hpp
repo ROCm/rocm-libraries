@@ -1,4 +1,4 @@
-// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -97,7 +97,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
                                     const bool           debug_synchronous)
 {
     using value_type  = typename std::iterator_traits<InputIt>::value_type;
-    using output_type = rocprim::invoke_result_binary_op_t<value_type, BinaryFunction>;
+    using output_type = ::rocprim::accumulator_t<BinaryFunction, value_type>;
     using larger_type
         = std::conditional_t<(sizeof(value_type) >= sizeof(output_type)), value_type, output_type>;
 

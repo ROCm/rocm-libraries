@@ -506,9 +506,9 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<
-             typename std::iterator_traits<InputIterator>::value_type,
-             BinaryFunction>>
+         class AccType
+         = ::rocprim::accumulator_t<BinaryFunction,
+                                    typename std::iterator_traits<InputIterator>::value_type>>
 inline hipError_t inclusive_scan(void*             temporary_storage,
                                  size_t&           storage_size,
                                  InputIterator     input,
@@ -664,7 +664,9 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+         class AccType
+         = ::rocprim::accumulator_t<BinaryFunction,
+                                    typename std::iterator_traits<InputIterator>::value_type>>
 inline hipError_t inclusive_scan(void*               temporary_storage,
                                  size_t&             storage_size,
                                  InputIterator       input,
@@ -707,9 +709,9 @@ template<class Config = default_config,
          class OutputIterator,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = rocprim::invoke_result_binary_op_t<
-             typename std::iterator_traits<InputIterator>::value_type,
-             BinaryFunction>>
+         class AccType
+         = ::rocprim::accumulator_t<BinaryFunction,
+                                    typename std::iterator_traits<InputIterator>::value_type>>
 inline hipError_t deterministic_inclusive_scan(void*             temporary_storage,
                                                size_t&           storage_size,
                                                InputIterator     input,
@@ -751,7 +753,9 @@ template<class Config = default_config,
          class InitValueType,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
-         class AccType = typename std::iterator_traits<InputIterator>::value_type>
+         class AccType
+         = ::rocprim::accumulator_t<BinaryFunction,
+                                    typename std::iterator_traits<InputIterator>::value_type>>
 inline hipError_t deterministic_inclusive_scan(void*             temporary_storage,
                                                size_t&           storage_size,
                                                InputIterator     input,
@@ -880,8 +884,7 @@ template<class Config = default_config,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
          class AccType
-         = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>,
-                                              BinaryFunction>>
+         = ::rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>>
 inline hipError_t exclusive_scan(void*               temporary_storage,
                                  size_t&             storage_size,
                                  InputIterator       input,
@@ -925,8 +928,7 @@ template<class Config = default_config,
          class BinaryFunction
          = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>,
          class AccType
-         = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>,
-                                              BinaryFunction>>
+         = ::rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>>
 inline hipError_t deterministic_exclusive_scan(void*               temporary_storage,
                                                size_t&             storage_size,
                                                InputIterator       input,

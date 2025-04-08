@@ -22,11 +22,16 @@
 #define ROCPRIM_TYPE_TRAITS_FUNCTIONS_HPP_
 
 #include "config.hpp"
-#include "functional.hpp"
+#include "functional.hpp" // not used
 #include "types.hpp"
+#include "types/integer_sequence.hpp"
 #include "types/tuple.hpp"
 
 #include <functional>
+#include <iterator>
+#include <limits>
+#include <stdint.h>
+#include <type_traits>
 #include <utility>
 
 /// \addtogroup utilsmodule_typetraits
@@ -177,61 +182,71 @@ template<class T>
 struct invoke_impl
 {
     template<class F, class... Args>
-    ROCPRIM_HOST_DEVICE
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
     static auto call(F&& f, Args&&... args)
-        -> decltype(std::forward<F>(f)(std::forward<Args>(args)...));
+        -> decltype(::std::forward<F>(f)(::std::forward<Args>(args)...));
 };
 
 template<class B, class MT>
 struct invoke_impl<MT B::*>
 {
-    template<class T,
-             class Td = typename std::decay<T>::type,
-             class    = typename std::enable_if<std::is_base_of<B, Td>::value>::type>
-    ROCPRIM_HOST_DEVICE
-    static auto get(T&& t) -> T&&;
+    template<class T, class Td = ::std::decay_t<T>, ::std::enable_if_t<::std::is_base_of_v<B, Td>>>
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+    constexpr auto get(T&& t) -> T&&;
 
     template<class T,
-             class Td = typename std::decay<T>::type,
-             class    = typename std::enable_if<is_reference_wrapper<Td>::value>::type>
-    ROCPRIM_HOST_DEVICE
-    static auto get(T&& t) -> decltype(t.get());
+             class Td = ::std::decay_t<T>,
+             ::std::enable_if_t<is_reference_wrapper<Td>::value>>
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+    constexpr auto get(T&& t) -> decltype(t.get());
 
     template<class T,
-             class Td = typename std::decay<T>::type,
-             class    = typename std::enable_if<!std::is_base_of<B, Td>::value>::type,
-             class    = typename std::enable_if<!is_reference_wrapper<Td>::value>::type>
-    ROCPRIM_HOST_DEVICE
-    static auto get(T&& t) -> decltype(*std::forward<T>(t));
+             class Td = ::std::decay_t<T>,
+             ::std::enable_if_t<!::std::is_base_of_v<B, Td>>,
+             ::std::enable_if_t<!is_reference_wrapper<Td>::value>>
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+    constexpr auto get(T&& t) -> decltype(*::std::forward<T>(t));
 
-    template<class T,
-             class... Args,
-             class MT1,
-             class = typename std::enable_if<std::is_function<MT1>::value>::type>
-    ROCPRIM_HOST_DEVICE
+    template<class T, class... Args, class MT1, ::std::enable_if_t<::std::is_function_v<MT1>>>
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
     static auto call(MT1 B::*pmf, T&& t, Args&&... args)
-        -> decltype((invoke_impl::get(std::forward<T>(t)).*pmf)(std::forward<Args>(args)...));
+        -> decltype((invoke_impl::get(::std::forward<T>(t)).*pmf)(::std::forward<Args>(args)...));
 
     template<class T>
-    ROCPRIM_HOST_DEVICE
-    static auto call(MT B::*pmd, T&& t) -> decltype(invoke_impl::get(std::forward<T>(t)).*pmd);
+    ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+    static auto call(MT B::*pmd, T&& t) -> decltype(invoke_impl::get(::std::forward<T>(t)).*pmd);
 };
 
-template<class F, class... Args, class Fd = typename std::decay<F>::type>
-ROCPRIM_HOST_DEVICE
-auto INVOKE(F&& f, Args&&... args)
-    -> decltype(invoke_impl<Fd>::call(std::forward<F>(f), std::forward<Args>(args)...));
+template<class F, class... Args, class Fd = ::std::decay_t<F>>
+ROCPRIM_INLINE ROCPRIM_HOST_DEVICE
+constexpr auto INVOKE(F&& f, Args&&... args)
+    -> decltype(invoke_impl<Fd>::call(::std::forward<F>(f), ::std::forward<Args>(args)...));
 
-// Conforming C++14 implementation (is also a valid C++11 implementation):
-template<typename AlwaysVoid, typename, typename...>
-struct invoke_result_impl
+template<typename AlwaysVoid, typename, typename, typename...>
+struct invoke_result_r_impl
 {};
+
 template<typename F, typename... Args>
-struct invoke_result_impl<decltype(void(INVOKE(std::declval<F>(), std::declval<Args>()...))),
-                          F,
-                          Args...>
+struct invoke_result_r_impl<decltype(void(INVOKE(::std::declval<F>(), ::std::declval<Args>()...))),
+                            void,
+                            F,
+                            Args...>
 {
-    using type = decltype(INVOKE(std::declval<F>(), std::declval<Args>()...));
+    using type = decltype(INVOKE(::std::declval<F>(), ::std::declval<Args>()...));
+};
+
+template<typename R, typename F, typename... Args>
+struct invoke_result_r_impl<
+    ::std::enable_if_t<
+        ::std::is_convertible_v<decltype(INVOKE(::std::declval<F>(), ::std::declval<Args>()...)),
+                                R>,
+        void>,
+    R,
+    F,
+    Args...>
+{
+
+    using type = decltype(INVOKE(::std::declval<F>(), ::std::declval<Args>()...));
 };
 
 template<class T>
@@ -333,20 +348,29 @@ struct guarded_inequality_wrapper
 
 } // end namespace detail
 
+/// \brief Similar to ``rocprim::invoke_result``, but also checks if the result
+/// can be converted to a specified return type when the return type is not ``void``.
+///
+/// \tparam R The type to which the function's return type must be convertible.
+/// \tparam F Type of the function.
+/// \tparam Args Input type(s) to the function ``F``.
+template<typename R, typename F, typename... Args>
+struct invoke_result_r : detail::invoke_result_r_impl<void, R, F, Args...>
+{
+#ifdef DOXYGEN_DOCUMENTATION_BUILD
+    /// \brief The return type of the Callable type F if invoked with the arguments Args.
+    /// \hideinitializer
+    using type = detail::invoke_result_r_impl<void, R, F, Args...>::type;
+#endif // DOXYGEN_DOCUMENTATION_BUILD
+};
+
 /// \brief Behaves like ``std::invoke_result``, but allows the use of invoke_result
 /// with device-only lambdas/functors in host-only functions on HIP-clang.
 ///
 /// \tparam F Type of the function.
 /// \tparam Args Input type(s) to the function ``F``.
 template<class F, class... Args>
-struct invoke_result : detail::invoke_result_impl<void, F, Args...>
-{
-#ifdef DOXYGEN_DOCUMENTATION_BUILD
-    /// \brief The return type of the Callable type F if invoked with the arguments Args.
-    /// \hideinitializer
-    using type = detail::invoke_result_impl<void, F, Args...>::type;
-#endif // DOXYGEN_DOCUMENTATION_BUILD
-};
+using invoke_result = invoke_result_r<void, F, Args...>;
 
 /// \brief Helper type. It is an alias for ``invoke_result::type``.
 ///
@@ -360,7 +384,8 @@ using invoke_result_t = typename invoke_result<F, Args...>::type;
 /// \tparam T Input type to the binary operator.
 /// \tparam F Type of the binary operator.
 template<class T, class F>
-struct invoke_result_binary_op
+struct [[deprecated("To deduce the type of accumulator, use 'rocprim::accumulator_t' "
+                    "instead.")]] invoke_result_binary_op
 {
     /// \brief The result type of the binary operator.
     using type = typename invoke_result<F, T, T>::type;
@@ -371,7 +396,13 @@ struct invoke_result_binary_op
 /// \tparam T Input type to the binary operator.
 /// \tparam F Type of the binary operator.
 template<class T, class F>
-using invoke_result_binary_op_t = typename invoke_result_binary_op<T, F>::type;
+using invoke_result_binary_op_t
+    [[deprecated("To deduce the type of accumulator, use 'rocprim::accumulator_t' instead.")]]
+    = typename invoke_result_binary_op<T, F>::type;
+
+/// \brief The type of intermediate accumulator (according to CCCL)
+template<typename Invokable, typename InputT, typename InitT = InputT>
+using accumulator_t = ::std::decay_t<invoke_result_t<Invokable, InitT, InputT>>;
 
 namespace detail
 {

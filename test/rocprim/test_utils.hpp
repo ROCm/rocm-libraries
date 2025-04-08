@@ -283,9 +283,8 @@ OutputIt host_inclusive_scan_impl(
 template<class InputIt, class OutputIt, class BinaryOperation>
 OutputIt host_inclusive_scan(InputIt first, InputIt last, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type
-        = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIt>::value_type,
-                                             BinaryOperation>;
+    using acc_type = ::rocprim::accumulator_t<BinaryOperation,
+                                              typename std::iterator_traits<InputIt>::value_type>;
     return host_inclusive_scan_impl(first, last, d_first, op, acc_type{});
 }
 
@@ -336,8 +335,7 @@ template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(
     InputIt first, InputIt last, T initial_value, OutputIt d_first, BinaryOperation op)
 {
-    using acc_type
-        = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<T>, BinaryOperation>;
+    using acc_type = ::rocprim::accumulator_t<BinaryOperation, rocprim::detail::input_type_t<T>>;
     return host_exclusive_scan_impl(first, last, initial_value, d_first, op, acc_type{});
 }
 

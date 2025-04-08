@@ -48,9 +48,8 @@ namespace reduce_by_key
 {
 
 template<typename ValueIterator, typename BinaryOp>
-using accumulator_type_t =
-    typename invoke_result_binary_op<::rocprim::detail::value_type_t<ValueIterator>,
-                                     BinaryOp>::type;
+using accumulator_type_t
+    = ::rocprim::accumulator_t<BinaryOp, ::rocprim::detail::value_type_t<ValueIterator>>;
 
 template<typename AccumulatorType>
 using wrapped_type_t = rocprim::tuple<unsigned int, AccumulatorType>;
