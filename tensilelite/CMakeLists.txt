@@ -78,17 +78,11 @@ else()
     message(FATAL_ERROR "TENSILE_BIN is not defined. Please set it to one of the valid options: ${VALID_BINS}")
 endif()
 
-if("$ENV{Python_ROOT}" STREQUAL "" AND NOT Python_ROOT)
-    message(STATUS "Python_ROOT is unset. Setting Python_ROOT to /usr.")
-    message(STATUS "Configure Python_ROOT variable if a different installation is preferred.")
-    set(Python_ROOT /usr)
-endif()
+# Find Python interpreter
+find_package(Python COMPONENTS Interpreter REQUIRED)
 
 # Add rocisa
 add_subdirectory(rocisa)
-
-# Find Python interpreter
-find_package(PythonInterp REQUIRED)
 
 # Set common variables
 set(TENSILE_BIN_ROOT "${CMAKE_SOURCE_DIR}/Tensile/bin")
@@ -103,7 +97,7 @@ if(DEFINED DEVELOP_MODE)
         file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"
              "@echo off\n"
              "${CMAKE_BUILD_COMMAND}\n"
-             "PYTHONPATH=${PYTHONPATH} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} %*\n"
+             "PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} %*\n"
              "pause\n"
         )
     else()
@@ -112,7 +106,7 @@ if(DEFINED DEVELOP_MODE)
              "#!/bin/bash\n"
              "set -euo pipefail\n"
              "${CMAKE_BUILD_COMMAND}\n"
-             "PYTHONPATH=${PYTHONPATH} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} \"$@\"\n"
+             "PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} \"$@\"\n"
         )
         execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/${TENSILE_BIN}.sh")
     endif()
