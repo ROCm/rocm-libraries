@@ -4330,8 +4330,9 @@ namespace rocisa
                         {
                             auto [src1, src2] = std::dynamic_pointer_cast<RegisterContainer>(arg)
                                                     ->splitRegContainer();
-                            instructions = {std::make_shared<VMovB32>(dst1, src1, std::nullopt, comment),
-                                            std::make_shared<VMovB32>(dst2, src2, std::nullopt, comment)};
+                            instructions
+                                = {std::make_shared<VMovB32>(dst1, src1, std::nullopt, comment),
+                                   std::make_shared<VMovB32>(dst2, src2, std::nullopt, comment)};
                         }
                     },
                     srcs[0]);

@@ -182,7 +182,7 @@ namespace rocisa
                 }
                 else if(auto smov = std::dynamic_pointer_cast<SMovB32>(item))
                 {
-                    auto& dst = *smov->dst; 
+                    auto& dst      = *smov->dst;
                     auto& gprValue = smov->srcs[0];
                     if(typeid(dst) != typeid(EXEC))
                     {
