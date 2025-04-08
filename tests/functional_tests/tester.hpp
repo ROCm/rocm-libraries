@@ -92,7 +92,7 @@ enum TestType {
   SignalFetchTestType = 55,
   WGSignalFetchTestType = 56,
   WAVESignalFetchTestType = 57,
-  TeamBarrierTestType = 58,
+  TeamWGBarrierTestType = 58,
   DefaultCTXGetTestType = 59,
   DefaultCTXGetNBITestType = 60,
   DefaultCTXPutTestType = 61,
@@ -103,6 +103,10 @@ enum TestType {
   WGBarrierAllTestType = 66,
   WAVESyncAllTestType = 67,
   WGSyncAllTestType = 68,
+  TeamBarrierTestType = 69,
+  TeamWAVEBarrierTestType = 70,
+  WAVESyncTestType = 71,
+  WGSyncTestType = 72,
 };
 
 enum OpType { PutType = 0, GetType = 1 };

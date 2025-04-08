@@ -71,11 +71,19 @@ class ROContext : public Context {
 
   __device__ void barrier(rocshmem_team_t team);
 
+  __device__ void barrier_wave(rocshmem_team_t team);
+
+  __device__ void barrier_wg(rocshmem_team_t team);
+
   __device__ void sync_all();
 
   __device__ void sync_all_wave();
 
   __device__ void sync_all_wg();
+
+  __device__ void sync(rocshmem_team_t team);
+
+  __device__ void sync_wave(rocshmem_team_t team);
 
   __device__ void sync_wg(rocshmem_team_t team);
 

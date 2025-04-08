@@ -80,7 +80,7 @@ declare -A TEST_NUMBERS=(
   ["signalfetch"]="55"
   ["wgsignalfetch"]="56"
   ["wavesignalfetch"]="57"
-  ["teambarrier"]="58"
+  ["teamwgbarrier"]="58"
   ["defaultctxget"]="59"
   ["defaultctxgetnbi"]="60"
   ["defaultctxput"]="61"
@@ -91,6 +91,10 @@ declare -A TEST_NUMBERS=(
   ["wgbarrierall"]="66"
   ["wavesyncall"]="67"
   ["wgsyncall"]="68"
+  ["teambarrier"]="69"
+  ["teamwavebarrier"]="70"
+  ["wavesync"]="71"
+  ["wgsync"]="72"
 )
 
 ExecTest() {
@@ -328,8 +332,34 @@ TestColl() {
   ExecTest  "wgbarrierall"     2       64           1024
 
   ExecTest  "teambarrier"      2       1            1
+  ExecTest  "teambarrier"      2       16           64
+  ExecTest  "teambarrier"      2       32           256
+  ExecTest  "teambarrier"      2       39           1024
+
+  ExecTest  "teamwavebarrier"  2       1            1
+  ExecTest  "teamwavebarrier"  2       16           64
+  ExecTest  "teamwavebarrier"  2       32           256
+  ExecTest  "teamwavebarrier"  2       39           1024
+
+  ExecTest  "teamwgbarrier"    2       1            1
+  ExecTest  "teamwgbarrier"    2       16           64
+  ExecTest  "teamwgbarrier"    2       32           256
+  ExecTest  "teamwgbarrier"    2       39           1024
 
   ExecTest  "sync"             2       1            1
+  ExecTest  "sync"             2       16           64
+  ExecTest  "sync"             2       32           256
+  ExecTest  "sync"             2       39           1024
+
+  ExecTest  "wavesync"         2       1            1
+  ExecTest  "wavesync"         2       16           64
+  ExecTest  "wavesync"         2       32           256
+  ExecTest  "wavesync"         2       39           1024
+
+  ExecTest  "wgsync"           2       1            1
+  ExecTest  "wgsync"           2       16           64
+  ExecTest  "wgsync"           2       32           256
+  ExecTest  "wgsync"           2       39           1024
 
   ExecTest  "syncall"          2       1            1
   ExecTest  "syncall"          2       16           64

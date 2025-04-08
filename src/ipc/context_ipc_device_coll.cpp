@@ -118,6 +118,30 @@ __device__ void IPCContext::internal_sync_wg(int pe, int PE_start, int stride,
   __syncthreads();
 }
 
+__device__ void IPCContext::sync(rocshmem_team_t team) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe = team_obj->my_pe_in_world;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
+  long *p_sync = team_obj->barrier_pSync;
+
+  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+}
+
+__device__ void IPCContext::sync_wave(rocshmem_team_t team) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe = team_obj->my_pe_in_world;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
+  long *p_sync = team_obj->barrier_pSync;
+
+  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync);
+}
+
 __device__ void IPCContext::sync_wg(rocshmem_team_t team) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
@@ -163,6 +187,34 @@ __device__ void IPCContext::barrier_all_wg() {
 }
 
 __device__ void IPCContext::barrier(rocshmem_team_t team) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe = team_obj->my_pe_in_world;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
+  long *p_sync = team_obj->barrier_pSync;
+
+  quiet();
+  internal_sync(pe, pe_start, pe_stride, pe_size, p_sync);
+}
+
+__device__ void IPCContext::barrier_wave(rocshmem_team_t team) {
+  IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
+
+  int pe = team_obj->my_pe_in_world;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int pe_stride = team_obj->tinfo_wrt_world->stride;
+  int pe_size = team_obj->num_pes;
+  long *p_sync = team_obj->barrier_pSync;
+
+  if (is_thread_zero_in_wave()) {
+    quiet();
+  }
+  internal_sync_wave(pe, pe_start, pe_stride, pe_size, p_sync);
+}
+
+__device__ void IPCContext::barrier_wg(rocshmem_team_t team) {
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
 
   int pe = team_obj->my_pe_in_world;

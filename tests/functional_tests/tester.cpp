@@ -330,6 +330,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       if (rank == 0) std::cout << "Team Barrier Test ###" << std::endl;
       testers.push_back(new TeamBarrierTester(args));
       return testers;
+    case TeamWAVEBarrierTestType:
+      if (rank == 0) std::cout << "Team WAVE Barrier Test ###" << std::endl;
+      testers.push_back(new TeamBarrierTester(args));
+      return testers;
+    case TeamWGBarrierTestType:
+      if (rank == 0) std::cout << "Team WG Barrier Test ###" << std::endl;
+      testers.push_back(new TeamBarrierTester(args));
+      return testers;
     case SyncAllTestType:
       if (rank == 0) std::cout << "SyncAll ###" << std::endl;
       testers.push_back(new SyncTester(args));
@@ -344,6 +352,14 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       return testers;
     case SyncTestType:
       if (rank == 0) std::cout << "Sync ###" << std::endl;
+      testers.push_back(new SyncTester(args));
+      return testers;
+    case WAVESyncTestType:
+      if (rank == 0) std::cout << "WAVE Sync ###" << std::endl;
+      testers.push_back(new SyncTester(args));
+      return testers;
+    case WGSyncTestType:
+      if (rank == 0) std::cout << "WG Sync ###" << std::endl;
       testers.push_back(new SyncTester(args));
       return testers;
     case RandomAccessTestType:
@@ -528,10 +544,12 @@ bool Tester::peLaunchesKernel() {
                 (_type == TeamAllToAllTestType) || (_type == TeamFCollectTestType) ||
                 (_type == PingPongTestType) || (_type == BarrierAllTestType) ||
                 (_type == WAVEBarrierAllTestType) || (_type == WGBarrierAllTestType) ||
-                (_type == SyncTestType) || (_type == SyncAllTestType) ||
+                (_type == SyncTestType) || (_type == WAVESyncTestType) ||
+                (_type == WGSyncTestType) || (_type == SyncAllTestType) ||
                 (_type == WAVESyncAllTestType) || (_type == WGSyncAllTestType) ||
                 (_type == RandomAccessTestType) || (_type == PingAllTestType) ||
-                (_type == TeamBarrierTestType);
+                (_type == TeamBarrierTestType) || (_type == TeamWAVEBarrierTestType) ||
+                (_type == TeamWGBarrierTestType);
 
   return is_launcher;
 }

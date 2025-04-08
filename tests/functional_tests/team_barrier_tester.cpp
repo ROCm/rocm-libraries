@@ -28,27 +28,40 @@ rocshmem_team_t team_barrier_world_dup;
  *****************************************************************************/
 __global__ void TeamBarrierTest(int loop, int skip, long long int *start_time,
                                   long long int *end_time,
-                                  ShmemContextType ctx_type,
-                                  rocshmem_team_t *teams) {
+                                  ShmemContextType ctx_type, TestType type,
+                                  int wf_size, rocshmem_team_t *teams) {
   __shared__ rocshmem_ctx_t ctx;
+  int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
+  int wf_id = t_id / wf_size;
 
   rocshmem_wg_init();
   rocshmem_wg_team_create_ctx(teams[wg_id], ctx_type, &ctx);
-
-  int n_pes = rocshmem_ctx_n_pes(ctx);
-
-  __syncthreads();
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && hipThreadIdx_x == 0) {
       start_time[wg_id] = wall_clock64();
     }
 
-    rocshmem_barrier(teams[wg_id]);
+    switch (type) {
+      case TeamBarrierTestType:
+        if(t_id == 0) {
+          rocshmem_ctx_barrier(ctx, teams[wg_id]);
+        }
+        break;
+      case TeamWAVEBarrierTestType:
+        if(wf_id == 0) {
+          rocshmem_ctx_wave_barrier(ctx, teams[wg_id]);
+        }
+        break;
+      case TeamWGBarrierTestType:
+        rocshmem_ctx_wg_barrier(ctx, teams[wg_id]);
+        break;
+      default:
+        break;
+    }
+    __syncthreads();
   }
-
-  __syncthreads();
 
   if (hipThreadIdx_x == 0) {
     end_time[wg_id] = wall_clock64();
@@ -95,10 +108,10 @@ void TeamBarrierTester::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, uint64_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(TeamBarrierTest, gridSize, blockSize,
-                     shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, _shmem_context,
-		     team_barrier_world_dup);
+  hipLaunchKernelGGL(TeamBarrierTest, gridSize, blockSize, shared_bytes,
+                     stream, loop, args.skip, start_time, end_time,
+                     _shmem_context, _type, wf_size,
+                     team_barrier_world_dup);
 
   num_msgs = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
