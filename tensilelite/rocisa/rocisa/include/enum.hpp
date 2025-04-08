@@ -23,13 +23,13 @@
 #pragma once
 #include <string>
 
-typedef enum
+enum class SignatureValueKind : int
 {
     SIG_VALUE        = 1,
     SIG_GLOBALBUFFER = 2
-} SignatureValueKind;
+};
 
-typedef enum
+enum class InstType : int
 {
     INST_F8         = 1,
     INST_F16        = 2,
@@ -70,9 +70,9 @@ typedef enum
     INST_CVT        = 37,
     INST_MACRO      = 38,
     INST_NOTYPE     = 39
-} InstType;
+};
 
-typedef enum
+enum class SelectBit : int
 {
     SEL_NONE = 0,
     DWORD    = 1,
@@ -82,17 +82,17 @@ typedef enum
     BYTE_3   = 5,
     WORD_0   = 6,
     WORD_1   = 7
-} SelectBit;
+};
 
-typedef enum
+enum class UnusedBit : int
 {
     UNUSED_NONE     = 0,
     UNUSED_PAD      = 1,
     UNUSED_SEXT     = 2,
     UNUSED_PRESERVE = 3
-} UnusedBit;
+};
 
-typedef enum
+enum class CvtType : int
 {
     CVT_F16_to_F32          = 1,
     CVT_F32_to_F16          = 2,
@@ -118,31 +118,31 @@ typedef enum
     CVT_SCALEF32_SR_BF8_F16 = 22,
     CVT_BF16_to_F32         = 23,
     CVT_PK_F32_to_BF16      = 24
-} CvtType;
+};
 
-typedef enum
+enum class RoundType : int
 {
     ROUND_UP              = 0,
     ROUND_TO_NEAREST_EVEN = 1
-} RoundType;
+};
 
 inline std::string toString(SelectBit bit)
 {
     switch(bit)
     {
-    case DWORD:
+    case SelectBit::DWORD:
         return "DWORD";
-    case BYTE_0:
+    case SelectBit::BYTE_0:
         return "BYTE_0";
-    case BYTE_1:
+    case SelectBit::BYTE_1:
         return "BYTE_1";
-    case BYTE_2:
+    case SelectBit::BYTE_2:
         return "BYTE_2";
-    case BYTE_3:
+    case SelectBit::BYTE_3:
         return "BYTE_3";
-    case WORD_0:
+    case SelectBit::WORD_0:
         return "WORD_0";
-    case WORD_1:
+    case SelectBit::WORD_1:
         return "WORD_1";
     default:
         return "";
@@ -153,11 +153,11 @@ inline std::string toString(UnusedBit bit)
 {
     switch(bit)
     {
-    case UNUSED_PAD:
+    case UnusedBit::UNUSED_PAD:
         return "UNUSED_PAD";
-    case UNUSED_SEXT:
+    case UnusedBit::UNUSED_SEXT:
         return "UNUSED_SEXT";
-    case UNUSED_PRESERVE:
+    case UnusedBit::UNUSED_PRESERVE:
         return "UNUSED_PRESERVE";
     default:
         return "";
