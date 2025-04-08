@@ -5,6 +5,10 @@ Documentation for rocFFT is available at
 
 ## rocFFT 1.0.34 (unreleased)
 
+### Removed
+
+* Removed rocfft-rider legacy compatibility from clients
+
 ## rocFFT 1.0.33 for ROCm 6.5.0
 
 ### Optimized
