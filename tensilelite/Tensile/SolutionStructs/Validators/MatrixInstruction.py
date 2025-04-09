@@ -273,7 +273,7 @@ def validateMIParameters(
             assert miInputPerThread == mi4[2], elineno()
 
     # If Navi architecture, the input per thread is different
-    if IsaVersion(10, 0, 0) <= isa <= IsaVersion(11, 0, 2):
+    if IsaVersion(10, 0, 0) <= isa <= IsaVersion(11, 5, 1):
         assert miInputPerThread == mi4[2], elineno()
     else:
         assert miInputPerThread == mi4[0] * mi4[2] * mi4[3] // wfsize, f"{elineno()} MIInputPerThread: {miInputPerThread} != {mi4[0]} * {mi4[2]} * {mi4[3]} / {wfsize} = {mi4[0] * mi4[2] * mi4[3] // wfsize}"
