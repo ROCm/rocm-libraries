@@ -177,6 +177,16 @@ Due to this the following APIs would be affected:
 * ``rocblas_is_user_managing_device_memory()`` will be removed.
 * ``rocblas_set_device_memory_size()`` will be replaced by a future function ``rocblas_increase_device_memory_size()``, this new API would allow users to increase the device memory pool size at runtime.
 
+Announced in rocBLAS 2.46
+=========================
+
+Remove ability for hipBLAS to set rocblas_int8_type_for_hipblas
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+From rocBLAS 3.0, remove ``enum rocblas_int8_type_for_hipblas`` and the functions ``rocblas_get_int8_type_for_hipblas`` and
+``rocblas_set_int8_type_for_hipblas``. These are used by hipBLAS to select either ``int8_t`` or ``packed_int8x4`` datatype.
+In hipBLAS the option to use ``packed_int8x4`` will be removed, only ``int8_t`` will be available.
+
 Announced in rocBLAS 2.45
 ==========================
 
@@ -190,15 +200,3 @@ Replace truncate with rocblas_truncate
 
 From rocBLAS 3.0 enum ``truncate_t`` and the value truncate has been removed and replaced by ``rocblas_truncate_t``
 and ``rocblas_truncate``, respectively.
-
-Announced in rocBLAS 2.46
-=========================
-
-Remove ability for hipBLAS to set rocblas_int8_type_for_hipblas
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
-From rocBLAS 3.0, remove ``enum rocblas_int8_type_for_hipblas`` and the functions ``rocblas_get_int8_type_for_hipblas`` and
-``rocblas_set_int8_type_for_hipblas``. These are used by hipBLAS to select either ``int8_t`` or ``packed_int8x4`` datatype.
-In hipBLAS the option to use ``packed_int8x4`` will be removed, only ``int8_t`` will be available.
-
-
