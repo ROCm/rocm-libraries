@@ -100,21 +100,21 @@ namespace rocRoller::KernelGraph
          * Sequence Deallocate nodes before any other parallel nodes.  This will
          * ensure that if a tag is borrowed, it will be deallocated (returned)
          * before it is borrowed again.
-         * 
+         *
          * Before:
          * ```mermaid
          * graph LR
-         * 
+         *
          *  NodeA ---> NodeB
          *  NodeB ---> NodeC
          *  NodeA ---> Deallocate
          *  NodeB ---> Deallocate
          * ```
-         * 
+         *
          * If we don't simplify first, we will get:
          * ```mermaid
          * graph LR
-         * 
+         *
          *  NodeA ---> NodeB
          *  NodeB ---> NodeC
          *  Deallocate ---> NodeB
@@ -122,37 +122,37 @@ namespace rocRoller::KernelGraph
          *  NodeA ---> Deallocate
          *  NodeB ---> Deallocate
          * ```
-         * 
+         *
          * which contains a cycle.
-         * 
+         *
          * So we simplify:
          * ```mermaid
          * graph LR
-         * 
+         *
          *  NodeA ---> NodeB
          *  NodeB ---> NodeC
          *  NodeB ---> Deallocate
          * ```
-         * 
+         *
          * Then add new sequence edges:
          * ```mermaid
          * graph LR
-         * 
+         *
          *  NodeA ---> NodeB
          *  NodeB ---> NodeC
          *  NodeB ---> Deallocate
          *  Deallocate ---> NodeC
          * ```
-         * 
+         *
          * Then simplify again:
          * ```mermaid
          * graph LR
-         * 
+         *
          *  NodeA ---> NodeB
          *  NodeB ---> Deallocate
          *  Deallocate ---> NodeC
          * ```
-         * 
+         *
          */
 
         removeRedundantSequenceEdges(graph);

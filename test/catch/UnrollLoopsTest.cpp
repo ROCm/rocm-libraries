@@ -152,8 +152,14 @@ TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll][graph-transforms]")
         CHECK(tail != std::nullopt);
         kgraph = kgraph.transform(std::make_shared<kg::Simplify>());
 
-        CHECK(kgraph.control.compareNodes(forOp, *tail)
-              == kg::ControlGraph::NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(rocRoller::UpdateCache, forOp, *tail)
+              == rocRoller::KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(rocRoller::CacheOnly, forOp, *tail)
+              == rocRoller::KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(rocRoller::UseCacheIfAvailable, forOp, *tail)
+              == rocRoller::KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(rocRoller::IgnoreCache, forOp, *tail)
+              == rocRoller::KernelGraph::ControlGraph::NodeOrdering::LeftFirst);
 
         auto ops
             = kgraph.control.findElements(kgraph.control.isElemType<kg::ControlGraph::ForLoopOp>())

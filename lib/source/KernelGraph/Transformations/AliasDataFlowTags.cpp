@@ -72,7 +72,8 @@ namespace rocRoller
                     {
                         if(inBegin != gapBegin)
                         {
-                            auto order = kgraph.control.compareNodes(gapBegin, inBegin);
+                            auto order = kgraph.control.compareNodes(
+                                rocRoller::UpdateCache, gapBegin, inBegin);
                             if(order != ControlGraph::NodeOrdering::LeftFirst)
                                 return false;
                         }
@@ -85,7 +86,8 @@ namespace rocRoller
                     {
                         if(inEnd != gapEnd)
                         {
-                            auto order = kgraph.control.compareNodes(inEnd, gapEnd);
+                            auto order = kgraph.control.compareNodes(
+                                rocRoller::UpdateCache, inEnd, gapEnd);
                             if(order != ControlGraph::NodeOrdering::LeftFirst)
                                 return false;
                         }
@@ -153,11 +155,13 @@ namespace rocRoller
                         {
                             if(one != two)
                             {
-                                AssertFatal(kgraph.control.compareNodes(one, two)
-                                                == ControlGraph::NodeOrdering::LeftFirst,
-                                            ShowValue(one),
-                                            ShowValue(two),
-                                            ShowValue(kgraph.control.compareNodes(one, two)));
+                                AssertFatal(
+                                    kgraph.control.compareNodes(rocRoller::UpdateCache, one, two)
+                                        == ControlGraph::NodeOrdering::LeftFirst,
+                                    ShowValue(one),
+                                    ShowValue(two),
+                                    ShowValue(kgraph.control.compareNodes(
+                                        rocRoller::UpdateCache, one, two)));
                             }
                         }
                     }
@@ -237,7 +241,8 @@ namespace rocRoller
                         auto        aIdx = graphIndices[a];
                         auto        bIdx = graphIndices[b];
 
-                        auto order = kgraph.control.compareNodes(aRec.control, bRec.control);
+                        auto order = kgraph.control.compareNodes(
+                            rocRoller::UpdateCache, aRec.control, bRec.control);
 
                         switch(order)
                         {

@@ -1081,7 +1081,8 @@ namespace rocRoller
                         {
                             if(tagA == tagB)
                                 continue;
-                            if(graph.control.compareNodes(tagA, tagB) == NodeOrdering::LeftFirst)
+                            if(graph.control.compareNodes(rocRoller::UpdateCache, tagA, tagB)
+                               == NodeOrdering::LeftFirst)
                             {
                                 isLast = false;
                                 break;

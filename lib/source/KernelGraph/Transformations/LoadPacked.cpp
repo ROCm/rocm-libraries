@@ -75,7 +75,8 @@ namespace rocRoller::KernelGraph
                 }
                 else
                 {
-                    auto ordering = graph.control.compareNodes(setCoordNode, iter->second);
+                    auto ordering = graph.control.compareNodes(
+                        rocRoller::UpdateCache, setCoordNode, iter->second);
                     if(ordering == ControlGraph::NodeOrdering::LeftInBodyOfRight)
                     {
                         Log::debug("{}: replacing {} with {}.",

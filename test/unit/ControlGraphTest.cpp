@@ -175,14 +175,24 @@ namespace rocRollerTest
             }
         ).";
 
-        // Can't compare a node to itself
-        EXPECT_THROW(control.compareNodes(loadA_index, loadA_index), FatalError);
-        // Can't compare a node to an edge
-        EXPECT_THROW(control.compareNodes(loadA_index, sequence1_index), FatalError);
-        EXPECT_THROW(control.compareNodes(sequence2_index, loadB_index), FatalError);
-        // Not in the graph
-        EXPECT_ANY_THROW(control.compareNodes(loadA_index, 9000));
-        EXPECT_ANY_THROW(control.compareNodes(9000, loadB_index));
+        {
+            auto checkOrder = [&](auto const policy) {
+                // Can't compare a node to itself
+                EXPECT_THROW(control.compareNodes(policy, loadA_index, loadA_index), FatalError);
+                // Can't compare a node to an edge
+                EXPECT_THROW(control.compareNodes(policy, loadA_index, sequence1_index),
+                             FatalError);
+                EXPECT_THROW(control.compareNodes(policy, sequence2_index, loadB_index),
+                             FatalError);
+                // Not in the graph
+                EXPECT_ANY_THROW(control.compareNodes(policy, loadA_index, 9000));
+                EXPECT_ANY_THROW(control.compareNodes(policy, 9000, loadB_index));
+            };
+            checkOrder(rocRoller::UpdateCache);
+            checkOrder(rocRoller::CacheOnly);
+            checkOrder(rocRoller::UseCacheIfAvailable);
+            checkOrder(rocRoller::IgnoreCache);
+        }
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
 
@@ -194,7 +204,14 @@ namespace rocRollerTest
 
         EXPECT_EQ(std::set<int>{}, control.nodesBefore(loadB_index).to<std::set>());
 
-        EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(loadA_index, mul_index));
+        EXPECT_EQ(NodeOrdering::LeftFirst,
+                  control.compareNodes(rocRoller::UpdateCache, loadA_index, mul_index));
+        EXPECT_EQ(NodeOrdering::LeftFirst,
+                  control.compareNodes(rocRoller::CacheOnly, loadA_index, mul_index));
+        EXPECT_EQ(NodeOrdering::LeftFirst,
+                  control.compareNodes(rocRoller::UseCacheIfAvailable, loadA_index, mul_index));
+        EXPECT_EQ(NodeOrdering::LeftFirst,
+                  control.compareNodes(rocRoller::IgnoreCache, loadA_index, mul_index));
 
         EXPECT_EQ((std::set{loadA_index, loadB_index, add_index}),
                   control.nodesBefore(mul_index).to<std::set>());
@@ -202,12 +219,22 @@ namespace rocRollerTest
         EXPECT_EQ(std::set{kernel_index}, control.nodesContaining(loadA_index).to<std::set>());
         EXPECT_EQ(std::set{kernel_index}, control.nodesContaining(storeC_index).to<std::set>());
 
-        EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(loadA_index, loadB_index));
-
-        EXPECT_EQ(NodeOrdering::RightFirst, control.compareNodes(mul_index, add_index));
-
-        EXPECT_EQ(NodeOrdering::LeftInBodyOfRight, control.compareNodes(mul_index, kernel_index));
-        EXPECT_EQ(NodeOrdering::RightInBodyOfLeft, control.compareNodes(kernel_index, loadB_index));
+        {
+            auto checkOrder = [&](auto const policy) {
+                EXPECT_EQ(NodeOrdering::Undefined,
+                          control.compareNodes(policy, loadA_index, loadB_index));
+                EXPECT_EQ(NodeOrdering::RightFirst,
+                          control.compareNodes(policy, mul_index, add_index));
+                EXPECT_EQ(NodeOrdering::LeftInBodyOfRight,
+                          control.compareNodes(policy, mul_index, kernel_index));
+                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
+                          control.compareNodes(policy, kernel_index, loadB_index));
+            };
+            checkOrder(rocRoller::UpdateCache);
+            checkOrder(rocRoller::CacheOnly);
+            checkOrder(rocRoller::UseCacheIfAvailable);
+            checkOrder(rocRoller::IgnoreCache);
+        }
     }
 
     TEST_F(ControlGraphTest, BeforeAfter)
@@ -286,20 +313,32 @@ namespace rocRollerTest
         EXPECT_EQ(std::set({forOp, scope2, kernel}), control.nodesContaining(loadD).to<std::set>());
         EXPECT_EQ(std::set({scope3, kernel}), control.nodesContaining(storeE).to<std::set>());
 
-        EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(assign2, assign3));
-        EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(assign2, mul));
-        EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(assign1, assign2));
+        {
+            auto checkOrder = [&](auto const policy) {
+                EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, assign2, assign3));
+                EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, assign2, mul));
+                EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(policy, assign1, assign2));
 
-        EXPECT_EQ(NodeOrdering::RightFirst, control.compareNodes(forInc, forInit));
-        EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(loadA, loadB));
-        EXPECT_EQ(NodeOrdering::RightInBodyOfLeft, control.compareNodes(forOp, assign3));
-        EXPECT_EQ(NodeOrdering::LeftInBodyOfRight, control.compareNodes(mul, scope3));
+                EXPECT_EQ(NodeOrdering::RightFirst, control.compareNodes(policy, forInc, forInit));
+                EXPECT_EQ(NodeOrdering::Undefined, control.compareNodes(policy, loadA, loadB));
+                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
+                          control.compareNodes(policy, forOp, assign3));
+                EXPECT_EQ(NodeOrdering::LeftInBodyOfRight,
+                          control.compareNodes(policy, mul, scope3));
 
-        EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(loadC, storeD));
-        EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(loadD, storeD));
+                EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, loadC, storeD));
+                EXPECT_EQ(NodeOrdering::LeftFirst, control.compareNodes(policy, loadD, storeD));
 
-        EXPECT_EQ(NodeOrdering::RightInBodyOfLeft, control.compareNodes(scope1, storeD));
-        EXPECT_EQ(NodeOrdering::RightInBodyOfLeft, control.compareNodes(scope2, storeD));
+                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
+                          control.compareNodes(policy, scope1, storeD));
+                EXPECT_EQ(NodeOrdering::RightInBodyOfLeft,
+                          control.compareNodes(policy, scope2, storeD));
+            };
+            checkOrder(rocRoller::UpdateCache);
+            checkOrder(rocRoller::CacheOnly);
+            checkOrder(rocRoller::UseCacheIfAvailable);
+            checkOrder(rocRoller::IgnoreCache);
+        }
 
         std::string expectedTable = R".(
                \   1   2   3   6   9  11  12  15  17  19  21  23  25  27  30  32  34  36
@@ -583,5 +622,84 @@ namespace rocRollerTest
         EXPECT_EQ(false, hasExistingSetCoordinate(kg, load1, coord3, unrollDim));
         EXPECT_EQ(true, hasExistingSetCoordinate(kg, load1, coord2, unrollDim));
         EXPECT_EQ(false, hasExistingSetCoordinate(kg, load2, coord1, unrollDim));
+    }
+
+    TEST_F(ControlGraphTest, ModifyOrder)
+    {
+        // This control graph is from the Basic test with two changes:
+        //  - a new Assign node connected by an Initialize edge
+        //  - a new Assign node connected by a Sequence edge
+        ControlGraph control = ControlGraph();
+
+        int kernel_index = control.addElement(Kernel());
+
+        int assign1_index = control.addElement(Assign());
+        int init_index    = control.addElement(Initialize(), {kernel_index}, {assign1_index});
+
+        int assign2_index = control.addElement(Assign());
+        int seq_index     = control.addElement(Sequence(), {kernel_index}, {assign2_index});
+
+        int loadA_index = control.addElement(LoadLinear(DataType::Float));
+        int loadB_index = control.addElement(LoadLinear(DataType::Float));
+        int body1_index = control.addElement(Body(), {kernel_index}, {loadA_index});
+        int body2_index = control.addElement(Body(), {kernel_index}, {loadB_index});
+
+        int add_index       = control.addElement(Assign());
+        int sequence1_index = control.addElement(Sequence(), {loadA_index}, {add_index});
+        int sequence2_index = control.addElement(Sequence(), {loadB_index}, {add_index});
+
+        int mul_index       = control.addElement(Assign());
+        int sequence3_index = control.addElement(Sequence(), {add_index}, {mul_index});
+
+        int storeC_index = control.addElement(StoreLinear());
+
+        control.chain<Sequence>(loadB_index, mul_index, storeC_index);
+
+        auto checkAllPolicies = [&](int nodeA, int nodeB, NodeOrdering expectedOrder) {
+            EXPECT_EQ(expectedOrder, control.compareNodes(rocRoller::UpdateCache, nodeA, nodeB));
+            EXPECT_EQ(expectedOrder, control.compareNodes(rocRoller::CacheOnly, nodeA, nodeB));
+            EXPECT_EQ(expectedOrder,
+                      control.compareNodes(rocRoller::UseCacheIfAvailable, nodeA, nodeB));
+            EXPECT_EQ(expectedOrder, control.compareNodes(rocRoller::IgnoreCache, nodeA, nodeB));
+        };
+
+        // assign1 is via an Initialize edge, so all other nodes (except kernel)
+        // are LeftFirst
+        checkAllPolicies(assign1_index, loadA_index, NodeOrdering::LeftFirst);
+        checkAllPolicies(assign1_index, loadB_index, NodeOrdering::LeftFirst);
+        checkAllPolicies(assign1_index, storeC_index, NodeOrdering::LeftFirst);
+        checkAllPolicies(assign1_index, assign2_index, NodeOrdering::LeftFirst);
+
+        // assign2 is via a Sequence edge, so all other nodes (except kernel)
+        // are RightFirst
+        checkAllPolicies(assign2_index, loadA_index, NodeOrdering::RightFirst);
+        checkAllPolicies(assign2_index, loadB_index, NodeOrdering::RightFirst);
+        checkAllPolicies(assign2_index, storeC_index, NodeOrdering::RightFirst);
+        checkAllPolicies(assign2_index, assign1_index, NodeOrdering::RightFirst);
+
+        // kernel is the only ancestor of loadA and loadB, and both are connected via Body
+        checkAllPolicies(loadA_index, loadB_index, NodeOrdering::Undefined);
+
+        // loadA is a parent of storeC with a paths via a Sequence edge
+        checkAllPolicies(storeC_index, loadA_index, NodeOrdering::RightFirst);
+        // Delete the Sequence edge between loadA and add, then there is no path between loadA and storeC
+        control.deleteElement(sequence1_index);
+        checkAllPolicies(storeC_index, loadA_index, NodeOrdering::Undefined);
+
+        // Add the Sequence edge back, then the order should restore
+        std::ignore = control.addElement(Sequence(), {loadA_index}, {add_index});
+        checkAllPolicies(storeC_index, loadA_index, NodeOrdering::RightFirst);
+
+        // add is a parent of mul (directly connected via a Sequence edge)
+        checkAllPolicies(add_index, mul_index, NodeOrdering::LeftFirst);
+        // Delete the Sequence edge between add and mul, then the order is Undefined
+        control.deleteElement(sequence3_index);
+        checkAllPolicies(add_index, mul_index, NodeOrdering::Undefined);
+
+        // loadB is a parent of mul with two paths via two Sequence edges
+        checkAllPolicies(loadB_index, mul_index, NodeOrdering::LeftFirst);
+        // Delete one Sequence edge between loadB and mul, then the order should still be the same
+        control.deleteElement(sequence2_index);
+        checkAllPolicies(loadB_index, mul_index, NodeOrdering::LeftFirst);
     }
 }

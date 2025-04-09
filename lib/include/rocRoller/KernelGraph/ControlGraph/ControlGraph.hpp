@@ -36,6 +36,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/KernelGraph/Policy.hpp>
 #include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller
@@ -136,7 +137,10 @@ namespace rocRoller
              * Nodes whose relationship is not determined by the above rules could be
              * scheduled concurrently.
              */
-            NodeOrdering compareNodes(int nodeA, int nodeB) const;
+            NodeOrdering compareNodes(UpdateCachePolicy const, int nodeA, int nodeB) const;
+            NodeOrdering compareNodes(CacheOnlyPolicy const, int nodeA, int nodeB) const;
+            NodeOrdering compareNodes(UseCacheIfAvailablePolicy const, int nodeA, int nodeB) const;
+            NodeOrdering compareNodes(IgnoreCachePolicy const, int nodeA, int nodeB) const;
 
             /**
              * Yields (in no particular order) all nodes that are definitely after `node`.
@@ -245,8 +249,10 @@ namespace rocRoller
              */
             std::set<int> populateOrderCache(int startingNode) const;
 
-            NodeOrdering lookupOrderCache(int nodeA, int nodeB) const;
-            void         writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
+            NodeOrdering lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const;
+            NodeOrdering lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const;
+
+            void writeOrderCache(int nodeA, int nodeB, NodeOrdering order) const;
 
             template <CForwardRangeOf<int> ARange = std::initializer_list<int>,
                       CForwardRangeOf<int> BRange = std::initializer_list<int>>

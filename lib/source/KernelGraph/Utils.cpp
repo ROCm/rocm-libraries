@@ -946,56 +946,6 @@ namespace rocRoller
             return getVariableType(node);
         }
 
-        void orderMemoryNodes(KernelGraph&                         graph,
-                              std::set<std::pair<int, int>> const& pairs,
-                              bool                                 ordered)
-        {
-            LastRWTracer tracer(graph);
-
-            std::map<int, std::deque<int>> traces;
-            for(auto pair : pairs)
-            {
-                traces[pair.first]  = tracer.controlStack(pair.first);
-                traces[pair.second] = tracer.controlStack(pair.second);
-            }
-            for(auto pair : pairs)
-            {
-                if(pair.first != pair.second
-                   && graph.control.compareNodes(pair.first, pair.second)
-                          == NodeOrdering::Undefined)
-                {
-                    graph.control.orderMemoryNodes(
-                        traces.at(pair.first), traces.at(pair.second), ordered);
-                }
-            }
-        }
-
-        void orderMemoryNodes(KernelGraph&         graph,
-                              std::set<int> const& srcs,
-                              std::set<int> const& dests,
-                              bool                 ordered)
-        {
-            std::set<std::pair<int, int>> pairs;
-            for(auto src : srcs)
-            {
-                for(auto dest : dests)
-                {
-                    pairs.insert(std::make_pair(src, dest));
-                }
-            }
-            orderMemoryNodes(graph, pairs, ordered);
-        }
-
-        void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered)
-        {
-            std::set<std::pair<int, int>> pairs;
-            // Cartesian product; mimics the std::set version above
-            for(int i = 0; i < nodes.size(); ++i)
-                for(int j = 0; j < nodes.size(); ++j)
-                    pairs.insert(std::make_pair(nodes[i], nodes[j]));
-            orderMemoryNodes(graph, pairs, ordered);
-        }
-
         void replaceMacroTile(KernelGraph&                   graph,
                               std::unordered_set<int> const& ops,
                               int                            oldMacTileTag,
@@ -1136,5 +1086,58 @@ namespace rocRoller
             }
             return false;
         }
+
+        void orderMemoryNodes(KernelGraph&                         graph,
+                              std::set<std::pair<int, int>> const& pairs,
+                              bool                                 ordered)
+        {
+            LastRWTracer tracer(graph);
+
+            std::map<int, std::deque<int>> traces;
+            for(auto pair : pairs)
+            {
+                traces[pair.first]  = tracer.controlStack(pair.first);
+                traces[pair.second] = tracer.controlStack(pair.second);
+            }
+            for(auto pair : pairs)
+            {
+                if(pair.first != pair.second
+                   && graph.control.compareNodes(
+                          rocRoller::UseCacheIfAvailable, pair.first, pair.second)
+                          == NodeOrdering::Undefined)
+                {
+                    graph.control.orderMemoryNodes(
+                        traces.at(pair.first), traces.at(pair.second), ordered);
+                }
+            }
+        }
+
+        void orderMemoryNodes(KernelGraph&         graph,
+                              std::set<int> const& srcs,
+                              std::set<int> const& dests,
+                              bool                 ordered)
+        {
+            std::set<std::pair<int, int>> pairs;
+            for(auto src : srcs)
+            {
+                for(auto dest : dests)
+                {
+                    pairs.insert(std::make_pair(src, dest));
+                }
+            }
+            orderMemoryNodes(graph, pairs, ordered);
+        }
+
+        void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered)
+        {
+            std::set<std::pair<int, int>> pairs;
+            // Cartesian product; mimics the std::set version above
+            for(int i = 0; i < nodes.size(); ++i)
+                for(int j = 0; j < nodes.size(); ++j)
+                    pairs.insert(std::make_pair(nodes[i], nodes[j]));
+            orderMemoryNodes(graph, pairs, ordered);
+        }
+
     }
+
 }

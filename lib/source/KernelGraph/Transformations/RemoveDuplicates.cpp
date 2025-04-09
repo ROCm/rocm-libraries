@@ -258,7 +258,8 @@ namespace rocRoller
                     if(opSpecs.contains(spec))
                     {
                         auto originalOp = opSpecs[spec];
-                        auto ordering   = graph.control.compareNodes(op, originalOp);
+                        auto ordering
+                            = graph.control.compareNodes(rocRoller::UpdateCache, op, originalOp);
                         if(ordering == ControlGraph::NodeOrdering::LeftFirst)
                             opSpecs[spec] = op;
                     }

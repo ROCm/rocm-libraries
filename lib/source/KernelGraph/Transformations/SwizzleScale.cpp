@@ -476,7 +476,8 @@ namespace rocRoller
                             else
                             {
                                 AssertFatal(mergeOp != -1);
-                                AssertFatal(graph.control.compareNodes(mergeOp, fDim.second)
+                                AssertFatal(graph.control.compareNodes(
+                                                rocRoller::UpdateCache, mergeOp, fDim.second)
                                             == NodeOrdering::LeftFirst);
                                 loadUnrollMap.erase(fDim.second);
 
@@ -577,7 +578,8 @@ namespace rocRoller
                     for(auto merge : load.second)
                     {
                         auto mergeTopOp = getTopSetCoordinate(graph, merge);
-                        auto ordering   = graph.control.compareNodes(topOp, mergeTopOp);
+                        auto ordering
+                            = graph.control.compareNodes(rocRoller::UpdateCache, topOp, mergeTopOp);
                         AssertFatal(ordering == NodeOrdering::LeftFirst);
                         auto nop = graph.control.addElement(NOP());
                         replaceWith(graph, mergeTopOp, nop, false);

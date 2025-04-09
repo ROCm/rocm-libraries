@@ -880,7 +880,8 @@ namespace rocRoller
             ControlFlowRWTracer tracer(graph);
             for(auto m : tracer.coordinatesReadWrite(accumInfo.accumulatorTile))
             {
-                if(graph.control.compareNodes(loopInfo.accumulatorLoopOp, m.control)
+                if(graph.control.compareNodes(
+                       rocRoller::UseCacheIfAvailable, loopInfo.accumulatorLoopOp, m.control)
                    == NodeOrdering::LeftFirst)
                 {
                     accumInfo.usesAccumulatorTile.insert(m.control);

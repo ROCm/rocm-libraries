@@ -130,32 +130,16 @@ namespace rocRoller::KernelGraph::ControlGraph
             populateOrderCache();
     }
 
-    inline NodeOrdering ControlGraph::lookupOrderCache(int nodeA, int nodeB) const
+    inline NodeOrdering ControlGraph::lookupOrder(CacheOnlyPolicy const, int nodeA, int nodeB) const
     {
         if(nodeA > nodeB)
-            return opposite(lookupOrderCache(nodeB, nodeA));
+            return opposite(lookupOrder(CacheOnly, nodeB, nodeA));
 
         auto iter = m_orderCache.find({nodeA, nodeB});
         if(iter == m_orderCache.end())
             return NodeOrdering::Undefined;
 
         return iter->second;
-    }
-
-    inline NodeOrdering ControlGraph::compareNodes(int nodeA, int nodeB) const
-    {
-        AssertFatal(nodeA != nodeB, ShowValue(nodeA));
-        AssertFatal(getElementType(nodeA) == Graph::ElementType::Node
-                        && getElementType(nodeB) == Graph::ElementType::Node,
-                    ShowValue(getElementType(nodeA)),
-                    ShowValue(getElementType(nodeB)));
-
-        auto const order = lookupOrderCache(nodeA, nodeB);
-        if(order != NodeOrdering::Undefined || m_cacheStatus == CacheStatus::Valid)
-            return order;
-
-        populateOrderCache();
-        return lookupOrderCache(nodeA, nodeB);
     }
 
     inline Generator<int> ControlGraph::nodesAfter(int node) const
@@ -224,7 +208,7 @@ namespace rocRoller::KernelGraph::ControlGraph
             std::set otherNodes(std::next(iter), memNodes.end());
             for(auto node : otherNodes)
             {
-                if(compareNodes(*iter, node) == NodeOrdering::Undefined)
+                if(compareNodes(rocRoller::UpdateCache, *iter, node) == NodeOrdering::Undefined)
                 {
                     badNodes.insert(std::make_pair(*iter, node));
                 }

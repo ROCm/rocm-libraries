@@ -576,13 +576,13 @@ namespace rocRoller
                               int                            newMacTileTag);
 
         /**
-        * @brief
-        *
-        * @param kgraph
-        * @param opTag1 LoadTiled or StoreLDSTile operation
-        * @param opTag2 LoadTileDirect2LDS operation
-        *
-        */
+         * @brief
+         *
+         * @param kgraph
+         * @param opTag1 LoadTiled or StoreLDSTile operation
+         * @param opTag2 LoadTileDirect2LDS operation
+         *
+         */
         void moveConnections(rocRoller::KernelGraph::KernelGraph& kgraph, int opTag1, int opTag2);
 
         /**

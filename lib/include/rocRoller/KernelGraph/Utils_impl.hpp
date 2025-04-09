@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
@@ -287,5 +288,4 @@ namespace rocRoller::KernelGraph
 
         return newStartNodes;
     }
-
 }

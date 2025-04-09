@@ -72,7 +72,7 @@ namespace rocRoller::KernelGraph::ControlGraph
                 }
                 else
                 {
-                    msg << " " << std::setw(width) << abbrev(lookupOrderCache(i, j));
+                    msg << " " << std::setw(width) << abbrev(lookupOrder(CacheOnly, i, j));
                 }
             }
 
@@ -247,4 +247,157 @@ namespace rocRoller::KernelGraph::ControlGraph
         }
     }
 
+    NodeOrdering ControlGraph::lookupOrder(IgnoreCachePolicy const, int nodeA, int nodeB) const
+    {
+        TIMER(t, "ControlGraph::lookupOrder");
+
+        using GD = Graph::Direction;
+        std::unordered_set<int> visited_nodes;
+
+        // Corresponding variant index of edge type:
+        //   Sequence(0), Initialize(1), ForLoopIncrement(2), Body(3), Else(4)
+        //
+        // And order of edge type
+        //   Initialize -> Body -> Else -> ForLoopIncrement -> Sequence.
+
+        // Decide order of A and B when A is parent of B
+        auto const getOrderIfParent = [&](int edge) {
+            auto const index = getEdge(edge).index();
+            AssertFatal(index <= 4, "Invalid edge");
+            return index == 0 ? NodeOrdering::LeftFirst : NodeOrdering::RightInBodyOfLeft;
+        };
+
+        // Decide order of A and B when A and B are descendants of a node
+        auto const getOrderOfDescendants = [&](int edgeATypeIndex, int edgeBTypeIndex) {
+            AssertFatal(edgeATypeIndex != edgeBTypeIndex, "edgeA and edgeB should not be the same");
+            AssertFatal(edgeATypeIndex <= 4 && edgeBTypeIndex <= 4, "Invalid edge");
+
+            switch(edgeATypeIndex)
+            {
+            case 0: // edgeA is Sequence
+                return opposite(NodeOrdering::LeftFirst);
+            case 1: // edgeA is Initialize
+                return NodeOrdering::LeftFirst;
+            case 2: // edgeA is ForLoopIncrement
+                return edgeBTypeIndex == 0 ? NodeOrdering::LeftFirst
+                                           : opposite(NodeOrdering::LeftFirst);
+            case 3: // edgeA is Body
+                return edgeBTypeIndex == 1 ? opposite(NodeOrdering::LeftFirst)
+                                           : NodeOrdering::LeftFirst;
+            case 4: // edgeA is Else
+                return edgeBTypeIndex == 1 || edgeBTypeIndex == 3
+                           ? opposite(NodeOrdering::LeftFirst)
+                           : NodeOrdering::LeftFirst;
+            default:
+                return NodeOrdering::Undefined;
+            }
+        };
+
+        // {key, value} = {node index, edge type (index of variant)}
+        std::unordered_map<int, int> A_ancestors;
+        std::vector<int>             stk{nodeA};
+
+        // Traverse upstream from A to collect all ancestors of A
+        while(!stk.empty())
+        {
+            auto node = stk.back();
+            stk.pop_back();
+
+            for(auto edge : getNeighbours<GD::Upstream>(node))
+            {
+                for(auto parent : getNeighbours<GD::Upstream>(edge))
+                {
+                    if(parent == nodeB)
+                        return opposite(getOrderIfParent(edge));
+
+                    A_ancestors.insert({parent, getEdge(edge).index()});
+
+                    if(!visited_nodes.contains(parent))
+                    {
+                        visited_nodes.insert(parent);
+                        stk.push_back(parent);
+                    }
+                }
+            }
+        }
+
+        AssertFatal(stk.empty());
+        stk.push_back(nodeB);
+        visited_nodes.clear();
+
+        // Traverse upstream from B to find common ancestors to decide order
+        while(!stk.empty())
+        {
+            auto node = stk.back();
+            stk.pop_back();
+
+            for(auto edge : getNeighbours<GD::Upstream>(node))
+            {
+                for(auto parent : getNeighbours<GD::Upstream>(edge))
+                {
+                    if(parent == nodeA)
+                        return getOrderIfParent(edge);
+
+                    if(A_ancestors.contains(parent))
+                    {
+                        // If this is a common ancestor, compare the types of both edges to
+                        // know the order
+                        auto const edgeBTypeIndex = getEdge(edge).index();
+                        if(A_ancestors.at(parent) != edgeBTypeIndex)
+                        {
+                            return getOrderOfDescendants(A_ancestors.at(parent), edgeBTypeIndex);
+                        }
+                    }
+
+                    if(!visited_nodes.contains(parent))
+                    {
+                        visited_nodes.insert(parent);
+                        stk.push_back(parent);
+                    }
+                }
+            }
+        }
+
+        return NodeOrdering::Undefined;
+    }
+
+    static void validateNodes(ControlGraph const& control, int nodeA, int nodeB)
+    {
+        AssertFatal(nodeA != nodeB, ShowValue(nodeA));
+        AssertFatal(control.getElementType(nodeA) == Graph::ElementType::Node
+                        && control.getElementType(nodeB) == Graph::ElementType::Node,
+                    ShowValue(control.getElementType(nodeA)),
+                    ShowValue(control.getElementType(nodeB)));
+    }
+
+    NodeOrdering ControlGraph::compareNodes(CacheOnlyPolicy const, int nodeA, int nodeB) const
+    {
+        AssertFatal(m_cacheStatus == CacheStatus::Valid);
+
+        validateNodes(*this, nodeA, nodeB);
+        return lookupOrder(CacheOnly, nodeA, nodeB);
+    }
+
+    NodeOrdering ControlGraph::compareNodes(UpdateCachePolicy const, int nodeA, int nodeB) const
+    {
+        if(m_cacheStatus != CacheStatus::Valid)
+            populateOrderCache();
+
+        return compareNodes(CacheOnly, nodeA, nodeB);
+    }
+
+    NodeOrdering
+        ControlGraph::compareNodes(UseCacheIfAvailablePolicy const, int nodeA, int nodeB) const
+    {
+        validateNodes(*this, nodeA, nodeB);
+
+        return m_cacheStatus == CacheStatus::Valid ? compareNodes(CacheOnly, nodeA, nodeB)
+                                                   : compareNodes(IgnoreCache, nodeA, nodeB);
+    }
+
+    NodeOrdering ControlGraph::compareNodes(IgnoreCachePolicy const, int nodeA, int nodeB) const
+    {
+        validateNodes(*this, nodeA, nodeB);
+        return lookupOrder(IgnoreCache, nodeA, nodeB);
+    }
 }
