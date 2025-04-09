@@ -38,9 +38,7 @@ To build examples, tests, or benchmarks, use the appropriate CMake directive:
 * ``BUILD_TEST``: Set to ``ON`` to build the CTests. ``OFF`` by default.
 * ``BUILD_EXAMPLE``: Set to ``ON`` to build examples. ``OFF`` by default.
 * ``BUILD_BENCHMARK``: Set to ``ON`` to build benchmarking tests. ``OFF`` by default.
-* ``BENCHMARK_CONFIG_TUNING``: Set to ``ON`` to find the best kernel configuration parameters. Setting this to ``ON`` significantly increases the compilation time. ``OFF`` by default. 
 * ``AMDGPU_TARGETS``: Set this to a specific architecture target or set of architecture targets. When not set, examples, tests, and benchmarks are built for gfx803, gfx900, gfx906, and gfx908 architectures. The list of targets must be separated by a semicolon (``;``).
-* ``AMDGPU_TEST_TARGETS``: Set this to a list of AMD architectures for which to specifically build tests. This will create separate tests for each architecture. By default tests won't be built for any specific architecture. To test for a specific architecture when no architecture has been specified, run ``ctest -R`` with a list of architectures separated by a pipe (``|``). For example, ``ctest -R gfx803|gfx900``.
 * ``ONLY_INSTALL``: Set to ``ON`` to ignore any example, test, or benchmark build instructions. ``OFF`` by default.
 
 Run ``make`` after ``cmake`` to build the examples, tests, and benchmarks, then run ``make install``. For example, to build tests run:
