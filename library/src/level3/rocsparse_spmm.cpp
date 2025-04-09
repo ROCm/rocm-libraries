@@ -21,9 +21,13 @@
  *
  * ************************************************************************ */
 
+#include <map>
+#include <sstream>
+
 #include "control.h"
 #include "handle.h"
 #include "rocsparse.h"
+#include "to_string.hpp"
 #include "utility.h"
 
 #include "rocsparse_bellmm.hpp"
@@ -652,183 +656,221 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-    template <typename... Ts>
-    static inline rocsparse_status spmm_dynamic_dispatch(rocsparse_indextype itype,
-                                                         rocsparse_indextype jtype,
-                                                         rocsparse_datatype  atype,
-                                                         rocsparse_datatype  btype,
-                                                         rocsparse_datatype  ctype,
-                                                         rocsparse_datatype  compute_type,
-                                                         Ts&&... ts)
+    typedef rocsparse_status (*spmm_template_t)(rocsparse_handle            handle,
+                                                rocsparse_operation         trans_A,
+                                                rocsparse_operation         trans_B,
+                                                const void*                 alpha,
+                                                rocsparse_const_spmat_descr mat_A,
+                                                rocsparse_const_dnmat_descr mat_B,
+                                                const void*                 beta,
+                                                const rocsparse_dnmat_descr mat_C,
+                                                rocsparse_spmm_alg          alg,
+                                                rocsparse_spmm_stage        stage,
+                                                size_t*                     buffer_size,
+                                                void*                       temp_buffer);
+
+    using spmm_template_tuple = std::tuple<rocsparse_datatype,
+                                           rocsparse_indextype,
+                                           rocsparse_indextype,
+                                           rocsparse_datatype,
+                                           rocsparse_datatype,
+                                           rocsparse_datatype>;
+    // clang-format off
+#define SPMM_TEMPLATE_CONFIG(T_, I_, J_, A_, B_, C_)                        \
+    {                                                                       \
+        spmm_template_tuple(T_, I_, J_, A_, B_, C_),                        \
+            spmm_template<typename rocsparse::datatype_traits<T_>::type_t,  \
+                          typename rocsparse::indextype_traits<I_>::type_t, \
+                          typename rocsparse::indextype_traits<J_>::type_t, \
+                          typename rocsparse::datatype_traits<A_>::type_t,  \
+                          typename rocsparse::datatype_traits<B_>::type_t,  \
+                          typename rocsparse::datatype_traits<C_>::type_t>  \
+    }
+    // clang-format on
+
+    static const std::map<spmm_template_tuple, spmm_template_t> s_spmm_template_dispatch{{
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_i8_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f16_r,
+                             rocsparse_datatype_f32_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r,
+                             rocsparse_datatype_f64_r),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c,
+                             rocsparse_datatype_f64_c),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
+                             rocsparse_indextype_i32,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i32,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c),
+
+        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
+                             rocsparse_indextype_i64,
+                             rocsparse_indextype_i64,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c,
+                             rocsparse_datatype_f32_c)}};
+
+    static rocsparse_status spmm_template_find(spmm_template_t*    spmm_function_,
+                                               rocsparse_datatype  compute_type_,
+                                               rocsparse_indextype i_type_,
+                                               rocsparse_indextype j_type_,
+                                               rocsparse_datatype  a_type_,
+                                               rocsparse_datatype  b_type_,
+                                               rocsparse_datatype  c_type_)
     {
-        ROCSPARSE_ROUTINE_TRACE;
+        const auto& it = rocsparse::s_spmm_template_dispatch.find(rocsparse::spmm_template_tuple(
+            compute_type_, i_type_, j_type_, a_type_, b_type_, c_type_));
 
-        rocsparse_host_assert(
-            compute_type == ctype,
-            "This function is designed for ctype and compute_type being the same.");
-
-#define DISPATCH_COMPUTE_TYPE_I32R(ITYPE, JTYPE, COMPUTETYPE, atype, btype, ctype)                 \
-    if(atype == rocsparse_datatype_i8_r && btype == rocsparse_datatype_i8_r                        \
-       && ctype == rocsparse_datatype_i32_r)                                                       \
-    {                                                                                              \
-        RETURN_IF_ROCSPARSE_ERROR((                                                                \
-            rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, int8_t, int8_t, int32_t>(ts...))); \
-        return rocsparse_status_success;                                                           \
-    }                                                                                              \
-    else                                                                                           \
-    {                                                                                              \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                               \
-    }
-
-#define DISPATCH_COMPUTE_TYPE_F32R(ITYPE, JTYPE, COMPUTETYPE, atype, btype, ctype)                \
-    if(atype == rocsparse_datatype_f32_r && atype == btype && atype == ctype)                     \
-    {                                                                                             \
-        RETURN_IF_ROCSPARSE_ERROR(                                                                \
-            (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, float, float, float>(ts...)));   \
-        return rocsparse_status_success;                                                          \
-    }                                                                                             \
-    else if(atype == rocsparse_datatype_i8_r && btype == rocsparse_datatype_i8_r                  \
-            && ctype == rocsparse_datatype_f32_r)                                                 \
-    {                                                                                             \
-        RETURN_IF_ROCSPARSE_ERROR(                                                                \
-            (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, int8_t, int8_t, float>(ts...))); \
-        return rocsparse_status_success;                                                          \
-    }                                                                                             \
-    else if(atype == rocsparse_datatype_f16_r && btype == rocsparse_datatype_f16_r                \
-            && ctype == rocsparse_datatype_f32_r)                                                 \
-    {                                                                                             \
-        RETURN_IF_ROCSPARSE_ERROR(                                                                \
-            (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, _Float16, _Float16, float>(      \
-                ts...)));                                                                         \
-        return rocsparse_status_success;                                                          \
-    }                                                                                             \
-    else                                                                                          \
-    {                                                                                             \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                              \
-    }
-
-#define DISPATCH_COMPUTE_TYPE_F64R(ITYPE, JTYPE, COMPUTETYPE, atype, btype, ctype)                 \
-    if(atype == rocsparse_datatype_f64_r && atype == btype && atype == ctype)                      \
-    {                                                                                              \
-        RETURN_IF_ROCSPARSE_ERROR(                                                                 \
-            (rocsparse::spmm_template<COMPUTETYPE, ITYPE, JTYPE, double, double, double>(ts...))); \
-        return rocsparse_status_success;                                                           \
-    }                                                                                              \
-    else                                                                                           \
-    {                                                                                              \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                               \
-    }
-
-#define DISPATCH_COMPUTE_TYPE_F32C(ITYPE, JTYPE, COMPUTETYPE, atype, btype, ctype)             \
-    if(atype == rocsparse_datatype_f32_c && atype == btype && atype == ctype)                  \
-    {                                                                                          \
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_template<COMPUTETYPE,                       \
-                                                            ITYPE,                             \
-                                                            JTYPE,                             \
-                                                            rocsparse_float_complex,           \
-                                                            rocsparse_float_complex,           \
-                                                            rocsparse_float_complex>(ts...))); \
-        return rocsparse_status_success;                                                       \
-    }                                                                                          \
-    else                                                                                       \
-    {                                                                                          \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                           \
-    }
-
-#define DISPATCH_COMPUTE_TYPE_F64C(ITYPE, JTYPE, COMPUTETYPE, atype, btype, ctype)              \
-    if(atype == rocsparse_datatype_f64_c && atype == btype && atype == ctype)                   \
-    {                                                                                           \
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_template<COMPUTETYPE,                        \
-                                                            ITYPE,                              \
-                                                            JTYPE,                              \
-                                                            rocsparse_double_complex,           \
-                                                            rocsparse_double_complex,           \
-                                                            rocsparse_double_complex>(ts...))); \
-        return rocsparse_status_success;                                                        \
-    }                                                                                           \
-    else                                                                                        \
-    {                                                                                           \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                            \
-    }
-
-#define DISPATCH_COMPUTE_TYPE(ITYPE, JTYPE, atype, btype, ctype, compute_type)                  \
-    switch(compute_type)                                                                        \
-    {                                                                                           \
-    case rocsparse_datatype_i32_r:                                                              \
-    {                                                                                           \
-        DISPATCH_COMPUTE_TYPE_I32R(ITYPE, JTYPE, int32_t, atype, btype, ctype)                  \
-    }                                                                                           \
-    case rocsparse_datatype_f32_r:                                                              \
-    {                                                                                           \
-        DISPATCH_COMPUTE_TYPE_F32R(ITYPE, JTYPE, float, atype, btype, ctype)                    \
-    }                                                                                           \
-    case rocsparse_datatype_f64_r:                                                              \
-    {                                                                                           \
-        DISPATCH_COMPUTE_TYPE_F64R(ITYPE, JTYPE, double, atype, btype, ctype)                   \
-    }                                                                                           \
-    case rocsparse_datatype_f32_c:                                                              \
-    {                                                                                           \
-        DISPATCH_COMPUTE_TYPE_F32C(ITYPE, JTYPE, rocsparse_float_complex, atype, btype, ctype)  \
-    }                                                                                           \
-    case rocsparse_datatype_f64_c:                                                              \
-    {                                                                                           \
-        DISPATCH_COMPUTE_TYPE_F64C(ITYPE, JTYPE, rocsparse_double_complex, atype, btype, ctype) \
-    }                                                                                           \
-    case rocsparse_datatype_i8_r:                                                               \
-    case rocsparse_datatype_u8_r:                                                               \
-    case rocsparse_datatype_u32_r:                                                              \
-    case rocsparse_datatype_f16_r:                                                              \
-    {                                                                                           \
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);                            \
-    }                                                                                           \
-    }
-
-        switch(itype)
+        if(it != rocsparse::s_spmm_template_dispatch.end())
         {
-        case rocsparse_indextype_u16:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            spmm_function_[0] = it->second;
         }
-        case rocsparse_indextype_i32:
-        {
-            switch(jtype)
-            {
-            case rocsparse_indextype_u16:
-            case rocsparse_indextype_i64:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            case rocsparse_indextype_i32:
-            {
-                DISPATCH_COMPUTE_TYPE(int32_t, int32_t, atype, btype, ctype, compute_type);
-            }
-            }
-        }
-        case rocsparse_indextype_i64:
-        {
-            switch(jtype)
-            {
-            case rocsparse_indextype_u16:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-            }
-            case rocsparse_indextype_i32:
-            {
-                DISPATCH_COMPUTE_TYPE(int64_t, int32_t, atype, btype, ctype, compute_type);
-            }
-            case rocsparse_indextype_i64:
-            {
-                DISPATCH_COMPUTE_TYPE(int64_t, int64_t, atype, btype, ctype, compute_type);
-            }
-            }
-        }
-        }
-
         // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
-    }
+        else
+        {
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "compute_type: " << rocsparse::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::to_string(i_type_)
+                 << ", j_type: " << rocsparse::to_string(j_type_)
+                 << ", a_type: " << rocsparse::to_string(a_type_)
+                 << ", b_type: " << rocsparse::to_string(b_type_)
+                 << ", c_type: " << rocsparse::to_string(c_type_);
 
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
+        // LCOV_EXCL_STOP
+
+        return rocsparse_status_success;
+    }
 }
 
 /*
@@ -906,25 +948,29 @@ try
         break;
     }
     }
+
+    rocsparse::spmm_template_t spmm_function;
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spmm_dynamic_dispatch(rocsparse::determine_I_index_type(mat_A),
-                                         rocsparse::determine_J_index_type(mat_A),
-                                         mat_A->data_type,
-                                         mat_B->data_type,
-                                         mat_C->data_type,
-                                         compute_type,
-                                         handle,
-                                         trans_A,
-                                         trans_B,
-                                         alpha,
-                                         mat_A,
-                                         mat_B,
-                                         beta,
-                                         mat_C,
-                                         alg,
-                                         stage,
-                                         buffer_size,
-                                         temp_buffer));
+        rocsparse::spmm_template_find(&spmm_function,
+                                      compute_type,
+                                      rocsparse::determine_I_index_type(mat_A),
+                                      rocsparse::determine_J_index_type(mat_A),
+                                      mat_A->data_type,
+                                      mat_B->data_type,
+                                      mat_C->data_type));
+
+    RETURN_IF_ROCSPARSE_ERROR(spmm_function(handle,
+                                            trans_A,
+                                            trans_B,
+                                            alpha,
+                                            mat_A,
+                                            mat_B,
+                                            beta,
+                                            mat_C,
+                                            alg,
+                                            stage,
+                                            buffer_size,
+                                            temp_buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

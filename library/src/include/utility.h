@@ -976,6 +976,11 @@ namespace rocsparse
     struct datatype_traits;
 
     template <>
+    struct datatype_traits<rocsparse_datatype_f16_r>
+    {
+        using type_t = _Float16;
+    };
+    template <>
     struct datatype_traits<rocsparse_datatype_f32_r>
     {
         using type_t = float;
