@@ -521,7 +521,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
   add_custom_command(
     OUTPUT rocfft_kernel_cache.db
-    COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
+    COMMAND "${CMAKE_CURRENT_BINARY_DIR}/rocfft_aot_helper" \"${ROCFFT_BUILD_KERNEL_CACHE_PATH}\" ${ROCFFT_KERNEL_CACHE_PATH} $<TARGET_FILE:rocfft_rtc_helper> ${GPU_TARGETS_AOT}
     DEPENDS rocfft_aot_helper rocfft_rtc_helper
     COMMENT "Compile kernels into shipped cache file"
   )
@@ -587,7 +587,8 @@ else()
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING )
-  rocm_install(PROGRAMS $<TARGET_FILE:rocfft_rtc_helper>
+  set_target_properties(rocfft_rtc_helper PROPERTIES INSTALL_RPATH "$ORIGIN/../../")
+  install(TARGETS rocfft_rtc_helper
     DESTINATION "${ROCFFT_RTC_HELPER_INSTALL_DIR}"
     COMPONENT runtime
   )

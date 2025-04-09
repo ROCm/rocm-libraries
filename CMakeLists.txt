@@ -90,6 +90,10 @@ include( ROCMCheckTargetIds )
 include( ROCMClients )
 include( ROCMHeaderWrapper )
 
+if( ROCM_PATH )
+  list( APPEND CMAKE_BUILD_RPATH ${ROCM_PATH}/lib )
+endif()
+
 # Using standardized versioning from rocm-cmake
 set ( VERSION_STRING "1.0.34" )
 rocm_setup_version( VERSION ${VERSION_STRING} )

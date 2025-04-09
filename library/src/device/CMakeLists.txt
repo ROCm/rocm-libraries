@@ -72,11 +72,9 @@ foreach(i RANGE ${LOOP_END})
   list(APPEND FUNCTION_POOLS "function_pool_init_${i}.cpp")
 endforeach()
 
-# stockham_gen will be having relative RUNPATH with respect to package install directory
-# Set LD_LIBRARY_PATH for running the executable from build directory
 add_custom_command(OUTPUT function_pool.cpp
   OUTPUT ${FUNCTION_POOLS}
-  COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=$ENV{LD_LIBRARY_PATH}:${ROCM_PATH}/${CMAKE_INSTALL_LIBDIR}" ${Python3_EXECUTABLE} ${kgen}
+  COMMAND ${Python3_EXECUTABLE} ${kgen}
   --runtime-compile-default=${ROCFFT_RUNTIME_COMPILE_DEFAULT}
   --num-files=${ROCFFT_FUNCTION_POOL_N}
   generate $<TARGET_FILE:stockham_gen>
