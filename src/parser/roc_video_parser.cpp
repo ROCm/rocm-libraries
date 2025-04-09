@@ -75,14 +75,6 @@ rocDecStatus RocVideoParser::Initialize(RocdecParserParams *pParams) {
     return ROCDEC_SUCCESS;
 }
 
-rocDecStatus RocVideoParser::MarkFrameForReuse(int pic_idx) {
-    if (pic_idx < 0) {
-        return ROCDEC_INVALID_PARAMETER;
-    }
-    //todo::
-    return ROCDEC_NOT_IMPLEMENTED;
-}
-
 void RocVideoParser::InitDecBufPool() {
     for (int i = 0; i < dec_buf_pool_size_; i++) {
         decode_buffer_pool_[i].use_status = kNotUsed;

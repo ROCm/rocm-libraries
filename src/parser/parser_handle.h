@@ -38,7 +38,6 @@ public:
     const char* ErrorMsg() { return error_.c_str(); }
     void CaptureError(const std::string& err_msg) { error_ = err_msg; }
     rocDecStatus ParseVideoData(RocdecSourceDataPacket *packet) { return roc_parser_->ParseVideoData(packet); }
-    rocDecStatus MarkFrameForReuse(int pic_idx) { return roc_parser_->MarkFrameForReuse(pic_idx); }
     rocDecStatus DestroyParser() { return DestroyParserInternal(); };
 
 private:

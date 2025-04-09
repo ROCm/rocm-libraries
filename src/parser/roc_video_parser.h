@@ -123,7 +123,6 @@ public:
      * 
      * @return rocDecStatus 
      */
-    virtual rocDecStatus MarkFrameForReuse(int pic_idx);
 
 protected:
     RocdecParserParams parser_params_ = {};
