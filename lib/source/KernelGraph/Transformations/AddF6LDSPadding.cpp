@@ -32,17 +32,17 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        inline bool isMatrixA(MacroTile const& macTile)
+        inline bool isMatrixA(CoordinateGraph::MacroTile const& macTile)
         {
             return macTile.layoutType == LayoutType::MATRIX_A;
         }
 
-        inline bool isMatrixB(MacroTile const& macTile)
+        inline bool isMatrixB(CoordinateGraph::MacroTile const& macTile)
         {
             return macTile.layoutType == LayoutType::MATRIX_B;
         }
 
-        MacroTile paddedMacroTile(MacroTile& macroTile)
+        CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile)
         {
             uint const elementBits     = 6;
             uint const packing         = 16;
@@ -54,17 +54,18 @@ namespace rocRoller
             std::vector<uint> padBytesA = {padElements * padElementBytes, 0};
             std::vector<uint> padBytesB = {0, padElements * padElementBytes};
 
-            return MacroTile(macroTile, isMatrixA(macroTile) ? padBytesA : padBytesB);
+            return CoordinateGraph::MacroTile(macroTile,
+                                              isMatrixA(macroTile) ? padBytesA : padBytesB);
         }
 
         auto findCandidates(KernelGraph const& graph)
         {
             auto isLoadLDSTileOfTransposedTile = [&](int tag) {
-                auto load = graph.control.get<LoadLDSTile>(tag);
+                auto load = graph.control.get<ControlGraph::LoadLDSTile>(tag);
                 if(!load)
                     return false;
 
-                auto [macTileTag, macTile] = graph.getDimension<MacroTile>(tag);
+                auto [macTileTag, macTile] = graph.getDimension<CoordinateGraph::MacroTile>(tag);
                 auto elementBits           = DataTypeInfo::Get(load->varType).elementBits;
 
                 return elementBits == 6 && load->isTransposedTile
@@ -101,7 +102,7 @@ namespace rocRoller
                         continue;
                     visitedCoordinates.insert(coordTag);
 
-                    auto maybeUser = graph.coordinates.get<User>(coordTag);
+                    auto maybeUser = graph.coordinates.get<CoordinateGraph::User>(coordTag);
                     if(maybeUser)
                     {
                         auto newUser = *maybeUser;
@@ -111,7 +112,7 @@ namespace rocRoller
                         kgraph.coordinates.setElement(coordTag, newUser);
                     }
 
-                    auto maybeLDS = graph.coordinates.get<LDS>(coordTag);
+                    auto maybeLDS = graph.coordinates.get<CoordinateGraph::LDS>(coordTag);
                     if(maybeLDS)
                     {
                         auto ldsTag = coordTag;
@@ -126,12 +127,14 @@ namespace rocRoller
                             auto coordTag   = conn.coordinate;
                             auto controlTag = conn.control;
 
-                            auto storeLDSTile = graph.control.get<StoreLDSTile>(controlTag);
+                            auto storeLDSTile
+                                = graph.control.get<ControlGraph::StoreLDSTile>(controlTag);
                             if(storeLDSTile)
                             {
                                 auto storeLDSTileTag{controlTag};
                                 auto [macroTileTag, macroTile]
-                                    = graph.getDimension<MacroTile>(storeLDSTileTag);
+                                    = graph.getDimension<CoordinateGraph::MacroTile>(
+                                        storeLDSTileTag);
 
                                 Log::debug("Padding Tile {}", macroTileTag);
                                 kgraph.coordinates.setElement(macroTileTag,
@@ -140,7 +143,8 @@ namespace rocRoller
                                 for(auto conn : graph.mapper.getConnections(storeLDSTileTag))
                                 {
                                     auto maybeMacroTile
-                                        = graph.coordinates.get<MacroTile>(conn.coordinate);
+                                        = graph.coordinates.get<CoordinateGraph::MacroTile>(
+                                            conn.coordinate);
                                     if(maybeMacroTile)
                                     {
                                         Log::debug("Padding Tile {}", conn.coordinate);

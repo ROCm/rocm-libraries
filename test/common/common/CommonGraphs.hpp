@@ -40,6 +40,8 @@
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 
+#include <common/GEMMProblem.hpp>
+
 namespace rocRollerTest
 {
     namespace Graphs
@@ -52,6 +54,7 @@ namespace rocRollerTest
         using ContextPtr                 = rocRoller::ContextPtr;
         using KernelArguments            = rocRoller::KernelArguments;
         using KernelGraph                = rocRoller::KernelGraph::KernelGraph;
+        using DataType                   = rocRoller::DataType;
 
         /**
          * @brief Graph for linear: alpha x + beta y.
@@ -178,11 +181,13 @@ namespace rocRollerTest
          * - Assign(D = alpha * AB + beta * C)
          * - StoreTiled(D)
          */
-        template <typename T>
         class GEMM
         {
         public:
-            GEMM();
+            GEMM(DataType ta);
+            GEMM(DataType ta, DataType tb);
+            GEMM(DataType ta, DataType tb, DataType tc);
+            GEMM(DataType ta, DataType tb, DataType tc, DataType td);
 
             CommandPtr  getCommand();
             KernelGraph getKernelGraph();
@@ -190,17 +195,33 @@ namespace rocRollerTest
             void setTileSize(int m, int n, int k);
             void setMFMA(int m, int n, int k, int b);
             void setUseLDS(bool a, bool b, bool d);
+            void setUnroll(unsigned int unrollX, unsigned int unrollY);
+            void setPrefetch(bool prefetch,
+                             int  prefetchInFlight,
+                             int  prefetchLDSFactor,
+                             bool prefetchMixMemOps);
+
+            GEMMProblem const& getProblem() const
+            {
+                return m_problem;
+            };
+            void setProblem(GEMMProblem const& problem);
 
             CommandParametersPtr getCommandParameters() const;
 
         private:
             void createCommand();
 
-            int  m_macM, m_macN, m_macK;
-            int  m_waveM, m_waveN, m_waveK, m_waveB;
-            bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
+            DataType m_ta, m_tb, m_tc, m_td;
+
+            GEMMProblem m_problem;
+
+            // int  m_macM, m_macN, m_macK;
+            // int  m_waveM, m_waveN, m_waveK, m_waveB;
+            // bool m_useLDSA = false, m_useLDSB = false, m_useLDSD = false;
 
             rocRoller::Operations::OperationTag m_tagA, m_tagB, m_tagC, m_tagD;
+            rocRoller::Operations::OperationTag m_tagNumWGs;
 
             CommandPtr m_command;
         };

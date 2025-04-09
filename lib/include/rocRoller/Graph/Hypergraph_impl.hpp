@@ -1086,8 +1086,17 @@ namespace rocRoller
             Generator<int> Hypergraph<Node, Edge, Hyper>::getConnectedNodeIndices(int const dst)
         const
         {
-            auto edgePredicate = [](Edge const& edge) { return std::holds_alternative<T>(edge); };
-            co_yield getConnectedNodeIndices<Dir>(dst, edgePredicate);
+            if constexpr(std::same_as<Edge, T>)
+            {
+                auto truePredicate = [](auto const&) { return true; };
+                co_yield getConnectedNodeIndices<Dir>(dst, truePredicate);
+            }
+            else
+            {
+                auto edgePredicate
+                    = [](Edge const& edge) { return std::holds_alternative<T>(edge); };
+                co_yield getConnectedNodeIndices<Dir>(dst, edgePredicate);
+            }
         }
 
         template <typename Node, typename Edge, bool Hyper>

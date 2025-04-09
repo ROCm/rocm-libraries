@@ -40,7 +40,8 @@
 
 #include <common/CommonGraphs.hpp>
 
-TEST_CASE("identifyParallelDimensionSets works for MatrixMultiply", "[kernel-graph]")
+TEST_CASE("identifyParallelDimensionSets works for MatrixMultiply",
+          "[kernel-graph][graph-transforms]")
 {
     using namespace rocRoller;
     auto example = rocRollerTest::Graphs::MatrixMultiply(DataType::Int32);
@@ -76,7 +77,7 @@ TEST_CASE("identifyParallelDimensionSets works for GEMM", "[kernel-graph]")
     using namespace rocRoller;
     auto ctx = TestContext::ForDefaultTarget();
 
-    auto example = rocRollerTest::Graphs::GEMM<float>();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
     auto kgraph = KernelGraph::translate(example.getCommand());
 
@@ -177,7 +178,7 @@ SCENARIO("IdentifyParallelDimensions transformation works for GEMM", "[kernel-gr
     using namespace rocRoller;
     auto ctx = TestContext::ForDefaultTarget();
 
-    auto example = rocRollerTest::Graphs::GEMM<float>();
+    auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
     GIVEN("The initial kernel graph for a GEMM")
     {

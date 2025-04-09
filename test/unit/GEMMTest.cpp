@@ -417,6 +417,8 @@ namespace GEMMDriverTest
             params->fuseLoops                     = gemm.fuseLoops;
             params->tailLoops                     = gemm.tailLoops;
             params->allowAmbiguousMemoryNodes     = gemm.allowAmbiguousMemoryNodes;
+            params->unrollX                       = gemm.unrollX;
+            params->unrollY                       = gemm.unrollY;
             params->unrollK                       = gemm.unrollK;
             params->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
             params->prefetch                      = gemm.prefetch;

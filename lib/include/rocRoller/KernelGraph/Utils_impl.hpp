@@ -36,7 +36,7 @@ namespace rocRoller::KernelGraph
     template <Expression::CBinary T>
     std::tuple<int, Expression::ExpressionPtr> getBinaryLHS(KernelGraph const& kgraph, int assign)
     {
-        auto op = kgraph.control.get<Assign>(assign);
+        auto op = kgraph.control.get<ControlGraph::Assign>(assign);
 
         auto expr = std::get<T>(*op->expression);
         if(!std::holds_alternative<Expression::DataFlowTag>(*expr.lhs))
@@ -51,7 +51,7 @@ namespace rocRoller::KernelGraph
     template <Expression::CBinary T>
     std::tuple<int, Expression::ExpressionPtr> getBinaryRHS(KernelGraph const& kgraph, int assign)
     {
-        auto op = kgraph.control.get<Assign>(assign);
+        auto op = kgraph.control.get<ControlGraph::Assign>(assign);
 
         auto expr = std::get<T>(*op->expression);
         if(!std::holds_alternative<Expression::DataFlowTag>(*expr.rhs))
@@ -88,7 +88,7 @@ namespace rocRoller::KernelGraph
         if(!forLoopOp)
             return {};
 
-        auto forLoopCoord = kgraph.mapper.get<ForLoop>(*forLoopOp);
+        auto forLoopCoord = kgraph.mapper.get<CoordinateGraph::ForLoop>(*forLoopOp);
 
         if(std::find(within.cbegin(), within.cend(), forLoopCoord) != within.cend())
             return forLoopCoord;
@@ -224,8 +224,9 @@ namespace rocRoller::KernelGraph
                 // to different data and to use different registers.
                 // Note: A PassThrough edge is added from any of the duplicate nodes to the original
                 // node.
-                auto maybeMacroTile = graph.coordinates.get<MacroTile>(c.coordinate);
-                auto maybeLDS       = graph.coordinates.get<LDS>(c.coordinate);
+                auto maybeMacroTile
+                    = graph.coordinates.get<CoordinateGraph::MacroTile>(c.coordinate);
+                auto maybeLDS = graph.coordinates.get<CoordinateGraph::LDS>(c.coordinate);
                 if(maybeMacroTile || maybeLDS)
                 {
                     if(reindexer->coordinates.count(c.coordinate) == 0)
@@ -233,30 +234,37 @@ namespace rocRoller::KernelGraph
                         auto dim = graph.coordinates.addElement(
                             graph.coordinates.getElement(c.coordinate));
                         reindexer->coordinates[c.coordinate] = dim;
-                        auto duplicate
-                            = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<Duplicate>)
-                                  .to<std::vector>();
+                        auto duplicate                       = graph.coordinates
+                                             .getOutputNodeIndices(
+                                                 coord, CT::isEdge<CoordinateGraph::Duplicate>)
+                                             .to<std::vector>();
 
                         auto origCoord = duplicate.empty() ? coord : duplicate[0];
-                        graph.coordinates.addElement(Duplicate(), {dim}, {origCoord});
+                        graph.coordinates.addElement(
+                            CoordinateGraph::Duplicate(), {dim}, {origCoord});
 
                         // Add View edges for new duplicated coordinates
                         auto outgoingViews
-                            = graph.coordinates.getOutputNodeIndices(coord, CT::isEdge<View>)
+                            = graph.coordinates
+                                  .getOutputNodeIndices(coord, CT::isEdge<CoordinateGraph::View>)
                                   .to<std::vector>();
                         if(!outgoingViews.empty() && reindexer->coordinates.count(outgoingViews[0]))
                         {
                             graph.coordinates.addElement(
-                                View(), {dim}, {reindexer->coordinates[outgoingViews[0]]});
+                                CoordinateGraph::View(),
+                                {dim},
+                                {reindexer->coordinates[outgoingViews[0]]});
                         }
 
                         auto incomingViews
-                            = graph.coordinates.getInputNodeIndices(origCoord, CT::isEdge<View>)
+                            = graph.coordinates
+                                  .getInputNodeIndices(origCoord, CT::isEdge<CoordinateGraph::View>)
                                   .to<std::vector>();
                         if(!incomingViews.empty() && reindexer->coordinates.count(incomingViews[0]))
                         {
-                            graph.coordinates.addElement(
-                                View(), {reindexer->coordinates[incomingViews[0]]}, {dim});
+                            graph.coordinates.addElement(CoordinateGraph::View(),
+                                                         {reindexer->coordinates[incomingViews[0]]},
+                                                         {dim});
                         }
                     }
                     coord = reindexer->coordinates[c.coordinate];

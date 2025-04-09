@@ -87,7 +87,7 @@ namespace rocRoller
             {
                 auto [target, direction] = getOperationTarget(opTag, k);
 
-                auto maybeForLoop = findContainingOperation<ForLoopOp>(opTag, k);
+                auto maybeForLoop = findContainingOperation<ControlGraph::ForLoopOp>(opTag, k);
 
                 auto parentOp = -1;
                 if(maybeForLoop)
@@ -99,7 +99,7 @@ namespace rocRoller
                     unrollColour = colouring.operationColour.at(opTag);
                 }
 
-                int opType = k.control.getNode<Operation>(opTag).index();
+                int opType = k.control.getNode<ControlGraph::Operation>(opTag).index();
 
                 return {target, parentOp, opType, unrollColour};
             }
@@ -107,18 +107,19 @@ namespace rocRoller
 
         namespace RD
         {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
             bool loadForLDS(int loadTag, KernelGraph const& graph)
             {
-                namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
-                auto dst = graph.mapper.get<MacroTile>(loadTag);
-                dst      = only(graph.coordinates.getOutputNodeIndices(dst, CT::isEdge<Duplicate>))
+                auto dst = graph.mapper.get<CT::MacroTile>(loadTag);
+                dst = only(graph.coordinates.getOutputNodeIndices(dst, CT::isEdge<CT::Duplicate>))
                           .value_or(dst);
 
                 bool hasLDS = false;
-                for(auto output : graph.coordinates.getInputNodeIndices(dst, CT::isEdge<DataFlow>))
+                for(auto output :
+                    graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::DataFlow>))
                 {
-                    if(graph.coordinates.get<LDS>(output).has_value())
+                    if(graph.coordinates.get<CT::LDS>(output).has_value())
                         return true;
                 }
                 return false;
@@ -136,16 +137,17 @@ namespace rocRoller
                 std::unordered_set<int> candidates;
                 for(auto op : graph.control.getNodes())
                 {
-                    auto isLoadTiled    = graph.control.get<LoadTiled>(op).has_value();
-                    auto isStoreLDSTile = graph.control.get<StoreLDSTile>(op).has_value();
+                    auto isLoadTiled = graph.control.get<ControlGraph::LoadTiled>(op).has_value();
+                    auto isStoreLDSTile
+                        = graph.control.get<ControlGraph::StoreLDSTile>(op).has_value();
                     if(!(isLoadTiled || isStoreLDSTile))
                         continue;
 
                     // Only consider within the KLoop
-                    auto maybeForLoop = findContainingOperation<ForLoopOp>(op, graph);
+                    auto maybeForLoop = findContainingOperation<ControlGraph::ForLoopOp>(op, graph);
                     if(!maybeForLoop)
                         continue;
-                    auto forLoop = *graph.control.get<ForLoopOp>(*maybeForLoop);
+                    auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
                     if(forLoop.loopName != rocRoller::KLOOP)
                         continue;
 
@@ -172,17 +174,18 @@ namespace rocRoller
                 std::unordered_set<int> candidates;
                 for(auto op : graph.control.getNodes())
                 {
-                    auto isLoadTiled   = graph.control.get<LoadTiled>(op).has_value();
-                    auto isLoadLDSTile = graph.control.get<LoadLDSTile>(op).has_value();
+                    auto isLoadTiled = graph.control.get<ControlGraph::LoadTiled>(op).has_value();
+                    auto isLoadLDSTile
+                        = graph.control.get<ControlGraph::LoadLDSTile>(op).has_value();
 
                     if(!(isLoadTiled || isLoadLDSTile))
                         continue;
 
                     // Only consider within the KLoop
-                    auto maybeForLoop = findContainingOperation<ForLoopOp>(op, graph);
+                    auto maybeForLoop = findContainingOperation<ControlGraph::ForLoopOp>(op, graph);
                     if(!maybeForLoop)
                         continue;
-                    auto forLoop = *graph.control.get<ForLoopOp>(*maybeForLoop);
+                    auto forLoop = *graph.control.get<ControlGraph::ForLoopOp>(*maybeForLoop);
                     if(forLoop.loopName != rocRoller::KLOOP)
                         continue;
 
@@ -204,9 +207,9 @@ namespace rocRoller
             std::unordered_set<int> jammedColours(KernelGraph const& graph)
             {
                 std::unordered_set<int> rv;
-                for(auto forLoopOpTag : graph.control.getNodes<ForLoopOp>())
+                for(auto forLoopOpTag : graph.control.getNodes<ControlGraph::ForLoopOp>())
                 {
-                    auto forLoopOp = *graph.control.get<ForLoopOp>(forLoopOpTag);
+                    auto forLoopOp = *graph.control.get<ControlGraph::ForLoopOp>(forLoopOpTag);
 
                     if(forLoopOp.loopName != rocRoller::KLOOP)
                     {
@@ -225,7 +228,7 @@ namespace rocRoller
              * should be removed from the control graph.
              *
              * Note that the "existing" operation is
-             * NoderOrdering::LeftFirst of all members of the
+             * NodeOrdering::LeftFirst of all members of the
              * "duplicate" set.
              *
              * An operation is a duplicate of another if:
@@ -256,7 +259,7 @@ namespace rocRoller
                     {
                         auto originalOp = opSpecs[spec];
                         auto ordering   = graph.control.compareNodes(op, originalOp);
-                        if(ordering == NodeOrdering::LeftFirst)
+                        if(ordering == ControlGraph::NodeOrdering::LeftFirst)
                             opSpecs[spec] = op;
                     }
                     else
@@ -329,7 +332,7 @@ namespace rocRoller
                         // operation we replace with a NOP happens
                         // *after* the existing operation that it
                         // duplicates.
-                        auto nop = graph.control.addElement(NOP());
+                        auto nop = graph.control.addElement(ControlGraph::NOP());
                         replaceWith(graph, topDuplicateOp, nop, false);
                         purgeNodeAndChildren(graph, topDuplicateOp);
 
@@ -344,10 +347,10 @@ namespace rocRoller
                         // Mark for update: references to the
                         // duplicate tile need to be updated to the
                         // original tile.
-                        auto duplicateTileTag = original.mapper.get<MacroTile>(duplicateOp);
+                        auto duplicateTileTag = original.mapper.get<CT::MacroTile>(duplicateOp);
                         if(duplicateTileTag != -1)
                         {
-                            auto originalTileTag = original.mapper.get<MacroTile>(originalOp);
+                            auto originalTileTag = original.mapper.get<CT::MacroTile>(originalOp);
                             expressionReindexer.coordinates.emplace(duplicateTileTag,
                                                                     originalTileTag);
                         }
@@ -388,7 +391,8 @@ namespace rocRoller
         KernelGraph RemoveDuplicates::apply(KernelGraph const& original)
         {
             auto colouring = colourByUnrollValue(original);
-            auto graph     = removeRedundantSequenceEdges(original);
+            auto graph     = original;
+            removeRedundantSequenceEdges(graph);
 
             // Two passes:
             //   1. Workgroup (LoadTiled and StoreLDSTile) and
@@ -414,7 +418,8 @@ namespace rocRoller
                 graph           = RD::removeDuplicates(graph, duplicates);
             }
 
-            return removeRedundantNOPs(graph);
+            removeRedundantNOPs(graph);
+            return graph;
         }
     }
 }

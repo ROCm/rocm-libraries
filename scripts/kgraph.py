@@ -91,10 +91,20 @@ def extract_asm_dot(path: pathlib.Path):
 
 def extract_log_dots(path: pathlib.Path):
     source = path.read_text()
+    source_clean = ""
+    prev_end = 0
     dots = []
     for graph in re.finditer("digraph {", source):
-        dots.append(source[graph.start() :].partition("\n\n")[0])
-    return dots
+        this_graph = source[graph.start() :].partition("\n\n")[0]
+        before_graph = source[prev_end : graph.start()]
+        source_clean += before_graph
+        prev_end = graph.start() + len(this_graph)
+
+        dots.append(this_graph)
+
+    source_clean += source[prev_end:]
+
+    return dots, source_clean
 
 
 def write_dot(dot: str, fname: pathlib.Path):
@@ -201,7 +211,11 @@ if __name__ == "__main__":
         process_asm(path)
 
     elif path.suffix == ".log":
-        dots = extract_log_dots(path)
+        dots, source_clean = extract_log_dots(path)
+
+        foutput_clean = pathlib.Path(str(foutput) + "_clean.log")
+        foutput_clean.write_text(source_clean)
+
         if not args.omit_diff:
             dots = diff_dots(dots)
         for i, dot in enumerate(dots):

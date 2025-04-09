@@ -34,6 +34,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Reindexer.hpp>
@@ -974,18 +975,18 @@ namespace KernelGraphTest
         "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
-        "coord4"[label="MacroTile{NA}(4)"];
+        "coord4"[label="MacroTile{NA}(2/None/None){}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
         "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
-        "coord11"[label="MacroTile{NA}(11)"];
+        "coord11"[label="MacroTile{NA}(2/None/None){}-()(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{NA}(15)"];
+        "coord15"[label="MacroTile{NA}(0/None/None){}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
         "coord17"[label="SubDimension{0, NA}(17)"];
         "coord18"[label="SubDimension{1, NA}(18)"];
@@ -1250,7 +1251,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, LowerTensor)
     {
-        auto example = rocRollerTest::Graphs::GEMM<float>();
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
         int macK  = 16;
         int waveK = 8;
@@ -1300,7 +1301,7 @@ namespace KernelGraphTest
 
         // Verify that loops have been unrolled
         auto unrolledForLoops = kgraphUnrolled.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(unrolledForLoops.size(), 10); // main: X (Y (K K)) (Y (K K)); epilogue:  X (Y Y)
+        EXPECT_EQ(unrolledForLoops.size(), 14);
 
         auto kgraphFused = kgraphUnrolled.transform(fuseLoopsTransform);
         kgraphFused      = kgraphFused.transform(removeDuplicatesTransform);
@@ -1310,7 +1311,7 @@ namespace KernelGraphTest
         EXPECT_EQ(fusedForLoops.size(), 5);
 
         auto fusedLoads = kgraphFused.control.getNodes<LoadTiled>().to<std::vector>();
-        EXPECT_EQ(fusedLoads.size(), 9); // 1 for A, 4 for B, 4 for C
+        EXPECT_EQ(fusedLoads.size(), 17);
 
         // Verify that single iteration loops have been removed.
         auto kgraphClean     = kgraphFused.transform(cleanLoopsTransform);
@@ -1318,8 +1319,16 @@ namespace KernelGraphTest
         EXPECT_EQ(cleanedForLoops.size(), 1);
 
         // Verify that there is only a single StoreLDSTile node per K loop
-        auto unrolledStoreLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
-        EXPECT_EQ(unrolledStoreLDS.size(), 4);
+        auto unrolled_kgraph_lds = kgraphUnrolled.transform(addLDSTransform);
+        auto unrolledStoreLDS
+            = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
+        auto kloops = kgraphUnrolled.control.getNodes<ForLoopOp>()
+                          .filter([&](int node) {
+                              auto loop = kgraphUnrolled.control.getNode<ForLoopOp>(node);
+                              return loop.loopName == KLOOP;
+                          })
+                          .to<std::vector>();
+        EXPECT_EQ(unrolledStoreLDS.size(), kloops.size());
 
         // Verify number of ComputeIndexes: A loads; A LDS loads; B loads; C load; D
         // store: 3 + (2+2) + 3 + 3 + 3 = 12
@@ -1334,15 +1343,25 @@ namespace KernelGraphTest
         EXPECT_EQ(addDeallocates.size(), 16);
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
-        EXPECT_EQ(storeLDS.size(), 4);
+        EXPECT_EQ(storeLDS.size(), 8);
 
         auto fusedStoreLDS = kgraphFused.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
+
+        // Verify number of ComputeIndexes after unroll/fuse/lds
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
+        computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
+        EXPECT_EQ(computeIndexes.size(), 112);
+
+        // Verify number of Deallocates after unroll/fuse/lds
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
+        addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
+        EXPECT_EQ(addDeallocates.size(), 86);
     }
 
     TEST_F(KernelGraphTest, InlineIncrement)
     {
-        auto example = rocRollerTest::Graphs::GEMM<float>();
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);
@@ -1400,22 +1419,22 @@ namespace KernelGraphTest
         "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
-        "coord4"[label="MacroTile{16,8}(4)"];
+        "coord4"[label="MacroTile{NA}(2/LDS/None){16,8}-(4,2)(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
         "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
-        "coord11"[label="MacroTile{16,8}(11)"];
+        "coord11"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{16,8}(15)"];
+        "coord15"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="MacroTile{16,8}(17)"];
+        "coord17"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(17)"];
         "coord18"[label="DataFlow(18)",shape=box];
-        "coord19"[label="MacroTile{16,8}(19)"];
+        "coord19"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(19)"];
         "coord20"[label="DataFlow(20)",shape=box];
         "coord21"[label="SubDimension{0, NA}(21)"];
         "coord22"[label="SubDimension{1, NA}(22)"];
@@ -2449,18 +2468,18 @@ namespace KernelGraphTest
         "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
-        "coord4"[label="MacroTile{NA}(4)"];
+        "coord4"[label="MacroTile{NA}(2/None/None){}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
         "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
-        "coord11"[label="MacroTile{NA}(11)"];
+        "coord11"[label="MacroTile{NA}(2/None/None){}-()(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{NA}(15)"];
+        "coord15"[label="MacroTile{NA}(0/None/None){}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
         "coord17"[label="SubDimension{0, NA}(17)"];
         "coord18"[label="SubDimension{1, NA}(18)"];
@@ -2579,18 +2598,18 @@ namespace KernelGraphTest
         "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
-        "coord4"[label="MacroTile{64,64}(4)"];
+        "coord4"[label="MacroTile{NA}(2/VGPR/None){64,64}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
         "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
-        "coord11"[label="MacroTile{64,64}(11)"];
+        "coord11"[label="MacroTile{NA}(2/VGPR/None){64,64}-()(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{64,64}(15)"];
+        "coord15"[label="MacroTile{NA}(2/WAVE/MATRIX_ACCUMULATOR){64,64}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
         "coord17"[label="SubDimension{0, NA}(17)"];
         "coord18"[label="SubDimension{1, NA}(18)"];
@@ -2917,7 +2936,7 @@ namespace KernelGraphTest
     {
         using GD = Graph::Direction;
 
-        auto example = rocRollerTest::Graphs::GEMM<float>();
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);

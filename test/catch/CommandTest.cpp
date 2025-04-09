@@ -38,9 +38,9 @@ namespace CommandTest
     {
         SECTION("GEMM/TileAdd")
         {
-            auto example1 = *rocRollerTest::Graphs::GEMM<float>().getCommand();
-            auto example2 = *rocRollerTest::Graphs::GEMM<float>().getCommand();
-            auto example3 = *rocRollerTest::Graphs::GEMM<Half>().getCommand();
+            auto example1 = *rocRollerTest::Graphs::GEMM(DataType::Float).getCommand();
+            auto example2 = *rocRollerTest::Graphs::GEMM(DataType::Float).getCommand();
+            auto example3 = *rocRollerTest::Graphs::GEMM(DataType::Half).getCommand();
             auto example4 = *rocRollerTest::Graphs::TileDoubleAdd<Half>().getCommand();
 
             CHECK(example1 == example2);
@@ -58,7 +58,7 @@ namespace CommandTest
     {
         SECTION("GEMM")
         {
-            auto example = rocRollerTest::Graphs::GEMM<float>();
+            auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
             auto command0 = example.getCommand();
             auto yaml     = Command::toYAML(*command0);

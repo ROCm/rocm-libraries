@@ -85,7 +85,7 @@ TEST_CASE("Test getUnrollAmount", "[kernel-graph][unroll]")
     CHECK(kg::getUnrollAmount(kgraph, forOp, params) == 7);
 }
 
-TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll]")
+TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll][graph-transforms]")
 {
     using namespace rocRoller;
     namespace kg = rocRoller::KernelGraph;
@@ -152,7 +152,8 @@ TEST_CASE("UnrollLoops simple test", "[kernel-graph][unroll]")
         CHECK(tail != std::nullopt);
         kgraph = kgraph.transform(std::make_shared<kg::Simplify>());
 
-        CHECK(kgraph.control.compareNodes(forOp, *tail) == kg::NodeOrdering::LeftFirst);
+        CHECK(kgraph.control.compareNodes(forOp, *tail)
+              == kg::ControlGraph::NodeOrdering::LeftFirst);
 
         auto ops
             = kgraph.control.findElements(kgraph.control.isElemType<kg::ControlGraph::ForLoopOp>())

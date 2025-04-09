@@ -30,6 +30,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -43,8 +44,9 @@ namespace rocRoller::KernelGraph
         TIMER(t, "KernelGraph::addDeallocate");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
-        auto graph  = original;
-        auto tracer = LastRWTracer(graph);
+        auto          graph  = original;
+        auto          tracer = LastRWTracer(graph);
+        std::set<int> deallocateNodes;
 
         for(auto& [coordinate, controls] : tracer.lastRWLocations())
         {
@@ -74,6 +76,7 @@ namespace rocRoller::KernelGraph
 
             // Create a Deallocate operation
             auto deallocate = graph.control.addElement(Deallocate());
+            deallocateNodes.insert(deallocate);
             graph.mapper.connect<Dimension>(deallocate, coordinate);
 
             if(hotLoop.size() != 1)
@@ -92,6 +95,85 @@ namespace rocRoller::KernelGraph
                 graph.control.addElement(Sequence(), {*hotLoop.cbegin()}, {deallocate});
             }
         }
+
+        /**
+         * Sequence Deallocate nodes before any other parallel nodes.  This will
+         * ensure that if a tag is borrowed, it will be deallocated (returned)
+         * before it is borrowed again.
+         * 
+         * Before:
+         * ```mermaid
+         * graph LR
+         * 
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeA ---> Deallocate
+         *  NodeB ---> Deallocate
+         * ```
+         * 
+         * If we don't simplify first, we will get:
+         * ```mermaid
+         * graph LR
+         * 
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  Deallocate ---> NodeB
+         *  Deallocate ---> NodeC
+         *  NodeA ---> Deallocate
+         *  NodeB ---> Deallocate
+         * ```
+         * 
+         * which contains a cycle.
+         * 
+         * So we simplify:
+         * ```mermaid
+         * graph LR
+         * 
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeB ---> Deallocate
+         * ```
+         * 
+         * Then add new sequence edges:
+         * ```mermaid
+         * graph LR
+         * 
+         *  NodeA ---> NodeB
+         *  NodeB ---> NodeC
+         *  NodeB ---> Deallocate
+         *  Deallocate ---> NodeC
+         * ```
+         * 
+         * Then simplify again:
+         * ```mermaid
+         * graph LR
+         * 
+         *  NodeA ---> NodeB
+         *  NodeB ---> Deallocate
+         *  Deallocate ---> NodeC
+         * ```
+         * 
+         */
+
+        removeRedundantSequenceEdges(graph);
+
+        /**
+         * Siblings of Deallocate nodes that are not Deallocate nodes must come
+         * after the Deallocate node.
+         */
+        for(auto deallocate : deallocateNodes)
+        {
+            for(auto parent : graph.control.getInputNodeIndices<Sequence>(deallocate))
+            {
+                for(auto child : graph.control.getOutputNodeIndices<Sequence>(parent))
+                {
+                    if(!graph.control.get<Deallocate>(child))
+                        graph.control.chain<Sequence>(deallocate, child);
+                }
+            }
+        }
+
+        removeRedundantSequenceEdges(graph);
 
         return graph;
     }

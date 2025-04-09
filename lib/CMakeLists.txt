@@ -48,27 +48,28 @@ if(BUILD_VERBOSE)
 endif()
 
 set(rocroller_src
-    source/AssemblyKernel_serialization.cpp
+
     source/AssemblyKernel.cpp
     source/AssemblyKernelArgument.cpp
+    source/AssemblyKernel_serialization.cpp
     source/AssertOpKinds.cpp
-    source/Command_serialization.cpp
     source/CommandSolution.cpp
+    source/Command_serialization.cpp
     source/CommonSubexpressionElim.cpp
     source/Context.cpp
+    source/DataTypes.cpp
     source/DataTypes_BF16_Utils.cpp
     source/DataTypes_F6_Utils.cpp
     source/DataTypes_F8_Utils.cpp
     source/DataTypes_Utils.cpp
-    source/DataTypes.cpp
     source/Error.cpp
     source/ExecutableKernel.cpp
+    source/Expression.cpp
     source/Expression_evaluate.cpp
     source/Expression_generate.cpp
     source/Expression_resultType.cpp
     source/Expression_serialization.cpp
     source/Expression_toString.cpp
-    source/Expression.cpp
     source/GPUArchitecture.cpp
     source/GPUArchitectureLibrary.cpp
     source/GPUInstructionInfo.cpp
@@ -86,21 +87,6 @@ set(rocroller_src
     source/Assemblers/InProcessAssembler.cpp
     source/Assemblers/InProcessAssembler_assemble.cpp
     source/Assemblers/SubprocessAssembler.cpp
-
-    source/ExpressionTransformations/CombineShifts.cpp
-    source/ExpressionTransformations/DataFlowTagPropagation.cpp
-    source/ExpressionTransformations/FastArithmetic.cpp
-    source/ExpressionTransformations/FastDivision.cpp
-    source/ExpressionTransformations/FastMultiplication.cpp
-    source/ExpressionTransformations/FuseAssociative.cpp
-    source/ExpressionTransformations/FuseTernary.cpp
-    source/ExpressionTransformations/Identity.cpp
-    source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
-    source/ExpressionTransformations/LowerBitfieldValues.cpp
-    source/ExpressionTransformations/LowerExponential.cpp
-    source/ExpressionTransformations/LowerPRNG.cpp
-    source/ExpressionTransformations/RestoreCommandArguments.cpp
-    source/ExpressionTransformations/Simplify.cpp
 
     source/CodeGen/AddInstruction.cpp
     source/CodeGen/ArgumentLoader.cpp
@@ -155,8 +141,28 @@ set(rocroller_src
     source/Costs/UniformCost.cpp
     source/Costs/WaitCntNopCost.cpp
 
+    source/ExpressionTransformations/CombineShifts.cpp
+    source/ExpressionTransformations/DataFlowTagPropagation.cpp
+    source/ExpressionTransformations/FastArithmetic.cpp
+    source/ExpressionTransformations/FastDivision.cpp
+    source/ExpressionTransformations/FastMultiplication.cpp
+    source/ExpressionTransformations/FuseAssociative.cpp
+    source/ExpressionTransformations/FuseTernary.cpp
+    source/ExpressionTransformations/Identity.cpp
+    source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
+    source/ExpressionTransformations/LowerBitfieldValues.cpp
+    source/ExpressionTransformations/LowerExponential.cpp
+    source/ExpressionTransformations/LowerPRNG.cpp
+    source/ExpressionTransformations/RestoreCommandArguments.cpp
+    source/ExpressionTransformations/Simplify.cpp
+
     source/KernelGraph/ControlFlowRWTracer.cpp
+    source/KernelGraph/ControlGraph/ControlGraph.cpp
+    source/KernelGraph/ControlGraph/Operation.cpp
     source/KernelGraph/ControlToCoordinateMapper.cpp
+    source/KernelGraph/CoordinateGraph/CoordinateGraph.cpp
+    source/KernelGraph/CoordinateGraph/Dimension.cpp
+    source/KernelGraph/CoordinateGraph/Transformer.cpp
     source/KernelGraph/GlobalConstraints.cpp
     source/KernelGraph/KernelGraph.cpp
     source/KernelGraph/KernelGraph_serialization.cpp
@@ -167,13 +173,6 @@ set(rocroller_src
     source/KernelGraph/ScopeManager.cpp
     source/KernelGraph/Utils.cpp
 
-    source/KernelGraph/ControlGraph/ControlGraph.cpp
-    source/KernelGraph/ControlGraph/Operation.cpp
-
-    source/KernelGraph/CoordinateGraph/CoordinateGraph.cpp
-    source/KernelGraph/CoordinateGraph/Dimension.cpp
-    source/KernelGraph/CoordinateGraph/Transformer.cpp
-
     source/KernelGraph/Transformations/AddComputeIndex.cpp
     source/KernelGraph/Transformations/AddConvert.cpp
     source/KernelGraph/Transformations/AddDeallocate.cpp
@@ -182,6 +181,7 @@ set(rocroller_src
     source/KernelGraph/Transformations/AddLDS.cpp
     source/KernelGraph/Transformations/AddPRNG.cpp
     source/KernelGraph/Transformations/AddStreamK.cpp
+    source/KernelGraph/Transformations/AliasDataFlowTags.cpp
     source/KernelGraph/Transformations/CleanArguments.cpp
     source/KernelGraph/Transformations/CleanLoops.cpp
     source/KernelGraph/Transformations/ConnectWorkgroups.cpp
@@ -223,11 +223,11 @@ set(rocroller_src
     source/Observers/VALUWriteSGPRVMEM.cpp
     source/Observers/VALUWriteVCCVDIVFMAS.cpp
     source/Observers/VCMPXWrite94x.cpp
-    source/Observers/WaitcntObserver.cpp
     source/Observers/WMMAObserver.cpp
     source/Observers/WMMAReadSrcD.cpp
     source/Observers/WMMAWriteSrcD.cpp
     source/Observers/WMMAWrite.cpp
+    source/Observers/WaitcntObserver.cpp
     source/Observers/XDLReadSrcC908.cpp
     source/Observers/XDLReadSrcC90a.cpp
     source/Observers/XDLReadSrcC94x.cpp
@@ -239,8 +239,8 @@ set(rocroller_src
     source/Operations/Command.cpp
     source/Operations/Operation.cpp
     source/Operations/RandomNumberGenerator.cpp
-    source/Operations/TensorScalar.cpp
     source/Operations/T_LoadStore.cpp
+    source/Operations/TensorScalar.cpp
 
     source/Schedulers/CooperativeScheduler.cpp
     source/Schedulers/PriorityScheduler.cpp

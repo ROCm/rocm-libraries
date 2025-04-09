@@ -56,6 +56,7 @@ namespace rocRoller
         {
             std::vector<GraphConstraint> m_constraints{
                 &NoDanglingMappings, &SingleControlRoot, &NoRedundantSetCoordinates};
+            std::vector<std::string> m_transforms;
 
         public:
             ControlGraph::ControlGraph       control;
@@ -105,6 +106,9 @@ namespace rocRoller
              * @param GraphTransform
             */
             KernelGraph transform(GraphTransformPtr const& transform);
+
+            std::vector<std::string> const& appliedTransforms() const;
+            void addAppliedTransforms(std::vector<std::string> const& transforms);
         };
 
         /**

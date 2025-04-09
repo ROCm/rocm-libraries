@@ -28,6 +28,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <rocRoller/Graph/GraphUtilities.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
@@ -55,45 +56,21 @@ namespace rocRoller::KernelGraph
      * where @ are operations and all edges are Sequence edges.  The A
      * edge is redundant.
      */
-    KernelGraph removeRedundantSequenceEdges(KernelGraph const& original)
+    void removeRedundantSequenceEdges(KernelGraph& graph)
     {
-        auto graph  = original;
-        auto logger = rocRoller::Log::getLogger();
-
-        auto edges = filter(graph.control.isElemType<Sequence>(), graph.control.getEdges())
-                         .to<std::vector>();
-        for(auto edge : edges)
+        auto isSequence = graph.control.isElemType<Sequence>();
+        for(auto edge : Graph::findRedundantEdges(graph.control, isSequence))
         {
-            auto onlyFollowDifferentSequenceEdges = [&](int x) -> bool {
-                auto isSame     = x == edge;
-                auto isSequence = CF::isEdge<Sequence>(graph.control.getElement(x));
-                return !isSame && isSequence;
-            };
-
-            auto tail = *only(graph.control.getNeighbours<GD::Upstream>(edge));
-            auto head = *only(graph.control.getNeighbours<GD::Downstream>(edge));
-
-            auto reachable
-                = graph.control
-                      .depthFirstVisit(tail, onlyFollowDifferentSequenceEdges, GD::Downstream)
-                      .to<std::unordered_set>();
-
-            if(reachable.contains(head))
-            {
-                logger->debug("Deleting redundant Sequence edge: {}", edge);
-                graph.control.deleteElement(edge);
-            }
+            Log::debug("Deleting redundant Sequence edge: {}", edge);
+            graph.control.deleteElement(edge);
         }
-        return graph;
     }
 
     /*
      * Helper for removeRedundantBodyEdges (early return).
      */
-    void removeBodyEdgeIfRedundant(KernelGraph& graph, int edge)
+    bool isRedundantBodyEdge(KernelGraph const& graph, int edge)
     {
-        auto logger = rocRoller::Log::getLogger();
-
         auto tail = *only(graph.control.getNeighbours<GD::Upstream>(edge));
         auto head = *only(graph.control.getNeighbours<GD::Downstream>(edge));
 
@@ -103,34 +80,31 @@ namespace rocRoller::KernelGraph
             return !isSame && isBody;
         };
 
-        auto reachable
-            = graph.control.depthFirstVisit(tail, onlyFollowDifferentBodyEdges, GD::Downstream)
-                  .to<std::unordered_set>();
-
-        if(reachable.contains(head))
         {
-            logger->debug("Deleting redundant Body edge: {}", edge);
-            graph.control.deleteElement(edge);
-            return;
+            auto reachable
+                = !graph.control.depthFirstVisit(tail, onlyFollowDifferentBodyEdges, GD::Downstream)
+                       .filter([head](int x) { return x == head; })
+                       .empty();
+
+            if(reachable)
+                return true;
         }
 
-        auto otherBodies = graph.control.getOutputNodeIndices<Body>(tail).to<std::unordered_set>();
-        otherBodies.erase(head);
+        auto otherBodies = graph.control.getOutputNodeIndices<Body>(tail).filter(
+            [head](int x) { return x != head; });
 
         for(auto top : otherBodies)
         {
             auto reachable
-                = graph.control
-                      .depthFirstVisit(top, graph.control.isElemType<Sequence>(), GD::Downstream)
-                      .to<std::unordered_set>();
+                = !graph.control
+                       .depthFirstVisit(top, graph.control.isElemType<Sequence>(), GD::Downstream)
+                       .filter([head](int x) { return x == head; })
+                       .empty();
 
-            if(reachable.contains(head))
-            {
-                logger->debug("Deleting redundant Body edge: {}", edge);
-                graph.control.deleteElement(edge);
-                return;
-            }
+            if(reachable)
+                return true;
         }
+        return false;
     }
 
     /**
@@ -152,16 +126,18 @@ namespace rocRoller::KernelGraph
      * If there were another Body edge parallel to A, it would also be
      * redundant and should be removed.
      */
-    KernelGraph removeRedundantBodyEdges(KernelGraph const& original)
+    void removeRedundantBodyEdges(KernelGraph& graph)
     {
-        auto graph = original;
-
         auto edges
-            = filter(graph.control.isElemType<Body>(), graph.control.getEdges()).to<std::vector>();
+            = graph.control.getEdges().filter(graph.control.isElemType<Body>()).to<std::vector>();
         for(auto edge : edges)
-            removeBodyEdgeIfRedundant(graph, edge);
-
-        return graph;
+        {
+            if(isRedundantBodyEdge(graph, edge))
+            {
+                Log::debug("Deleting redundant Body edge: {}", edge);
+                graph.control.deleteElement(edge);
+            }
+        }
     }
 
     /*
@@ -281,9 +257,9 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Remove redundant NOP nodes.
      */
-    KernelGraph removeRedundantNOPs(KernelGraph const& original)
+    void removeRedundantNOPs(KernelGraph& graph)
     {
-        auto graph        = removeRedundantSequenceEdges(original);
+        removeRedundantSequenceEdges(graph);
         bool graphChanged = true;
         while(graphChanged)
         {
@@ -292,9 +268,8 @@ namespace rocRoller::KernelGraph
             for(auto nop : nops)
                 graphChanged |= removeNOPIfRedundant(graph, nop);
             if(graphChanged)
-                graph = removeRedundantSequenceEdges(graph);
+                removeRedundantSequenceEdges(graph);
         }
-        return graph;
     }
 
     // Remove removeRedundantNOPs is not fully tested.
@@ -305,8 +280,9 @@ namespace rocRoller::KernelGraph
     KernelGraph Simplify::apply(KernelGraph const& original)
     {
         TIMER(t, "KernelGraph::Simplify");
-        auto graph = removeRedundantSequenceEdges(original);
-        graph      = removeRedundantBodyEdges(graph);
+        auto graph = original;
+        removeRedundantSequenceEdges(graph);
+        removeRedundantBodyEdges(graph);
         return graph;
     }
 

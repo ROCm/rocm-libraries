@@ -33,6 +33,8 @@
 
 namespace rocRoller::KernelGraph
 {
+    using namespace ControlGraph;
+    using namespace CoordinateGraph;
 
     /**
      * @brief Find the <scalarDFTag, scalarTag, tensorTag> when scalar * tensor

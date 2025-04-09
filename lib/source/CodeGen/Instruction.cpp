@@ -29,6 +29,32 @@
 
 namespace rocRoller
 {
+    bool Instruction::requiresVnopForHazard() const
+    {
+        // TODO: Reevalute this method for retrieving/passing the context.
+        ContextPtr ctx = nullptr;
+        for(const auto& r : m_src)
+        {
+            if(r && r->context())
+            {
+                ctx = r->context();
+                break;
+            }
+        }
+        if(nullptr == ctx)
+        {
+            for(const auto& r : m_dst)
+            {
+                if(r && r->context())
+                {
+                    ctx = r->context();
+                    break;
+                }
+            }
+        }
+        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU();
+    }
+
     void Instruction::codaString(std::ostream& os, LogLevel level) const
     {
         if(level >= LogLevel::Terse && m_comments.size() > 1)

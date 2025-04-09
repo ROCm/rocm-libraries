@@ -55,6 +55,9 @@ namespace rocRoller
                                                           CommandParametersPtr params,
                                                           ContextPtr           context)
         {
+            using namespace ControlGraph;
+            using namespace CoordinateGraph;
+
             auto loadTiledNodes    = kgraph.control.getNodes<LoadTiled>().to<std::vector>();
             auto storeLDSTileNodes = kgraph.control.getNodes<StoreLDSTile>().to<std::vector>();
             std::vector<std::pair<int, int>> result;
@@ -87,6 +90,7 @@ namespace rocRoller
 
         void mergeOperations(KernelGraph& kgraph, int globalOp, int ldsOp)
         {
+            using namespace ControlGraph;
             auto variableType = getVariableType(kgraph, globalOp);
 
             if(isChain(kgraph, globalOp, ldsOp))

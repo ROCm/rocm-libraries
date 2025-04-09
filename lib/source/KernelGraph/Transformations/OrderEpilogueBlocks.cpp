@@ -61,6 +61,7 @@ namespace rocRoller
         namespace OrderEpilogueBlocksNS
         {
             using GD = rocRoller::Graph::Direction;
+            using namespace ControlGraph;
 
             void orderEpilogueBlocks(KernelGraph& graph, int tag, UnrollColouring const& colouring)
             {
@@ -137,13 +138,14 @@ namespace rocRoller
             // Exclude Unrolls that aren't associated with
             // JammedWaveTileNumbers from the colouring.
             auto exclude = std::unordered_set<int>();
-            for(auto unroll : graph.coordinates.getNodes<Unroll>())
+            for(auto unroll : graph.coordinates.getNodes<CoordinateGraph::Unroll>())
             {
                 bool isJammed = false;
                 for(auto input :
                     graph.coordinates.getInputNodeIndices(unroll, [](auto) { return true; }))
                 {
-                    auto maybeJammed = graph.coordinates.get<JammedWaveTileNumber>(input);
+                    auto maybeJammed
+                        = graph.coordinates.get<CoordinateGraph::JammedWaveTileNumber>(input);
                     if(maybeJammed)
                         isJammed = true;
                 }
@@ -153,7 +155,7 @@ namespace rocRoller
             }
             auto colouring = colourByUnrollValue(original, -1, exclude);
 
-            for(const auto node : graph.control.getNodes<ForLoopOp>())
+            for(const auto node : graph.control.getNodes<ControlGraph::ForLoopOp>())
             {
                 OrderEpilogueBlocksNS::orderEpilogueBlocks(graph, node, colouring);
             }

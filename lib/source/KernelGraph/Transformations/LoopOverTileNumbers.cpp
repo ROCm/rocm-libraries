@@ -39,6 +39,7 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        using namespace ControlGraph;
         using namespace CoordinateGraph;
         using GD = rocRoller::Graph::Direction;
 

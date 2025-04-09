@@ -228,7 +228,7 @@ namespace rocRoller
         auto packed        = DataTypeInfo::Get(toPack->variableType()).packedVariableType();
         if(!packed)
         {
-            Throw<FatalError>("Segmented variable type not found for ",
+            Throw<FatalError>("Packed variable type not found for ",
                               ShowValue(toPack->variableType()));
         }
 

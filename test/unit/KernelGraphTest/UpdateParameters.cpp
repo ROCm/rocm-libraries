@@ -89,7 +89,7 @@ namespace KernelGraphTest
     {
         using namespace rocRoller::KernelGraph;
 
-        auto example = rocRollerTest::Graphs::GEMM<float>();
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
         int macK  = 16;
         int waveK = 8;
@@ -124,7 +124,7 @@ namespace KernelGraphTest
             auto arguments = command->getArguments();
             for(auto argument : arguments)
             {
-                if(argument->name() == "Tensor_4_size_0")
+                if(argument->name() == "Tensor_0_size_0")
                     tensorDsizeX = argument;
             }
         }
@@ -138,6 +138,7 @@ namespace KernelGraphTest
         auto expected
             = (((tensorDsizeX->expression() + workgroupSizeX) - one) / workgroupSizeX) * one;
 
-        EXPECT_TRUE(Expression::identical(expected, workitemCount[0]));
+        EXPECT_TRUE(Expression::identical(expected, workitemCount[0]))
+            << expected << "/" << workitemCount[0] << std::endl;
     }
 }

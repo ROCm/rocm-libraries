@@ -44,8 +44,11 @@
 #include <rocRoller/DataTypes/DataTypes_Int8.hpp>
 #include <rocRoller/DataTypes/DataTypes_Int8x4.hpp>
 #include <rocRoller/DataTypes/DataTypes_UInt8x4.hpp>
+
 #include <rocRoller/GPUArchitecture/GPUArchitecture_fwd.hpp>
+
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
+
 #include <rocRoller/Utilities/Comparison.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>

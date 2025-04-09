@@ -31,7 +31,6 @@
 #include <memory>
 #include <string>
 
-#include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -411,32 +410,6 @@ namespace rocRoller
     inline void Instruction::directiveString(std::ostream& os, LogLevel level) const
     {
         os << m_directive;
-    }
-
-    inline bool Instruction::requiresVnopForHazard() const
-    {
-        // TODO: Reevalute this method for retrieving/passing the context.
-        ContextPtr ctx = nullptr;
-        for(const auto& r : m_src)
-        {
-            if(r && r->context())
-            {
-                ctx = r->context();
-                break;
-            }
-        }
-        if(nullptr == ctx)
-        {
-            for(const auto& r : m_dst)
-            {
-                if(r && r->context())
-                {
-                    ctx = r->context();
-                    break;
-                }
-            }
-        }
-        return nullptr != ctx && ctx->targetArchitecture().target().isGFX12GPU();
     }
 
     inline void Instruction::functionalString(std::ostream& os, LogLevel level) const

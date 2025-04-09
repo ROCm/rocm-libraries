@@ -86,6 +86,9 @@ namespace rocRoller
                             "The control graph should only contain one root node, the Kernel node.",
                             ShowValue(candidates.size()));
 
+                for(auto const& xform : m_graph->appliedTransforms())
+                    co_yield Instruction::Comment(xform);
+
                 co_yield generate(candidates, coords);
                 co_yield Instruction::Comment("CodeGeneratorVisitor::generate() end");
             }

@@ -60,6 +60,8 @@ struct GEMMProblem
     std::string transB = "T";
 
     // Unroll Sizes
+    unsigned int unrollX = 0;
+    unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
     bool loadLDSA    = true;
@@ -94,4 +96,6 @@ struct GEMMProblem
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
+
+    auto operator<=>(GEMMProblem const& rhs) const = default;
 };

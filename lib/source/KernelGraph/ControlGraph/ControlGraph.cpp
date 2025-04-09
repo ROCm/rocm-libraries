@@ -39,26 +39,16 @@ namespace rocRoller::KernelGraph::ControlGraph
         return m_orderCache;
     }
 
-    std::string ControlGraph::nodeOrderTableString() const
+    std::string ControlGraph::nodeOrderTableString(std::set<int> const& nodes) const
     {
         populateOrderCache();
 
-        TIMER(t, "nodeOrderTable");
-
-        std::ostringstream msg;
-
-        int prevR = -1;
-
-        std::set<int> nodes;
-
-        for(auto const& pair : m_orderCache)
+        if(nodes.empty())
         {
-            nodes.insert(std::get<0>(pair.first));
-            nodes.insert(std::get<1>(pair.first));
+            return "Empty order cache.\n";
         }
 
-        if(nodes.empty())
-            msg << "Empty order cache." << std::endl;
+        std::ostringstream msg;
 
         int width = std::ceil(std::log10(static_cast<float>(*nodes.rbegin())));
         width     = std::max(width, 3);
@@ -98,6 +88,23 @@ namespace rocRoller::KernelGraph::ControlGraph
         msg << std::endl;
 
         return msg.str();
+    }
+
+    std::string ControlGraph::nodeOrderTableString() const
+    {
+        populateOrderCache();
+
+        TIMER(t, "nodeOrderTable");
+
+        std::set<int> nodes;
+
+        for(auto const& pair : m_orderCache)
+        {
+            nodes.insert(std::get<0>(pair.first));
+            nodes.insert(std::get<1>(pair.first));
+        }
+
+        return nodeOrderTableString(nodes);
     }
 
     void ControlGraph::clearCache(Graph::GraphModification modification)

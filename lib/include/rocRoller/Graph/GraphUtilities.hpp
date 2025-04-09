@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,25 +26,36 @@
 
 #pragma once
 
-#include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <concepts>
+
+#include <rocRoller/Graph/Hypergraph.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph
+    namespace Graph
     {
         /**
-         * @brief Simplify a graph by removing redundant edges.
+         * `graph` must be an instantiation of Hypergraph which is calm (i.e.
+         * not hyper).
+         *
+         * For each edge in `graph` that matches `edgePredicate`, delete that
+         * edge if its destination node would still be reachable from the
+         * source, only following edges that satisfy edgePredicate.
          */
-        class Simplify : public GraphTransform
-        {
-        public:
-            KernelGraph apply(KernelGraph const& original) override;
-            std::string name() const override;
-        };
+        template <CCalmGraph AGraph, std::predicate<int> EdgePredicate>
+        void removeRedundantEdges(AGraph& graph, EdgePredicate edgePredicate);
 
-        void removeRedundantSequenceEdges(KernelGraph& graph);
-        void removeRedundantBodyEdges(KernelGraph& graph);
-        void removeRedundantNOPs(KernelGraph& graph);
+        /**
+         * `graph` must be an instantiation of Hypergraph which is calm (i.e.
+         * not hyper).
+         *
+         * For each edge in `graph` that matches `edgePredicate`, delete that
+         * edge if its destination node would still be reachable from the
+         * source, only following edges that satisfy edgePredicate.
+         */
+        template <CCalmGraph AGraph, std::predicate<int> EdgePredicate>
+        Generator<int> findRedundantEdges(AGraph const& graph, EdgePredicate edgePredicate);
     }
 }
+
+#include "GraphUtilities_impl.hpp"

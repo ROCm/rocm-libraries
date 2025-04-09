@@ -43,6 +43,8 @@
 
 using namespace rocRoller;
 using namespace rocRoller::KernelGraph;
+using namespace rocRoller::KernelGraph::CoordinateGraph;
+using namespace rocRoller::KernelGraph::ControlGraph;
 using ::testing::HasSubstr;
 
 namespace AssertTest

@@ -46,15 +46,12 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using namespace ControlGraph;
-        using namespace CoordinateGraph;
-
         using CTEdge = rocRoller::KernelGraph::CoordinateGraph::Edge;
 
         // clang-format off
         template <typename T>
         concept CCoordinateEdgeVisitor
-            = requires(T & vis, int tag, Tile const& edge)
+            = requires(T & vis, int tag, CoordinateGraph::Tile const& edge)
         {
             { vis.visitCoordinateEdge(tag, edge) }
                  -> std::convertible_to<rocRoller::KernelGraph::CoordinateGraph::Edge>;
@@ -311,67 +308,71 @@ namespace rocRoller
                 return m_rewriteCoordinates;
             }
 
-            MAKE_EDGE_VISITOR(ConstructMacroTile);
-            MAKE_EDGE_VISITOR(DataFlow);
-            MAKE_EDGE_VISITOR(Offset);
-            MAKE_EDGE_VISITOR(Stride);
-            MAKE_EDGE_VISITOR(View);
-            MAKE_EDGE_VISITOR(DestructMacroTile);
-            MAKE_EDGE_VISITOR(Flatten);
-            MAKE_EDGE_VISITOR(Forget);
-            MAKE_EDGE_VISITOR(Inherit);
-            MAKE_EDGE_VISITOR(Join);
-            MAKE_EDGE_VISITOR(MakeOutput);
-            MAKE_EDGE_VISITOR(PassThrough);
-            MAKE_EDGE_VISITOR(Split);
-            MAKE_EDGE_VISITOR(Tile);
+            MAKE_EDGE_VISITOR(CoordinateGraph::DataFlow);
 
-            MAKE_OPERATION_VISITOR(Assign);
-            MAKE_OPERATION_VISITOR(Barrier);
-            MAKE_OPERATION_VISITOR(ComputeIndex);
-            MAKE_OPERATION_VISITOR(ConditionalOp);
-            MAKE_OPERATION_VISITOR(AssertOp);
-            MAKE_OPERATION_VISITOR(Deallocate);
-            MAKE_OPERATION_VISITOR(DoWhileOp);
-            MAKE_OPERATION_VISITOR(Exchange);
-            MAKE_OPERATION_VISITOR(ForLoopOp);
-            MAKE_OPERATION_VISITOR(Kernel);
-            MAKE_OPERATION_VISITOR(LoadLDSTile);
-            MAKE_OPERATION_VISITOR(LoadLinear);
-            MAKE_OPERATION_VISITOR(LoadTiled);
-            MAKE_OPERATION_VISITOR(LoadVGPR);
-            MAKE_OPERATION_VISITOR(LoadSGPR);
-            MAKE_OPERATION_VISITOR(Multiply);
-            MAKE_OPERATION_VISITOR(NOP);
-            MAKE_OPERATION_VISITOR(Block);
-            MAKE_OPERATION_VISITOR(Scope);
-            MAKE_OPERATION_VISITOR(SetCoordinate);
-            MAKE_OPERATION_VISITOR(StoreLDSTile);
-            MAKE_OPERATION_VISITOR(LoadTileDirect2LDS);
-            MAKE_OPERATION_VISITOR(StoreLinear);
-            MAKE_OPERATION_VISITOR(StoreTiled);
-            MAKE_OPERATION_VISITOR(StoreVGPR);
-            MAKE_OPERATION_VISITOR(StoreSGPR);
-            MAKE_OPERATION_VISITOR(TensorContraction);
-            MAKE_OPERATION_VISITOR(UnrollOp);
-            MAKE_OPERATION_VISITOR(WaitZero);
-            MAKE_OPERATION_VISITOR(SeedPRNG);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Alias);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Buffer);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Offset);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Stride);
+            MAKE_EDGE_VISITOR(CoordinateGraph::View);
 
-            virtual void visitEdge(KernelGraph&                   graph,
-                                   KernelGraph const&             original,
-                                   GraphReindexer&                reindexer,
-                                   int                            tag,
-                                   CoordinateTransformEdge const& edge)
+            MAKE_EDGE_VISITOR(CoordinateGraph::ConstructMacroTile);
+            MAKE_EDGE_VISITOR(CoordinateGraph::DestructMacroTile);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Flatten);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Forget);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Inherit);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Join);
+            MAKE_EDGE_VISITOR(CoordinateGraph::MakeOutput);
+            MAKE_EDGE_VISITOR(CoordinateGraph::PassThrough);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Split);
+            MAKE_EDGE_VISITOR(CoordinateGraph::Tile);
+
+            MAKE_OPERATION_VISITOR(ControlGraph::AssertOp);
+            MAKE_OPERATION_VISITOR(ControlGraph::Assign);
+            MAKE_OPERATION_VISITOR(ControlGraph::Barrier);
+            MAKE_OPERATION_VISITOR(ControlGraph::Block);
+            MAKE_OPERATION_VISITOR(ControlGraph::ComputeIndex);
+            MAKE_OPERATION_VISITOR(ControlGraph::ConditionalOp);
+            MAKE_OPERATION_VISITOR(ControlGraph::Deallocate);
+            MAKE_OPERATION_VISITOR(ControlGraph::DoWhileOp);
+            MAKE_OPERATION_VISITOR(ControlGraph::Exchange);
+            MAKE_OPERATION_VISITOR(ControlGraph::ForLoopOp);
+            MAKE_OPERATION_VISITOR(ControlGraph::Kernel);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadLDSTile);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadLinear);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadSGPR);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadTileDirect2LDS);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadTiled);
+            MAKE_OPERATION_VISITOR(ControlGraph::LoadVGPR);
+            MAKE_OPERATION_VISITOR(ControlGraph::Multiply);
+            MAKE_OPERATION_VISITOR(ControlGraph::NOP);
+            MAKE_OPERATION_VISITOR(ControlGraph::Scope);
+            MAKE_OPERATION_VISITOR(ControlGraph::SeedPRNG);
+            MAKE_OPERATION_VISITOR(ControlGraph::SetCoordinate);
+            MAKE_OPERATION_VISITOR(ControlGraph::StoreLDSTile);
+            MAKE_OPERATION_VISITOR(ControlGraph::StoreLinear);
+            MAKE_OPERATION_VISITOR(ControlGraph::StoreSGPR);
+            MAKE_OPERATION_VISITOR(ControlGraph::StoreTiled);
+            MAKE_OPERATION_VISITOR(ControlGraph::StoreVGPR);
+            MAKE_OPERATION_VISITOR(ControlGraph::TensorContraction);
+            MAKE_OPERATION_VISITOR(ControlGraph::UnrollOp);
+            MAKE_OPERATION_VISITOR(ControlGraph::WaitZero);
+
+            virtual void visitEdge(KernelGraph&                                    graph,
+                                   KernelGraph const&                              original,
+                                   GraphReindexer&                                 reindexer,
+                                   int                                             tag,
+                                   CoordinateGraph::CoordinateTransformEdge const& edge)
             {
                 std::visit([&](auto&& arg) { visitEdge(graph, original, reindexer, tag, arg); },
                            edge);
             }
 
-            virtual void visitEdge(KernelGraph&        graph,
-                                   KernelGraph const&  original,
-                                   GraphReindexer&     reindexer,
-                                   int                 tag,
-                                   DataFlowEdge const& edge)
+            virtual void visitEdge(KernelGraph&                         graph,
+                                   KernelGraph const&                   original,
+                                   GraphReindexer&                      reindexer,
+                                   int                                  tag,
+                                   CoordinateGraph::DataFlowEdge const& edge)
             {
                 std::visit([&](auto&& arg) { visitEdge(graph, original, reindexer, tag, arg); },
                            edge);
@@ -407,6 +408,7 @@ namespace rocRoller
             GraphReindexer reindexer;
 
             graph.addConstraints(original.getConstraints());
+            graph.addAppliedTransforms(original.appliedTransforms());
 
             if(visitor.rewriteCoordinates())
             {
@@ -450,10 +452,10 @@ namespace rocRoller
                                         : original.control.reverseTopologicalSort())
             {
                 auto element = original.control.getElement(index);
-                if(std::holds_alternative<Operation>(element))
+                if(std::holds_alternative<ControlGraph::Operation>(element))
                 {
-                    auto node = std::get<Operation>(element);
-                    if(std::holds_alternative<Kernel>(node))
+                    auto node = std::get<ControlGraph::Operation>(element);
+                    if(std::holds_alternative<ControlGraph::Kernel>(node))
                         continue;
                     std::visit(
                         [&](auto&& arg) {

@@ -36,20 +36,20 @@ TEST_CASE("Simplify redundant Sequence edges", "[kernel-graph]")
     using namespace rocRoller::KernelGraph;
     using namespace rocRoller::KernelGraph::ControlGraph;
 
-    KernelGraph graph0;
+    KernelGraph graph;
 
-    auto kernel = graph0.control.addElement(Kernel());
-    auto loadA  = graph0.control.addElement(LoadTiled());
-    auto loadB  = graph0.control.addElement(LoadTiled());
-    auto assign = graph0.control.addElement(Assign());
+    auto kernel = graph.control.addElement(Kernel());
+    auto loadA  = graph.control.addElement(LoadTiled());
+    auto loadB  = graph.control.addElement(LoadTiled());
+    auto assign = graph.control.addElement(Assign());
 
-    graph0.control.addElement(Sequence(), {kernel}, {loadA});
-    graph0.control.addElement(Sequence(), {kernel}, {loadB});
-    graph0.control.addElement(Sequence(), {loadA}, {loadB});
-    graph0.control.addElement(Sequence(), {loadA}, {assign});
-    graph0.control.addElement(Sequence(), {loadB}, {assign});
+    graph.control.addElement(Sequence(), {kernel}, {loadA});
+    graph.control.addElement(Sequence(), {kernel}, {loadB});
+    graph.control.addElement(Sequence(), {loadA}, {loadB});
+    graph.control.addElement(Sequence(), {loadA}, {assign});
+    graph.control.addElement(Sequence(), {loadB}, {assign});
 
-    /* graph0 is:
+    /* graph is:
      *
      *          Kernel
      *         /   |
@@ -59,10 +59,11 @@ TEST_CASE("Simplify redundant Sequence edges", "[kernel-graph]")
      *       \    /
      *       Assign
      */
+    CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 5);
 
-    auto graph1 = removeRedundantSequenceEdges(graph0);
+    removeRedundantSequenceEdges(graph);
 
-    /* graph1 should be
+    /* graph should be
      *
      *          Kernel
      *         /
@@ -73,8 +74,7 @@ TEST_CASE("Simplify redundant Sequence edges", "[kernel-graph]")
      *       Assign
      */
 
-    CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 5);
-    CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 3);
+    CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 3);
 }
 
 TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
@@ -84,21 +84,21 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
 
     SECTION("Simple redundant NOP")
     {
-        KernelGraph graph0;
+        KernelGraph graph;
 
-        auto kernel = graph0.control.addElement(Kernel());
-        auto nop0   = graph0.control.addElement(NOP());
-        auto loadA  = graph0.control.addElement(LoadTiled());
-        auto loadB  = graph0.control.addElement(LoadTiled());
-        auto assign = graph0.control.addElement(Assign());
+        auto kernel = graph.control.addElement(Kernel());
+        auto nop0   = graph.control.addElement(NOP());
+        auto loadA  = graph.control.addElement(LoadTiled());
+        auto loadB  = graph.control.addElement(LoadTiled());
+        auto assign = graph.control.addElement(Assign());
 
-        graph0.control.addElement(Sequence(), {kernel}, {nop0});
-        graph0.control.addElement(Sequence(), {nop0}, {loadA});
-        graph0.control.addElement(Sequence(), {nop0}, {loadB});
-        graph0.control.addElement(Sequence(), {loadA}, {assign});
-        graph0.control.addElement(Sequence(), {loadB}, {assign});
+        graph.control.addElement(Sequence(), {kernel}, {nop0});
+        graph.control.addElement(Sequence(), {nop0}, {loadA});
+        graph.control.addElement(Sequence(), {nop0}, {loadB});
+        graph.control.addElement(Sequence(), {loadA}, {assign});
+        graph.control.addElement(Sequence(), {loadB}, {assign});
 
-        /* graph0 is:
+        /* graph is:
          *
          *          Kernel
          *            |
@@ -109,9 +109,12 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *         Assign
          */
 
-        auto graph1 = removeRedundantNOPs(graph0);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 1);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 5);
 
-        /* graph1 should be:
+        removeRedundantNOPs(graph);
+
+        /* graph should be:
          *
          *          Kernel
          *          /   \
@@ -120,28 +123,26 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *         Assign
          */
 
-        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 1);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 0);
 
-        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 5);
-        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 4);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 4);
     }
 
     SECTION("Simple double NOP")
     {
-        KernelGraph graph0;
+        KernelGraph graph;
 
-        auto kernel = graph0.control.addElement(Kernel());
-        auto nop0   = graph0.control.addElement(NOP());
-        auto nop1   = graph0.control.addElement(NOP());
-        auto assign = graph0.control.addElement(Assign());
+        auto kernel = graph.control.addElement(Kernel());
+        auto nop0   = graph.control.addElement(NOP());
+        auto nop1   = graph.control.addElement(NOP());
+        auto assign = graph.control.addElement(Assign());
 
-        graph0.control.addElement(Sequence(), {kernel}, {nop0});
-        graph0.control.addElement(Sequence(), {kernel}, {nop1});
-        graph0.control.addElement(Sequence(), {nop0}, {assign});
-        graph0.control.addElement(Sequence(), {nop1}, {assign});
+        graph.control.addElement(Sequence(), {kernel}, {nop0});
+        graph.control.addElement(Sequence(), {kernel}, {nop1});
+        graph.control.addElement(Sequence(), {nop0}, {assign});
+        graph.control.addElement(Sequence(), {nop1}, {assign});
 
-        /* graph0 is:
+        /* graph is:
          *
          *          Kernel
          *          /   \
@@ -150,39 +151,39 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *         Assign
          */
 
-        auto graph1 = removeRedundantNOPs(graph0);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 2);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 4);
 
-        /* graph1 should be:
+        removeRedundantNOPs(graph);
+
+        /* graph should be:
          *
          *          Kernel
          *            |
          *          Assign
          */
 
-        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 2);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
-
-        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 4);
-        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 1);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 1);
     }
 
     SECTION("Scheduling redundant NOP")
     {
-        KernelGraph graph0;
+        KernelGraph graph;
 
-        auto kernel = graph0.control.addElement(Kernel());
-        auto nop0   = graph0.control.addElement(NOP());
-        auto loadA  = graph0.control.addElement(LoadTiled());
-        auto loadB  = graph0.control.addElement(LoadTiled());
-        auto assign = graph0.control.addElement(Assign());
+        auto kernel = graph.control.addElement(Kernel());
+        auto nop0   = graph.control.addElement(NOP());
+        auto loadA  = graph.control.addElement(LoadTiled());
+        auto loadB  = graph.control.addElement(LoadTiled());
+        auto assign = graph.control.addElement(Assign());
 
-        graph0.control.addElement(Sequence(), {kernel}, {loadA});
-        graph0.control.addElement(Sequence(), {kernel}, {loadB});
-        graph0.control.addElement(Sequence(), {loadA}, {nop0});
-        graph0.control.addElement(Sequence(), {loadB}, {nop0});
-        graph0.control.addElement(Sequence(), {nop0}, {assign});
+        graph.control.addElement(Sequence(), {kernel}, {loadA});
+        graph.control.addElement(Sequence(), {kernel}, {loadB});
+        graph.control.addElement(Sequence(), {loadA}, {nop0});
+        graph.control.addElement(Sequence(), {loadB}, {nop0});
+        graph.control.addElement(Sequence(), {nop0}, {assign});
 
-        /* graph0 is:
+        /* graph is:
          *
          *          Kernel
          *          /   \
@@ -191,15 +192,18 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *           NOP
          *            |
          *         Assign
-	 *
-	 * Some transforms use NOPs as aids for scheduling.  As an
-	 * example, the NOP here ensures the loads happen before
-	 * assign.
+         *
+         * Some transforms use NOPs as aids for scheduling.  As an
+         * example, the NOP here ensures the loads happen before
+         * assign.
          */
 
-        auto graph1 = removeRedundantNOPs(graph0);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 5);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 1);
 
-        /* graph1 should be:
+        removeRedundantNOPs(graph);
+
+        /* graph should be:
          *
          *          Kernel
          *          /   \
@@ -208,81 +212,76 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *         Assign
          */
 
-        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 5);
-        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 4);
-
-        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 1);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 4);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 0);
     }
 
     SECTION("Scheduling NOPs from a ForLoop")
     {
-        KernelGraph graph0;
+        KernelGraph graph;
 
-        auto forLoop = graph0.control.addElement(ForLoopOp());
-        auto nop0    = graph0.control.addElement(NOP());
-        auto nop1    = graph0.control.addElement(NOP());
-        auto loadA   = graph0.control.addElement(LoadTiled());
-        auto loadB   = graph0.control.addElement(LoadTiled());
+        auto forLoop = graph.control.addElement(ForLoopOp());
+        auto nop0    = graph.control.addElement(NOP());
+        auto nop1    = graph.control.addElement(NOP());
+        auto loadA   = graph.control.addElement(LoadTiled());
+        auto loadB   = graph.control.addElement(LoadTiled());
 
-        graph0.control.addElement(Body(), {forLoop}, {nop0});
-        graph0.control.addElement(Body(), {forLoop}, {nop1});
-        graph0.control.addElement(Sequence(), {nop0}, {loadA});
-        graph0.control.addElement(Sequence(), {nop1}, {loadB});
+        graph.control.addElement(Body(), {forLoop}, {nop0});
+        graph.control.addElement(Body(), {forLoop}, {nop1});
+        graph.control.addElement(Sequence(), {nop0}, {loadA});
+        graph.control.addElement(Sequence(), {nop1}, {loadB});
 
-        /* graph0 is:
+        /* graph is:
          *
          *         ForLoop
          *          /   \
          *        NOP   NOP
          *         |     |
-	 *       LoadA  LoadB
-	 *
-	 * where the edges out of the ForLoop are bodies.
+         *       LoadA  LoadB
+         *
+         * where the edges out of the ForLoop are bodies.
          */
+        CHECK(graph.control.getElements<Body>().to<std::vector>().size() == 2);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 2);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 2);
 
-        auto graph1 = removeRedundantNOPs(graph0);
+        removeRedundantNOPs(graph);
 
-        /* graph1 should be:
+        /* graph should be:
          *
          *
          *         ForLoop
          *          /   \
-	 *       LoadA  LoadB
-	 *
-	 * where the edges out of the ForLoop are bodies.
+         *       LoadA  LoadB
+         *
+         * where the edges out of the ForLoop are bodies.
          */
 
-        CHECK(graph0.control.getElements<Body>().to<std::vector>().size() == 2);
-        CHECK(graph1.control.getElements<Body>().to<std::vector>().size() == 2);
-
-        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 2);
-        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 0);
-
-        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 2);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<Body>().to<std::vector>().size() == 2);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 0);
     }
 
     SECTION("Nasty NOP cluster")
     {
-        KernelGraph graph0;
+        KernelGraph graph;
 
-        auto kernel = graph0.control.addElement(Kernel());
-        auto nop0   = graph0.control.addElement(NOP());
-        auto nop1   = graph0.control.addElement(NOP());
-        auto nop2   = graph0.control.addElement(NOP());
-        auto nop3   = graph0.control.addElement(NOP());
-        auto assign = graph0.control.addElement(Assign());
+        auto kernel = graph.control.addElement(Kernel());
+        auto nop0   = graph.control.addElement(NOP());
+        auto nop1   = graph.control.addElement(NOP());
+        auto nop2   = graph.control.addElement(NOP());
+        auto nop3   = graph.control.addElement(NOP());
+        auto assign = graph.control.addElement(Assign());
 
-        graph0.control.addElement(Sequence(), {kernel}, {nop0});
-        graph0.control.addElement(Sequence(), {kernel}, {nop1});
-        graph0.control.addElement(Sequence(), {nop0}, {nop2});
-        graph0.control.addElement(Sequence(), {nop1}, {nop2});
-        graph0.control.addElement(Sequence(), {nop1}, {nop3});
-        graph0.control.addElement(Sequence(), {nop2}, {assign});
-        graph0.control.addElement(Sequence(), {nop3}, {assign});
+        graph.control.addElement(Sequence(), {kernel}, {nop0});
+        graph.control.addElement(Sequence(), {kernel}, {nop1});
+        graph.control.addElement(Sequence(), {nop0}, {nop2});
+        graph.control.addElement(Sequence(), {nop1}, {nop2});
+        graph.control.addElement(Sequence(), {nop1}, {nop3});
+        graph.control.addElement(Sequence(), {nop2}, {assign});
+        graph.control.addElement(Sequence(), {nop3}, {assign});
 
-        /* graph0 is:
+        /* graph is:
          *
          *          Kernel
          *          /   \
@@ -292,20 +291,20 @@ TEST_CASE("Simplify redundant NOPs", "[kernel-graph]")
          *             \  /
          *            Assign
          */
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 4);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 7);
 
-        auto graph1 = removeRedundantNOPs(graph0);
+        removeRedundantNOPs(graph);
 
-        /* graph1 should be:
+        /* graph should be:
          *
          *          Kernel
          *            |
          *          Assign
          */
 
-        CHECK(graph0.control.getElements<NOP>().to<std::vector>().size() == 4);
-        CHECK(graph1.control.getElements<NOP>().to<std::vector>().size() == 0);
+        CHECK(graph.control.getElements<NOP>().to<std::vector>().size() == 0);
 
-        CHECK(graph0.control.getElements<Sequence>().to<std::vector>().size() == 7);
-        CHECK(graph1.control.getElements<Sequence>().to<std::vector>().size() == 1);
+        CHECK(graph.control.getElements<Sequence>().to<std::vector>().size() == 1);
     }
 }

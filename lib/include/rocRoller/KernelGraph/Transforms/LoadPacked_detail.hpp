@@ -65,7 +65,7 @@ namespace rocRoller::KernelGraph
          * - Register dimensions will be set to unallocated registers.
          * - Returns other dimensions that cannot be determined in the set.
          */
-        std::tuple<Transformer, std::set<int>> getFakeTransformerForControlNode(
+        std::tuple<CoordinateGraph::Transformer, std::set<int>> getFakeTransformerForControlNode(
             int controlNode, KernelGraph const& graph, ContextPtr context);
 
         /**

@@ -74,6 +74,8 @@ namespace rocRoller
             int alignmentPhase = 0;
 
             static AllocationOptions FullyContiguous();
+
+            auto operator<=>(AllocationOptions const& other) const = default;
         };
 
         struct RegisterId

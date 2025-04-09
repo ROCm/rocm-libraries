@@ -38,6 +38,71 @@
 
 namespace rocRoller
 {
+
+    std::string CommandParameters::toString() const
+    {
+        std::ostringstream msg;
+
+        msg << ShowValue(allowAmbiguousMemoryNodes);
+        msg << ShowValue(enableLongDwordInstructions);
+
+        msg << ShowValue(transposeMemoryAccess);
+        msg << ShowValue(packMultipleElementsInto1VGPR);
+
+        msg << ShowValue(unrollX);
+        msg << ShowValue(unrollY);
+        msg << ShowValue(unrollK);
+        msg << ShowValue(fuseLoops);
+        msg << ShowValue(tailLoops);
+
+        msg << ShowValue(prefetch);
+        msg << ShowValue(prefetchInFlight);
+        msg << ShowValue(prefetchLDSFactor);
+        msg << ShowValue(prefetchMixMemOps);
+
+        msg << ShowValue(streamK);
+        msg << ShowValue(streamKTwoTile);
+
+        msg << "loopOverOutputTilesDimensions: ";
+        streamJoin(msg, loopOverOutputTilesDimensions, ", ");
+        msg << std::endl;
+
+        msg << ShowValue(loopOverOutputTilesTopLoop);
+
+        msg << "loopOverOutputTilesCoordSizes: ";
+        streamJoin(msg, loopOverOutputTilesCoordSizes, ", ");
+        msg << std::endl;
+
+        msg << ShowValue(loopOverOutputTilesIteratedTiles);
+
+        msg << "dimInfo: " << std::endl;
+        for(auto const& [tag, dim] : m_dimInfo)
+            msg << "  " << tag << ": " << dim << std::endl;
+
+        if(m_workgroupSize)
+        {
+            msg << "workgroupSize: ";
+            streamJoin(msg, *m_workgroupSize, ", ");
+            msg << std::endl;
+        }
+
+        if(m_wavefrontCounts)
+        {
+            auto const& [a, b] = *m_wavefrontCounts;
+            msg << "wavefrontCounts: [" << a << ", " << b << "]" << std::endl;
+        }
+
+        msg << ShowValue(m_kernelDimension);
+
+        msg << "waveTilesPerWavefront: [";
+        streamJoin(msg, m_waveTilesPerWavefront, ", ");
+        msg << "]" << std::endl;
+
+        msg << ShowValue(m_splitStoreTileIntoWaveBlocks);
+
+        return msg.str();
+    }
+
     CommandParameters::CommandParameters()
         : m_waveTilesPerWavefront({1, 1})
     {
@@ -338,6 +403,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
 

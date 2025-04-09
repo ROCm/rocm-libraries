@@ -34,9 +34,6 @@
 
 namespace rocRoller::KernelGraph
 {
-    using namespace CoordinateGraph;
-    using namespace ControlGraph;
-
     /**
      * @brief Register read/write tracer.
      *
@@ -90,36 +87,36 @@ namespace rocRoller::KernelGraph
          */
         std::unordered_map<int, int> getBodyParents() const;
 
-        void operator()(Assign const& op, int tag);
-        void operator()(Barrier const& op, int tag);
-        void operator()(ComputeIndex const& op, int tag);
-        void operator()(ConditionalOp const& op, int tag);
-        void operator()(AssertOp const& op, int tag);
-        void operator()(Deallocate const& op, int tag);
-        void operator()(DoWhileOp const& op, int tag);
-        void operator()(Exchange const& op, int tag);
-        void operator()(ForLoopOp const& op, int tag);
-        void operator()(Kernel const& op, int tag);
-        void operator()(LoadLDSTile const& op, int tag);
-        void operator()(LoadLinear const& op, int tag);
-        void operator()(LoadTiled const& op, int tag);
-        void operator()(LoadVGPR const& op, int tag);
-        void operator()(LoadSGPR const& op, int tag);
-        void operator()(Multiply const& op, int tag);
-        void operator()(NOP const& op, int tag);
-        void operator()(Block const& op, int tag);
-        void operator()(Scope const& op, int tag);
-        void operator()(SetCoordinate const& op, int tag);
-        void operator()(StoreLDSTile const& op, int tag);
-        void operator()(LoadTileDirect2LDS const& op, int tag);
-        void operator()(StoreLinear const& op, int tag);
-        void operator()(StoreTiled const& op, int tag);
-        void operator()(StoreVGPR const& op, int tag);
-        void operator()(StoreSGPR const& op, int tag);
-        void operator()(TensorContraction const& op, int tag);
-        void operator()(UnrollOp const& op, int tag);
-        void operator()(WaitZero const& op, int tag);
-        void operator()(SeedPRNG const& op, int tag);
+        void operator()(ControlGraph::AssertOp const& op, int tag);
+        void operator()(ControlGraph::Assign const& op, int tag);
+        void operator()(ControlGraph::Barrier const& op, int tag);
+        void operator()(ControlGraph::Block const& op, int tag);
+        void operator()(ControlGraph::ComputeIndex const& op, int tag);
+        void operator()(ControlGraph::ConditionalOp const& op, int tag);
+        void operator()(ControlGraph::Deallocate const& op, int tag);
+        void operator()(ControlGraph::DoWhileOp const& op, int tag);
+        void operator()(ControlGraph::Exchange const& op, int tag);
+        void operator()(ControlGraph::ForLoopOp const& op, int tag);
+        void operator()(ControlGraph::Kernel const& op, int tag);
+        void operator()(ControlGraph::LoadLDSTile const& op, int tag);
+        void operator()(ControlGraph::LoadLinear const& op, int tag);
+        void operator()(ControlGraph::LoadSGPR const& op, int tag);
+        void operator()(ControlGraph::LoadTileDirect2LDS const& op, int tag);
+        void operator()(ControlGraph::LoadTiled const& op, int tag);
+        void operator()(ControlGraph::LoadVGPR const& op, int tag);
+        void operator()(ControlGraph::Multiply const& op, int tag);
+        void operator()(ControlGraph::NOP const& op, int tag);
+        void operator()(ControlGraph::Scope const& op, int tag);
+        void operator()(ControlGraph::SeedPRNG const& op, int tag);
+        void operator()(ControlGraph::SetCoordinate const& op, int tag);
+        void operator()(ControlGraph::StoreLDSTile const& op, int tag);
+        void operator()(ControlGraph::StoreLinear const& op, int tag);
+        void operator()(ControlGraph::StoreSGPR const& op, int tag);
+        void operator()(ControlGraph::StoreTiled const& op, int tag);
+        void operator()(ControlGraph::StoreVGPR const& op, int tag);
+        void operator()(ControlGraph::TensorContraction const& op, int tag);
+        void operator()(ControlGraph::UnrollOp const& op, int tag);
+        void operator()(ControlGraph::WaitZero const& op, int tag);
 
     protected:
         void trackRegister(int control, int coordinate, ReadWrite rw);
@@ -127,7 +124,7 @@ namespace rocRoller::KernelGraph
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);
-        void call(Operation const& op, int tag);
+        void call(ControlGraph::Operation const& op, int tag);
 
         KernelGraph                  m_graph;
         std::set<int>                m_completedControlNodes;
@@ -149,7 +146,10 @@ namespace rocRoller::KernelGraph
         void trace(int start);
     };
 
-    std::string   toString(ControlFlowRWTracer::ReadWrite const& rw);
+    std::string toString(ControlFlowRWTracer::ReadWrite rw);
+
+    std::string toString(ControlFlowRWTracer::ReadWriteRecord const& record);
+
     std::ostream& operator<<(std::ostream& stream, ControlFlowRWTracer::ReadWrite rw);
 
 }

@@ -38,17 +38,21 @@ help() {
     echo "options:"
     echo "--skip_codecov  Skip running the tests and collecting code coverage."
     echo "--skip_diff     Skip performing the diff and producing reports."
+    echo "--skip_zip      Skip creating the zip archive with the results."
     echo "-b              Absolute path to build directory"
     echo "-g              GPU Identifier (for output file names)"
     echo "-u              Comparison archive URL"
+    echo "-R              Regular expression to filter tests."
     echo "-h              Print this help message"
     echo
 }
 
 skip_diff=false
 skip_codecov=false
+ctest_re_flag=
+ctest_re=
 
-while getopts g:b:u:h:-: flag; do
+while getopts R:g:b:u:h:-: flag; do
     case "${flag}" in
     -)
       case "${OPTARG}" in
@@ -58,12 +62,19 @@ while getopts g:b:u:h:-: flag; do
         skip_diff)
           skip_diff=true
           ;;
+        skip_zip)
+          skip_diff=true
+          ;;
         *)
           echo "Unknown option --${OPTARG}"
           help
           exit 1
           ;;
       esac
+      ;;
+    R)
+      ctest_re=${OPTARG}
+      ctest_re_flag="-R"
       ;;
     g) gpu=${OPTARG} ;;
     b) build_path=${OPTARG} ;; # Absolute path required
@@ -122,7 +133,8 @@ else
     OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocRollerTests_%m.profraw ctest \
         -j $(nproc) \
         --test-dir ${build_path} \
-        --output-on-failure
+        --output-on-failure \
+        ${ctest_re_flag} "${ctest_re}"
 
     # this combines them back together.
     /opt/rocm/lib/llvm/bin/llvm-profdata merge \
@@ -166,10 +178,14 @@ else
         ${code_cov_path}/code_cov_${gpu}_text/lib/
     rm -rf ${code_cov_path}/code_cov_${gpu}_text/coverage
 
-    # zip the text report for archiving.
-    pushd ${code_cov_path}
-    zip -r ${code_cov_path}/code_cov_${gpu}.zip ./code_cov_${gpu}_text
-    popd
+    if $skip_zip; then
+        echo "Skipping zip."
+    else
+        # zip the text report for archiving.
+        pushd ${code_cov_path}
+        zip -r ${code_cov_path}/code_cov_${gpu}.zip ./code_cov_${gpu}_text
+        popd
+    fi
 fi
 
 if $skip_diff; then

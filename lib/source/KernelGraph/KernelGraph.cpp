@@ -91,9 +91,6 @@ namespace rocRoller
             auto transformString  = concatenate("KernelGraph::transform ", transformation->name());
             auto checkConstraints = Settings::getInstance()->get(Settings::EnforceGraphConstraints);
 
-            auto logger = rocRoller::Log::getLogger();
-            logger->debug(transformString);
-
             if(checkConstraints)
             {
                 auto check = (*this).checkConstraints(transformation->preConstraints());
@@ -104,9 +101,9 @@ namespace rocRoller
             KernelGraph newGraph = transformation->apply(*this);
 
             if(Settings::getInstance()->get(Settings::LogGraphs))
-                logger->debug("KernelGraph::transform: {}, post: {}",
-                              transformation->name(),
-                              newGraph.toDOT(false, transformString));
+                Log::debug("KernelGraph::transform: {}, post: {}",
+                           transformation->name(),
+                           newGraph.toDOT(false, transformString));
 
             if(checkConstraints)
             {
@@ -116,7 +113,19 @@ namespace rocRoller
                             concatenate(transformString, " PostCheck: \n", check.explanation));
             }
 
+            newGraph.m_transforms.push_back(transformation->name());
+
             return newGraph;
+        }
+
+        std::vector<std::string> const& KernelGraph::appliedTransforms() const
+        {
+            return m_transforms;
+        }
+
+        void KernelGraph::addAppliedTransforms(std::vector<std::string> const& transforms)
+        {
+            m_transforms.insert(m_transforms.end(), transforms.begin(), transforms.end());
         }
     }
 }

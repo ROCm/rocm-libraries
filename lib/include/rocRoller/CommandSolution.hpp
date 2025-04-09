@@ -73,7 +73,7 @@ namespace rocRoller
         int  getManualKernelDimension() const;
 
         /**
-         * Manually overrite workgroup sizes.
+         * Manually override workgroup sizes.
          *
          * TODO remove this.
          */
@@ -106,6 +106,8 @@ namespace rocRoller
          */
         void setSplitStoreTileIntoWaveBlocks(bool);
         bool getSplitStoreTileIntoWaveBlocks() const;
+
+        std::string toString() const;
 
         /**
          * Lowering parameters.

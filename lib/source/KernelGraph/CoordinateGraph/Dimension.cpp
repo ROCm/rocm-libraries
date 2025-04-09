@@ -242,16 +242,18 @@ namespace rocRoller
 
         std::string MacroTile::toString() const
         {
-            if(!sizes.empty())
-            {
-                std::string _sizes = "{";
-                for(int s : sizes)
-                    _sizes += std::to_string(s) + ",";
-                _sizes[_sizes.length() - 1] = '}';
-                return name() + _sizes;
-            }
+            std::ostringstream msg;
+            msg << BaseDimension::toString() << "(" << rank << "/" << memoryType << "/"
+                << layoutType << ")"
+                << "{";
 
-            return BaseDimension::toString();
+            streamJoin(msg, sizes, ",");
+
+            msg << "}-(";
+            streamJoin(msg, subTileSizes, ",");
+            msg << ")";
+
+            return msg.str();
         }
 
         MacroTileNumber MacroTile::tileNumber(int sdim, Expression::ExpressionPtr size) const

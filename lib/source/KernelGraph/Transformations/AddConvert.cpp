@@ -34,6 +34,9 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
         class AddConvertOperations
         {
         public:
@@ -57,7 +60,7 @@ namespace rocRoller
             void stageMultiplyConverts(KernelGraph const& graph);
             void commit(KernelGraph& graph);
 
-            // Map from storage coordinate to vector of {Multiply operation tag, RHS/LHS} pairs.
+            // Map from storage coordinate to vector of {Multiply operation tag, LHS/RHS} pairs.
             std::map<int, std::vector<std::pair<int, NaryArgument>>> m_multiplyArgs;
             // Map from storage coordinate to set of LoadTiled/LoadLDSTile operations
             std::map<int, std::unordered_set<int>> m_loadMap;
@@ -104,7 +107,7 @@ namespace rocRoller
                 std::visit(visitor, graph.control.getNode(node));
             }
 
-            for(auto& [storage, multiplies] : m_multiplyArgs)
+            for(auto const& [storage, multiplies] : m_multiplyArgs)
             {
                 auto packed = DataTypeInfo::Get(m_storageDataType[storage]).packedVariableType();
                 if(!packed)
@@ -112,7 +115,12 @@ namespace rocRoller
                 if(m_storageDataType[storage] == packed->dataType)
                     continue;
 
-                m_locations.emplace_back(ConvertLocation{storage, m_loadMap[storage], multiplies});
+                Log::debug("{}: convert {} to {}",
+                           storage,
+                           toString(m_storageDataType[storage]),
+                           toString(*packed));
+
+                m_locations.emplace_back(storage, m_loadMap[storage], multiplies);
             }
         }
 
@@ -140,6 +148,11 @@ namespace rocRoller
                         Assign{Register::Type::Vector, Expression::convert(packed, dataFlow), 0});
                     graph.mapper.connect(convertNode, newStorage, NaryArgument::DEST);
                     insertAfter(graph, loadOp, convertNode, convertNode);
+
+                    Log::debug("{}: added convert {} (new storage {})",
+                               location.storageCoord,
+                               convertNode,
+                               newStorage);
                 }
 
                 // Change mappings for all multiplies

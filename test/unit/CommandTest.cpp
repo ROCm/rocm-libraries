@@ -108,7 +108,8 @@ TEST_F(CommandTest, ConvertOp)
         Tensor.Float.d1 0, (base=&0, lim=&8, sizes={&16 }, strides={&24 })
         T_LOAD_LINEAR 1 Source 0
         T_EXECUTE 1
-        E_Cvt 2, 1)";
+        E_Cvt 2, 1
+        )";
 
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
 }
@@ -138,7 +139,8 @@ TEST_F(CommandTest, VectorAdd)
         T_EXECUTE 1 3
         E_Add 4, 1, 3
         Tensor.Float.d1 6, (base=&64, lim=&72, sizes={&80 }, strides={&88 })
-        T_STORE_LINEAR 7 Source 4 Dest 6)";
+        T_STORE_LINEAR 7 Source 4 Dest 6
+        )";
     EXPECT_EQ(NormalizedSource(command->toString()), NormalizedSource(result));
 
     {

@@ -292,8 +292,9 @@ namespace RandomNumberGenerationTest
                 = command->addOperation(rocRoller::Operations::Tensor(1, DataType::UInt32));
             command->addOperation(rocRoller::Operations::T_Store_Linear(addOp2, outputTag2));
 
-            CommandKernel commandKernel(command, "GenerateTwoRandomValues");
-            auto          context = TestContext::ForTestDevice();
+            auto context = TestContext::ForTestDevice({}, seedMode);
+
+            CommandKernel commandKernel(command, context->kernel()->kernelName());
             commandKernel.setContext(context.get());
             commandKernel.generateKernel();
 
@@ -355,7 +356,7 @@ namespace RandomNumberGenerationTest
         }
     }
 
-    TEST_CASE("Two dimensional kernel", "[gpu][prng]")
+    TEST_CASE("PRNG works for a two dimensional kernel", "[gpu][prng]")
     {
         auto seedMode = GENERATE(rocRoller::Operations::RandomNumberGenerator::SeedMode::Default,
                                  rocRoller::Operations::RandomNumberGenerator::SeedMode::PerThread);
@@ -497,7 +498,8 @@ namespace RandomNumberGenerationTest
         }
     }
 
-    TEST_CASE("Check random numbers are generated in topological order", "[prng][transformation]")
+    TEST_CASE("Check random numbers are generated in topological order",
+              "[prng][kernel-graph][transformation][graph-transforms]")
     {
         auto seedMode = rocRoller::Operations::RandomNumberGenerator::SeedMode::Default;
 

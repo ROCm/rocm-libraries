@@ -97,6 +97,8 @@ namespace rocRoller
         public:
             using Element = std::variant<Node, Edge>;
 
+            inline static constexpr bool IsHyper = Hyper;
+
             static std::string ElementName(Element const& el);
 
             using Incident = HypergraphIncident;
@@ -475,6 +477,8 @@ namespace rocRoller
                                       auto                                        edgePredicate,
                                       auto destNodePredicate);
 
+        template <typename T>
+        concept CCalmGraph = !T::IsHyper;
     }
 }
 

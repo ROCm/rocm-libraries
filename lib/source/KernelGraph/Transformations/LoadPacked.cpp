@@ -51,12 +51,14 @@ namespace rocRoller::KernelGraph
             auto parents = graph.control.nodesContaining(controlNode).to<std::set>();
             Log::debug("{} parents: {}", controlNode, concatenate(parents));
 
-            auto setCoordNodes = graph.control.nodesContaining(controlNode)
-                                     .filter(graph.control.isElemType<SetCoordinate>());
+            auto setCoordNodes
+                = graph.control.nodesContaining(controlNode)
+                      .filter(graph.control.isElemType<ControlGraph::SetCoordinate>());
 
             for(auto setCoordNode : setCoordNodes)
             {
-                auto setCoord = graph.control.get<SetCoordinate>(setCoordNode).value();
+                auto setCoord
+                    = graph.control.get<ControlGraph::SetCoordinate>(setCoordNode).value();
 
                 auto connections = graph.mapper.getConnections(setCoordNode);
                 AssertFatal(connections.size() == 1,
@@ -74,7 +76,7 @@ namespace rocRoller::KernelGraph
                 else
                 {
                     auto ordering = graph.control.compareNodes(setCoordNode, iter->second);
-                    if(ordering == NodeOrdering::LeftInBodyOfRight)
+                    if(ordering == ControlGraph::NodeOrdering::LeftInBodyOfRight)
                     {
                         Log::debug("{}: replacing {} with {}.",
                                    coord,
@@ -94,6 +96,7 @@ namespace rocRoller::KernelGraph
                                KernelGraph const&             graph,
                                ContextPtr                     context)
         {
+            using namespace CoordinateGraph;
             std::map<int, Expression::ExpressionPtr> rv;
 
             auto isRegisterDim = [](auto dim) -> bool {
@@ -116,7 +119,7 @@ namespace rocRoller::KernelGraph
             return rv;
         }
 
-        std::tuple<Transformer, std::set<int>> getFakeTransformerForControlNode(
+        std::tuple<CoordinateGraph::Transformer, std::set<int>> getFakeTransformerForControlNode(
             int controlNode, KernelGraph const& graph, ContextPtr context)
         {
             auto const& [coords, paths] = findAllRequiredCoordinates(controlNode, graph);
@@ -124,7 +127,7 @@ namespace rocRoller::KernelGraph
             auto staticCoords = getStaticCoords(controlNode, graph);
             auto regCoords    = fillRegisterCoords(coords, graph, context);
 
-            Transformer xform(&graph.coordinates);
+            CoordinateGraph::Transformer xform(&graph.coordinates);
 
             for(auto const& [coord, expr] : staticCoords)
                 xform.setCoordinate(coord, expr);
@@ -157,14 +160,14 @@ namespace rocRoller::KernelGraph
                 auto dim = graph.coordinates.getNode(coord);
 
                 auto visitor = rocRoller::overloaded{
-                    [&]<std::derived_from<SubDimension> T>(T const& subdim) {
+                    [&]<std::derived_from<CoordinateGraph::SubDimension> T>(T const& subdim) {
                         if(!maxSubDim || subdim.dim > maxSubDim)
                         {
                             fastestCoord = coord;
                             maxSubDim    = subdim.dim;
                         }
                     },
-                    [&](VGPR const& vgpr) {
+                    [&](CoordinateGraph::VGPR const& vgpr) {
                         fastestCoord = coord;
                         maxSubDim    = 1000;
                     },
@@ -184,6 +187,8 @@ namespace rocRoller::KernelGraph
 
     KernelGraph LoadPacked::apply(KernelGraph const& original)
     {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
         using namespace LoadPackedDetail;
 
         std::set<int> changedDims;

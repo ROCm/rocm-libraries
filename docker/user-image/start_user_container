@@ -302,7 +302,13 @@ def main():
                 args.user_dockerfile,
                 user_image_name,
                 args.context,
-                *make_build_args(["base_image=" + base_image_name, "_UID=" + args.uid, "_GID=" + str(get_render_group())]),
+                *make_build_args(
+                    [
+                        "base_image=" + base_image_name,
+                        "_UID=" + args.uid,
+                        "_GID=" + str(get_render_group()),
+                    ]
+                ),
                 *[
                     arg
                     for extra_arg in args.user_build_extra_args

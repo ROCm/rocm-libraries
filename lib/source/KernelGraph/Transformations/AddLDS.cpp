@@ -480,7 +480,9 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::AddPrefetch");
 
-            auto graph = removeRedundantNOPs(removeRedundantBodyEdges(original));
+            auto graph = original;
+            removeRedundantBodyEdges(graph);
+            removeRedundantNOPs(graph);
 
             std::unordered_set<int> storeHasBarrierAlready;
 
@@ -653,8 +655,8 @@ namespace rocRoller
                 commitForLoop(k, forLoop, numUnroll);
             }
 
-            k = removeRedundantSequenceEdges(k);
-            k = removeRedundantBodyEdges(k);
+            removeRedundantSequenceEdges(k);
+            removeRedundantBodyEdges(k);
         }
 
         /**

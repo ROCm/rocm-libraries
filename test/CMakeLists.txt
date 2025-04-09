@@ -1,4 +1,3 @@
-
 ################################################################################
 #
 # MIT License
@@ -70,18 +69,19 @@ set(
     unit/CostTest.cpp
     unit/DataTypesTest.cpp
     unit/DependencyTest.cpp
+    unit/EnumToStringTest.cpp
     unit/ErrorTest.cpp
     unit/F6Test.cpp
     unit/F8Test.cpp
+    unit/FP4Test.cpp
     unit/FastDivisionTest.cpp
     unit/FastMultiplicationTest.cpp
     unit/FileWritingObserverTest.cpp
-    unit/FP4Test.cpp
     unit/GEMMFusion.cpp
     unit/GEMMTest.cpp
-    unit/GeneratorTest.cpp
     unit/GPUArchitectureTest.cpp
     unit/GPUInstructionInfoTest.cpp
+    unit/GeneratorTest.cpp
     unit/HalfPrecisionTest.cpp
     unit/HypergraphTest.cpp
     unit/InstructionTest.cpp
@@ -93,16 +93,16 @@ set(
     unit/KernelIndexTest.cpp
     unit/KernelOptionsTest.cpp
     unit/KernelTest.cpp
-    unit/LabelTest.cpp
     unit/LDSTest.cpp
     unit/LDSTileCopyTest.cpp
+    unit/LabelTest.cpp
     unit/LockTest.cpp
     unit/LowerExponentialTest.cpp
+    unit/MFMAHazardObserverTest.cpp
+    unit/MFMAUnitObserverTest.cpp
     unit/MatrixMultiplyTest.cpp
     unit/MemoryInstructionsTest.cpp
     unit/MetaObserverTest.cpp
-    unit/MFMAHazardObserverTest.cpp
-    unit/MFMAUnitObserverTest.cpp
     unit/MixedArithmeticTest.cpp
     unit/OperationTagTest.cpp
     unit/PermLanesTest.cpp
@@ -113,6 +113,7 @@ set(
     unit/SchedulerTest.cpp
     unit/ScopeTest.cpp
     unit/SourceMatcherTest.cpp
+    unit/StreamTest.cpp
     unit/SupportedInstructionObserverTest.cpp
     unit/TileTransposeAdd.cpp
     unit/TimerTest.cpp
@@ -122,9 +123,6 @@ set(
     unit/VectorAddBenchmark.cpp
     unit/WaitCountObserverTest.cpp
     unit/WaitCountTest.cpp
-    unit/OperationTagTest.cpp
-    unit/StreamTest.cpp
-    unit/EnumToStringTest.cpp
 )
 
 add_executable(rocRollerTests ${rocRollerTests_SOURCES})
@@ -158,6 +156,7 @@ set(
     catch/CustomAssertions.cpp
     catch/TestKernels.cpp
 
+    catch/AliasDataFlowTagsTest.cpp
     catch/AnnotateInstructionsTest.cpp
     catch/BinaryExpressionTest.cpp
     catch/BranchGeneratorTest.cpp
@@ -186,6 +185,7 @@ set(
     catch/MultipleLDSAllocationTest.cpp
     catch/RandomNumberExpressionTest.cpp
     catch/RandomNumberGenerationTest.cpp
+    catch/RegisterTagManagerTest.cpp
     catch/ScalarExpressionTest.cpp
     catch/SettingsTest.cpp
     catch/SubDwordExpressionTest.cpp
@@ -193,10 +193,10 @@ set(
     catch/TestContextTest.cpp
     catch/UnrollLoopsTest.cpp
     catch/UtilsTest.cpp
-    catch/mxDataGeneratorTest.cpp
-    catch/WidenAddrExprTo64bitTest.cpp
     catch/WMMAHazardObserverTest.cpp
     catch/WMMAObserverUnitTest.cpp
+    catch/WidenAddrExprTo64bitTest.cpp
+    catch/mxDataGeneratorTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

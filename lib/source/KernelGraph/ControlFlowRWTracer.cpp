@@ -34,25 +34,10 @@ namespace rocRoller::KernelGraph
 
     namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
-    inline std::string toString(ControlFlowRWTracer::ReadWrite const& rw)
+    std::string toString(ControlFlowRWTracer::ReadWriteRecord const& record)
     {
-        switch(rw)
-        {
-        case ControlFlowRWTracer::ReadWrite::READ:
-            return "READ";
-        case ControlFlowRWTracer::ReadWrite::WRITE:
-            return "WRITE";
-        case ControlFlowRWTracer::ReadWrite::READWRITE:
-            return "READWRITE";
-        default:
-            break;
-        }
-        throw std::runtime_error("Invalid ControlFlowRWTracer::ReadWrite");
-    }
-
-    inline std::ostream& operator<<(std::ostream& stream, ControlFlowRWTracer::ReadWrite rw)
-    {
-        return stream << toString(rw);
+        return fmt::format(
+            "ctrl {} {} coord {}", record.control, toString(record.rw), record.coordinate);
     }
 
     /**
@@ -437,6 +422,10 @@ namespace rocRoller::KernelGraph
         auto seedVGPR = m_graph.mapper.get(tag, NaryArgument::DEST);
         trackRegister(tag, seedVGPR, ReadWrite::WRITE);
         trackConnections(tag, {seedVGPR}, ReadWrite::READ);
+
+        auto rhs = m_graph.mapper.get(tag, NaryArgument::RHS);
+        trackRegister(tag, rhs, ReadWrite::READ);
+        trackConnections(tag, {rhs}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
@@ -615,6 +604,28 @@ namespace rocRoller::KernelGraph
         auto dst
             = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
         trackRegister(tag, dst, ReadWrite::READWRITE);
+    }
+
+    std::string toString(ControlFlowRWTracer::ReadWrite rw)
+    {
+        switch(rw)
+        {
+        case ControlFlowRWTracer::READ:
+            return "READ";
+        case ControlFlowRWTracer::WRITE:
+            return "WRITE";
+        case ControlFlowRWTracer::READWRITE:
+            return "READWRITE";
+        case ControlFlowRWTracer::Count:
+            break;
+        }
+
+        Throw<FatalError>("Invalid ReadWrite.");
+    }
+
+    std::ostream& operator<<(std::ostream& stream, ControlFlowRWTracer::ReadWrite rw)
+    {
+        return stream << toString(rw);
     }
 
 }

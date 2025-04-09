@@ -72,6 +72,10 @@ def format_and_patch(command: str, path: pathlib.Path):
     write(p2.stdout)
 
 
+def test_clang_format():
+    subprocess.check_call("clang-format --version", shell=True)
+
+
 def run_clang_format(path: pathlib.Path):
     format_and_patch(f"clang-format '{path}' | diff {path} -", path)
 
@@ -100,6 +104,7 @@ def get_py_files(dir: pathlib.Path):
 
 
 def fix_cpp(dir: pathlib.Path):
+    test_clang_format()
     paths = get_cpp_files(dir)
     write(f"Fixing {len(paths)} C++ files:")
 

@@ -51,8 +51,10 @@ namespace rocRoller
             elementBlockStride; //< If non-null, stride between element blocks.
         Expression::ExpressionPtr
             trLoadPairStride; //< If non-null, stride between element blocks of transpose loads of a wavetile.
+
+        auto operator<=>(RegisterExpressionAttributes const& other) const = default;
     };
-    std::string toString(RegisterExpressionAttributes t);
+    std::string toString(RegisterExpressionAttributes const& attrs);
 
     /**
      * @brief Register Tag Manager - Keeps track of data flow tags
@@ -76,10 +78,19 @@ namespace rocRoller
         ~RegisterTagManager();
 
         /**
-         * Copies any necessary info from the kernel graph.
-     * Currently registers Index edges.
+         * Copies any necessary info from the kernel graph.  Currently registers
+         * Alias and Index edges.
          */
         void initialize(KernelGraph::KernelGraph const& kgraph);
+
+        /**
+         * Causes `src` to borrow the register the allocation from `dst`.  This will
+         * require that:
+         *  - `src` and `dst` will use the same number, type, and alignment
+         *    requirements.
+         *  - `dst` will not be accessed while `src` is active.
+         */
+        void addAlias(int src, int dst);
 
         /**
          * Causes `src` to index the register allocation from `dst`.
@@ -174,26 +185,41 @@ namespace rocRoller
         void deleteTag(int tag);
 
         /**
-         * @brief Returns whether or not a register has already been added to the
-         *        Register Manager.
-         *
-         * @param tag
-         * @return true
-         * @return false
+         * Returns whether or not a register has already been added to the
+         * Register Manager.
          */
         bool hasRegister(int tag) const;
 
         std::optional<int> findRegister(Register::ValuePtr reg) const;
 
         /**
-         * @brief Returns whether or not an expression has already been added to the
-         *        Register Manager.
-         *
-         * @param tag
-         * @return true
-         * @return false
+         * Returns whether or not an expression has already been added to the
+         * Register Manager.
          */
         bool hasExpression(int tag) const;
+
+        /**
+         * Indicates that the register for `tag` may be borrowed to be used
+         * for a different tag's data.
+         */
+        bool isAliased(int tag) const;
+
+        /**
+         * Indicates that the register for `tag` will borrow the allocation
+         * from a different tag's register.
+         */
+        bool hasAlias(int tag) const;
+
+        /**
+         * If `hasAlias(tag)`, then returns the tag we will borrow from.
+         */
+        std::optional<int> getAlias(int tag) const;
+
+        /**
+         * Indicates that `tag` is unavailable because `isAliased(tag)` and
+         * another tag is currently using `tag`'s allocation.
+         */
+        bool isBorrowed(int tag) const;
 
         /**
          * If `getIndex(tag)`, then returns the pair <tag, index>.
@@ -206,6 +232,11 @@ namespace rocRoller
         std::map<int, std::pair<Expression::ExpressionPtr, RegisterExpressionAttributes>>
             m_expressions;
 
+        inline static constexpr int ALIAS_DEST = -1;
+
+        std::map<int, int> m_borrowedTags;
+
+        std::map<int, int>                 m_aliases;
         std::map<int, std::pair<int, int>> m_indexes;
     };
 }

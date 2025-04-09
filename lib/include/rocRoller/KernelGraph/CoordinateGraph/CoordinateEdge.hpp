@@ -87,6 +87,12 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(DataFlow);
 
         /**
+         * Alias - denotes that the source will borrow the register
+         * allocation from the dest.
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Alias);
+
+        /**
          * Index - denotes that the source will index the register
          * allocation from the dest.
          */

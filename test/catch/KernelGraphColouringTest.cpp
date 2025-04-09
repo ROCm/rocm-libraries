@@ -37,6 +37,7 @@ TEST_CASE("Colour by Unroll value", "[kernel-graph]")
     using namespace rocRoller::Expression;
     using namespace rocRoller::KernelGraph;
     using namespace rocRoller::KernelGraph::ControlGraph;
+    using namespace rocRoller::KernelGraph::CoordinateGraph;
 
     KernelGraph graph;
 

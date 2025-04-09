@@ -33,6 +33,8 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
 
         /**
          *  Get an unordered map where the values are random number generators(PRNG) and

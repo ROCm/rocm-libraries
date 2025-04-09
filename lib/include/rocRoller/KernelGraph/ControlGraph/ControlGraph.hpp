@@ -29,6 +29,8 @@
 #include <functional>
 #include <variant>
 
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph_fwd.hpp>
+
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge.hpp>
@@ -163,6 +165,12 @@ namespace rocRoller
              * all nodes in the graph.
              */
             std::string nodeOrderTableString() const;
+
+            /**
+             * Returns a string containing a text table describing the relationship between
+             * the listed nodes in the graph.
+             */
+            std::string nodeOrderTableString(std::set<int> const& nodes) const;
 
             /**
              * Contains a map of every definite ordering between two nodes.
