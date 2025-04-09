@@ -259,12 +259,6 @@ else()
     endif()
 endif()
 
-find_package(Boost REQUIRED)
-if(Boost_VERSION VERSION_LESS "1.74.0")
-    message(WARNING "Boost version ${Boost_VERSION} too old, not building RocRoller")
-    set(USE_ROCROLLER OFF)
-endif()
-
 if( LEGACY_HIPBLAS_DIRECT )
   find_package( hipblas REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 else()

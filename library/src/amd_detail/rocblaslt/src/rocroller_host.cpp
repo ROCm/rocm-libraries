@@ -3,6 +3,7 @@
 #include "utility.hpp"
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
