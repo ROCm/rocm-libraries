@@ -44,7 +44,7 @@
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
-extern "C" _CCCL_DEVICE void __atomic_try_wait_unsupported_before_SM_70__();
+_CCCL_DEVICE inline void __atomic_try_wait_unsupported_before_SM_70__(){};
 
 template <typename _Tp, typename _Sco>
 _LIBCUDACXX_HIDE_FROM_ABI void
