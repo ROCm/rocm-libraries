@@ -214,8 +214,8 @@ namespace detail
 #endif
 
 #ifdef __HIP_DEVICE_COMPILE__
-    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_is_shared) \
-        && __has_builtin(__builtin_amdgcn_is_private)
+    #if !ROCPRIM_TARGET_SPIRV && defined(__has_builtin) \
+        && __has_builtin(__builtin_amdgcn_is_shared) && __has_builtin(__builtin_amdgcn_is_private)
 
         auto* ptr = (const __attribute__((address_space(0 /*flat*/))) __uint128_t*)address;
         if(__builtin_amdgcn_is_shared(ptr))
@@ -235,6 +235,8 @@ namespace detail
             ROCPRIM_ATOMIC_LOAD_GLOBAL(global_ptr);
         }
     #else
+        // SPIR-V does not like the address-space checks. For now
+        // lets just do flat loading/storing.
         ROCPRIM_ATOMIC_LOAD_FLAT(address);
     #endif
 #else
@@ -320,8 +322,8 @@ namespace detail
 #endif
 
 #ifdef __HIP_DEVICE_COMPILE__
-    #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_is_shared) \
-        && __has_builtin(__builtin_amdgcn_is_private)
+    #if !ROCPRIM_TARGET_SPIRV && defined(__has_builtin) \
+        && __has_builtin(__builtin_amdgcn_is_shared) && __has_builtin(__builtin_amdgcn_is_private)
 
         auto* ptr = (__attribute__((address_space(0 /*flat*/))) __uint128_t*)address;
         if(__builtin_amdgcn_is_shared(ptr))
@@ -339,6 +341,8 @@ namespace detail
             ROCPRIM_ATOMIC_STORE_GLOBAL(global_ptr);
         }
     #else
+        // SPIR-V does not like the address-space checks. For now
+        // lets just do flat loading/storing.
         ROCPRIM_ATOMIC_STORE_FLAT(address);
     #endif
 #else
