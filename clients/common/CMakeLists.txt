@@ -141,12 +141,6 @@ set(rocblas_testing_common_source
     blas_ex/common_geam_ex.cpp
 )
 
-if( BUILD_WITH_TENSILE )
-  set( rocblas_testing_common_tensile_source
-       blas_ex/common_gemm_ex3.cpp
-  )
-endif()
-
 add_library(rocblas_clients_common OBJECT ${rocblas_testing_common_tensile_source} ${rocblas_common_source})
 
 rocblas_client_library_settings( rocblas_clients_common )

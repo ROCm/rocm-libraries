@@ -127,12 +127,11 @@ struct Arguments
 
     rocblas_gemm_flags flags;
 
-    rocblas_datatype    a_type;
-    rocblas_datatype    b_type;
-    rocblas_datatype    c_type;
-    rocblas_datatype    d_type;
-    rocblas_datatype    compute_type;
-    rocblas_computetype composite_compute_type;
+    rocblas_datatype a_type;
+    rocblas_datatype b_type;
+    rocblas_datatype c_type;
+    rocblas_datatype d_type;
+    rocblas_datatype compute_type;
 
     rocblas_initialization initialization;
 
@@ -241,7 +240,6 @@ struct Arguments
     OPER(c_type) SEP                 \
     OPER(d_type) SEP                 \
     OPER(compute_type) SEP           \
-    OPER(composite_compute_type) SEP \
     OPER(initialization) SEP         \
     OPER(atomics_mode) SEP           \
     OPER(os_flags) SEP               \

@@ -183,18 +183,6 @@ namespace
         using tensile_type = int8_t;
     };
 
-    template <>
-    struct rocblas_to_tensile_type<rocblas_f8>
-    {
-        using tensile_type = Tensile::Float8;
-    };
-
-    template <>
-    struct rocblas_to_tensile_type<rocblas_bf8>
-    {
-        using tensile_type = Tensile::BFloat8;
-    };
-
     /********************************************************************
      * Variable template to map a rocBLAS type into a Tensile::DataType *
      ********************************************************************/
@@ -206,12 +194,6 @@ namespace
 
     template <>
     constexpr auto tensile_datatype<int32_t> = Tensile::DataType::Int32;
-
-    template <>
-    constexpr auto tensile_datatype<rocblas_f8> = Tensile::DataType::Float8;
-
-    template <>
-    constexpr auto tensile_datatype<rocblas_bf8> = Tensile::DataType::BFloat8;
 
     template <>
     constexpr auto tensile_datatype<rocblas_half> = Tensile::DataType::Half;
@@ -335,14 +317,13 @@ namespace
     /****************************************************************
      * Construct a Tensile Problem from a RocblasContractionProblem *
      ****************************************************************/
-    template <typename TiA, typename To, typename Tc, typename TiB = TiA>
-    auto ConstructTensileProblem(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
+    template <typename Ti, typename To, typename Tc>
+    auto ConstructTensileProblem(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         // Tensile DataTypes corresponding to rocBLAS data types
-        static constexpr Tensile::DataType Tensile_TiA = tensile_datatype<TiA>;
-        static constexpr Tensile::DataType Tensile_TiB = tensile_datatype<TiB>;
-        static constexpr Tensile::DataType Tensile_To  = tensile_datatype<To>;
-        static constexpr Tensile::DataType Tensile_Tc  = tensile_datatype<Tc>;
+        static constexpr Tensile::DataType Tensile_Ti = tensile_datatype<Ti>;
+        static constexpr Tensile::DataType Tensile_To = tensile_datatype<To>;
+        static constexpr Tensile::DataType Tensile_Tc = tensile_datatype<Tc>;
 
         // Tensor descriptors for a, b
         Tensile::TensorDescriptor a, b;
@@ -372,7 +353,7 @@ namespace
         if(prob.trans_a != rocblas_operation_none)
         {
             a = {
-                    Tensile_TiA,
+                    Tensile_Ti,
                     {k, prob.m, prob.batch_count},
                     {prob.row_stride_a, prob.col_stride_a, prob.batch_stride_a},
                     prob.buffer_offset_a
@@ -383,7 +364,7 @@ namespace
         else
         {
             a = {
-                    Tensile_TiA,
+                    Tensile_Ti,
                     {prob.m, k, prob.batch_count},
                     {prob.row_stride_a, prob.col_stride_a, prob.batch_stride_a},
                     prob.buffer_offset_a
@@ -393,14 +374,14 @@ namespace
         }
 
         // If A is complex and conjugated, add a ComplexConjugate op to aops
-        if(rocblas_is_complex<TiA> && prob.trans_a == rocblas_operation_conjugate_transpose)
+        if(rocblas_is_complex<Ti> && prob.trans_a == rocblas_operation_conjugate_transpose)
             aops.push_back(Tensile::TensorOp::Type::ComplexConjugate);
 
         // If B is transposed, swap the free and bound dimensions and their ranks
         if(prob.trans_b != rocblas_operation_none)
         {
             b = {
-                    Tensile_TiB,
+                    Tensile_Ti,
                     {prob.n, k, prob.batch_count},
                     {prob.row_stride_b, prob.col_stride_b, prob.batch_stride_b},
                     prob.buffer_offset_b
@@ -411,7 +392,7 @@ namespace
         else
         {
             b = {
-                    Tensile_TiB,
+                    Tensile_Ti,
                     {k, prob.n, prob.batch_count},
                     {prob.row_stride_b, prob.col_stride_b, prob.batch_stride_b},
                     prob.buffer_offset_b
@@ -423,7 +404,7 @@ namespace
         // clang-format on
 
         // If B is complex and conjugated, add a ComplexConjugate op to bops
-        if(rocblas_is_complex<TiB> && prob.trans_b == rocblas_operation_conjugate_transpose)
+        if(rocblas_is_complex<Ti> && prob.trans_b == rocblas_operation_conjugate_transpose)
             bops.push_back(Tensile::TensorOp::Type::ComplexConjugate);
 
         // Descriptor for input matrix C
@@ -463,19 +444,12 @@ namespace
         tensileProblem.setAlphaType(Tensile_Tc);
         tensileProblem.setBetaType(Tensile_Tc);
 
-        if(std::is_same<To, rocblas_f8>{} || std::is_same<To, rocblas_bf8>{})
-        {
-            bool stochastic_rounding = prob.flags & rocblas_gemm_flags_stochastic_rounding;
-            tensileProblem.setStochasticRounding(stochastic_rounding);
-        }
-
         // HPA is active iff sizeof(compute type) > sizeof(input type)
-        tensileProblem.setHighPrecisionAccumulate(sizeof(Tc) > sizeof(TiA)
-                                                  || sizeof(Tc) > sizeof(TiB));
+        tensileProblem.setHighPrecisionAccumulate(sizeof(Tc) > sizeof(Ti));
 
         // Environment variable to force use of VALU for double precision gemm
         static bool force_valu_for_dgemm = std::getenv("ROCBLAS_INTERNAL_FORCE_VALU_FOR_DGEMM");
-        if(std::is_same<TiA, double>::value && std::is_same<To, double>::value
+        if(std::is_same<Ti, double>::value && std::is_same<To, double>::value
            && std::is_same<Tc, double>::value && force_valu_for_dgemm)
         {
             tensileProblem.setArithmeticUnit(Tensile::ArithmeticUnit::VALU);
@@ -497,17 +471,16 @@ namespace
         else if(metric != rocblas_default_performance_metric)
             tensileProblem.setPerformanceMetric(performanceMetricMap(metric));
 
-        if(std::is_same<TiA, float>() && prob.handle->math_mode == rocblas_xf32_xdl_math_op)
+        if(std::is_same<Ti, float>() && prob.handle->math_mode == rocblas_xf32_xdl_math_op)
             tensileProblem.setF32XdlMathOp(Tensile::DataType::XFloat32);
 
         // alpha and beta are stored by value in Tensile::TypedContractionInputs
         // alpha and beta are copied from host to Tensile::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set tensileAlpha=0
         // Not positive if this is necessary here as well
-        //TODO will this change with hybrid cases in f8
-        typename AlphaBeta<TiA, To, Tc>::tensile_type tensileAlpha;
+        typename AlphaBeta<Ti, To, Tc>::tensile_type tensileAlpha;
         if(prob.k)
-            AlphaBeta<TiA, To, Tc>::copy(&tensileAlpha, prob.alpha);
+            AlphaBeta<Ti, To, Tc>::copy(&tensileAlpha, prob.alpha);
         else
             memset(&tensileAlpha, 0, sizeof(tensileAlpha));
         tensileProblem.setAlphaRestriction(Tensile::toScalarValueEnum(tensileAlpha));
@@ -541,33 +514,26 @@ namespace
     /***************************************************************
      * Construct the inputs to a Tensile ContractionProblem        *
      ***************************************************************/
-    template <typename TiA, typename To = TiA, typename Tc = To, typename TiB = TiA>
-    //typename TcA = TiA,
-    //typename TcB = TiA>
-    // <typename Ti, typename To, typename Tc>
-    auto GetTensileInputs(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
+    template <typename Ti, typename To = Ti, typename Tc = To>
+    auto GetTensileInputs(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         // Tensile types corresponding to Ti, To, Tc
-        using Tensile_TiA = typename rocblas_to_tensile_type<TiA>::tensile_type;
-        using Tensile_TiB = typename rocblas_to_tensile_type<TiB>::tensile_type;
-        using Tensile_To  = typename rocblas_to_tensile_type<To>::tensile_type;
+        using Tensile_Ti = typename rocblas_to_tensile_type<Ti>::tensile_type;
+        using Tensile_To = typename rocblas_to_tensile_type<To>::tensile_type;
         //TODO verify this
-        using Tensile_Talpha_beta = typename AlphaBeta<TiA, To, Tc>::tensile_type;
+        using Tensile_Talpha_beta = typename AlphaBeta<Ti, To, Tc>::tensile_type;
 
         // Make sure rocBLAS and Tensile types are compatible
-        static_assert(sizeof(Tensile_TiA) == sizeof(TiA) && sizeof(Tensile_TiB) == sizeof(TiB)
-                          && sizeof(Tensile_To) == sizeof(To),
+        static_assert(sizeof(Tensile_Ti) == sizeof(Ti) && sizeof(Tensile_To) == sizeof(To),
                       "Tensile and rocBLAS types are not the same size");
 
-        static_assert(std::is_standard_layout<TiA>{} && std::is_standard_layout<Tensile_TiA>{}
-                          && std::is_standard_layout<TiB>{}
-                          && std::is_standard_layout<Tensile_TiB>{} && std::is_standard_layout<To>{}
-                          && std::is_standard_layout<Tensile_To>{},
+        static_assert(std::is_standard_layout<Ti>{} && std::is_standard_layout<Tensile_Ti>{}
+                          && std::is_standard_layout<To>{} && std::is_standard_layout<Tensile_To>{},
                       "Tensile or rocBLAS types are not standard layout types");
 
         // Structure describing the inputs (A, B, C, D, alpha, beta)
-        Tensile::TypedContractionInputs<Tensile_TiA,
-                                        Tensile_TiB,
+        Tensile::TypedContractionInputs<Tensile_Ti,
+                                        Tensile_Ti,
                                         Tensile_To,
                                         Tensile_To,
                                         Tensile_Talpha_beta,
@@ -575,13 +541,13 @@ namespace
             inputs;
 
         // Set the A, B, C, D matrices pointers in Tensile
-        inputs.a = reinterpret_cast<const Tensile_TiA*>(prob.A);
-        inputs.b = reinterpret_cast<const Tensile_TiB*>(prob.B);
+        inputs.a = reinterpret_cast<const Tensile_Ti*>(prob.A);
+        inputs.b = reinterpret_cast<const Tensile_Ti*>(prob.B);
         inputs.c = reinterpret_cast<const Tensile_To*>(prob.C);
         inputs.d = reinterpret_cast<Tensile_To*>(prob.D);
 
-        inputs.batchA = reinterpret_cast<Tensile_TiA const* const*>(prob.batch_A);
-        inputs.batchB = reinterpret_cast<Tensile_TiB const* const*>(prob.batch_B);
+        inputs.batchA = reinterpret_cast<Tensile_Ti const* const*>(prob.batch_A);
+        inputs.batchB = reinterpret_cast<Tensile_Ti const* const*>(prob.batch_B);
         inputs.batchC = reinterpret_cast<Tensile_To const* const*>(prob.batch_C);
         inputs.batchD = reinterpret_cast<Tensile_To* const*>(prob.batch_D);
 
@@ -592,10 +558,10 @@ namespace
         // alpha and beta are copied from host to Tensile::TypedContractionInputs
         // If k==0, we do not need to dereference prob.alpha and can set inputs.alpha=0
         if(prob.k)
-            AlphaBeta<TiA, To, Tc>::copy(&inputs.alpha, prob.alpha);
+            AlphaBeta<Ti, To, Tc>::copy(&inputs.alpha, prob.alpha);
         else
             memset(&inputs.alpha, 0, sizeof(inputs.alpha));
-        AlphaBeta<TiA, To, Tc>::copy(&inputs.beta, prob.beta);
+        AlphaBeta<Ti, To, Tc>::copy(&inputs.beta, prob.beta);
 
         return inputs;
     }
@@ -1102,8 +1068,8 @@ inline bool fallbackTensileProblem(Tensile::ContractionProblem& tensile_prob)
     return false;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB> //, typename TcA, typename TcB>
-bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
+template <typename Ti, typename To, typename Tc>
+bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
     bool problemSpecific = prob.batch_A == 0; // Only use hipblaslt for non-batch problems.
@@ -1117,10 +1083,10 @@ bool useHipBLASLt(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
  * runContractionProblem calls Tensile to run a contraction problem described *
  * by RocblasContractionProblem                                               *
  ******************************************************************************/
-template <typename TiA, typename To, typename Tc, typename TiB>
-rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
-                                     rocblas_gemm_algo                                  algo,
-                                     int32_t solution_index)
+template <typename Ti, typename To, typename Tc>
+rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                                     rocblas_gemm_algo                            algo,
+                                     int32_t                                      solution_index)
 {
     rocblas_status status            = rocblas_status_internal_error;
     bool           hipblaslt_backend = false;
@@ -1320,12 +1286,12 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<TiA, To, Tc
     return status;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB>
-rocblas_status getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
-                                   rocblas_tensile_get_solution_option                option,
-                                   rocblas_int*                                       list_array,
-                                   rocblas_int*                                       list_size,
-                                   rocblas_int                                        arrayIdx)
+template <typename Ti, typename To, typename Tc>
+rocblas_status getRocblasSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                                   rocblas_tensile_get_solution_option          option,
+                                   rocblas_int*                                 list_array,
+                                   rocblas_int*                                 list_size,
+                                   rocblas_int                                  arrayIdx)
 {
     if(option != CAN_SOLVE && option != MATCHES_TYPE)
         return rocblas_status_invalid_value;
@@ -1336,8 +1302,7 @@ rocblas_status getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, 
     bool batched = !prob.strided_batch;
 
     // note that RocblasContractionProblem has non-ptr types so forcing non-batched here
-    constexpr bool gemv_supported_type
-        = std::is_same_v<TiA, TiB> && rocblas_is_gemv_supported_types<false, Tc, TiA, To, To>();
+    constexpr bool gemv_supported_type = rocblas_is_gemv_supported_types<false, Tc, Ti, To, To>();
     if(gemv_supported_type)
     {
         bool can_use_gemv
@@ -1382,11 +1347,11 @@ rocblas_status getRocblasSolutions(const RocblasContractionProblem<TiA, To, Tc, 
     return rocblas_status_continue;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB>
-rocblas_status getAllSolutions(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
-                               rocblas_tensile_get_solution_option                option,
-                               rocblas_int*                                       list_array,
-                               rocblas_int*                                       list_size)
+template <typename Ti, typename To, typename Tc>
+rocblas_status getAllSolutions(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                               rocblas_tensile_get_solution_option          option,
+                               rocblas_int*                                 list_array,
+                               rocblas_int*                                 list_size)
 {
     if(list_size == nullptr)
     {
@@ -1510,84 +1475,6 @@ template rocblas_status
     runContractionProblem(const RocblasContractionProblem<rocblas_double_complex>&,
                           rocblas_gemm_algo algo,
                           int32_t           solution_index);
-
-// EX types
-
-// f8 case0: Ti=f8 Tc=To=f32
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_f8, float, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_f8, rocblas_half, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_f8, rocblas_f8, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_bf8, float, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_bf8, rocblas_half, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_bf8, rocblas_bf8, float>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-//hybrid // Change of f8 parameter convention in order to support existing usage
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_f8, float, float, rocblas_bf8>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status runContractionProblem(
-    const RocblasContractionProblem<rocblas_f8, rocblas_half, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblem(const RocblasContractionProblem<rocblas_bf8, float, float, rocblas_f8>&,
-                          rocblas_gemm_algo algo,
-                          int32_t           solution_index);
-
-template rocblas_status runContractionProblem(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_half, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-// template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_f8,
-//                                                                               rocblas_f8,
-//                                                                               float,
-//                                                                               rocblas_bf8>&,
-//                                               rocblas_gemm_algo algo,
-//                                               int32_t           solution_index);
-
-template rocblas_status runContractionProblem(
-    const RocblasContractionProblem<rocblas_f8, rocblas_bf8, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-// template rocblas_status runContractionProblem(const RocblasContractionProblem<rocblas_bf8,
-//                                                                               rocblas_f8,
-//                                                                               float,
-//                                                                               rocblas_f8>&,
-//                                               rocblas_gemm_algo algo,
-//                                               int32_t           solution_index);
-
-template rocblas_status runContractionProblem(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_bf8, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
 
 // HPA types
 template rocblas_status

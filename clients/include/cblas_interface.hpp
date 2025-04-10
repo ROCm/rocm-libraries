@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1819,114 +1819,6 @@ void ref_geam(rocblas_operation transa,
               int64_t           ldc);
 
 // gemm
-
-template <typename TiA,
-          typename TiB,
-          typename To,
-          typename Tc,
-          typename std::enable_if<std::is_same<To, Tc>{}, int>::type = 0>
-inline void f8_to_cblas_sgemm(rocblas_operation transA,
-                              rocblas_operation transB,
-                              int64_t           m,
-                              int64_t           n,
-                              int64_t           k,
-                              Tc                alpha,
-                              const TiA*        A,
-                              int64_t           lda,
-                              const TiB*        B,
-                              int64_t           ldb,
-                              Tc                beta,
-                              To*               C,
-                              int64_t           ldc)
-{
-    // cblas does not support rocblas_float8, so convert to higher precision float
-    // This will give more precise result which is acceptable for testing
-
-    size_t sizeA = (transA == rocblas_operation_none ? k : m) * size_t(lda);
-    size_t sizeB = (transB == rocblas_operation_none ? n : k) * size_t(ldb);
-    size_t sizeC = n * size_t(ldc);
-
-    host_vector<Tc> A_float(sizeA), B_float(sizeB), C_float(sizeC);
-
-    for(size_t i = 0; i < sizeA; i++)
-        A_float[i] = static_cast<float>(A[i]);
-    for(size_t i = 0; i < sizeB; i++)
-        B_float[i] = static_cast<float>(B[i]);
-
-    // just directly cast, since transA, transB are integers in the enum
-    // printf("transA: rocblas =%d, cblas=%d\n", transA, static_cast<CBLAS_TRANSPOSE>(transA) );
-    cblas_sgemm(CblasColMajor,
-                static_cast<CBLAS_TRANSPOSE>(transA),
-                static_cast<CBLAS_TRANSPOSE>(transB),
-                m,
-                n,
-                k,
-                alpha,
-                A_float,
-                lda,
-                B_float,
-                ldb,
-                beta,
-                C,
-                ldc);
-}
-
-// gemm
-template <typename TiA,
-          typename TiB,
-          typename To,
-          typename Tc,
-          typename std::enable_if<!std::is_same<To, Tc>{}, int>::type = 0>
-inline void f8_to_cblas_sgemm(rocblas_operation transA,
-                              rocblas_operation transB,
-                              int64_t           m,
-                              int64_t           n,
-                              int64_t           k,
-                              Tc                alpha,
-                              const TiA*        A,
-                              int64_t           lda,
-                              const TiB*        B,
-                              int64_t           ldb,
-                              Tc                beta,
-                              To*               C,
-                              int64_t           ldc)
-{
-    // cblas does not support rocblas_float8, so convert to higher precision float
-    // This will give more precise result which is acceptable for testing
-
-    size_t sizeA = (transA == rocblas_operation_none ? k : m) * size_t(lda);
-    size_t sizeB = (transB == rocblas_operation_none ? n : k) * size_t(ldb);
-    size_t sizeC = n * size_t(ldc);
-
-    host_vector<Tc> A_float(sizeA), B_float(sizeB), C_float(sizeC);
-
-    for(size_t i = 0; i < sizeA; i++)
-        A_float[i] = static_cast<float>(A[i]);
-    for(size_t i = 0; i < sizeB; i++)
-        B_float[i] = static_cast<float>(B[i]);
-    for(size_t i = 0; i < sizeC; i++)
-        C_float[i] = static_cast<float>(C[i]);
-
-    // just directly cast, since transA, transB are integers in the enum
-    // printf("transA: rocblas =%d, cblas=%d\n", transA, static_cast<CBLAS_TRANSPOSE>(transA) );
-    cblas_sgemm(CblasColMajor,
-                static_cast<CBLAS_TRANSPOSE>(transA),
-                static_cast<CBLAS_TRANSPOSE>(transB),
-                m,
-                n,
-                k,
-                alpha,
-                A_float,
-                lda,
-                B_float,
-                ldb,
-                beta,
-                C_float,
-                ldc);
-
-    for(size_t i = 0; i < sizeC; i++)
-        C[i] = To(C_float[i]);
-}
 
 template <typename Ti, typename To, typename Tc>
 void ref_gemm(rocblas_operation                    transA,

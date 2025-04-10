@@ -54,14 +54,6 @@ template <class T>
 static constexpr double sum_error_tolerance = get_epsilon<T>();
 
 template <>
-ROCBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance<rocblas_f8> = 1 / 16.0; // computed epsilon_f8=0.0625, epsilon_bf8=0.125
-
-template <>
-ROCBLAS_CLANG_STATIC constexpr double
-    sum_error_tolerance<rocblas_bf8> = 1 / 8.0; // computed epsilon_f8=0.0625, epsilon_bf8=0.125
-
-template <>
 ROCBLAS_CLANG_STATIC constexpr double sum_error_tolerance<rocblas_bfloat16> = 1 / 100.0;
 
 template <>
@@ -200,10 +192,6 @@ double dot_near_tolerance(int arch_major, int64_t n, To sum)
 
 #define NEAR_ASSERT_BF16(a, b, err) ASSERT_NEAR(double(rocblas_bfloat16(a)), double(b), err)
 
-#define NEAR_ASSERT_F8(a, b, err) ASSERT_NEAR(double(float(a)), double(float(b)), err)
-
-#define NEAR_ASSERT_BF8(a, b, err) ASSERT_NEAR(double(float(a)), double(float(b)), err)
-
 #define NEAR_ASSERT_COMPLEX(a, b, err)                  \
     do                                                  \
     {                                                   \
@@ -234,28 +222,6 @@ inline void near_check_general(int64_t             M,
                                double              abs_error)
 {
     NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, NEAR_ASSERT_HALF);
-}
-
-template <>
-inline void near_check_general(int64_t           M,
-                               int64_t           N,
-                               int64_t           lda,
-                               const rocblas_f8* hCPU,
-                               const rocblas_f8* hGPU,
-                               double            abs_error)
-{
-    NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, NEAR_ASSERT_F8);
-}
-
-template <>
-inline void near_check_general(int64_t            M,
-                               int64_t            N,
-                               int64_t            lda,
-                               const rocblas_bf8* hCPU,
-                               const rocblas_bf8* hGPU,
-                               double             abs_error)
-{
-    NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, NEAR_ASSERT_BF8);
 }
 
 template <>
@@ -317,32 +283,6 @@ inline void near_check_general(int64_t             M,
                                double              abs_error)
 {
     NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_HALF);
-}
-
-template <>
-inline void near_check_general(int64_t           M,
-                               int64_t           N,
-                               int64_t           lda,
-                               rocblas_stride    strideA,
-                               const rocblas_f8* hCPU,
-                               const rocblas_f8* hGPU,
-                               int64_t           batch_count,
-                               double            abs_error)
-{
-    NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_F8);
-}
-
-template <>
-inline void near_check_general(int64_t            M,
-                               int64_t            N,
-                               int64_t            lda,
-                               rocblas_stride     strideA,
-                               const rocblas_bf8* hCPU,
-                               const rocblas_bf8* hGPU,
-                               int64_t            batch_count,
-                               double             abs_error)
-{
-    NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_BF8);
 }
 
 template <>
@@ -469,30 +409,6 @@ inline void near_check_general(int64_t                   M,
                                double                    abs_error)
 {
     NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_HALF);
-}
-
-template <>
-inline void near_check_general(int64_t                 M,
-                               int64_t                 N,
-                               int64_t                 lda,
-                               const rocblas_f8* const hCPU[],
-                               const rocblas_f8* const hGPU[],
-                               int64_t                 batch_count,
-                               double                  abs_error)
-{
-    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_F8);
-}
-
-template <>
-inline void near_check_general(int64_t                  M,
-                               int64_t                  N,
-                               int64_t                  lda,
-                               const rocblas_bf8* const hCPU[],
-                               const rocblas_bf8* const hGPU[],
-                               int64_t                  batch_count,
-                               double                   abs_error)
-{
-    NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_BF8);
 }
 
 template <>

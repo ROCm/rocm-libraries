@@ -21,16 +21,6 @@ Datatypes:
         u32_c: 167
         bf16_r: 168
         bf16_c: 169
-        f8_r: 170
-        bf8_r: 171
-  - rocblas_computetype:
-      bases: [ c_int ]
-      attr:
-        f32: 300
-        f8_f8_f32: 301
-        f8_bf8_f32: 302
-        bf8_f8_f32: 303
-        bf8_bf8_f32: 304
   - { half: f16_r, single: f32_r, double: f64_r }
   - { half complex: f16_c, single complex: f32_c, double complex: f64_c }
   - rocblas_initialization:
@@ -397,65 +387,6 @@ Hpa single double complex real: &half_single_double_complex_real_precisions
   - *half_precision
 
 #############################################
-#           Used for gemm_ex3      #
-#############################################
-F8SS family: &F8SS_family #in_type_out_type_compute_family
-  - &float8_float8_single #a_type_b_type_out_type
-    { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, composite_compute_type: f32 }
-  - &bfloat8_bfloat8_single
-    { a_type: bf8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, composite_compute_type: f32 }
-  - &float8_bfloat8_single
-    { a_type: f8_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, composite_compute_type: f32 }
-  - &bfloat8_float8_single
-    { a_type: bf8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, composite_compute_type: f32 }
-
-F8F8S family: &F8F8S_family #in_type_out_type_compute_family
-  - &float8_float8_float8   #a_type_b_type_out_type
-    { a_type: f8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, composite_compute_type: f32 }
-  - &bfloat8_bfloat8_bfloat8
-    { a_type: bf8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: f32 }
-  - &float8_bfloat8_bfloat8
-    { a_type: f8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: f32 }
-  - &bfloat8_float8_bfloat8
-    { a_type: bf8_r, b_type: f8_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: f32 }
-
-F8HS family: &F8HS_family #in_type_out_type_compute_family
-  - &float8_float8_half   #a_type_b_type_out_type
-    { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f32 }
-  - &bfloat8_bfloat8_half
-    { a_type: bf8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f32 }
-  - &float8_bfloat8_half
-    { a_type: f8_r, b_type: bf8_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f32 }
-  - &bfloat8_float8_half
-    { a_type: bf8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f32 }
-
-stage 1 family: &stage1_family
-  - &half_f8_f8_f32 #in/out_composite_compute_type
-    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f8_f8_f32 }
-  - &half_f8_bf8_f32
-    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, composite_compute_type: f8_bf8_f32 }
-  - &half_bf8_f8_f32
-    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, composite_compute_type: bf8_f8_f32 }
-  - &half_bf8_bf8_f32
-    { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, composite_compute_type: bf8_bf8_f32 }
-
-
-stage 2 family: &stage2_family
-  - &float8_single_float8  #a_type_b_type_out_type
-    { a_type: f8_r, b_type: f32_r, c_type: f8_r, d_type: f8_r, composite_compute_type: f8_f8_f32 }
-  - &single_float8_float8
-    { a_type: f32_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, composite_compute_type: f8_f8_f32 }
-  - &bfloat8_single_bfloat8
-    { a_type: bf8_r, b_type: f32_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: bf8_bf8_f32 }
-  - &single_bfloat8_bfloat8
-    { a_type: f32_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: f8_bf8_f32 }
-  - &bfloat8_single_single
-    { a_type: bf8_r, b_type: f32_r, c_type: f32_r, d_type: f32_r, composite_compute_type: bf8_f8_f32 }
-  - &single_bfloat8_single
-    { a_type: f32_r, b_type: bf8_r, c_type: f32_r, d_type: f32_r, composite_compute_type: f8_bf8_f32 }
-
-
-#############################################
 #           Used for axpy_ex                #
 #############################################
 Hpa bfloat half single double complex real: &bfloat_half_single_double_complex_real_precisions
@@ -593,7 +524,6 @@ Arguments:
   - c_type: rocblas_datatype
   - d_type: rocblas_datatype
   - compute_type: rocblas_datatype
-  - composite_compute_type: rocblas_computetype
   - initialization: rocblas_initialization
   - atomics_mode: rocblas_atomics_mode
   - os_flags: rocblas_client_os
@@ -716,7 +646,6 @@ Defaults:
   c_noalias_d: false
   outofplace: false
   user_allocated_workspace: 0
-  composite_compute_type: -1
   compute_type: -1
   use_hipblaslt: -1
   cleanup: true

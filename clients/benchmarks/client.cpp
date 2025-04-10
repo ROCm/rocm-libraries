@@ -106,10 +106,6 @@
 #include "type_dispatch.hpp"
 #undef I
 
-#if BUILD_WITH_TENSILE
-#include "blas_ex/common_gemm_ex3.hpp"
-#endif
-
 using namespace roc; // For emulated program_options
 using namespace std::literals; // For std::string literals of form "str"s
 
@@ -188,69 +184,6 @@ struct perf_gemm_strided_batched_ex<
         run_function(map, arg);
     }
 };
-
-#if BUILD_WITH_TENSILE
-
-// Template to dispatch testing_gemm_ex3 for performance tests
-// When Ti == void or Ti == To == Tc == bfloat16, the test is marked invalid
-template <typename TiA, typename TiB = TiA, typename To = TiA, typename Tc = To, typename = void>
-struct perf_gemm_ex3 : rocblas_test_invalid
-{
-};
-
-template <typename TiA, typename TiB, typename To, typename Tc>
-struct perf_gemm_ex3<
-    TiA,
-    TiB,
-    To,
-    Tc,
-    std::enable_if_t<(!std::is_same<TiA, void>{} && !std::is_same<TiB, void>{})
-                     && ((std::is_same<TiA, rocblas_f8>{} || std::is_same<TiA, rocblas_bf8>{}
-                          || std::is_same<TiA, rocblas_half>{} || std::is_same<TiA, float>{}))
-                     && (std::is_same<TiB, rocblas_f8>{} || std::is_same<TiB, rocblas_bf8>{}
-                         || std::is_same<TiB, rocblas_half>{} || std::is_same<TiB, float>{})>>
-    : rocblas_test_valid
-{
-    void operator()(const Arguments& arg)
-    {
-        static const func_map map = {
-            {"gemm_ex3", testing_gemm_ex3<TiA, TiB, To, Tc>},
-            {"gemm_batched_ex3", testing_gemm_batched_ex3<TiA, TiB, To, Tc>},
-        };
-        run_function(map, arg);
-    }
-};
-
-// Template to dispatch testing_gemm_ex3 for performance tests
-// When Ti == void or Ti == To == Tc == bfloat16, the test is marked invalid
-template <typename TiA, typename TiB = TiA, typename To = TiA, typename Tc = To, typename = void>
-struct perf_gemm_strided_batched_ex3 : rocblas_test_invalid
-{
-};
-
-template <typename TiA, typename TiB, typename To, typename Tc>
-struct perf_gemm_strided_batched_ex3<
-    TiA,
-    TiB,
-    To,
-    Tc,
-    std::enable_if_t<(!std::is_same<TiA, void>{} && !std::is_same<TiB, void>{})
-                     && ((std::is_same<TiA, rocblas_f8>{} || std::is_same<TiA, rocblas_bf8>{}
-                          || std::is_same<TiA, rocblas_half>{} || std::is_same<TiA, float>{}))
-                     && (std::is_same<TiB, rocblas_f8>{} || std::is_same<TiB, rocblas_bf8>{}
-                         || std::is_same<TiB, rocblas_half>{} || std::is_same<TiB, float>{})>>
-    : rocblas_test_valid
-{
-    void operator()(const Arguments& arg)
-    {
-        static const func_map map = {
-            {"gemm_strided_batched_ex3", testing_gemm_strided_batched_ex3<TiA, TiB, To, Tc>},
-        };
-        run_function(map, arg);
-    }
-};
-
-#endif // BUILD_WITH_TENSILE
 
 template <typename T, typename U = T, typename = void>
 struct perf_blas : rocblas_test_invalid
@@ -1102,20 +1035,6 @@ int run_bench_test(bool               init,
 
         rocblas_gemm_dispatch<perf_gemm_strided_batched_ex>(arg);
     }
-#if BUILD_WITH_TENSILE
-    else if(!strcmp(function, "gemm_ex3") || !strcmp(function, "gemm_batched_ex3"))
-    {
-        gemm_arg_adjust(arg, any_stride);
-
-        rocblas_gemm_dispatch<perf_gemm_ex3>(arg);
-    }
-    else if(!strcmp(function, "gemm_strided_batched_ex3"))
-    {
-        gemm_arg_adjust(arg, any_stride);
-
-        rocblas_gemm_dispatch<perf_gemm_strided_batched_ex3>(arg);
-    }
-#endif
     else
     {
         if(!strcmp(function, "scal") || !strcmp(function, "scal_batched")
@@ -1277,7 +1196,6 @@ try
     std::string c_type;
     std::string d_type;
     std::string compute_type;
-    std::string composite_compute_type;
     std::string initialization;
     std::string filter;
     std::string name_filter;
@@ -1404,7 +1322,7 @@ try
 
         ("precision,r",
          value<std::string>(&precision)->default_value("f32_r"), "Precision. "
-         "Options: h,s,d,c,z,f8_r, bf8_r, f16_r,f32_r,f64_r,bf16_r,f32_c,f64_c,i8_r,i32_r")
+         "Options: h,s,d,c,z, f16_r,f32_r,f64_r,bf16_r,f32_c,f64_c,i8_r,i32_r")
 
         ("a_type",
          value<std::string>(&a_type), "Precision of matrix A. "
@@ -1425,10 +1343,6 @@ try
         ("compute_type",
          value<std::string>(&compute_type), "Precision of computation. "
          "Options: h,s,d,c,z,f16_r,f32_r,f64_r,bf16_r,f32_c,f64_c,i8_r,i32_r")
-
-        ("composite_compute_type",
-         value<std::string>(&composite_compute_type), "Precision of computation. "
-         "Options: f32, f8_f8_f32, f8_bf8_f32, bf8_f8_f32, bf8_bf8_f32")
 
         ("initialization, init",
          value<std::string>(&initialization)->default_value("hpl"),
@@ -1707,11 +1621,6 @@ try
     arg.compute_type = compute_type == "" ? prec : string2rocblas_datatype(compute_type);
     if(arg.compute_type == rocblas_datatype_invalid)
         throw std::invalid_argument("Invalid value for --compute_type " + compute_type);
-
-    arg.composite_compute_type = string2rocblas_computetype(composite_compute_type);
-    if(arg.composite_compute_type == static_cast<rocblas_computetype>(-1))
-        throw std::invalid_argument("Invalid value for --composite_compute_type "
-                                    + composite_compute_type);
 
     arg.initialization = string2rocblas_initialization(initialization);
     if(arg.initialization == static_cast<rocblas_initialization>(0)) // zero not in enum

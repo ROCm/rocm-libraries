@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -84,8 +84,6 @@
 
 #define ASSERT_HALF_EQ(a, b) ASSERT_FLOAT_EQ(float(a), float(b))
 #define ASSERT_BF16_EQ(a, b) ASSERT_FLOAT_EQ(float(a), float(b))
-#define ASSERT_F8_EQ(a, b) ASSERT_FLOAT_EQ(float(a), float(b))
-#define ASSERT_BF8_EQ(a, b) ASSERT_FLOAT_EQ(float(a), float(b))
 
 // Compare float to rocblas_bfloat16
 // Allow the rocblas_bfloat16 to match the rounded or truncated value of float
@@ -123,20 +121,6 @@
 template <typename T, typename T_hpa = T>
 void unit_check_general(
     int64_t M, int64_t N, int64_t lda, const std::remove_cv_t<T_hpa>* hCPU, const T* hGPU);
-
-template <>
-inline void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, const rocblas_f8* hCPU, const rocblas_f8* hGPU)
-{
-    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_F8_EQ);
-}
-
-template <>
-inline void unit_check_general(
-    int64_t M, int64_t N, int64_t lda, const rocblas_bf8* hCPU, const rocblas_bf8* hGPU)
-{
-    UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_BF8_EQ);
-}
 
 template <>
 inline void unit_check_general(
@@ -226,31 +210,6 @@ inline void unit_check_general(int64_t                 M,
                                int64_t                 batch_count)
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF16_EQ);
-}
-
-// ToDO: implement for all F8 types
-template <>
-inline void unit_check_general(int64_t           M,
-                               int64_t           N,
-                               int64_t           lda,
-                               rocblas_stride    strideA,
-                               const rocblas_f8* hCPU,
-                               const rocblas_f8* hGPU,
-                               int64_t           batch_count)
-{
-    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
-}
-
-template <>
-inline void unit_check_general(int64_t            M,
-                               int64_t            N,
-                               int64_t            lda,
-                               rocblas_stride     strideA,
-                               const rocblas_bf8* hCPU,
-                               const rocblas_bf8* hGPU,
-                               int64_t            batch_count)
-{
-    UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
 }
 
 template <>
@@ -498,28 +457,6 @@ inline void unit_check_general(int64_t                   M,
 }
 
 template <>
-inline void unit_check_general(int64_t                 M,
-                               int64_t                 N,
-                               int64_t                 lda,
-                               const rocblas_f8* const hCPU[],
-                               const rocblas_f8* const hGPU[],
-                               int64_t                 batch_count)
-{
-    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
-}
-
-template <>
-inline void unit_check_general(int64_t                  M,
-                               int64_t                  N,
-                               int64_t                  lda,
-                               const rocblas_bf8* const hCPU[],
-                               const rocblas_bf8* const hGPU[],
-                               int64_t                  batch_count)
-{
-    UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_BF8_EQ);
-}
-
-template <>
 inline void unit_check_general(int64_t          M,
                                int64_t          N,
                                int64_t          lda,
@@ -588,29 +525,10 @@ inline void trsm_err_res_check(T max_error, int64_t M, T forward_tolerance, T ep
     trsm_err_res_check(std::abs(max_error), M, std::abs(forward_tolerance), std::abs(eps));
 }
 
-template <typename T,
-          std::enable_if_t<(!rocblas_is_complex<T> && !std::is_same<rocblas_f8, T>::value
-                            && !std::is_same<rocblas_bf8, T>::value),
-                           int> = 0>
+template <typename T, std::enable_if_t<(!rocblas_is_complex<T>), int> = 0>
 constexpr double get_epsilon()
 {
     return std::numeric_limits<T>::epsilon();
-}
-
-// epsilon is calculated by an iterative algorithm for non-standard types
-// f8 = 0.0625 bf8 = 0.125
-template <typename T, std::enable_if_t<std::is_same<rocblas_f8, T>::value, int> = 0>
-constexpr double get_epsilon()
-{
-    return 0.0625;
-}
-
-// epsilon is calculated by an iterative algorithm for non-standard types
-// f8 = 0.0625 bf8 = 0.125
-template <typename T, std::enable_if_t<std::is_same<rocblas_bf8, T>::value, int> = 0>
-constexpr double get_epsilon()
-{
-    return 0.125;
 }
 
 template <typename T, std::enable_if_t<+rocblas_is_complex<T>, int> = 0>
@@ -641,18 +559,6 @@ template <typename T>
 inline double to_double(T x)
 {
     return (double)(x);
-}
-
-template <>
-inline double to_double(rocblas_f8 x)
-{
-    return (double)(float(x));
-}
-
-template <>
-inline double to_double(rocblas_bf8 x)
-{
-    return (double)(float(x));
 }
 
 // TODO: need to rewrite it with less redundant codes...

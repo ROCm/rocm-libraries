@@ -30,7 +30,7 @@ auto rocblas_get_flops_per_clock_per_cu_gfx942(rocblas_datatype type)
         return 256;
     else if(type == rocblas_datatype_f16_r || type == rocblas_datatype_bf16_r)
         return 2048;
-    else if(type == rocblas_datatype_i8_r || type == rocblas_datatype_f8_r)
+    else if(type == rocblas_datatype_i8_r)
         return 4096;
     else
         return 0;

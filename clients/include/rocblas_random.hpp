@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -120,30 +120,6 @@ public:
     explicit operator rocblas_bfloat16()
     {
         return random_nan_data<rocblas_bfloat16, uint16_t, 7, 8>();
-    }
-
-    // Single NaN float8...
-    explicit operator rocblas_f8()
-    {
-        union
-        {
-            uint8_t    bits;
-            rocblas_f8 value;
-        } x;
-        x.bits = 0x80;
-        return x.value;
-    }
-
-    // Single NaN bfloat8...
-    explicit operator rocblas_bf8()
-    {
-        union
-        {
-            uint8_t     bits;
-            rocblas_bf8 value;
-        } x;
-        x.bits = 0x80;
-        return x.value;
     }
 
     explicit operator rocblas_float_complex()
@@ -344,22 +320,6 @@ inline rocblas_bfloat16 random_generator<rocblas_bfloat16>()
     return rocblas_bfloat16((float)std::uniform_int_distribution<int>(-2, 2)(t_rocblas_rng));
 };
 
-// for rocblas_f8, generate float, and convert to rocblas_f8
-/*! \brief  generate a random number in range [1,2] */
-template <>
-inline rocblas_f8 random_generator<rocblas_f8>()
-{
-    return rocblas_f8(float(std::uniform_int_distribution<int>(1, 2)(t_rocblas_rng)));
-};
-
-// for rocblas_bf8, generate float, and convert to rocblas_bf8
-/*! \brief  generate a random number in range [1,2] */
-template <>
-inline rocblas_bf8 random_generator<rocblas_bf8>()
-{
-    return rocblas_bf8(float(std::uniform_int_distribution<int>(1, 2)(t_rocblas_rng)));
-};
-
 /*! \brief  generate a random number in range [1,2,3] */
 template <>
 inline int8_t random_generator<int8_t>()
@@ -410,72 +370,6 @@ inline T random_hpl_generator()
     return std::uniform_real_distribution<double>(-0.5, 0.5)(t_rocblas_rng);
 }
 
-template <>
-inline rocblas_bf8 random_hpl_generator()
-{
-    const std::vector<float> normal_values_bf8
-        = {-0.0000076294f, -0.0000152588f, -0.0000228882f, -0.0000305176f, -0.0000381470f,
-           -0.0000457764f, -0.0000534058f, -0.0000610352f, -0.0000762939f, -0.0000915527f,
-           -0.0001068115f, -0.0001220703f, -0.0001525879f, -0.0001831055f, -0.0002136230f,
-           -0.0002441406f, -0.0003051758f, -0.0003662109f, -0.0004272461f, -0.0004882812f,
-           -0.0006103516f, -0.0007324219f, -0.0008544922f, -0.0009765625f, -0.0012207031f,
-           -0.0014648438f, -0.0017089844f, -0.0019531250f, -0.0024414062f, -0.0029296875f,
-           -0.0034179688f, -0.0039062500f, -0.0048828125f, -0.0058593750f, -0.0068359375f,
-           -0.0078125000f, -0.0097656250f, -0.0117187500f, -0.0136718750f, -0.0156250000f,
-           -0.0195312500f, -0.0234375000f, -0.0273437500f, -0.0312500000f, -0.0390625000f,
-           -0.0468750000f, -0.0546875000f, -0.0625000000f, -0.0781250000f, -0.0937500000f,
-           -0.1093750000f, -0.1250000000f, -0.1562500000f, -0.1875000000f, -0.2187500000f,
-           -0.2500000000f, -0.3125000000f, -0.3750000000f, -0.4375000000f, -0.5000000000f,
-           0.0000000000f,  0.0000076294f,  0.0000152588f,  0.0000228882f,  0.0000305176f,
-           0.0000381470f,  0.0000457764f,  0.0000534058f,  0.0000610352f,  0.0000762939f,
-           0.0000915527f,  0.0001068115f,  0.0001220703f,  0.0001525879f,  0.0001831055f,
-           0.0002136230f,  0.0002441406f,  0.0003051758f,  0.0003662109f,  0.0004272461f,
-           0.0004882812f,  0.0006103516f,  0.0007324219f,  0.0008544922f,  0.0009765625f,
-           0.0012207031f,  0.0014648438f,  0.0017089844f,  0.0019531250f,  0.0024414062f,
-           0.0029296875f,  0.0034179688f,  0.0039062500f,  0.0048828125f,  0.0058593750f,
-           0.0068359375f,  0.0078125000f,  0.0097656250f,  0.0117187500f,  0.0136718750f,
-           0.0156250000f,  0.0195312500f,  0.0234375000f,  0.0273437500f,  0.0312500000f,
-           0.0390625000f,  0.0468750000f,  0.0546875000f,  0.0625000000f,  0.0781250000f,
-           0.0937500000f,  0.1093750000f,  0.1250000000f,  0.1562500000f,  0.1875000000f,
-           0.2187500000f,  0.2500000000f,  0.3125000000f,  0.3750000000f,  0.4375000000f,
-           0.5000000000f};
-    //  numbers_values_bf8_bias16
-    return rocblas_bf8(normal_values_bf8[std::uniform_int_distribution<int>(
-        0, normal_values_bf8.size() - 1)(t_rocblas_rng)]);
-}
-
-template <>
-inline rocblas_f8 random_hpl_generator()
-{
-    const std::vector<float> normal_values_f8
-        = {-0.0009765625f, -0.0019531250f, -0.0029296875f, -0.0039062500f, -0.0048828125f,
-           -0.0058593750f, -0.0068359375f, -0.0078125000f, -0.0087890625f, -0.0097656250f,
-           -0.0107421875f, -0.0117187500f, -0.0126953125f, -0.0136718750f, -0.0146484375f,
-           -0.0156250000f, -0.0175781250f, -0.0195312500f, -0.0214843750f, -0.0234375000f,
-           -0.0253906250f, -0.0273437500f, -0.0292968750f, -0.0312500000f, -0.0351562500f,
-           -0.0390625000f, -0.0429687500f, -0.0468750000f, -0.0507812500f, -0.0546875000f,
-           -0.0585937500f, -0.0625000000f, -0.0703125000f, -0.0781250000f, -0.0859375000f,
-           -0.0937500000f, -0.1015625000f, -0.1093750000f, -0.1171875000f, -0.1250000000f,
-           -0.1406250000f, -0.1562500000f, -0.1718750000f, -0.1875000000f, -0.2031250000f,
-           -0.2187500000f, -0.2343750000f, -0.2500000000f, -0.2812500000f, -0.3125000000f,
-           -0.3437500000f, -0.3750000000f, -0.4062500000f, -0.4375000000f, -0.4687500000f,
-           -0.5000000000f, 0.0000000000f,  0.0009765625f,  0.0019531250f,  0.0029296875f,
-           0.0039062500f,  0.0048828125f,  0.0058593750f,  0.0068359375f,  0.0078125000f,
-           0.0087890625f,  0.0097656250f,  0.0107421875f,  0.0117187500f,  0.0126953125f,
-           0.0136718750f,  0.0146484375f,  0.0156250000f,  0.0175781250f,  0.0195312500f,
-           0.0214843750f,  0.0234375000f,  0.0253906250f,  0.0273437500f,  0.0292968750f,
-           0.0312500000f,  0.0351562500f,  0.0390625000f,  0.0429687500f,  0.0468750000f,
-           0.0507812500f,  0.0546875000f,  0.0585937500f,  0.0625000000f,  0.0703125000f,
-           0.0781250000f,  0.0859375000f,  0.0937500000f,  0.1015625000f,  0.1093750000f,
-           0.1171875000f,  0.1250000000f,  0.1406250000f,  0.1562500000f,  0.1718750000f,
-           0.1875000000f,  0.2031250000f,  0.2187500000f,  0.2343750000f,  0.2500000000f,
-           0.2812500000f,  0.3125000000f,  0.3437500000f,  0.3750000000f,  0.4062500000f,
-           0.4375000000f,  0.4687500000f,  0.5000000000f};
-    //  numbers_values_fp8_bias8
-    return rocblas_f8(normal_values_f8[std::uniform_int_distribution<int>(
-        0, normal_values_f8.size() - 1)(t_rocblas_rng)]);
-}
-
 // for rocblas_bfloat16, generate float, and convert to rocblas_bfloat16
 /*! \brief  generate a random number in HPL-like [-0.5,0.5] doubles  */
 template <>
@@ -499,7 +393,6 @@ inline std::string random_string(size_t n)
     return str;
 }
 
-// added for f8 unit testing
 template <typename T>
 inline T random_zero_one_generator()
 {
@@ -517,16 +410,4 @@ template <>
 inline rocblas_bfloat16 random_zero_one_generator<rocblas_bfloat16>()
 {
     return rocblas_bfloat16((float)std::uniform_int_distribution<int>(0, 1)(t_rocblas_rng));
-}
-
-template <>
-inline rocblas_f8 random_zero_one_generator<rocblas_f8>()
-{
-    return rocblas_f8(float(std::uniform_int_distribution<int>(0, 1)(t_rocblas_rng)));
-}
-
-template <>
-inline rocblas_bf8 random_zero_one_generator<rocblas_bf8>()
-{
-    return rocblas_bf8(float(std::uniform_int_distribution<int>(0, 1)(t_rocblas_rng)));
 }

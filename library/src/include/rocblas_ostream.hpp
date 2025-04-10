@@ -450,13 +450,6 @@ public:
         return os;
     }
 
-    // rocblas_datatype output
-    friend rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os, rocblas_computetype d)
-    {
-        os.m_os << rocblas_datatype_string(d);
-        return os;
-    }
-
     // rocblas_operation output
     friend rocblas_internal_ostream& operator<<(rocblas_internal_ostream& os,
                                                 rocblas_operation         trans)

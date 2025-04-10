@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -75,79 +75,6 @@ struct hpl_functor
     {
         auto r = pseudo_random(i, j, b, M, N);
         return T(double(r) / double(std::numeric_limits<decltype(r)>::max()) - 0.5);
-    }
-};
-
-template <>
-struct hpl_functor<rocblas_bf8>
-{
-    const std::array<float, 121> normal_values_bf8
-        = {-0.0000076294f, -0.0000152588f, -0.0000228882f, -0.0000305176f, -0.0000381470f,
-           -0.0000457764f, -0.0000534058f, -0.0000610352f, -0.0000762939f, -0.0000915527f,
-           -0.0001068115f, -0.0001220703f, -0.0001525879f, -0.0001831055f, -0.0002136230f,
-           -0.0002441406f, -0.0003051758f, -0.0003662109f, -0.0004272461f, -0.0004882812f,
-           -0.0006103516f, -0.0007324219f, -0.0008544922f, -0.0009765625f, -0.0012207031f,
-           -0.0014648438f, -0.0017089844f, -0.0019531250f, -0.0024414062f, -0.0029296875f,
-           -0.0034179688f, -0.0039062500f, -0.0048828125f, -0.0058593750f, -0.0068359375f,
-           -0.0078125000f, -0.0097656250f, -0.0117187500f, -0.0136718750f, -0.0156250000f,
-           -0.0195312500f, -0.0234375000f, -0.0273437500f, -0.0312500000f, -0.0390625000f,
-           -0.0468750000f, -0.0546875000f, -0.0625000000f, -0.0781250000f, -0.0937500000f,
-           -0.1093750000f, -0.1250000000f, -0.1562500000f, -0.1875000000f, -0.2187500000f,
-           -0.2500000000f, -0.3125000000f, -0.3750000000f, -0.4375000000f, -0.5000000000f,
-           0.0000000000f,  0.0000076294f,  0.0000152588f,  0.0000228882f,  0.0000305176f,
-           0.0000381470f,  0.0000457764f,  0.0000534058f,  0.0000610352f,  0.0000762939f,
-           0.0000915527f,  0.0001068115f,  0.0001220703f,  0.0001525879f,  0.0001831055f,
-           0.0002136230f,  0.0002441406f,  0.0003051758f,  0.0003662109f,  0.0004272461f,
-           0.0004882812f,  0.0006103516f,  0.0007324219f,  0.0008544922f,  0.0009765625f,
-           0.0012207031f,  0.0014648438f,  0.0017089844f,  0.0019531250f,  0.0024414062f,
-           0.0029296875f,  0.0034179688f,  0.0039062500f,  0.0048828125f,  0.0058593750f,
-           0.0068359375f,  0.0078125000f,  0.0097656250f,  0.0117187500f,  0.0136718750f,
-           0.0156250000f,  0.0195312500f,  0.0234375000f,  0.0273437500f,  0.0312500000f,
-           0.0390625000f,  0.0468750000f,  0.0546875000f,  0.0625000000f,  0.0781250000f,
-           0.0937500000f,  0.1093750000f,  0.1250000000f,  0.1562500000f,  0.1875000000f,
-           0.2187500000f,  0.2500000000f,  0.3125000000f,  0.3750000000f,  0.4375000000f,
-           0.5000000000f};
-
-    __device__ rocblas_bf8
-        operator()(size_t i, size_t j, size_t b, rocblas_int M, rocblas_int N, bool)
-    {
-        return rocblas_bf8(
-            normal_values_bf8[pseudo_random(i, j, b, M, N) % normal_values_bf8.size()]);
-    }
-};
-
-template <>
-struct hpl_functor<rocblas_f8>
-{
-    const std::array<float, 113> normal_values_f8
-        = {-0.0009765625f, -0.0019531250f, -0.0029296875f, -0.0039062500f, -0.0048828125f,
-           -0.0058593750f, -0.0068359375f, -0.0078125000f, -0.0087890625f, -0.0097656250f,
-           -0.0107421875f, -0.0117187500f, -0.0126953125f, -0.0136718750f, -0.0146484375f,
-           -0.0156250000f, -0.0175781250f, -0.0195312500f, -0.0214843750f, -0.0234375000f,
-           -0.0253906250f, -0.0273437500f, -0.0292968750f, -0.0312500000f, -0.0351562500f,
-           -0.0390625000f, -0.0429687500f, -0.0468750000f, -0.0507812500f, -0.0546875000f,
-           -0.0585937500f, -0.0625000000f, -0.0703125000f, -0.0781250000f, -0.0859375000f,
-           -0.0937500000f, -0.1015625000f, -0.1093750000f, -0.1171875000f, -0.1250000000f,
-           -0.1406250000f, -0.1562500000f, -0.1718750000f, -0.1875000000f, -0.2031250000f,
-           -0.2187500000f, -0.2343750000f, -0.2500000000f, -0.2812500000f, -0.3125000000f,
-           -0.3437500000f, -0.3750000000f, -0.4062500000f, -0.4375000000f, -0.4687500000f,
-           -0.5000000000f, 0.0000000000f,  0.0009765625f,  0.0019531250f,  0.0029296875f,
-           0.0039062500f,  0.0048828125f,  0.0058593750f,  0.0068359375f,  0.0078125000f,
-           0.0087890625f,  0.0097656250f,  0.0107421875f,  0.0117187500f,  0.0126953125f,
-           0.0136718750f,  0.0146484375f,  0.0156250000f,  0.0175781250f,  0.0195312500f,
-           0.0214843750f,  0.0234375000f,  0.0253906250f,  0.0273437500f,  0.0292968750f,
-           0.0312500000f,  0.0351562500f,  0.0390625000f,  0.0429687500f,  0.0468750000f,
-           0.0507812500f,  0.0546875000f,  0.0585937500f,  0.0625000000f,  0.0703125000f,
-           0.0781250000f,  0.0859375000f,  0.0937500000f,  0.1015625000f,  0.1093750000f,
-           0.1171875000f,  0.1250000000f,  0.1406250000f,  0.1562500000f,  0.1718750000f,
-           0.1875000000f,  0.2031250000f,  0.2187500000f,  0.2343750000f,  0.2500000000f,
-           0.2812500000f,  0.3125000000f,  0.3437500000f,  0.3750000000f,  0.4062500000f,
-           0.4375000000f,  0.4687500000f,  0.5000000000f};
-
-    __device__ rocblas_f8
-        operator()(size_t i, size_t j, size_t b, rocblas_int M, rocblas_int N, bool)
-    {
-        return rocblas_f8(normal_values_f8[pseudo_random(i, j, b, M, N) % normal_values_f8.size()]);
     }
 };
 
@@ -233,26 +160,6 @@ __device__ rocblas_float_complex rand_nan_functor<rocblas_float_complex>::operat
         random_nan_data<uint32_t, 23, 8, float>(pseudo_random(i, j, b, M, N, 0)),
         random_nan_data<uint32_t, 23, 8, float>(pseudo_random(i, j, b, M, N, 1)));
 }
-
-template <>
-struct rand_nan_functor<rocblas_f8>
-{
-    const rocblas_f8      value = rocblas_f8(rocblas_nan_rng()); // Single NaN
-    __device__ rocblas_f8 operator()(size_t, size_t, size_t, rocblas_int, rocblas_int, bool)
-    {
-        return value;
-    }
-};
-
-template <>
-struct rand_nan_functor<rocblas_bf8>
-{
-    const rocblas_bf8      value = rocblas_bf8(rocblas_nan_rng{}); // Single NaN
-    __device__ rocblas_bf8 operator()(size_t, size_t, size_t, rocblas_int, rocblas_int, bool)
-    {
-        return value;
-    }
-};
 
 template <typename T>
 struct non_rep_bf16_vals_functor
@@ -522,8 +429,6 @@ INST(rocblas_float_complex, true);
 INST(rocblas_double_complex, true);
 INST(rocblas_half, true);
 INST(rocblas_bfloat16, true);
-INST(rocblas_f8, true);
-INST(rocblas_bf8, true);
 
 INST(signed char, false);
 INST(int, false);
@@ -533,7 +438,5 @@ INST(rocblas_float_complex, false);
 INST(rocblas_double_complex, false);
 INST(rocblas_half, false);
 INST(rocblas_bfloat16, false);
-INST(rocblas_f8, false);
-INST(rocblas_bf8, false);
 
 #undef INST

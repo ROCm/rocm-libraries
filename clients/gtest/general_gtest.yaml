@@ -4,22 +4,11 @@ include: known_bugs.yaml
 
 Definitions:
 
-f8 bf8: &f8_bf8_precisions
-- &f8_only_type
-  { a_type: f8_r, b_type: f8_r, c_type: f8_r, d_type: f8_r, composite_compute_type: f32 }
-- &bf8_only_type
-  { a_type: bf8_r, b_type: bf8_r, c_type: bf8_r, d_type: bf8_r, composite_compute_type: f32 }
-
 Half bfloat: &half_bfloat_precisions
 - *half_precision
 - *bf16_precision
 
 Tests:
-
-- name: f8_operators
-  category: quick
-  function: f8_operators
-  precision: *f8_bf8_precisions
 
 - name: half_operators
   category: quick

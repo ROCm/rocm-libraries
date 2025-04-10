@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -341,15 +341,5 @@ INST(rocblas_bfloat16*);
 INST(rocblas_bfloat16* const*);
 INST(rocblas_bfloat16 const*);
 INST(rocblas_bfloat16 const* const*);
-
-INST(rocblas_f8*);
-INST(rocblas_f8* const*);
-INST(rocblas_f8 const*);
-INST(rocblas_f8 const* const*);
-
-INST(rocblas_bf8*);
-INST(rocblas_bf8* const*);
-INST(rocblas_bf8 const*);
-INST(rocblas_bf8 const* const*);
 
 #undef INST

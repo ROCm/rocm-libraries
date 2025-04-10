@@ -186,7 +186,6 @@ set( rocblas_headers_public
   include/rocblas.h
   include/internal/rocblas-types.h
   include/internal/rocblas_bfloat16.h
-  include/internal/rocblas_float8.h
   include/internal/rocblas-auxiliary.h
   include/internal/rocblas-functions.h
   include/internal/rocblas-macros.h

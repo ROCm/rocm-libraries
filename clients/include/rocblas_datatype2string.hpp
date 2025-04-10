@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -133,32 +133,7 @@ constexpr auto rocblas_datatype2string(rocblas_datatype type)
         return "bf16_r";
     case rocblas_datatype_bf16_c:
         return "bf16_c";
-    case rocblas_datatype_f8_r: // todo: use f8 and bf8 ... f8 can be used for both. consider complex type well
-        return "f8_r";
-    case rocblas_datatype_bf8_r:
-        return "bf8_r";
     case rocblas_datatype_invalid:
-        return "invalid";
-    }
-    return "invalid";
-}
-
-// return precision string for rocblas_datatype
-constexpr auto rocblas_computetype2string(rocblas_computetype type)
-{
-    switch(type)
-    {
-    case rocblas_compute_type_f32:
-        return "f32";
-    case rocblas_compute_type_f8_f8_f32:
-        return "f8_f8_f32";
-    case rocblas_compute_type_f8_bf8_f32:
-        return "f8_bf8_f32";
-    case rocblas_compute_type_bf8_f8_f32:
-        return "bf8_f8_f32";
-    case rocblas_compute_type_bf8_bf8_f32:
-        return "bf8_bf8_f32";
-    case rocblas_compute_type_invalid:
         return "invalid";
     }
     return "invalid";
@@ -313,8 +288,6 @@ inline rocblas_datatype string2rocblas_datatype(const std::string& value)
         value == "f32_r" || value == "s" ? rocblas_datatype_f32_r  :
         value == "f64_r" || value == "d" ? rocblas_datatype_f64_r  :
         value == "bf16_r"                ? rocblas_datatype_bf16_r :
-        value == "f8_r"                  ? rocblas_datatype_f8_r   :
-        value == "bf8_r"                 ? rocblas_datatype_bf8_r  :
         value == "f16_c"                 ? rocblas_datatype_f16_c  :
         value == "f32_c" || value == "c" ? rocblas_datatype_f32_c  :
         value == "f64_c" || value == "z" ? rocblas_datatype_f64_c  :
@@ -330,14 +303,4 @@ inline rocblas_datatype string2rocblas_datatype(const std::string& value)
         rocblas_datatype_invalid;
 }
 
-inline rocblas_computetype string2rocblas_computetype(const std::string& value)
-{
-    return
-        value == "f32" ? rocblas_compute_type_f32  :
-        value == "f8_f8_f32" ? rocblas_compute_type_f8_f8_f32  :
-        value == "f8_bf8_f32" ? rocblas_compute_type_f8_bf8_f32  :
-        value == "bf8_f8_f32" ? rocblas_compute_type_bf8_f8_f32  :
-        value == "bf8_bf8_f32" ? rocblas_compute_type_bf8_bf8_f32 :
-        rocblas_compute_type_invalid;
-}
 // clang-format on

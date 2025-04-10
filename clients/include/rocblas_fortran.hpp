@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -378,88 +378,6 @@ rocblas_status rocblas_zgemmt_strided_batched_fortran(rocblas_handle            
 /* ==========
  *    Ext.
  * ========== */
-
-// gemm_ex3
-rocblas_status rocblas_gemm_ex3_fortran(rocblas_handle      handle,
-                                        rocblas_operation   transA,
-                                        rocblas_operation   transB,
-                                        rocblas_int         m,
-                                        rocblas_int         n,
-                                        rocblas_int         k,
-                                        const void*         alpha,
-                                        const void*         a,
-                                        rocblas_datatype    a_type,
-                                        rocblas_int         lda,
-                                        const void*         b,
-                                        rocblas_datatype    b_type,
-                                        rocblas_int         ldb,
-                                        const void*         beta,
-                                        const void*         c,
-                                        rocblas_datatype    c_type,
-                                        rocblas_int         ldc,
-                                        void*               d,
-                                        rocblas_datatype    d_type,
-                                        rocblas_int         ldd,
-                                        rocblas_computetype compute_type,
-                                        rocblas_gemm_algo   algo,
-                                        int32_t             solution_index,
-                                        uint32_t            flags);
-
-rocblas_status rocblas_gemm_batched_ex3_fortran(rocblas_handle      handle,
-                                                rocblas_operation   transA,
-                                                rocblas_operation   transB,
-                                                rocblas_int         m,
-                                                rocblas_int         n,
-                                                rocblas_int         k,
-                                                const void*         alpha,
-                                                const void*         a,
-                                                rocblas_datatype    a_type,
-                                                rocblas_int         lda,
-                                                const void*         b,
-                                                rocblas_datatype    b_type,
-                                                rocblas_int         ldb,
-                                                const void*         beta,
-                                                const void*         c,
-                                                rocblas_datatype    c_type,
-                                                rocblas_int         ldc,
-                                                void*               d,
-                                                rocblas_datatype    d_type,
-                                                rocblas_int         ldd,
-                                                rocblas_int         batch_count,
-                                                rocblas_computetype compute_type,
-                                                rocblas_gemm_algo   algo,
-                                                int32_t             solution_index,
-                                                uint32_t            flags);
-
-rocblas_status rocblas_gemm_strided_batched_ex3_fortran(rocblas_handle      handle,
-                                                        rocblas_operation   transA,
-                                                        rocblas_operation   transB,
-                                                        rocblas_int         m,
-                                                        rocblas_int         n,
-                                                        rocblas_int         k,
-                                                        const void*         alpha,
-                                                        const void*         a,
-                                                        rocblas_datatype    a_type,
-                                                        rocblas_int         lda,
-                                                        rocblas_stride      stride_a,
-                                                        const void*         b,
-                                                        rocblas_datatype    b_type,
-                                                        rocblas_int         ldb,
-                                                        rocblas_stride      stride_b,
-                                                        const void*         beta,
-                                                        const void*         c,
-                                                        rocblas_datatype    c_type,
-                                                        rocblas_int         ldc,
-                                                        rocblas_stride      stride_c,
-                                                        void*               d,
-                                                        rocblas_datatype    d_type,
-                                                        rocblas_int         ldd,
-                                                        rocblas_stride      stride_d,
-                                                        rocblas_int         batch_count,
-                                                        rocblas_computetype compute_type,
-                                                        rocblas_gemm_algo   algo,
-                                                        int32_t             solution_index,
-                                                        uint32_t            flags);
 
 // trsm_ex
 rocblas_status rocblas_trsm_ex_fortran(rocblas_handle    handle,

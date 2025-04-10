@@ -195,29 +195,14 @@ rocblas_status rocblas_internal_log_trace_alpha_beta_ex(rocblas_datatype        
                                                         rocblas_internal_ostream& alphass,
                                                         rocblas_internal_ostream& betass);
 
-rocblas_status rocblas_internal_log_trace_alpha_beta_ex(rocblas_computetype       compute_type,
-                                                        const void*               alpha,
-                                                        const void*               beta,
-                                                        rocblas_internal_ostream& alphass,
-                                                        rocblas_internal_ostream& betass);
-
 rocblas_status rocblas_internal_log_bench_alpha_beta_ex(rocblas_datatype compute_type,
                                                         const void*      alpha,
                                                         const void*      beta,
                                                         std::string&     alphas,
                                                         std::string&     betas);
 
-rocblas_status rocblas_internal_log_bench_alpha_beta_ex(rocblas_computetype compute_type,
-                                                        const void*         alpha,
-                                                        const void*         beta,
-                                                        std::string&        alphas,
-                                                        std::string&        betas);
-
 template <typename T>
 double rocblas_internal_value_category(const T* beta, rocblas_datatype compute_type);
-
-template <typename T>
-double rocblas_internal_value_category(const T* beta, rocblas_computetype compute_type);
 
 extern const char* c_rocblas_internal;
 

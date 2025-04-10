@@ -30,7 +30,6 @@
 #include "rocblas-export.h"
 #include "rocblas-macros.h"
 #include "rocblas_bfloat16.h"
-#include "rocblas_float8.h"
 #include <float.h>
 #include <math.h>
 #include <stdbool.h>
@@ -180,21 +179,8 @@ typedef enum rocblas_datatype_
     rocblas_datatype_u32_c   = 167, /**< 32-bit unsigned integer, complex */
     rocblas_datatype_bf16_r  = 168, /**< 16-bit bfloat, real */
     rocblas_datatype_bf16_c  = 169, /**< 16-bit bfloat, complex */
-    rocblas_datatype_f8_r    = 170, /**< 8 bit floating point, real */
-    rocblas_datatype_bf8_r   = 171, /**< 8 bit bfloat, real */
     rocblas_datatype_invalid = 255, /**< Invalid datatype value, do not use */
 } rocblas_datatype;
-
-/*! \brief Indicates the compute precision mode. */
-typedef enum rocblas_computetype_
-{
-    rocblas_compute_type_f32         = 300,
-    rocblas_compute_type_f8_f8_f32   = 301,
-    rocblas_compute_type_f8_bf8_f32  = 302,
-    rocblas_compute_type_bf8_f8_f32  = 303,
-    rocblas_compute_type_bf8_bf8_f32 = 304,
-    rocblas_compute_type_invalid     = 455, /**< Invalid datatype value, do not use */
-} rocblas_computetype;
 
 /* ============================================================================================ */
 /**

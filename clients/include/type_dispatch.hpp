@@ -39,10 +39,6 @@ constexpr auto rocblas_type2datatype()
     // rocblas_datatype_f32_r  = 151
     if(std::is_same_v<T, rocblas_float>)
         return rocblas_datatype_f32_r;
-    if(std::is_same<T, rocblas_f8>{})
-        return rocblas_datatype_f8_r;
-    if(std::is_same<T, rocblas_bf8>{})
-        return rocblas_datatype_bf8_r;
     // rocblas_datatype_f64_r  = 152
     if(std::is_same_v<T, rocblas_double>)
         return rocblas_datatype_f64_r;
@@ -108,21 +104,6 @@ auto rocblas_simple_dispatch(const Arguments& arg)
         return TEST<rocblas_float_complex>{}(arg);
     case rocblas_datatype_f64_c:
         return TEST<rocblas_double_complex>{}(arg);
-    default:
-        return TEST<void>{}(arg);
-    }
-}
-
-// general gtest use only for now
-template <template <typename...> class TEST>
-auto rocblas_f8_dispatch(const Arguments& arg)
-{
-    switch(arg.a_type)
-    {
-    case rocblas_datatype_f8_r:
-        return TEST<rocblas_f8>{}(arg);
-    case rocblas_datatype_bf8_r:
-        return TEST<rocblas_bf8>{}(arg);
     default:
         return TEST<void>{}(arg);
     }
@@ -439,7 +420,6 @@ template <template <typename...> class TEST>
 auto rocblas_gemm_dispatch(const Arguments& arg)
 {
     const auto Ti = arg.a_type, To = arg.c_type, Tc = arg.compute_type;
-    const auto Tc_new = arg.composite_compute_type;
 
     if((rocblas_gemm_flags_fp16_alt_impl & arg.flags)
        && rocblas_internal_get_arch_name() != "gfx90a")
@@ -458,21 +438,6 @@ auto rocblas_gemm_dispatch(const Arguments& arg)
             {
                 return TEST<int8_t, int32_t, int32_t>{}(arg);
             }
-            else if(Tc_new == rocblas_compute_type_f32)
-            {
-                if(To == rocblas_datatype_f8_r && Ti == rocblas_datatype_bf8_r)
-                    return TEST<rocblas_bf8, rocblas_bf8, rocblas_f8, float>{}(arg);
-                else if(To == rocblas_datatype_bf8_r && Ti == rocblas_datatype_f8_r)
-                    return TEST<rocblas_f8, rocblas_f8, rocblas_bf8, float>{}(arg);
-                else if(To == rocblas_datatype_f32_r && Ti == rocblas_datatype_f8_r)
-                    return TEST<rocblas_f8, rocblas_f8, float, float>{}(arg);
-                else if(To == rocblas_datatype_f32_r && Ti == rocblas_datatype_bf8_r)
-                    return TEST<rocblas_bf8, rocblas_bf8, float, float>{}(arg);
-                else if(To == rocblas_datatype_f16_r && Ti == rocblas_datatype_f8_r)
-                    return TEST<rocblas_f8, rocblas_f8, rocblas_half, float>{}(arg);
-                else if(To == rocblas_datatype_f16_r && Ti == rocblas_datatype_bf8_r)
-                    return TEST<rocblas_bf8, rocblas_bf8, rocblas_half, float>{}(arg);
-            }
             else if(To == rocblas_datatype_f32_r && Tc == rocblas_datatype_f32_r)
             {
                 if(Ti == rocblas_datatype_f16_r)
@@ -487,24 +452,7 @@ auto rocblas_gemm_dispatch(const Arguments& arg)
         }
         else if(Tc != To) // covers HPA: HHS, BBS // Ti=To
         {
-            if(Tc_new == rocblas_compute_type_f8_f8_f32 || Tc_new == rocblas_compute_type_f8_bf8_f32
-               || Tc_new == rocblas_compute_type_bf8_f8_f32
-               || Tc_new == rocblas_compute_type_bf8_bf8_f32)
-            {
-                if(To == rocblas_datatype_f32_r)
-                {
-                    return TEST<float, float, float, float>{}(arg);
-                }
-                else if(To == rocblas_datatype_f16_r)
-                {
-                    return TEST<rocblas_half, rocblas_half, rocblas_half, float>{}(arg);
-                }
-                else if(To == rocblas_datatype_bf16_r)
-                {
-                    return TEST<rocblas_bfloat16, rocblas_bfloat16, rocblas_bfloat16, float>{}(arg);
-                }
-            }
-            else if(To == rocblas_datatype_f16_r && Tc == rocblas_datatype_f32_r) // HHS
+            if(To == rocblas_datatype_f16_r && Tc == rocblas_datatype_f32_r) // HHS
             {
                 return TEST<rocblas_half, rocblas_half, float>{}(arg);
             }
@@ -512,61 +460,11 @@ auto rocblas_gemm_dispatch(const Arguments& arg)
             {
                 return TEST<rocblas_bfloat16, rocblas_bfloat16, float>{}(arg);
             }
-            else if(To == rocblas_datatype_f8_r && Tc_new == rocblas_compute_type_f32)
-            {
-                return TEST<rocblas_f8, rocblas_f8, rocblas_f8, float>{}(arg);
-            }
-            else if(To == rocblas_datatype_bf8_r && Tc_new == rocblas_compute_type_f32)
-            {
-                return TEST<rocblas_bf8, rocblas_bf8, rocblas_bf8, float>{}(arg);
-            }
         }
         else // covers non-HPA: dgemm, sgemm, zgemm, cgemm, hgemm
         {
             return rocblas_simple_dispatch<TEST>(arg); // Ti = To = Tc
         }
-    }
-    else if(arg.d_type == To && Tc_new == rocblas_compute_type_f32)
-    {
-        if(arg.a_type == rocblas_datatype_f8_r && arg.b_type == rocblas_datatype_bf8_r
-           && To == rocblas_datatype_f32_r)
-            return TEST<rocblas_f8, rocblas_bf8, float, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_bf8_r && arg.b_type == rocblas_datatype_f8_r
-                && To == rocblas_datatype_f32_r)
-            return TEST<rocblas_bf8, rocblas_f8, float, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_f8_r && arg.b_type == rocblas_datatype_bf8_r
-                && To == rocblas_datatype_bf8_r)
-            return TEST<rocblas_f8, rocblas_bf8, rocblas_bf8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_bf8_r && arg.b_type == rocblas_datatype_f8_r
-                && To == rocblas_datatype_bf8_r)
-            return TEST<rocblas_bf8, rocblas_f8, rocblas_bf8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_f8_r && arg.b_type == rocblas_datatype_bf8_r
-                && To == rocblas_datatype_f16_r)
-            return TEST<rocblas_f8, rocblas_bf8, rocblas_half, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_bf8_r && arg.b_type == rocblas_datatype_f8_r
-                && To == rocblas_datatype_f16_r)
-            return TEST<rocblas_bf8, rocblas_f8, rocblas_half, float>{}(arg);
-    }
-    else if(arg.d_type == To)
-    {
-        if(arg.a_type == rocblas_datatype_f8_r && arg.b_type == rocblas_datatype_f32_r
-           && To == rocblas_datatype_f8_r && Tc_new == rocblas_compute_type_f8_f8_f32)
-            return TEST<rocblas_f8, float, rocblas_f8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_f32_r && arg.b_type == rocblas_datatype_f8_r
-                && To == rocblas_datatype_f8_r && Tc_new == rocblas_compute_type_f8_f8_f32)
-            return TEST<float, rocblas_f8, rocblas_f8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_bf8_r && arg.b_type == rocblas_datatype_f32_r
-                && To == rocblas_datatype_bf8_r && Tc_new == rocblas_compute_type_bf8_bf8_f32)
-            return TEST<rocblas_bf8, float, rocblas_bf8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_f32_r && arg.b_type == rocblas_datatype_bf8_r
-                && To == rocblas_datatype_bf8_r && Tc_new == rocblas_compute_type_f8_bf8_f32)
-            return TEST<float, rocblas_bf8, rocblas_bf8, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_bf8_r && arg.b_type == rocblas_datatype_f32_r
-                && To == rocblas_datatype_f32_r && Tc_new == rocblas_compute_type_bf8_f8_f32)
-            return TEST<rocblas_bf8, float, float, float>{}(arg);
-        else if(arg.a_type == rocblas_datatype_f32_r && arg.b_type == rocblas_datatype_bf8_r
-                && To == rocblas_datatype_f32_r && Tc_new == rocblas_compute_type_f8_bf8_f32)
-            return TEST<float, rocblas_bf8, float, float>{}(arg);
     }
     return TEST<void>{}(arg);
 }

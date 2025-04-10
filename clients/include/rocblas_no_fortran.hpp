@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,11 +71,8 @@
 #define rocblas_scal_strided_batched_ex_64_fortran rocblas_scal_strided_batched_ex_64
 
 #define rocblas_gemm_ex_fortran rocblas_gemm_ex
-#define rocblas_gemm_ex3_fortran rocblas_gemm_ex3
 #define rocblas_gemm_batched_ex_fortran rocblas_gemm_batched_ex
-#define rocblas_gemm_batched_ex3_fortran rocblas_gemm_batched_ex3
 #define rocblas_gemm_strided_batched_ex_fortran rocblas_gemm_strided_batched_ex
-#define rocblas_gemm_strided_batched_ex3_fortran rocblas_gemm_strided_batched_ex3
 #define rocblas_gemmt_fortran rocblas_gemmt
 #define rocblas_gemmt_batched_fortran rocblas_gemmt_batched
 #define rocblas_gemmt_strided_batched_fortran rocblas_gemmt_strided_batched

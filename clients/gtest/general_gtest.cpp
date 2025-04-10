@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,6 @@
  * ************************************************************************ */
 
 #include "rocblas_data.hpp"
-#include "rocblas_float8.h"
 #include "rocblas_matrix.hpp"
 #include "rocblas_test.hpp"
 #include "rocblas_vector.hpp"
@@ -40,107 +39,6 @@ namespace
     {
         EXPECT_EQ(std::round(a * pow(10, decimals)), std::round(b * pow(10, decimals)));
     }
-
-    //
-    // 8 bit floats
-
-    template <typename T>
-    void testing_f8_operators(const Arguments& arg)
-    {
-
-        T c(0.5f);
-        T s(2.0f);
-
-        float result = c * s;
-        EXPECT_EQ(result, (1.0f));
-
-        c      = T(0.5f);
-        s      = T(2.0f);
-        result = s / c;
-        EXPECT_EQ(result, 4.0f);
-
-        c   = T(0.5f);
-        s   = T(2.0f);
-        T r = c + s;
-        EXPECT_EQ(float(r), 2.5f);
-
-        c = T(0.5f);
-        s = T(2.0f);
-        r = c - s;
-        EXPECT_EQ(float(r), -1.5f);
-
-        c = T(0.5f);
-        s = T(0.5f);
-        EXPECT_TRUE(c == s);
-        EXPECT_FALSE(c != s);
-
-        // unique harmonic convergence
-        T hc = T(0);
-        if(std::is_same_v<T, rocblas_f8>)
-        {
-            for(int i = 1; i <= 16; i++)
-                hc += T(T(1.0) / T(i));
-            expect_decimals_eq((float)hc, 3.0000f, 4);
-        }
-        else if(std::is_same_v<T, rocblas_bf8>)
-        {
-            for(int i = 1; i <= 16; i++)
-                hc += T(T(1.0) / T(i));
-            expect_decimals_eq((float)hc, 2.0000f, 4);
-        }
-    };
-
-    // By default, arbitrary type combinations are invalid.
-    // The unnamed second parameter is used for enable_if_t below.
-    template <typename, typename = void>
-    struct f8_operators_testing : rocblas_test_invalid
-    {
-    };
-
-    template <typename T>
-    struct f8_operators_testing<
-        T,
-        std::enable_if_t<std::is_same_v<T, rocblas_f8> || std::is_same_v<T, rocblas_bf8>>>
-        : rocblas_test_valid
-    {
-        void operator()(const Arguments& arg)
-        {
-            if(!strcmp(arg.function, "f8_operators"))
-                testing_f8_operators<T>(arg);
-            else
-                FAIL() << "Internal error: Test called with unknown function: " << arg.function;
-        }
-    };
-
-    struct f8_operators : RocBLAS_Test<f8_operators, f8_operators_testing>
-    {
-        // Filter for which types apply to this suite
-        static bool type_filter(const Arguments& arg)
-        {
-            return true;
-        }
-
-        // Filter for which functions apply to this suite
-        static bool function_filter(const Arguments& arg)
-        {
-            return !strcmp(arg.function, "f8_operators");
-        }
-
-        // Google Test name suffix based on parameters
-        static std::string name_suffix(const Arguments& arg)
-        {
-            RocBLAS_TestName<f8_operators> name(arg.name);
-            name << rocblas_datatype2string(arg.a_type);
-            return std::move(name);
-        }
-    };
-
-    TEST_P(f8_operators, auxiliary)
-    {
-        CATCH_SIGNALS_AND_EXCEPTIONS_AS_FAILURES(
-            rocblas_f8_dispatch<f8_operators_testing>(GetParam()));
-    }
-    INSTANTIATE_TEST_CATEGORIES(f8_operators);
 
     //
     // half floats

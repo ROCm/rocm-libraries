@@ -53,12 +53,6 @@ namespace
     constexpr auto hipblaslt_datatype<int32_t> = HIP_R_32I;
 
     template <>
-    constexpr auto hipblaslt_datatype<rocblas_f8> = HIP_R_8F_E4M3_FNUZ;
-
-    template <>
-    constexpr auto hipblaslt_datatype<rocblas_bf8> = HIP_R_8F_E5M2_FNUZ;
-
-    template <>
     constexpr auto hipblaslt_datatype<rocblas_half> = HIP_R_16F;
 
     template <>
@@ -130,16 +124,16 @@ namespace
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
-    template <typename TiA, typename To, typename Tc, typename TiB = TiA>
-    auto ConstructHipBlasLTGemm(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
+    template <typename Ti, typename To, typename Tc>
+    auto ConstructHipBlasLTGemm(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         hipblasLtHandle_t& handle = *(prob.handle->getHipblasLtHandle());
 
         hipblaslt_ext::Gemm gemm(handle,
                                  (hipblasOperation_t)prob.trans_a,
                                  (hipblasOperation_t)prob.trans_b,
-                                 hipblaslt_datatype<TiA>,
-                                 hipblaslt_datatype<TiB>,
+                                 hipblaslt_datatype<Ti>,
+                                 hipblaslt_datatype<Ti>,
                                  hipblaslt_datatype<To>,
                                  hipblaslt_datatype<To>,
                                  hipblaslt_compute_type<Tc>);
@@ -147,8 +141,8 @@ namespace
         hipblaslt_ext::GemmProblemType problemType;
         problemType.op_a         = (hipblasOperation_t)prob.trans_a;
         problemType.op_b         = (hipblasOperation_t)prob.trans_b;
-        problemType.type_a       = hipblaslt_datatype<TiA>;
-        problemType.type_b       = hipblaslt_datatype<TiB>;
+        problemType.type_a       = hipblaslt_datatype<Ti>;
+        problemType.type_b       = hipblaslt_datatype<Ti>;
         problemType.type_c       = hipblaslt_datatype<To>;
         problemType.type_d       = hipblaslt_datatype<To>;
         problemType.type_compute = hipblaslt_compute_type<Tc>;
@@ -183,16 +177,16 @@ namespace
     /****************************************************************
      * Construct a HipBlasLT Groupped GEMM from a RocblasContractionProblem *
      ****************************************************************/
-    template <typename TiA, typename To, typename Tc, typename TiB = TiA>
-    auto ConstructHipBlasLTGroupedGemm(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob)
+    template <typename Ti, typename To, typename Tc>
+    auto ConstructHipBlasLTGroupedGemm(const RocblasContractionProblem<Ti, To, Tc>& prob)
     {
         hipblasLtHandle_t& handle = *(prob.handle->getHipblasLtHandle());
 
         hipblaslt_ext::GroupedGemm gemm(handle,
                                         (hipblasOperation_t)prob.trans_a,
                                         (hipblasOperation_t)prob.trans_b,
-                                        hipblaslt_datatype<TiA>,
-                                        hipblaslt_datatype<TiB>,
+                                        hipblaslt_datatype<Ti>,
+                                        hipblaslt_datatype<Ti>,
                                         hipblaslt_datatype<To>,
                                         hipblaslt_datatype<To>,
                                         hipblaslt_compute_type<Tc>);
@@ -200,8 +194,8 @@ namespace
         hipblaslt_ext::GemmProblemType problemType;
         problemType.op_a         = (hipblasOperation_t)prob.trans_a;
         problemType.op_b         = (hipblasOperation_t)prob.trans_b;
-        problemType.type_a       = hipblaslt_datatype<TiA>;
-        problemType.type_b       = hipblaslt_datatype<TiB>;
+        problemType.type_a       = hipblaslt_datatype<Ti>;
+        problemType.type_b       = hipblaslt_datatype<Ti>;
         problemType.type_c       = hipblaslt_datatype<To>;
         problemType.type_d       = hipblaslt_datatype<To>;
         problemType.type_compute = hipblaslt_compute_type<Tc>;
@@ -394,11 +388,10 @@ namespace
  * runContractionProblemHipBlasLT calls Hipblaslt to run a contraction problem described *
  * by RocblasContractionProblem                                               *
  ******************************************************************************/
-template <typename TiA, typename To, typename Tc, typename TiB>
-rocblas_status
-    runContractionProblemHipBlasLT(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
-                                   rocblas_gemm_algo                                  algo,
-                                   int32_t solution_index)
+template <typename Ti, typename To, typename Tc>
+rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                                              rocblas_gemm_algo                            algo,
+                                              int32_t solution_index)
 {
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
@@ -534,14 +527,14 @@ rocblas_status
     return rocblas_status_success;
 }
 
-template <typename TiA, typename To, typename Tc, typename TiB>
-rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<TiA, To, Tc, TiB>& prob,
-                                        rocblas_tensile_get_solution_option                option,
-                                        rocblas_int* list_array,
-                                        rocblas_int* list_size)
+template <typename Ti, typename To, typename Tc>
+rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                                        rocblas_tensile_get_solution_option          option,
+                                        rocblas_int*                                 list_array,
+                                        rocblas_int*                                 list_size)
 {
 
-    constexpr bool is_complex = rocblas_is_complex<TiA> || rocblas_is_complex<Tc>;
+    constexpr bool is_complex = rocblas_is_complex<Ti> || rocblas_is_complex<Tc>;
     rocblas_status status     = rocblas_status_success;
     int            added_sols = 0;
 
@@ -579,8 +572,8 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<TiA, To,
                                                             hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
                                                             op1,
                                                             op2,
-                                                            hipblaslt_datatype<TiA>,
-                                                            hipblaslt_datatype<TiB>,
+                                                            hipblaslt_datatype<Ti>,
+                                                            hipblaslt_datatype<Ti>,
                                                             hipblaslt_datatype<To>,
                                                             hipblaslt_datatype<To>,
                                                             hipblaslt_compute_type<Tc>,
@@ -632,8 +625,8 @@ rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<TiA, To,
                                                     hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
                                                     (hipblasOperation_t)prob.trans_a,
                                                     (hipblasOperation_t)prob.trans_b,
-                                                    hipblaslt_datatype<TiA>,
-                                                    hipblaslt_datatype<TiB>,
+                                                    hipblaslt_datatype<Ti>,
+                                                    hipblaslt_datatype<Ti>,
                                                     hipblaslt_datatype<To>,
                                                     hipblaslt_datatype<To>,
                                                     hipblaslt_compute_type<Tc>,
@@ -732,80 +725,6 @@ template rocblas_status
     runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_double_complex>&,
                                    rocblas_gemm_algo algo,
                                    int32_t           solution_index);
-
-// EX types
-
-// f8 case0: Ti=f8 Tc=To=f32
-template rocblas_status
-    runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_f8, float, float>&,
-                                   rocblas_gemm_algo algo,
-                                   int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_f8, rocblas_half, float>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_f8, rocblas_f8, float>&,
-                                   rocblas_gemm_algo algo,
-                                   int32_t           solution_index);
-
-template rocblas_status
-    runContractionProblemHipBlasLT(const RocblasContractionProblem<rocblas_bf8, float, float>&,
-                                   rocblas_gemm_algo algo,
-                                   int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_half, float>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_bf8, float>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-//hybrid // Change of f8 parameter convention in order to support existing usage
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_f8, float, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_f8, rocblas_half, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, float, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_half, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_f8, rocblas_f8, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_f8, rocblas_bf8, float, rocblas_bf8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_f8, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
-
-template rocblas_status runContractionProblemHipBlasLT(
-    const RocblasContractionProblem<rocblas_bf8, rocblas_bf8, float, rocblas_f8>&,
-    rocblas_gemm_algo algo,
-    int32_t           solution_index);
 
 // HPA types
 template rocblas_status runContractionProblemHipBlasLT(

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,20 +71,6 @@ template <>
 __device__ __host__ inline rocblas_bfloat16 negate(rocblas_bfloat16 x)
 {
     x.data ^= 0x8000;
-    return x;
-}
-
-template <>
-__device__ __host__ inline rocblas_f8 negate(rocblas_f8 x)
-{
-    x.data ^= 0x80;
-    return x;
-}
-
-template <>
-__device__ __host__ inline rocblas_bf8 negate(rocblas_bf8 x)
-{
-    x.data ^= 0x80;
     return x;
 }
 
