@@ -34,6 +34,7 @@
 #include <string>
 #include <variant>
 
+#include <rocisa/include/enum.hpp>
 #include <Tensile/Comparison.hpp>
 #include <Tensile/DataTypes_BFloat16.hpp>
 #if (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 2 && HIP_VERSION_PATCH > 42130) \
@@ -79,34 +80,6 @@ namespace TensileLite
  * \ingroup DataTypes
  * @{
  */
-
-    /**
- * Data Type
- */
-    enum class DataType : int
-    {
-        Float,
-        Double,
-        ComplexFloat,
-        ComplexDouble,
-        Half,
-        Int8x4,
-        Int32,
-        BFloat16,
-        Int8,
-        Int64,
-        XFloat32,
-        Float8_fnuz,
-        BFloat8_fnuz,
-        Float8BFloat8_fnuz,
-        BFloat8Float8_fnuz,
-        Float8,
-        BFloat8,
-        Float8BFloat8,
-        BFloat8Float8,
-        Count,
-        None = Count
-    };
 
     std::string   ToString(DataType d);
     std::string   TypeAbbrev(DataType d);

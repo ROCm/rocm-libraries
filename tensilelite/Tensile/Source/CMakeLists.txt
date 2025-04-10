@@ -88,6 +88,9 @@ if(TENSILE_USE_OPENMP)
     endif ()
 endif()
 
+# rocisa header, shares with the Python generator
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../rocisa)
+
 add_subdirectory(lib)
 
 if(TENSILE_BUILD_CLIENT)
