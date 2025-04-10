@@ -25,22 +25,26 @@
 
 struct StockhamPartialPassKernelRR : public StockhamKernelRR
 {
-    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs& specs)
+    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs& specs,
+                                         const std::vector<size_t>&    ppFactors,
+                                         const size_t                  ppLength)
         : StockhamKernelRR(specs)
+        , factors_pp(ppFactors)
+        , length_pp(ppLength)
     {
         // TODO: revisit this. Test with factors_pp.size() > 1
-        max_factor_pp   = *std::max_element(specs.factors_pp.begin(), specs.factors_pp.end());
-        prod_factors_pp = std::accumulate(
-            specs.factors_pp.begin(), specs.factors_pp.end(), 1, std::multiplies<unsigned int>());
+        max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
     }
 
-    unsigned int max_factor_pp, prod_factors_pp;
-    Variable     offset_pp{"offset_pp", "size_t"};
-    Variable     stride_lds_pp{"stride_lds_pp", "size_t"};
-    Variable     offset_lds_pp{"offset_lds_pp", "size_t"};
+    unsigned int        max_factor_pp;
+    std::vector<size_t> factors_pp;
+    unsigned int        length_pp;
 
+    Variable offset_pp{"offset_pp", "size_t"};
+    Variable stride_lds_pp{"stride_lds_pp", "size_t"};
+    Variable offset_lds_pp{"offset_lds_pp", "size_t"};
     Variable twiddles_pp{"twiddles_pp", "const scalar_type", true, true};
 
     StatementList calculate_offsets() override
@@ -60,9 +64,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                         block_id * transforms_per_block + thread_id / threads_per_transform};
         stmts += Assign{remaining, transform};
         stmts += Assign{remaining_pp,
-                        length * Parens(transform / length)
-                            + Parens(transform % length) / max_factor_pp
-                            + Parens(transform * (length / max_factor_pp)) % length};
+                        64 * Parens(transform / 64) + Parens(transform % 64) / transforms_per_block
+                            + Parens(transform * (64 / transforms_per_block)) % 64};
 
         stmts += For{d,
                      1,
@@ -280,7 +283,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
     Function generate_twiddle_multiply_pp_function(int direction)
     {
         std::string function_name
-            = "twiddle_multiply_pp_length" + std::to_string(length) + "_device";
+            = "twiddle_multiply_pp_length" + std::to_string(length_pp) + "_device";
 
         Function f{function_name};
 
@@ -299,7 +302,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         for(unsigned int w = 0; w < max_factor_pp; ++w)
         {
-            body += Assign{W, twiddles_pp[thread * length + w]};
+            body += Assign{W, twiddles_pp[thread * Literal(length_pp) + w]};
 
             if(direction == -1)
                 body += Assign{t, TwiddleMultiply{R[w], W}};
@@ -353,9 +356,9 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         TemplateList            pre_twd_mul_tmpl = TemplateList{scalar_type};
         std::vector<Expression> pre_twd_mul_args
-            = {R, block_id % (length / max_factor_pp), twiddles_pp};
+            = {R, block_id % (length_pp / max_factor_pp), twiddles_pp};
         StatementList twdMul;
-        twdMul += Call{"twiddle_multiply_pp_length" + std::to_string(length) + "_device",
+        twdMul += Call{"twiddle_multiply_pp_length" + std::to_string(length_pp) + "_device",
                        pre_twd_mul_tmpl,
                        pre_twd_mul_args};
 

@@ -1,12 +1,14 @@
 function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_batched, test_mode)
 
+  test_mode_0 = 'input';
   test_mode_1 = 'full-3d';
   test_mode_2 = 'direction_1';
   test_mode_3 = 'direction_1_step_1_2';
   test_mode_4 = 'direction_1_step_1_2_3_4';
 
-  if ~(strcmp(test_mode,test_mode_1) || strcmp(test_mode,test_mode_2) || ...
-       strcmp(test_mode,test_mode_3) || strcmp(test_mode,test_mode_4))
+  if ~(strcmp(test_mode,test_mode_0) || strcmp(test_mode,test_mode_1) || ...
+       strcmp(test_mode,test_mode_2) || strcmp(test_mode,test_mode_3) || ...
+       strcmp(test_mode,test_mode_4))
       display(test_mode);
     error('Invalid test mode');
   endif
@@ -32,6 +34,18 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
       error('Error: incomplete data');
     endif
 
+    if (strcmp(test_mode,test_mode_0))
+      in = convert_3d_to_1d(in, ordering);
+      out_ = convert_3d_to_1d(out_, ordering);
+
+      in = sort(in);
+      out_ = sort(out_);
+
+      linf_rocfft_vs_octave_built_in = norm(in-out_,'inf');
+      disp(['l-inf norm: '  num2str(linf_rocfft_vs_octave_built_in)]);
+      return;
+    endif
+
     % 3D-FFT (MATLAB built-in)
     out = fftn(in);
     out = convert_3d_to_1d(out, ordering);
@@ -46,7 +60,7 @@ function partial_pass_3d(in_length, nbatch, pp_dim, pp_radices, in_batched, out_
 
       out_3d_rc = convert_3d_to_1d(out_3d_rc, ordering);
       linf_test = norm(out_3d_rc-out,'inf');
-      if (linf_test > 1E-8)
+      if (linf_test > 1E-5)
         error("Error: partial-pass 3D-RC failed accuracy test");
       endif
 

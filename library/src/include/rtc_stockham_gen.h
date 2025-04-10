@@ -78,6 +78,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
                          CallbackType                  cbtype,
                          const BluesteinFuseType&      fuseBlue,
                          const PartialPassType&        ppType,
+                         const std::vector<size_t>&    ppFactors,
+                         const size_t                  ppLength,
                          const LoadOps&                loadOps,
                          const StoreOps&               storeOps);
 

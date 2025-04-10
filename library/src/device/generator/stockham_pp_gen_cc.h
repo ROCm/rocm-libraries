@@ -31,8 +31,11 @@
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
     explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs& specs,
-                                         bool largeTwdBatchIsTransformCount)
+                                         bool                       largeTwdBatchIsTransformCount,
+                                         const std::vector<size_t>& ppFactors)
         : StockhamKernelCC(specs, largeTwdBatchIsTransformCount, false)
+        , factors_pp(ppFactors)
+
     {
         large_twiddle_steps.decl_default = 3;
         large_twiddle_base.decl_default  = 8;
@@ -40,14 +43,15 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         // TODO: Address and test all "lds_linear=false" cases
 
         // TODO: revisit this. Test with factors_pp.size() > 1
-        max_factor_pp = *std::max_element(specs.factors_pp.begin(), specs.factors_pp.end());
+        max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         // TODO: transforms_per_block_pp or threads_per_transform? Revisit all usages
         transforms_per_block_pp = transforms_per_block / max_factor_pp;
     }
 
-    unsigned int transforms_per_block_pp;
-    unsigned int max_factor_pp;
+    unsigned int        transforms_per_block_pp;
+    unsigned int        max_factor_pp;
+    std::vector<size_t> factors_pp;
 
     Variable thread_lds{"thread_lds", "unsigned int"};
     Variable idx_lds{"idx_lds", "unsigned int"};

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# requires changing code generator to skip full pass and steps 1-2
+test_mode_0='input'
+
 test_mode_1='full-3d'
 
 # requires changing code generator to skip steps 1-2
@@ -13,11 +16,11 @@ test_mode_4='direction_1_step_1_2_3_4'
 # input parameters
 # -------------------------------------------------------------------
 
-length=( 64 64 64 )
+length=( 64 64 128 )
 batch=( 5 )
 pp_dim=( 2 )
 pp_radices=( 16 4 )
-test_mode=$test_mode_2
+test_mode=$test_mode_3
 # -------------------------------------------------------------------
 
 in_len_file="in_len.txt"
@@ -46,7 +49,10 @@ ROCFFT_LAYER=16 ./rocfft-bench --precision double --length ${length[0]} ${length
 
 cd $rocfft_script_dir
 
-if [ $test_mode = $test_mode_1 ]; then
+if [ $test_mode = $test_mode_0 ]; then
+    buffer_arg_1=0
+    buffer_arg_2=1
+elif [ $test_mode = $test_mode_1 ]; then
     buffer_arg_1=0
     buffer_arg_2=2
 elif [ $test_mode = $test_mode_2 ]; then

@@ -269,6 +269,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
                          CallbackType                  cbtype,
                          const BluesteinFuseType&      fuseBlue,
                          const PartialPassType&        ppType,
+                         const std::vector<size_t>&    ppFactors,
+                         const size_t                  ppLength,
                          const LoadOps&                loadOps,
                          const StoreOps&               storeOps)
 {
@@ -314,7 +316,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         if(scheme == CS_KERNEL_STOCKHAM)
         {
             if(ppType == PartialPassType::PPT_SBRR)
-                kernel = std::make_unique<StockhamPartialPassKernelRR>(specs);
+                kernel = std::make_unique<StockhamPartialPassKernelRR>(specs, ppFactors, ppLength);
             else
                 kernel = std::make_unique<StockhamKernelRR>(specs);
         }
@@ -322,7 +324,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         {
             if(ppType == PartialPassType::PPT_SBCC)
                 kernel = std::make_unique<StockhamPartialPassKernelCC>(
-                    specs, largeTwdBatchIsTransformCount);
+                    specs, largeTwdBatchIsTransformCount, ppFactors);
             else
                 kernel = std::make_unique<StockhamKernelCC>(
                     specs, largeTwdBatchIsTransformCount, fuseBluestein);
@@ -409,7 +411,7 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         all_factors = kernel->factors;
 
         if(ppType != PPT_NONE)
-            all_factors.insert(all_factors.end(), specs.factors_pp.begin(), specs.factors_pp.end());
+            all_factors.insert(all_factors.end(), ppFactors.begin(), ppFactors.end());
     }
 
     // generated functions default to forward in-place interleaved.

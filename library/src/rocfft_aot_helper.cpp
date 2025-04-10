@@ -226,8 +226,10 @@ void build_stockham_function_pool(CompileQueue& queue)
     function_pool& fp = function_pool::get_function_pool();
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue = BluesteinFuseType::BFT_NONE;
-    auto ppType   = PartialPassType::PPT_NONE;
+    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
+    auto ppType    = PartialPassType::PPT_NONE;
+    auto ppFactors = std::vector<size_t>{};
+    auto ppLength  = 0;
 
     for(const auto& i : fp.get_map())
     {
@@ -243,7 +245,6 @@ void build_stockham_function_pool(CompileQueue& queue)
         std::copy(i.second.factors.begin(), i.second.factors.end(), std::back_inserter(factors));
 
         StockhamGeneratorSpecs specs{factors,
-                                     {},
                                      {},
                                      {static_cast<unsigned int>(precision)},
                                      static_cast<unsigned int>(i.second.workgroup_size),
@@ -307,7 +308,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                     = [=](const std::string& kernel_name) -> std::string {
                     StockhamGeneratorSpecs specs{factors,
                                                  {},
-                                                 {},
                                                  {static_cast<unsigned int>(precision)},
                                                  static_cast<unsigned int>(i.second.workgroup_size),
                                                  PrintScheme(scheme)};
@@ -335,6 +335,8 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
+                                        ppFactors,
+                                        ppLength,
                                         {},
                                         {});
                 };
@@ -622,8 +624,10 @@ void build_solution_kernels(CompileQueue& queue)
     solmap.get_all_kernels(kernel_nodes, true);
 
     // fused Bluestein and partial-pass kernels are always built at runtime
-    auto fuseBlue = BluesteinFuseType::BFT_NONE;
-    auto ppType   = PartialPassType::PPT_NONE;
+    auto fuseBlue  = BluesteinFuseType::BFT_NONE;
+    auto ppType    = PartialPassType::PPT_NONE;
+    auto ppFactors = std::vector<size_t>{};
+    auto ppLength  = 0;
 
     for(const SolutionNode& kernel_sol : kernel_nodes)
     {
@@ -669,7 +673,6 @@ void build_solution_kernels(CompileQueue& queue)
                 }
 
                 StockhamGeneratorSpecs specs{factors,
-                                             {},
                                              {},
                                              {static_cast<unsigned int>(precision)},
                                              static_cast<unsigned int>(config.workgroup_size),
@@ -727,6 +730,8 @@ void build_solution_kernels(CompileQueue& queue)
                                         cbtype,
                                         fuseBlue,
                                         ppType,
+                                        ppFactors,
+                                        ppLength,
                                         {},
                                         {});
                 };

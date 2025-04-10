@@ -38,10 +38,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     std::optional<StockhamGeneratorSpecs> specs;
     std::optional<StockhamGeneratorSpecs> specs2d;
 
-    std::vector<unsigned int> factors_pp;
-    std::copy(
-        node.kernelFactorsPP.begin(), node.kernelFactorsPP.end(), std::back_inserter(factors_pp));
-
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
     // that's known.
@@ -91,7 +87,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
 
         specs.emplace(factors,
-                      factors_pp,
                       std::vector<unsigned int>(),
                       precisions,
                       static_cast<unsigned int>(kernel->workgroup_size),
@@ -130,7 +125,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         }
 
         specs.emplace(factors1d,
-                      factors_pp,
                       factors2d,
                       precisions,
                       static_cast<unsigned int>(kernel->workgroup_size),
@@ -139,7 +133,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->half_lds              = kernel->half_lds;
 
         specs2d.emplace(factors2d,
-                        factors_pp,
                         factors1d,
                         precisions,
                         static_cast<unsigned int>(kernel->workgroup_size),
@@ -232,6 +225,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.GetCallbackType(enable_callbacks),
                             node.fuseBlue,
                             ppType,
+                            node.kernelFactorsPP,
+                            node.length[node.ppDim],
                             node.loadOps,
                             node.storeOps);
     };

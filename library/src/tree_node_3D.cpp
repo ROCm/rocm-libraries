@@ -666,6 +666,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         xPartialPassPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
         xPartialPassPlan->length    = xPartialPassPlanData.length;
         xPartialPassPlan->dimension = 1;
+        xPartialPassPlan->ppDim     = 1;
         xPartialPassPlan->allowInplace = true;
         xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 
@@ -689,6 +690,7 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
         zPartialPassPlan->length       = zPartialPassPlanData.length;
         zPartialPassPlan->dimension    = 1;
+        zPartialPassPlan->ppDim        = 1;
         zPartialPassPlan->allowInplace = false;
         zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
 

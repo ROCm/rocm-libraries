@@ -379,6 +379,9 @@ public:
     // enables partial pass for this node
     bool applyPartialPass = false;
 
+    // Dimension of the FFT where partial-pass is applied
+    size_t ppDim = 0;
+
     //
     BluesteinType     typeBlue   = BluesteinType::BT_NONE;
     BluesteinFuseType fuseBlue   = BluesteinFuseType::BFT_NONE;

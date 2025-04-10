@@ -937,15 +937,9 @@ bool Stockham1DNode::CreateDeviceResources()
 {
     if(applyPartialPass)
     {
-        // handles partial pass 64 x 64 x 64 case.
-        // current dimension y is the dimension to split
-        // into x and z.
-
-        // Create twiddle table for partial pass along y
-        size_t pp_dim = 1;
-
+        // Create twiddle table for partial pass along ppDim
         std::tie(twiddles_pp, twiddles_pp_size)
-            = Repo::GetTwiddlesPP(length[pp_dim], precision, deviceProp);
+            = Repo::GetTwiddlesPP(length[ppDim], precision, deviceProp);
     }
 
     twd_attach_halfN = (ebtype != EmbeddedType::NONE);
