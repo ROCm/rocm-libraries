@@ -122,7 +122,7 @@ void testing_gemm_batched_ex_get_solutions(const Arguments& arg)
 #define GEMM_B_EX_ARGS                                                                        \
     handle, transA, transB, M, N, K, &h_alpha_Tc, dA.ptr_on_device(), arg.a_type, lda,        \
         dB.ptr_on_device(), arg.b_type, ldb, &h_beta_Tc, dC.ptr_on_device(), arg.c_type, ldc, \
-        dD.ptr_on_device(), arg.d_type, ldd, batch_count, arg.compute_type, algo
+        dDref.ptr_on_device(), arg.d_type, ldd, batch_count, arg.compute_type, algo
 #define rocblas_gemm_batched_exM(...) rocblas_gemm_batched_ex(__VA_ARGS__)
 
     // Get number of solutions
