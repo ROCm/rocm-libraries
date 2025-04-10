@@ -86,6 +86,9 @@ class KernelCodeGenResult(NamedTuple):
     targetObjFilename: str
     isa: IsaVersion
     wavefrontSize: int
+    cuoccupancy: int
+    pgr: int
+    mathclk: int
 
 
 def processKernelSource(kernelWriterAssembly, data, useShortNames, splitGSU, kernelMinNaming, kernelSerialNaming, kernel) -> KernelCodeGenResult:
@@ -99,9 +102,11 @@ def processKernelSource(kernelWriterAssembly, data, useShortNames, splitGSU, ker
     err, src = kernelWriter.getSourceFileString(kernel, useShortNames)
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
-
+    pgr = int(kernel["PrefetchGlobalRead"])
     return KernelCodeGenResult(
-        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), kernel["WavefrontSize"]
+        err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
+        kernel["WavefrontSize"], kernel["CUOccupancy"], \
+        pgr, kernel["MathClocksUnrolledLoop"]
     )
 
 
@@ -152,6 +157,19 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
     for rel in removeResults:
         results.remove(rel)
 
+def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
+    resultDict = {}
+    for kernIdx, r in enumerate(results):
+        kName = getKeyNoInternalArgs(kernels[kernIdx], splitGSU)
+        resultDict["%s"%kName] = r
+    for solution in solutions:
+        solutionKernels = solution.getKernels()
+        for kernel in solutionKernels:
+            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            result = resultDict["%s"%kName]
+            solution._state["CUOccupancy"] = result.cuoccupancy
+            solution._state["PrefetchGlobalRead"] = result.pgr
+            solution._state["MathClocksUnrolledLoop"] = result.mathclk
 
 def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     if result.err:
@@ -255,6 +273,9 @@ def writeSolutionsAndKernels(
     asmResults = ParallelMap2(processKernelSource, asmIter, "Generating assembly kernels", return_as="list")
     removeInvalidSolutionsAndKernels(
         asmResults, asmKernels, solutions, errorTolerant, getVerbosity(), splitGSU
+    )
+    passPostKernelInfoToSolution(
+        asmResults, asmKernels, solutions, splitGSU
     )
 
     def assemble(ret):

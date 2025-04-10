@@ -1045,6 +1045,10 @@ class Solution(collections.abc.Mapping):
       if isaInfoMap[isa].archCaps["HasF32XEmulation"]:
         state["UseF32XEmulation"] = True
 
+    # initial info to be exported for solution prediction
+    state["CUOccupancy"]            = -1
+    state["MathClocksUnrolledLoop"] = 0
+
     Solution.assignProblemIndependentDerivedParameters(state, printRejectionReason, isaInfoMap)
 
     if "AssignedDerivedParameters" in state:

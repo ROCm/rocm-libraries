@@ -1258,9 +1258,9 @@ class KernelWriterAssembly(KernelWriter):
       self.states.overflowedResources = 2
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    if kernel["ScheduleIterAlg"] == 2 and \
-        self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
-        self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr) < 2:
+    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], self.vgprPool.size(), self.sgprPool.size(), \
+      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+    if kernel["ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       self.states.overflowedResources = 6
 
     vgprPerThreadPerOccupancy = self.states.regCaps["PhysicalMaxVgprCU"] // kernel["NumThreads"]

@@ -574,7 +574,10 @@ class SizeMapping:
                  'workGroupMappingXCC',
                  'workGroupMappingXCCGroup',
                  'globalSplitUCoalesced',
-                 'globalSplitUWorkGroupMappingRoundRobin'
+                 'globalSplitUWorkGroupMappingRoundRobin',
+                 'CUOccupancy',
+                 'PrefetchGlobalRead',
+                 'MathClocksUnrolledLoop'
                  ]
 
     @classmethod
@@ -588,6 +591,7 @@ class SizeMapping:
             globalAccum = 3
         if d['_GlobalAccumulation'] == 'PartialsBuffer':
             globalAccum = 4
+        pgr = int(d['PrefetchGlobalRead'])
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
                    macroTile                = cls.ReadOriginalMacroTile(d),
@@ -617,7 +621,10 @@ class SizeMapping:
                    workGroupMappingXCC      = d['WorkGroupMappingXCC'],
                    workGroupMappingXCCGroup = d['WorkGroupMappingXCCGroup'],
                    globalSplitUCoalesced    = d['GlobalSplitUCoalesced'],
-                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin']
+                   globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
+                   CUOccupancy              = d['CUOccupancy'],
+                   PrefetchGlobalRead       = pgr,
+                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop']
                    )
 
     @classmethod

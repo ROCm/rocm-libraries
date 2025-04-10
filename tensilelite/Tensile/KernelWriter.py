@@ -34,7 +34,7 @@ from .TensileInstructions import replaceHolder, \
                           SBranch, SCBranchSCC0, SCBranchSCC1
 from .TensileInstructions.Instructions import *
 from .KernelWriterModules import *
-from .TensilePass import TensilePass, TensilePassOptions
+from .TensilePass import TensilePass, TensilePassOptions, TensilePassGetCycles
 from .Component import Component, LraTileProperties
 from .Components.Signature import UserArgumentsInfo
 from .SolutionStructs import Solution, isPackedIndex
@@ -3237,8 +3237,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # Tensile pass
     tpo = TensilePassOptions()
-    tpo.removeDupActFunc = kernel["ActivationFuncCall"]
+    tpo.removeDupActFunc    = kernel["ActivationFuncCall"]
+    tpo.calculateMathClocks = True
+    numWaves                = kernel["NumThreads"] // kernel["WavefrontSize"]
     TensilePass(module, tpo)
+    kernel["MathClocksUnrolledLoop"] = TensilePassGetCycles(module, tpo, numWaves)
     # Add a label at the end of the asm for indexing.
     module.add(Label("ASM_End", "The end of the kernel"))
 

@@ -21,6 +21,7 @@
 ################################################################################
 
 from .TensileInstructions import Module, SAddI32, SEndpgm
+from .TensileInstructions.Instructions import *
 
 from dataclasses import dataclass, field
 
@@ -29,12 +30,17 @@ from dataclasses import dataclass, field
 #######################################
 @dataclass
 class TensilePassOptions:
-    removeDupActFunc: bool = field(init=False)
+    removeDupActFunc:    bool = field(init=False)
+    calculateMathClocks: bool = field(init=False)
 
 def TensilePass(module, options: TensilePassOptions):
     if options.removeDupActFunc:
         _removeDuplicatedActivationFunctions(module)
 
+def TensilePassGetCycles(module, options: TensilePassOptions, numWaves) -> int:
+    if options.calculateMathClocks:
+        return _calculateMathClocksInUnrolledLoop(module, numWaves)
+    return -1
 
 def getActivationFunctionModuleName(gwvw, sgpr, tmpVgpr, tmpSgpr):
     return "ActFunc_VW%d_Sgpr%d_Tmp%s_%s"%(gwvw, sgpr, tmpVgpr, tmpSgpr)
@@ -115,3 +121,46 @@ def _removeDuplicatedActivationFunctions(module):
     if moduleLast.items():
         module.add(moduleLast)
         module.add(SEndpgm())
+
+def _popInst(mod, moduleInst):
+    for item in mod.items():
+        if isinstance(item, Module):
+            _popInst(item, moduleInst)
+        elif isinstance(item, Instruction):
+            moduleInst.add(item)
+
+def _countCycles(item, numWaves):
+    moduleInst = Module("Instructions to be issued")
+    _popInst(item, moduleInst)
+
+    cycles   = 0
+    hwMFMA   = -99
+    for item in moduleInst.items():
+        if isinstance(item, Module):
+            assert 0, "Module should be instructions here."
+        elif isinstance(item, MFMAInstruction):
+            if cycles - hwMFMA >= 3:
+                cycles += 1
+            else:
+                cycles = hwMFMA + 4
+            hwMFMA = cycles
+        elif isinstance(item, BranchInstruction):
+            cycles += 1
+            # end of loop
+            if "label_LoopBeginL" == item.labelName:
+                break
+        elif isinstance(item, Instruction):
+            cycles += 1
+        item.comment = "This is " + str(cycles) + "-cycle" # for debug
+    return cycles
+
+def _calculateMathClocksInUnrolledLoop(module, numWaves):
+    # Kernel: openLoop -> loopBody -> noLoadLoop
+    cycles     = -1
+    isOpenLoop = False
+    for item in module.items():
+        # Find loopBody
+        if item.name == "loopBody":
+            cycles = _countCycles(item, numWaves)
+            return cycles
+    return -1
