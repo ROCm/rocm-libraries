@@ -55,6 +55,8 @@ using namespace rocRoller;
 
 namespace MatrixMultiplyTest
 {
+    static int const ScaleBlockSize = 32;
+
     template <typename T>
     concept isF8 = std::is_same_v<T, FP8> || std::is_same_v<T, BF8>;
 
@@ -125,10 +127,10 @@ namespace MatrixMultiplyTest
         {
             commandKernel = nullptr;
 
-            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
+            REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
             }
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
@@ -232,10 +234,10 @@ namespace MatrixMultiplyTest
             {
                 ASSERT_TRUE(scaleB);
 
-                auto scaledA = command->addOperation(
-                    rocRoller::Operations::BlockScale(tagLoadA, 2, tagLoadScaleA, {1, 32}));
-                auto scaledB = command->addOperation(
-                    rocRoller::Operations::BlockScale(tagLoadB, 2, tagLoadScaleB, {32, 1}));
+                auto scaledA = command->addOperation(rocRoller::Operations::BlockScale(
+                    tagLoadA, 2, tagLoadScaleA, {1, ScaleBlockSize}));
+                auto scaledB = command->addOperation(rocRoller::Operations::BlockScale(
+                    tagLoadB, 2, tagLoadScaleB, {ScaleBlockSize, 1}));
 
                 tagStoreD = command->addOperation(
                     rocRoller::Operations::T_Mul(scaledA, scaledB)); // D = A * B
@@ -265,11 +267,11 @@ namespace MatrixMultiplyTest
 
             if(scaleA)
             {
-                auto macTileScaleA
-                    = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k / 32},
-                                                              LayoutType::MATRIX_A,
-                                                              {wave_m, wave_n, wave_k / 32, wave_b},
-                                                              MemoryType::WAVE);
+                auto macTileScaleA = KernelGraph::CoordinateGraph::MacroTile(
+                    {mac_m, mac_k / ScaleBlockSize},
+                    LayoutType::MATRIX_A,
+                    {wave_m, wave_n, wave_k / ScaleBlockSize, wave_b},
+                    MemoryType::WAVE);
                 params->setDimensionInfo(tagLoadScaleA.value(), macTileScaleA);
             }
 
@@ -282,11 +284,11 @@ namespace MatrixMultiplyTest
 
             if(scaleB)
             {
-                auto macTileScaleB
-                    = KernelGraph::CoordinateGraph::MacroTile({mac_k / 32, mac_n},
-                                                              LayoutType::MATRIX_B,
-                                                              {wave_m, wave_n, wave_k / 32, wave_b},
-                                                              MemoryType::WAVE);
+                auto macTileScaleB = KernelGraph::CoordinateGraph::MacroTile(
+                    {mac_k / ScaleBlockSize, mac_n},
+                    LayoutType::MATRIX_B,
+                    {wave_m, wave_n, wave_k / ScaleBlockSize, wave_b},
+                    MemoryType::WAVE);
                 params->setDimensionInfo(tagLoadScaleB.value(), macTileScaleB);
             }
 
@@ -302,16 +304,16 @@ namespace MatrixMultiplyTest
                 TensorDescriptor descA(dataTypeA, {M, K}, transA);
                 TensorDescriptor descB(dataTypeB, {K, N}, transB);
                 TensorDescriptor descD(dataTypeD, {M, N}, {1u, M});
-                TensorDescriptor descScaleA(dataTypeA, {M, K / 32}, transA);
-                TensorDescriptor descScaleB(dataTypeB, {K / 32, N}, transB);
+                TensorDescriptor descScaleA(dataTypeA, {M, K / ScaleBlockSize}, transA);
+                TensorDescriptor descScaleB(dataTypeB, {K / ScaleBlockSize, N}, transB);
 
                 float rangeA = range<TA>();
                 float rangeB = range<TB>();
 
                 uint32_t seed = 9861u;
 
-                auto       blockScalingA = (scaleA) ? 32 : 1;
-                auto       blockScalingB = (scaleB) ? 32 : 1;
+                auto       blockScalingA = (scaleA) ? ScaleBlockSize : 1;
+                auto       blockScalingB = (scaleB) ? ScaleBlockSize : 1;
                 const auto dgenA
                     = getDataGenerator<TA>(descA, -rangeA, rangeA, seed, blockScalingA);
                 const auto dgenB
@@ -479,10 +481,10 @@ namespace MatrixMultiplyTest
             int const N = 1024;
             int const K = 512;
 
-            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
+            REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
             if constexpr(isF8<TA> || isF8<TB>)
             {
-                REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
+                REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA_fp8, GPUCapability::HasWMMA_f8);
             }
             if constexpr(isF6F4<TA> || isF6F4<TB>)
             {
@@ -610,7 +612,7 @@ namespace MatrixMultiplyTest
         template <typename T>
         void matrixMultiplyABC(int wave_m, int wave_n, int wave_k, int wave_b)
         {
-            REQUIRE_EITHER_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
+            REQUIRE_ANY_OF_ARCH_CAP(GPUCapability::HasMFMA, GPUCapability::HasWMMA);
 
             // matrix size: A is MxK; B is KxN; D is MxN
             unsigned M = 1024;
@@ -1655,8 +1657,8 @@ namespace MatrixMultiplyTest
         auto D     = std::vector<float>(M * N);
         auto ref_D = std::vector<float>(M * N);
 
-        auto AX = std::vector<uint8_t>(M * K / 32);
-        auto BX = std::vector<uint8_t>(K * N / 32);
+        auto AX = std::vector<uint8_t>(M * K / ScaleBlockSize);
+        auto BX = std::vector<uint8_t>(K * N / ScaleBlockSize);
         std::fill(AX.begin(), AX.end(), scaleA);
         std::fill(BX.begin(), BX.end(), scaleB);
 

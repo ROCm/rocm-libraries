@@ -112,6 +112,7 @@ set(
     unit/RegisterTest.cpp
     unit/SchedulerTest.cpp
     unit/ScopeTest.cpp
+    unit/ScopeManagerTest.cpp
     unit/SourceMatcherTest.cpp
     unit/StreamTest.cpp
     unit/SupportedInstructionObserverTest.cpp

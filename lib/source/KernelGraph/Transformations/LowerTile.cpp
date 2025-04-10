@@ -604,8 +604,8 @@ namespace rocRoller
 
             case LayoutType::MATRIX_ACCUMULATOR:
             {
-                auto numGPRsPerLaneInWave = wfs == 64 ? 4 : 8;
-                uint simdsPerWave         = wavefrontSize / 16u;
+                auto numGPRsPerLaneInWave = wfs == 64 ? 4 : 8; // A wave can have 256 GPR in total
+                uint simdsPerWave         = wavefrontSize / 16u; // Each SIMD consists of 16 lanes
                 auto simdsPerWaveLiteral  = literal(simdsPerWave);
                 auto unitStride           = literal(1u);
 

@@ -62,6 +62,14 @@ namespace CopyGeneratorTest
         }
     };
 
+    class CopyGenerator1200Test : public GenericContextFixture
+    {
+        GPUArchitectureTarget targetArchitecture() override
+        {
+            return {GPUArchitectureGFX::GFX1200};
+        }
+    };
+
     // Test if correct instructions are generated
     TEST_F(CopyGenerator90aTest, Instruction)
     {
@@ -548,5 +556,29 @@ namespace CopyGeneratorTest
             HasHipSuccess(0));
 
         EXPECT_EQ(std::memcmp(resultValue, expectedValue, size), 0);
+    }
+
+    TEST_F(CopyGenerator1200Test, NoAccVGPR)
+    {
+        auto literal = Register::Value::Literal(1);
+        auto vgpr
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Vector,
+                                                DataType::Int32,
+                                                1,
+                                                Register::AllocationOptions::FullyContiguous());
+        auto accVGPR
+            = std::make_shared<Register::Value>(m_context,
+                                                Register::Type::Accumulator,
+                                                DataType::Int32,
+                                                1,
+                                                Register::AllocationOptions::FullyContiguous());
+
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(accVGPR, literal)); },
+                     FatalError);
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(accVGPR, vgpr)); },
+                     FatalError);
+        EXPECT_THROW({ m_context->schedule(m_context->copier()->copy(vgpr, accVGPR)); },
+                     FatalError);
     }
 }

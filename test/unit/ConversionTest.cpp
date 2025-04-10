@@ -252,22 +252,26 @@ namespace rocRollerTest
     void ConversionTest::matrixMultiply(
         int wave_m, int wave_n, int wave_k, int wave_b, double acceptableError)
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
         // matrix size: A is MxK; B is KxN; D is MxN
         int M = 512;
         int N = 512;
         int K = 256;
 
+        const auto wavefrontCountX = 2;
+        const auto wavefrontCountY = 2;
+
         // output macro tile size
-        int mac_m = 64;
-        int mac_n = 64;
-        int mac_k = 64;
+        int mac_m = wavefrontCountX * wave_m;
+        int mac_n = wavefrontCountY * wave_n;
+        int mac_k = 2 * wave_k;
 
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        uint workgroup_size_x = 256;
+        auto       arch = m_context->targetArchitecture();
+        const auto wfs  = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+
+        uint workgroup_size_x = wavefrontCountX * wavefrontCountY * wfs;
         uint workgroup_size_y = 1;
 
         uint num_workgroup_x = M / mac_m;
@@ -319,7 +323,7 @@ namespace rocRollerTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
-        params->setManualWavefrontCount({2u, 2u});
+        params->setManualWavefrontCount({wavefrontCountX, wavefrontCountY});
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
         auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
@@ -724,10 +728,19 @@ namespace rocRollerTest
         matrixMultiplyABC<BF8, float, BF8>(16, 16, 32, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, GPU_MatrixMultiply)
+    TEST_F(ConversionTest, GPU_MatrixMultiply_MFMA)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         // D (Half) = Convert( A (F32) * B (F32) )
         matrixMultiply<float, Half>(32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_F(ConversionTest, GPU_MatrixMultiply_WMMA)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
+        // Note: the output type of A(Half) * B(Half) is Float
+        // D (Half) = Convert( A (Half) * B (Half) )
+        matrixMultiply<Half, Half>(16, 16, 16, 1, 2.e-6);
     }
 
     TEST_F(ConversionTest, GPU_SR_Float2FP8_VGPR)

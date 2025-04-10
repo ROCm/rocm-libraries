@@ -209,14 +209,20 @@ using GPUContextFixture = GPUContextFixtureParam<>;
         }                                                                       \
     } while(0)
 
-#define REQUIRE_EITHER_ARCH_CAP(capA, capB)                                               \
+template <typename... Caps>
+bool hasAnyOfTheseArchCaps(rocRoller::ContextPtr const context, Caps... caps)
+{
+    static_assert(sizeof...(caps) > 0);
+    return (... || context->targetArchitecture().HasCapability(caps));
+}
+
+#define REQUIRE_ANY_OF_ARCH_CAP(...)                                                      \
     do                                                                                    \
     {                                                                                     \
-        if(!(m_context->targetArchitecture().HasCapability(capA)                          \
-             || m_context->targetArchitecture().HasCapability(capB)))                     \
+        if(not hasAnyOfTheseArchCaps(m_context, __VA_ARGS__))                             \
         {                                                                                 \
             GTEST_SKIP() << m_context->targetArchitecture().target().toString()           \
-                         << " has no capability " << capA << " or " << capB << std::endl; \
+                         << " has no capability " << concatenate_join(", ", __VA_ARGS__); \
         }                                                                                 \
     } while(0)
 

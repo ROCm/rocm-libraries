@@ -41,7 +41,7 @@ namespace rocRoller::KernelGraph
     void ScopeManager::addRegister(int tag)
     {
         // Do not add if the tag is already in scope.
-        for(auto s : m_tags)
+        for(auto const& s : m_tags)
         {
             if(s.count(tag) > 0)
                 return;
