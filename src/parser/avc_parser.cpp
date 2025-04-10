@@ -1237,9 +1237,6 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
             ERR("Empty SPS is referred.");
             return PARSER_WRONG_STATE;
         }
-        // Re-set DPB size.
-        dpb_buffer_.dpb_size = p_sps->max_num_ref_frames + 1;
-        dpb_buffer_.dpb_size = dpb_buffer_.dpb_size > AVC_MAX_DPB_FRAMES ? AVC_MAX_DPB_FRAMES : dpb_buffer_.dpb_size;
         new_seq_activated_ = true;  // Note: clear this flag after the actions are taken.
     }
     p_sps = &sps_list_[active_sps_id_];
@@ -1251,15 +1248,20 @@ ParserResult AvcVideoParser::ParseSliceHeader(uint8_t *p_stream, size_t stream_s
         pic_width_ = curr_pic_width;
         pic_height_ = curr_pic_height;
         // Take care of the case where a new SPS replaces the old SPS with the same id but with different dimensions
-        // Re-set DPB size.
-        dpb_buffer_.dpb_size = p_sps->max_num_ref_frames + 1;
-        dpb_buffer_.dpb_size = dpb_buffer_.dpb_size > AVC_MAX_DPB_FRAMES ? AVC_MAX_DPB_FRAMES : dpb_buffer_.dpb_size;
         new_seq_activated_ = true;  // Note: clear this flag after the actions are taken.
     }
-
-    // Check and adjust decode buffer pool size if needed
-    if (new_seq_activated_) {
+    // Check DPB buffer size change
+    uint32_t dpb_size = p_sps->max_num_ref_frames + 1;
+    if (dpb_buffer_.dpb_size != dpb_size) {
+        // Need to flush DPB before changing size
+        ParserResult ret;
+        if ((ret = FlushDpb()) != PARSER_OK) {
+            return ret;
+        }
+        dpb_buffer_.dpb_size = dpb_size;
+        dpb_buffer_.dpb_size = dpb_buffer_.dpb_size > AVC_MAX_DPB_FRAMES ? AVC_MAX_DPB_FRAMES : dpb_buffer_.dpb_size;
         CheckAndAdjustDecBufPoolSize(dpb_buffer_.dpb_size);
+        new_seq_activated_ = true;
     }
 
     // Set frame rate if available

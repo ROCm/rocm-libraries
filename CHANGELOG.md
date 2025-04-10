@@ -10,6 +10,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * CTest for VP9 decode on bitstream reader.
 * HEVC/AVC stream syntax error handling.
 * HEVC stream bit depth change handling and DPB buffer size change handling through decoder reconfiguration.
+* AVC stream DPB buffer size change handling through decoder reconfiguration.
 * rocDecode now uses the Cmake CMAKE_PREFIX_PATH directive.
 
 ### Optimized
@@ -20,6 +21,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 ### Resolved issues
 
 * Fixed a bug in picture files sample "videoDecodePicFiles" that can results in incorrect output frame count.
+* Fixed a decoded frame output issue in video size change cases.
 
 ### Removed
 

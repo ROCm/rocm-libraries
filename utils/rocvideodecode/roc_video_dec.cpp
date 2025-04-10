@@ -483,13 +483,14 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     bool is_bit_depth_changed = p_video_format->bit_depth_luma_minus8 != bitdepth_minus_8_;
     bool is_dec_surface_num_changed = p_video_format->min_num_decode_surfaces != num_decode_surfaces_;
 
+    // Flush and clear internal frame store to reconfigure when either coded size or display size has changed.
+    if (p_reconfig_params_ && p_reconfig_params_->p_fn_reconfigure_flush)
+        num_frames_flushed_during_reconfig_ += p_reconfig_params_->p_fn_reconfigure_flush(this, p_reconfig_params_->reconfig_flush_mode, static_cast<void *>(p_reconfig_params_->p_reconfig_user_struct));
+
     if (!is_decode_res_changed && !is_display_rect_changed && !is_bit_depth_changed && !is_dec_surface_num_changed && !b_force_recofig_flush_) {
         return 1;
     }
 
-    // Flush and clear internal frame store to reconfigure when either coded size or display size has changed.
-    if (p_reconfig_params_ && p_reconfig_params_->p_fn_reconfigure_flush) 
-        num_frames_flushed_during_reconfig_ += p_reconfig_params_->p_fn_reconfigure_flush(this, p_reconfig_params_->reconfig_flush_mode, static_cast<void *>(p_reconfig_params_->p_reconfig_user_struct));
     // clear the existing output buffers of different size
     // note that app lose the remaining frames in the vp_frames/vp_frames_q in case application didn't set p_fn_reconfigure_flush_ callback
     if (out_mem_type_ == OUT_SURFACE_MEM_DEV_INTERNAL) {
