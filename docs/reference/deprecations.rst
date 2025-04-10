@@ -10,16 +10,13 @@ rocBLAS deprecations by version
 
 The following sections list the features deprecation by release version.
 
-Removed in rocBLAS 7.0
+Removed in rocBLAS 5.0
 =========================
 
 rocblas_gemm_ex3, gemm_batched_ex3 and gemm_strided_batched_ex3 removed
-'''''''''''''''''''''''''''''''''
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-``rocblas_gemm_ex3``, ``gemm_batched_ex3``, and ``gemm_strided_batched_ex3`` API functions were removed in 7.0.
-
-Removed in rocBLAS 5.0
-=========================
+``rocblas_gemm_ex3``, ``gemm_batched_ex3``, and ``gemm_strided_batched_ex3`` API functions were removed in 5.0.
 
 rocblas_Xgemm_kernel_name removed
 '''''''''''''''''''''''''''''''''
