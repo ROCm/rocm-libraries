@@ -22,12 +22,13 @@
 #
 ################################################################################
 
+from rocisa.enum import DataTypeEnum
 from ..TensileInstructions import DataType, Module
 from ..Component import Component, MAC
 
 class FMA_F64C_Plain(MAC):
     asmCaps = {"v_fma_f64": True}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.complexDouble)}}
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.ComplexDouble)}}
 
     def __call__(self, writer, m, innerUnroll):
         kernel = writer.states.kernel

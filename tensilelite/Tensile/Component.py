@@ -34,7 +34,7 @@ Most components should be able to get away with defining their requirements via 
         asmCaps = {"v_fma_f16": True,
                 "v_pk_fma_f16": False}
         #archCaps = {}
-        kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+        kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
                                 "HighPrecisionAccumulate": False}}
 ```
 
@@ -44,7 +44,7 @@ Values in the dictionaries can be lambdas for more advanced logic:
     class FMA_HPA_MAD_MIX(MAC):
         asmCaps = {"v_mad_mix_f32": True}
         #archCaps = {}
-        kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+        kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
                                 "HighPrecisionAccumulate": True},
                 }
 ```

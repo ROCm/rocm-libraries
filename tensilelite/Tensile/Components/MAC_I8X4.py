@@ -22,12 +22,13 @@
 #
 ################################################################################
 
+from rocisa.enum import DataTypeEnum
 from ..TensileInstructions import DataType, Module
 from ..Component import Component, MAC
 
 class MAC_I8X4_Plain(MAC):
     asmCaps = {"VOP3v_dot4_i32_i8": True}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.int8x4)}}
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Int8x4)}}
 
     def __call__(self, writer, m, innerUnroll):
         kernel = writer.states.kernel

@@ -1714,6 +1714,7 @@ namespace TensileLite
                     case DataType::BFloat8_fnuz:
                         prop.value = getValue<BFloat8_fnuz>(prop.init, prop.freeValue);
                         break;
+                    case DataType::Int64:
                     case DataType::XFloat32:
                     case DataType::Count:
                     case DataType::Float8BFloat8:

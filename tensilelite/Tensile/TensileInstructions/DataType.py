@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from rocisa.enum import DataTypeEnum
 import functools
 
 @functools.total_ordering
@@ -36,295 +37,183 @@ class DataType:
 
     properties = [
         {
+            'enum': DataTypeEnum.Float,
             'char': 'S',
-            'name': 'single',
             'nameAbbrev': 'f32',
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Float',
             'reg': 1,
-            'ocl': 'float',
             'hip': 'float',
-            'libType': 'float',
-            'libEnum': 'tensileDataTypeFloat',
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.Double,
             'char': 'D',
-            'name': 'double',
             'nameAbbrev': 'f64',
             'miOutTypeNameAbbrev': 'f64',
-            'enum': 'Double',
             'reg': 2,
-            'ocl': 'double',
             'hip': 'double',
-            'libType': 'double',
-            'libEnum': 'tensileDataTypeDouble',
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.ComplexFloat,
             'char': 'C',
-            'name': 'complexSingle',
             'nameAbbrev': 'f32c',
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'ComplexFloat',
             'reg': 2,
-            'ocl': 'float2',
             'hip': 'TensileComplexFloat',
-            'libType': 'TensileComplexFloat',
-            'libEnum': 'tensileDataTypeComplexFloat',
-            'isIntegral': False,
             'isComplex': True,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.ComplexDouble,
             'char': 'Z',
-            'name': 'complexDouble',
             'nameAbbrev': 'f64c',
             'miOutTypeNameAbbrev': 'f64',
-            'enum': 'ComplexDouble',
             'reg': 4,
-            'ocl': 'double2',
             'hip': 'TensileComplexDouble',
-            'libType': 'TensileComplexDouble',
-            'libEnum': 'tensileDataTypeComplexDouble',
-            'isIntegral': False,
             'isComplex': True,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.Half,
             'char': 'H',
-            'name': 'half',
             'nameAbbrev': 'f16',
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Half',
             'reg': 0.5,
-            'ocl': 'ERROR',
             'hip': 'tensile_half',
-            'libType': 'TensileHalf',
-            'libEnum': 'tensileDataTypeHalf',
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.Int8x4,
             'char': '4xi8',
-            'name': 'int8x4',
             'nameAbbrev': 'i8',
             'miOutTypeNameAbbrev': 'i32',
-            'enum': 'Int8x4',
             'reg': 1,
-            'ocl': 'ERROR',
             'hip': 'uint32_t',
-            'libType': 'TensileInt8x4',
-            'libEnum': 'tensileDataTypeInt8x4',
-            'isIntegral': True,
             'isComplex': False,
-            'packing': 4
         },
         {
+            'enum': DataTypeEnum.Int32,
             'char': 'I',
-            'name': 'int32',
             'nameAbbrev': 'i32',
             'miOutTypeNameAbbrev': 'NONE', # not supported for MI
-            'enum': 'Int32',
             'reg': 1,
-            'ocl': 'ERROR',
             'hip': 'int32_t',
-            'libType': 'TensileInt32',
-            'libEnum': 'tensileDataTypeInt32',
-            'isIntegral': True,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.BFloat16,
             'char': 'B',
-            'name': 'bfloat16',
             'nameAbbrev': 'bf16',
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'BFloat16',
             'reg': 0.5,
-            'ocl': 'ERROR',
             'hip': 'tensile_bfloat16',
-            'libType': 'tensile_bfloat16',
-            'libEnum': 'tensileDataTypeBFloat16',
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.Int8,
             'char': 'I8',
-            'name': 'int8',
             'nameAbbrev': 'i8',
             'miOutTypeNameAbbrev': 'i32',
-            'enum': 'Int8',                     # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'int8_t',
-            'libType': 'TensileInt8',           # old client
-            'libEnum': 'tensileDataTypeInt8',   # old client
-            'isIntegral': True,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.Int64,
             'char': 'I64',
-            'name': 'int64',
             'nameAbbrev': 'i64',
             'miOutTypeNameAbbrev': 'NONE', # not supported for MI
-            'enum': 'Int64',
             'reg': 1,
-            'ocl': 'ERROR',
             'hip': 'int64_t',
-            'libType': 'TensileInt64',
-            'libEnum': 'tensileDataTypeInt64',
-            'isIntegral': True,
             'isComplex': False,
-            'packing': 1
         },
         {
+            'enum': DataTypeEnum.XFloat32,
             'char': 'X',
-            'name': 'xfloat32',
             'nameAbbrev': 'xf32',
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'XFloat32',
             'reg': 1,
-            'ocl': 'ERROR',
             'hip': 'ERROR',
-            'libType': 'ERROR',
-            'libEnum': 'tensileDataTypeXFloat32',
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1
         },
         {   # NANOO E4M3
+            'enum': DataTypeEnum.Float8_fnuz,
             'char': 'F8N',
-            'name': 'float8_fnuz',
             'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Float8_fnuz',                 # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'tensile_float8_fnuz',
-            'libType': 'TensileFloat8_fnuz',       # old client
-            'libEnum': 'tensileDataTypeF8_fnuz',   # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   # NANOO E5M2
+            'enum': DataTypeEnum.BFloat8_fnuz,
             'char': 'B8N',
-            'name': 'bfloat8_fnuz',
             'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'BFloat8_fnuz',                # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'tensile_bfloat8_fnuz',
-            'libType': 'TensileBFloat8_fnuz',      # old client
-            'libEnum': 'tensileDataTypeB8_fnuz',   # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   #NANOO
+            'enum': DataTypeEnum.Float8BFloat8_fnuz,
             'char': 'F8B8N',
-            'name': 'float8Bfloat8_fnuz',
             'nameAbbrev': 'fp8_bf8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Float8BFloat8_fnuz',               # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'ERROR',
-            'libType': 'ERROR',                    # old client
-            'libEnum': 'tensileDataTypeF8B8_fnuz',      # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   #NANOO
+            'enum': DataTypeEnum.BFloat8Float8_fnuz,
             'char': 'B8F8N',
-            'name': 'bfloat8Float8_fnuz',
             'nameAbbrev': 'bf8_fp8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'BFloat8Float8_fnuz',          # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'ERROR',
-            'libType': 'ERROR',                    # old client
-            'libEnum': 'tensileDataTypeB8F8_fnuz', # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   # OCP E4M3
+            'enum': DataTypeEnum.Float8,
             'char': 'F8',
-            'name': 'float8',
             'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Float8',                      # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'tensile_float8',
-            'libType': 'TensileFloat8',            # old client
-            'libEnum': 'tensileDataTypeF8',        # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   # OCP E5M2
+            'enum': DataTypeEnum.BFloat8,
             'char': 'B8',
-            'name': 'bfloat8',
             'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'BFloat8',                     # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'tensile_bfloat8',
-            'libType': 'TensileBFloat8',           # old client
-            'libEnum': 'tensileDataTypeB8',        # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   #OCP
+            'enum': DataTypeEnum.Float8BFloat8,
             'char': 'F8B8',
-            'name': 'float8Bfloat8',
             'nameAbbrev': 'fp8_bf8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'Float8BFloat8',               # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'ERROR',
-            'libType': 'ERROR',                    # old client
-            'libEnum': 'tensileDataTypeF8B8',      # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
         {   #OCP
+            'enum': DataTypeEnum.BFloat8Float8,
             'char': 'B8F8',
-            'name': 'bfloat8Float8',
             'nameAbbrev': 'bf8_fp8',               # to match v_mfma
             'miOutTypeNameAbbrev': 'f32',
-            'enum': 'BFloat8Float8',               # mapping to new client c++ enum
             'reg': 0.25,
-            'ocl': 'ERROR',
             'hip': 'ERROR',
-            'libType': 'ERROR',                    # old client
-            'libEnum': 'tensileDataTypeB8F8',      # old client
-            'isIntegral': False,
             'isComplex': False,
-            'packing': 1,
         },
     ]
     lookup = {}
 
     def __init__(self, value):
-        if isinstance(value, int):
+        if isinstance(value, DataTypeEnum):
+            self.value = value.value
+        elif isinstance(value, int):
             self.value = value
         elif isinstance(value, str):
             self.value = DataType.lookup[value.lower()]
@@ -338,24 +227,16 @@ class DataType:
     def toChar(self):
         return self.properties['char']
     def toName(self):
-        return self.properties['name']
+        return self.properties['enum'].name
     def toNameAbbrev(self):
         return self.properties['nameAbbrev']
     def toEnum(self):
-        return self.properties['enum']
-    def toOpenCL(self):
-        return self.properties['ocl']
-    def toHIP(self):
-        return self.properties['hip']
+        return self.properties['enum'].name
     def toDevice(self, language):
-        if language == "OCL":
-            return self.toOpenCL()
+        if language == "HIP":
+            return self.properties['hip']
         else:
-            return self.toHIP()
-    def toCpp(self):
-        return self.properties['libType']
-    def getLibString(self):
-        return self.properties['libEnum']
+            assert 0
 
     ########################################
     def zeroString(self, language, vectorWidth):
@@ -370,16 +251,16 @@ class DataType:
         zeroString += ")("
 
         """
-        if self.value == self.half:
+        if self.value == DataTypeEnum.Half:
             single = "0"
             vectorWidth = 1
-        elif self.value == self.single:
+        elif self.value == DataTypeEnum.Float.value:
             single = "0.f"
-        elif self.value == self.double:
+        elif self.value == DataTypeEnum.Double.value:
             single = "0.0"
-        elif self.value == self.complexSingle:
+        elif self.value == DataTypeEnum.ComplexSingle.value:
             single = "0.f, 0.f"
-        elif self.value == self.complexDouble:
+        elif self.value == DataTypeEnum.ComplexDouble.value:
             single = "0.0, 0.0"
         """
         zeroString += "0"
@@ -391,108 +272,108 @@ class DataType:
     def isComplex(self):
         return self.properties['isComplex']
     def isDoubleComplex(self):
-        return self.value == DataType.complexDouble
+        return self.value == DataTypeEnum.ComplexDouble.value
     def isSingleComplex(self):
-        return self.value == DataType.complexSingle
+        return self.value == DataTypeEnum.ComplexFloat.value
     def isDouble(self):
-        return self.value == DataType.double
+        return self.value == DataTypeEnum.Double.value
     def isSingle(self):
-        return self.value == DataType.single
+        return self.value == DataTypeEnum.Float.value
     def isHalf(self):
-        return self.value == DataType.half
+        return self.value == DataTypeEnum.Half.value
     def isInt32(self):
-        return self.value == DataType.int32
+        return self.value == DataTypeEnum.Int32.value
     def isInt64(self):
-        return self.value == DataType.int64
+        return self.value == DataTypeEnum.Int64.value
     def isInt8x4(self):
-        return self.value == DataType.int8x4
+        return self.value == DataTypeEnum.Int8x4.value
     def isInt8(self):
-        return self.value == DataType.int8
+        return self.value == DataTypeEnum.Int8.value
     def isBFloat16(self):
-        return self.value == DataType.bfloat16
+        return self.value == DataTypeEnum.BFloat16.value
     def isXFloat32(self):
-        return self.value == DataType.xfloat32
+        return self.value == DataTypeEnum.XFloat32.value
     def isFloat8(self):
-        return self.value == DataType.float8
+        return self.value == DataTypeEnum.Float8.value
     def isFloat8_fnuz(self):
-        return self.value == DataType.float8_fnuz
+        return self.value == DataTypeEnum.Float8_fnuz.value
     def isAnyFloat8(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.float8_fnuz)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.Float8_fnuz.value)
     def isBFloat8(self):
-        return self.value == DataType.bfloat8
+        return self.value == DataTypeEnum.BFloat8.value
     def isBFloat8_fnuz(self):
-        return self.value == DataType.bfloat8_fnuz
+        return self.value == DataTypeEnum.BFloat8_fnuz.value
     def isAnyBFloat8(self):
-        return (self.value == DataType.bfloat8 \
-                or self.value == DataType.bfloat8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.BFloat8_fnuz.value)
     def isFloat8BFloat8(self):
-        return self.value == DataType.float8Bfloat8
+        return self.value == DataTypeEnum.Float8BFloat8.value
     def isFloat8BFloat8_fnuz(self):
-        return self.value == DataType.float8Bfloat8_fnuz
+        return self.value == DataTypeEnum.Float8BFloat8_fnuz.value
     def isAnyFloat8BFloat8(self):
-        return (self.value == DataType.float8Bfloat8 \
-                or self.value == DataType.float8Bfloat8_fnuz)
+        return (self.value == DataTypeEnum.Float8BFloat8.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
     def isBFloat8Float8(self):
-        return self.value == DataType.bfloat8Float8
+        return self.value == DataTypeEnum.BFloat8Float8.value
     def isBFloat8Float8_fnuz(self):
-        return self.value == DataType.bfloat8Float8_fnuz
+        return self.value == DataTypeEnum.BFloat8Float8_fnuz.value
     def isAnyBFloat8Float8(self):
-        return (self.value == DataType.bfloat8Float8 \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8Float8.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def is8bitFloat(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.bfloat8 \
-                or self.value == DataType.float8Bfloat8 \
-                or self.value == DataType.bfloat8Float8 \
-                or self.value == DataType.float8_fnuz \
-                or self.value == DataType.bfloat8_fnuz \
-                or self.value == DataType.float8Bfloat8_fnuz \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.Float8BFloat8.value \
+                or self.value == DataTypeEnum.BFloat8Float8.value \
+                or self.value == DataTypeEnum.Float8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def isFloat8A(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.float8Bfloat8)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.Float8BFloat8.value)
     def isFloat8_fnuzA(self):
-        return (self.value == DataType.float8_fnuz \
-                or self.value == DataType.float8Bfloat8_fnuz)
+        return (self.value == DataTypeEnum.Float8_fnuz.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
     def isAnyFloat8A(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.float8Bfloat8 \
-                or self.value == DataType.float8_fnuz \
-                or self.value == DataType.float8Bfloat8_fnuz)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.Float8BFloat8.value \
+                or self.value == DataTypeEnum.Float8_fnuz.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
     def isBFloat8A(self):
-        return (self.value == DataType.bfloat8 \
-                or self.value == DataType.bfloat8Float8)
+        return (self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.BFloat8Float8.value)
     def isBFloat8_fnuzA(self):
-        return (self.value == DataType.bfloat8_fnuz \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def isAnyBFloat8A(self):
-        return (self.value == DataType.bfloat8 \
-                or self.value == DataType.bfloat8Float8 \
-                or self.value == DataType.bfloat8_fnuz \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.BFloat8Float8.value \
+                or self.value == DataTypeEnum.BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def isFloat8B(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.bfloat8Float8)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.BFloat8Float8.value)
     def isFloat8_fnuzB(self):
-        return (self.value == DataType.float8_fnuz \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.Float8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def isAnyFloat8B(self):
-        return (self.value == DataType.float8 \
-                or self.value == DataType.bfloat8Float8 \
-                or self.value == DataType.float8_fnuz \
-                or self.value == DataType.bfloat8Float8_fnuz)
+        return (self.value == DataTypeEnum.Float8.value \
+                or self.value == DataTypeEnum.BFloat8Float8.value \
+                or self.value == DataTypeEnum.Float8_fnuz.value \
+                or self.value == DataTypeEnum.BFloat8Float8_fnuz.value)
     def isBFloat8B(self):
-        return (self.value == DataType.bfloat8 \
-                or self.value == DataType.float8Bfloat8)
+        return (self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.Float8BFloat8.value)
     def isBFloat8_fnuzB(self):
-        return (self.value == DataType.bfloat8_fnuz \
-                or self.value == DataType.float8Bfloat8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
     def isAnyBFloat8B(self):
-        return (self.value == DataType.bfloat8 \
-                or self.value == DataType.float8Bfloat8 \
-                or self.value == DataType.bfloat8_fnuz \
-                or self.value == DataType.float8Bfloat8_fnuz)
+        return (self.value == DataTypeEnum.BFloat8.value \
+                or self.value == DataTypeEnum.Float8BFloat8.value \
+                or self.value == DataTypeEnum.BFloat8_fnuz.value \
+                or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
     def isNone(self):
         return self.value == None
 
@@ -538,9 +419,11 @@ def _populateLookupTable(properties,lookup):
     is assigned to self.value when a DataType object is called
     """
     for i,e in enumerate(properties):
-        setattr(DataType, e['name'], i)
-        for k in ['name','char','enum','libEnum']:
-            lookupKey = e[k].lower()
+        if i != int(e['enum'].value):
+            print(e['enum'].name, ":", e['enum'].value, "does not match index", i, "in properties list")
+            raise RuntimeError("Enum value does not match index in properties list")
+        for k in ['enum','char']:
+            lookupKey = e[k].name.lower() if k == 'enum' else e[k].lower()
             if lookupKey in lookup and lookup[lookupKey] != i:
                 raise RuntimeError("Duplicate key {1} in property '{0}'".format(k,lookupKey))
             lookup[lookupKey] = i

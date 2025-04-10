@@ -33,6 +33,29 @@ void init_enum(nb::module_ m)
 {
     auto m_enum = m.def_submodule("enum", "rocIsa enum submodule.");
 
+    // For Python only, Python already has a class named DataType
+    nb::enum_<DataType>(m_enum, "DataTypeEnum")
+        .value("Float", DataType::Float)
+        .value("Double", DataType::Double)
+        .value("ComplexFloat", DataType::ComplexFloat)
+        .value("ComplexDouble", DataType::ComplexDouble)
+        .value("Half", DataType::Half)
+        .value("Int8x4", DataType::Int8x4)
+        .value("Int32", DataType::Int32)
+        .value("BFloat16", DataType::BFloat16)
+        .value("Int8", DataType::Int8)
+        .value("Int64", DataType::Int64)
+        .value("XFloat32", DataType::XFloat32)
+        .value("Float8_fnuz", DataType::Float8_fnuz)
+        .value("BFloat8_fnuz", DataType::BFloat8_fnuz)
+        .value("Float8BFloat8_fnuz", DataType::Float8BFloat8_fnuz)
+        .value("BFloat8Float8_fnuz", DataType::BFloat8Float8_fnuz)
+        .value("Float8", DataType::Float8)
+        .value("BFloat8", DataType::BFloat8)
+        .value("Float8BFloat8", DataType::Float8BFloat8)
+        .value("BFloat8Float8", DataType::BFloat8Float8)
+        .export_values();
+
     nb::enum_<SignatureValueKind>(m_enum, "SignatureValueKind")
         .value("SIG_VALUE", SignatureValueKind::SIG_VALUE)
         .value("SIG_GLOBALBUFFER", SignatureValueKind::SIG_GLOBALBUFFER)

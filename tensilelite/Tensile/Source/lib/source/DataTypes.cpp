@@ -49,10 +49,14 @@ namespace TensileLite
             return "Int8x4";
         case DataType::Int32:
             return "Int32";
+        case DataType::Int64:
+            return "Int64";
         case DataType::BFloat16:
             return "BFloat16";
         case DataType::Int8:
             return "Int8";
+        case DataType::XFloat32:
+            return "XFloat32";
         case DataType::Float8:
             return "Float8";
         case DataType::BFloat8:
@@ -61,8 +65,6 @@ namespace TensileLite
             return "Float8_fnuz";
         case DataType::BFloat8_fnuz:
             return "BFloat8_fnuz";
-        case DataType::XFloat32:
-            return "XFloat32";
         case DataType::Float8BFloat8:
             return "Float8BFloat8";
         case DataType::BFloat8Float8:
@@ -94,10 +96,14 @@ namespace TensileLite
             return "4xi8";
         case DataType::Int32:
             return "I";
+        case DataType::Int64:
+            return "I64";
         case DataType::BFloat16:
             return "B";
         case DataType::Int8:
             return "I8";
+        case DataType::XFloat32:
+            return "X";
         case DataType::Float8:
             return "F8";
         case DataType::BFloat8:
@@ -106,8 +112,6 @@ namespace TensileLite
             return "F8N";
         case DataType::BFloat8_fnuz:
             return "B8N";
-        case DataType::XFloat32:
-            return "X";
         case DataType::Float8BFloat8:
             return "F8B8";
         case DataType::BFloat8Float8:
@@ -139,10 +143,14 @@ namespace TensileLite
             return TypeInfo<Int8x4>::ElementSize;
         case DataType::Int32:
             return TypeInfo<int32_t>::ElementSize;
+        case DataType::Int64:
+            return TypeInfo<int64_t>::ElementSize;
         case DataType::BFloat16:
             return TypeInfo<BFloat16>::ElementSize;
         case DataType::Int8:
             return TypeInfo<int8_t>::ElementSize;
+        case DataType::XFloat32:
+            return TypeInfo<XFloat32>::ElementSize;
         case DataType::Float8:
             return TypeInfo<Float8>::ElementSize;
         case DataType::BFloat8:
@@ -151,8 +159,6 @@ namespace TensileLite
             return TypeInfo<Float8_fnuz>::ElementSize;
         case DataType::BFloat8_fnuz:
             return TypeInfo<BFloat8_fnuz>::ElementSize;
-        case DataType::XFloat32:
-            return TypeInfo<XFloat32>::ElementSize;
         case DataType::Float8BFloat8:
             return TypeInfo<Float8BFloat8>::ElementSize;
         case DataType::BFloat8Float8:
@@ -208,13 +214,14 @@ namespace TensileLite
         registerTypeInfo<Half>();
         registerTypeInfo<Int8x4>();
         registerTypeInfo<int32_t>();
+        registerTypeInfo<int64_t>();
         registerTypeInfo<BFloat16>();
         registerTypeInfo<int8_t>();
+        registerTypeInfo<XFloat32>();
         registerTypeInfo<Float8>();
         registerTypeInfo<BFloat8>();
         registerTypeInfo<Float8_fnuz>();
         registerTypeInfo<BFloat8_fnuz>();
-        registerTypeInfo<XFloat32>();
         registerTypeInfo<Float8BFloat8>();
         registerTypeInfo<BFloat8Float8>();
         registerTypeInfo<Float8BFloat8_fnuz>();
@@ -297,6 +304,8 @@ namespace TensileLite
             t = DataType::Int8x4;
         else if(strValue == ToString(DataType::Int32))
             t = DataType::Int32;
+        else if(strValue == ToString(DataType::Int64))
+            t = DataType::Int64;
         else if(strValue == ToString(DataType::Int8))
             t = DataType::Int8;
         else if(strValue == ToString(DataType::XFloat32))
@@ -349,6 +358,8 @@ namespace TensileLite
             return (*std::get_if<Half>(&d)) == Half(value);
         case static_cast<int>(DataType::Int32):
             return (*std::get_if<int32_t>(&d)) == int32_t(value);
+        case static_cast<int>(DataType::Int64):
+            return (*std::get_if<int64_t>(&d)) == int64_t(value);
         case static_cast<int>(DataType::BFloat16):
             return (*std::get_if<BFloat16>(&d)) == BFloat16(value);
         case static_cast<int>(DataType::Int8):

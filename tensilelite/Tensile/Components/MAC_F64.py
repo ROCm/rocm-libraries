@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from rocisa.enum import DataTypeEnum
 from ..TensileInstructions import DataType, Module, vgpr, VFmaF64, SSetPrior
 from ..Component import Component, MAC
 
@@ -30,7 +31,7 @@ class FMA_F64_Plain(MAC):
     Plain MAC instruction implementation
     """
     asmCaps = {"v_fma_f64": True}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.double)}}
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Double)}}
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel

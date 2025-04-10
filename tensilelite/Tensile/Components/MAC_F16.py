@@ -22,6 +22,7 @@
 #
 ################################################################################
 
+from rocisa.enum import DataTypeEnum
 from ..TensileInstructions import DataType, Module
 from ..Component import Component, MAC
 
@@ -33,7 +34,7 @@ class MAC_F16_Plain(MAC):
                "v_pk_fma_f16": False,
                "v_fma_f16": False}
     #archCaps = {}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
     def __call__(self, writer, m, innerUnroll):
@@ -78,7 +79,7 @@ class FMA_F16_NonPacked(MAC):
     asmCaps = {"v_fma_f16": True,
                "v_pk_fma_f16": False}
     #archCaps = {}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
     def __call__(self, writer, m, innerUnroll):
@@ -129,7 +130,7 @@ class FMA_F16_NonPacked(MAC):
 class FMA_F16_Packed(MAC):
     asmCaps = {"v_pk_fma_f16": True}
     #archCaps = {}
-    kernel = {"ProblemType": {"DataType": DataType(DataType.half),
+    kernel = {"ProblemType": {"DataType": DataType(DataTypeEnum.Half),
                               "HighPrecisionAccumulate": False}}
 
     def __call__(self, writer, m, innerUnroll):

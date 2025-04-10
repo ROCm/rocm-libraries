@@ -418,6 +418,7 @@ namespace TensileLite
                 case DataType::BFloat8_fnuz:
                     initArray<BFloat8_fnuz>(initMode, static_cast<BFloat8_fnuz*>(array), descriptor);
                     break;
+                case DataType::Int64:
                 case DataType::XFloat32:
                 case DataType::ComplexFloat:
                 case DataType::ComplexDouble:
