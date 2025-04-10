@@ -416,9 +416,9 @@ if(BUILD_CODE_COVERAGE)
   # Generate coverage output.
   #
   add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
+    COMMAND lcov --directory . --base-directory ${CMAKE_BINARY_DIR} --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
     COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" "'*/Tensile/Source/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage --prefix ${CMAKE_BINARY_DIR}
     )
 
   add_custom_target(coverage DEPENDS coverage_output)
