@@ -76,6 +76,10 @@ Tests:
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
   sparse_b: [true, false]
+  orderA: [C, R]
+  orderB: [C, R]
+  orderC: [C]
+  orderD: [C]
 
 - name: spmm_strided_batched_medium_alt
   category: pre_checkin

@@ -103,8 +103,8 @@ Tests:
   alpha_beta: *alpha_beta_range
   batch_count: [ 3 ]
   sparse_b: [ true, false]
-  orderA: [R]
-  orderB: [R]
+  orderA: [C, R]
+  orderB: [C, R]
   orderC: [R]
   orderD: [R]
 
