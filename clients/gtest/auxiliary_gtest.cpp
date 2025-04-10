@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -112,6 +112,8 @@ namespace
                 testing_aux_matmul_plan_init_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_matmul_plan_init"))
                 testing_aux_matmul_plan_init(arg);
+            else if(!strcmp(arg.function, "aux_matmul_plan_destroy_bad_arg"))
+                testing_aux_matmul_plan_destroy_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_get_workspace_size_bad_arg"))
                 testing_aux_get_workspace_size_bad_arg(arg);
             else if(!strcmp(arg.function, "aux_get_workspace_size"))
@@ -158,6 +160,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_alg_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_plan_init_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_plan_init")
+                   || !strcmp(arg.function, "aux_matmul_plan_destroy_bad_arg")
                    || !strcmp(arg.function, "aux_get_workspace_size_bad_arg")
                    || !strcmp(arg.function, "aux_get_workspace_size");
         }

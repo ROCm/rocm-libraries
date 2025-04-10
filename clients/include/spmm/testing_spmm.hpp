@@ -182,6 +182,9 @@ void testing_spmm_bad_arg(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dC.memcheck());
     CHECK_DEVICE_ALLOCATION(dD.memcheck());
 
+    hipsparseLtHandle_t      handle_;
+    hipsparseLtMatmulPlan_t plan_;
+
     hipsparselt_local_handle    handle{arg};
     hipsparselt_local_mat_descr matA(
         hipsparselt_matrix_type_structured, handle, M, K, lda, arg.a_type, HIPSPARSE_ORDER_COL);
@@ -207,7 +210,15 @@ void testing_spmm_bad_arg(const Arguments& arg)
         HIPSPARSE_STATUS_INVALID_VALUE);
 
     EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmul(&handle_, plan, &alpha, dA, dB, &beta, dC, dD, workspace, &stream, 1),
+        HIPSPARSE_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPSPARSE_STATUS(
         hipsparseLtMatmul(handle, nullptr, &alpha, dA, dB, &beta, dC, dD, workspace, &stream, 1),
+        HIPSPARSE_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmul(handle, &plan_, &alpha, dA, dB, &beta, dC, dD, workspace, &stream, 1),
         HIPSPARSE_STATUS_INVALID_VALUE);
 
     EXPECT_HIPSPARSE_STATUS(

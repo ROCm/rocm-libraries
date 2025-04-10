@@ -134,6 +134,11 @@ Tests:
   function:
     - aux_matmul_plan_init: *real_precisions
 
+- name: aux_matmul_plan_destroy_bad_arg
+  category: pre_checkin
+  function:
+    - aux_matmul_plan_destroy_bad_arg: *hpa_half_precision
+
 - name: aux_get_workspace_size_bad_arg
   category: pre_checkin
   function:

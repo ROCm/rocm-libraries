@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -633,6 +633,25 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
 
     tmpDataType = get_diff_datatype(arg.b_type);
 
+    hipsparselt_local_mat_descr matA_(
+        hipsparselt_matrix_type_structured, handle, K, N, ldb, HIP_R_32F, HIPSPARSE_ORDER_COL);
+    EXPECT_HIPSPARSE_STATUS(matA_.status(), HIPSPARSE_STATUS_SUCCESS);
+
+    // HIP_R_32F is unsupported.
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescriptorInit(
+            handle, &m_descr, opA, opB, matA_, matB, matC, matD, arg.compute_type),
+        HIPSPARSE_STATUS_NOT_SUPPORTED);
+
+    // C or D must be dense martrix
+    hipsparselt_local_mat_descr matCS_(
+        hipsparselt_matrix_type_structured, handle, M, N, ldc, arg.c_type, HIPSPARSE_ORDER_COL);
+    EXPECT_HIPSPARSE_STATUS(matC.status(), HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescriptorInit(
+            handle, &m_descr, opA, opB, matA, matB, matCS_, matD, arg.compute_type),
+        HIPSPARSE_STATUS_INVALID_VALUE);
+
     hipsparselt_local_mat_descr matB_(
         hipsparselt_matrix_type_dense, handle, K, N, ldb, tmpDataType, HIPSPARSE_ORDER_COL);
     EXPECT_HIPSPARSE_STATUS(matB_.status(), HIPSPARSE_STATUS_SUCCESS);
@@ -663,6 +682,15 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
             HIPSPARSE_STATUS_NOT_SUPPORTED);
     }
 #endif
+
+    hipsparselt_local_mat_descr matDR_(
+        hipsparselt_matrix_type_dense, handle, M, N, ldc, arg.d_type, HIPSPARSE_ORDER_ROW);
+    EXPECT_HIPSPARSE_STATUS(matDR_.status(), HIPSPARSE_STATUS_SUCCESS);
+
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescriptorInit(
+            handle, &m_descr, opA, opB, matA, matB, matC, matDR_, arg.compute_type),
+        HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_matmul_init(const Arguments& arg)
@@ -778,6 +806,18 @@ void testing_aux_matmul_set_attr_bad_arg(const Arguments& arg)
         hipsparseLtMatmulDescSetAttribute(
             handle, matmul, HIPSPARSELT_MATMUL_ACTIVATION_RELU_UPPERBOUND, &data64, 1),
         HIPSPARSE_STATUS_INVALID_VALUE);
+
+    void* dBias;
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescSetAttribute(
+            handle, matmul, HIPSPARSELT_MATMUL_BIAS_POINTER, &dBias, sizeof(dBias) - 1),
+        HIPSPARSE_STATUS_INVALID_VALUE);
+
+    int64_t bias_stride = M - 1;
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescSetAttribute(
+            handle, matmul, HIPSPARSELT_MATMUL_BIAS_STRIDE, &bias_stride, sizeof(bias_stride)),
+        HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_matmul_get_attr_bad_arg(const Arguments& arg)
@@ -858,14 +898,13 @@ void testing_aux_matmul_get_attr_bad_arg(const Arguments& arg)
             handle, matmul, HIPSPARSELT_MATMUL_ACTIVATION_RELU_UPPERBOUND, &data64, 1),
         HIPSPARSE_STATUS_INVALID_VALUE);
 
-#ifdef __HIP_PLATFORM_NVIDIA__
+    size_t bad_ptr_size = sizeof(void*) - 1;
     void* dBias;
     hipMalloc((void**)&dBias, (M) * sizeof(float));
     EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulDescGetAttribute(
-                                handle, matmul, HIPSPARSELT_MATMUL_BIAS_POINTER, &dBias, 4),
+                                handle, matmul, HIPSPARSELT_MATMUL_BIAS_POINTER, &dBias, bad_ptr_size),
                             HIPSPARSE_STATUS_INVALID_VALUE);
     CHECK_HIP_ERROR(hipFree(dBias));
-#endif
 }
 
 void testing_aux_matmul_set_get_bias_vector(const Arguments& arg)
@@ -1448,6 +1487,13 @@ void testing_aux_matmul_plan_init_bad_arg(const Arguments& arg)
                             HIPSPARSE_STATUS_INVALID_VALUE);
     EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulPlanInit(handle, &plan, matmul, &alg_sel_),
                             HIPSPARSE_STATUS_INVALID_VALUE);
+}
+
+void testing_aux_matmul_plan_destroy_bad_arg(const Arguments& arg)
+{
+    hipsparseLtMatmulPlan_t plan;
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulPlanDestroy(nullptr), HIPSPARSE_STATUS_INVALID_VALUE);
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtMatmulPlanDestroy(&plan), HIPSPARSE_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_matmul_plan_init(const Arguments& arg)
