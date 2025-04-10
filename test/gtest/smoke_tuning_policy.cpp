@@ -8,11 +8,11 @@
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_USER_DB_PATH)
 
-class GPU_TuningPolicy : public ::testing::Test
+class CPU_TuningPolicy_NONE : public ::testing::Test
 {
 };
 
-TEST_F(GPU_TuningPolicy, TestTuningPolicyGetterAndSetter)
+TEST_F(CPU_TuningPolicy_NONE, TestTuningPolicyGetterAndSetter)
 {
     auto&& handle = get_handle();
     // test initial value
