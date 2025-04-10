@@ -170,14 +170,14 @@ endif()
 include(FetchContent)
 if(USE_ROCROLLER)
   _save_var(BUILD_TESTING)
-  set(BUILD_CLIENTS OFF)
   _save_var(BUILD_CLIENTS)
+  set(BUILD_CLIENTS OFF)
   set(BUILD_TESTING OFF)
 
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG 33fb58b76df640f98726b90a45fc5b9aa3e8af3b
+    GIT_TAG 34307b30956cac16e459db6cfdd3ba1f07c7e9b8
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
