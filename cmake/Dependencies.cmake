@@ -355,16 +355,17 @@ endfunction()
 set(mrisa_xml_EXPORT_VARS mrisa_xml_SOURCE_DIR)
 
 function(_fetch_boost VERSION HASH)
-    _determine_git_tag("boost-" "boost-1.81.0")
+    _determine_git_tag("boost-" "boost-1.87.0")
     FetchContent_Declare(
         boost
-        URL https://github.com/boostorg/boost/releases/download/${GIT_TAG}/${GIT_TAG}.tar.gz
+        URL https://github.com/boostorg/boost/releases/download/${GIT_TAG}/${GIT_TAG}-cmake.tar.gz
     )
     _save_var(BUILD_TESTING)
     set(BUILD_TESTING OFF)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS OFF)
     set(Boost_USE_STATIC_LIBS ON)
+    set(BOOST_INCLUDE_LIBRARIES multi_index)
     FetchContent_MakeAvailable(boost)
     _restore_var(BUILD_SHARED_LIBS)
     _restore_var(BUILD_TESTING)
