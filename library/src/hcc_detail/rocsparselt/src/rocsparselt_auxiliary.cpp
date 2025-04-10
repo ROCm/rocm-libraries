@@ -42,62 +42,6 @@
 extern "C" {
 #endif
 
-//@TODO This is used to backward support hipsparseLtDatatype_t, should be deprecated in the later version.
-hipDataType HIPSparseLtDatatypeToHipDatatype(hipsparseLtDatatype_t type)
-{
-    switch(type)
-    {
-    case HIPSPARSELT_R_32F:
-        return HIP_R_32F;
-
-    case HIPSPARSELT_R_16BF:
-        return HIP_R_16BF;
-
-    case HIPSPARSELT_R_16F:
-        return HIP_R_16F;
-
-    case HIPSPARSELT_R_8I:
-        return HIP_R_8I;
-
-    case HIPSPARSELT_R_8F:
-        return HIP_R_8F_E4M3_FNUZ;
-
-    case HIPSPARSELT_R_8BF:
-        return HIP_R_8F_E5M2_FNUZ;
-
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
-//@TODO This is used to backward support hipsparseLtDatatype_t, should be deprecated in the later version.
-hipsparseLtDatatype_t HipDatatypeToHIPSparseLtDatatype(hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_32F:
-        return HIPSPARSELT_R_32F;
-
-    case HIP_R_16BF:
-        return HIPSPARSELT_R_16BF;
-
-    case HIP_R_16F:
-        return HIPSPARSELT_R_16F;
-
-    case HIP_R_8I:
-        return HIPSPARSELT_R_8I;
-
-    case HIP_R_8F_E4M3_FNUZ:
-        return HIPSPARSELT_R_8F;
-
-    case HIP_R_8F_E5M2_FNUZ:
-        return HIPSPARSELT_R_8BF;
-
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
 /********************************************************************************
  * \brief rocsparselt_handle is a structure holding the rocsparselt library context.
  * It must be initialized using rocsparselt_init()
@@ -204,25 +148,8 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
         // Allocate
         try
         {
-            /*
-             *  @TODO
-             *  This is used to backward support hipsparseLtDatatype_t, will be deprecated in the later version.
-             */
-            hipDataType vtype_;
-            bool        is_hipsparselt_datatype = false;
-            try
-            {
-                vtype_ = HIPSparseLtDatatypeToHipDatatype(
-                    static_cast<hipsparseLtDatatype_t>(valueType));
-                is_hipsparselt_datatype = true;
-            }
-            catch(...)
-            {
-                vtype_ = valueType;
-            }
-
             auto status = validateMatrixArgs(
-                _handle, rows, cols, ld, alignment, vtype_, order, rocsparselt_matrix_type_dense);
+                _handle, rows, cols, ld, alignment, valueType, order, rocsparselt_matrix_type_dense);
             if(status != rocsparselt_status_success)
                 throw status;
 
@@ -234,11 +161,10 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
             _matDescr->n            = cols;
             _matDescr->ld           = ld;
             _matDescr->alignment    = alignment;
-            _matDescr->type         = vtype_;
+            _matDescr->type         = valueType;
             _matDescr->order        = order;
             _matDescr->num_batches  = 1;
             _matDescr->batch_stride = order == rocsparselt_order_column ? cols * ld : rows * ld;
-            _matDescr->is_hipsparselt_datatype = is_hipsparselt_datatype;
             log_api(_handle,
                     __func__,
                     "_matDescr[out]",
@@ -252,7 +178,7 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
                     "alignment[in]",
                     alignment,
                     "valueType[in]",
-                    hipDataType_to_string(vtype_),
+                    hipDataType_to_string(valueType),
                     "order[in]",
                     rocsparselt_order_to_string(order));
         }
@@ -306,30 +232,12 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
         // Allocate
         try
         {
-
-            /*
-             *  @TODO
-             *  This is used to backward support hipsparseLtDatatype_t, will be deprecated in the later version.
-             */
-            hipDataType vtype_;
-            bool        is_hipsparselt_datatype = false;
-            try
-            {
-                vtype_ = HIPSparseLtDatatypeToHipDatatype(
-                    static_cast<hipsparseLtDatatype_t>(valueType));
-                is_hipsparselt_datatype = true;
-            }
-            catch(...)
-            {
-                vtype_ = valueType;
-            }
-
             auto status = validateMatrixArgs(_handle,
                                              rows,
                                              cols,
                                              ld,
                                              alignment,
-                                             vtype_,
+                                             valueType,
                                              order,
                                              rocsparselt_matrix_type_structured);
             if(status != rocsparselt_status_success)
@@ -343,12 +251,11 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
             _matDescr->n            = cols;
             _matDescr->ld           = ld;
             _matDescr->alignment    = alignment;
-            _matDescr->type         = vtype_;
+            _matDescr->type         = valueType;
             _matDescr->order        = order;
             _matDescr->sparsity     = sparsity;
             _matDescr->num_batches  = 1;
             _matDescr->batch_stride = order == rocsparselt_order_column ? cols * ld : rows * ld;
-            _matDescr->is_hipsparselt_datatype = is_hipsparselt_datatype;
             log_api(_handle,
                     __func__,
                     "_matDescr[out]",
@@ -362,7 +269,7 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
                     "alignment[in]",
                     alignment,
                     "valueType[in]",
-                    hipDataType_to_string(vtype_),
+                    hipDataType_to_string(valueType),
                     "order[in]",
                     rocsparselt_order_to_string(order),
                     "sparsity[in]",
@@ -812,8 +719,6 @@ rocsparselt_status rocsparselt_matmul_descr_init(const rocsparselt_handle*    ha
                 break;
             }
 
-            _matmulDescr->bias_is_hipsparselt_datatype = _matA->is_hipsparselt_datatype;
-
             _matmulDescr->_op_A = _matmulDescr->op_A;
             if(_matA->order != _matC->order)
                 _matmulDescr->_op_A = _matmulDescr->op_A == rocsparselt_operation_none
@@ -1019,23 +924,7 @@ rocsparselt_status
             }
             case rocsparselt_matmul_bias_type:
             {
-                /*
-                *  @TODO
-                *  This is used to backward support hipsparseLtDatatype_t, will be deprecated in the later version.
-                */
-                hipDataType vtype_;
-                assign_data(&vtype_);
-                try
-                {
-                    _matmulDescr->bias_type = HIPSparseLtDatatypeToHipDatatype(
-                        static_cast<hipsparseLtDatatype_t>(vtype_));
-                    _matmulDescr->bias_is_hipsparselt_datatype = true;
-                }
-                catch(...)
-                {
-                    _matmulDescr->bias_type                    = vtype_;
-                    _matmulDescr->bias_is_hipsparselt_datatype = false;
-                }
+                assign_data(&_matmulDescr->bias_type);
                 break;
             }
             case rocsparselt_matmul_alpha_vector_scaling:
@@ -1179,25 +1068,7 @@ rocsparselt_status
                 break;
             case rocsparselt_matmul_bias_type:
             {
-                /*
-                *  @TODO
-                *  This is used to backward support hipsparseLtDatatype_t, will be deprecated in the later version.
-                */
-                if(_matmulDescr->bias_is_hipsparselt_datatype)
-                {
-                    try
-                    {
-                        hipsparseLtDatatype_t bias_type_
-                            = HipDatatypeToHIPSparseLtDatatype(_matmulDescr->bias_type);
-                        retrive_data(bias_type_);
-                    }
-                    catch(...)
-                    {
-                        retrive_data(_matmulDescr->bias_type);
-                    }
-                }
-                else
-                    retrive_data(_matmulDescr->bias_type);
+                retrive_data(_matmulDescr->bias_type);
                 break;
             }
             case rocsparselt_matmul_alpha_vector_scaling:
