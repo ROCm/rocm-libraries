@@ -43,6 +43,10 @@ Tests:
   transA: N
   transB: N
   fortran: [ false, true ]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
 
 # Tests confirm no NaN propagation when alpha = 0, 2 and beta = 0. Value .NaN is converted into zero
 - {name: alpha_beta_zero_NaN, category: pre_checkin, precision: *real_precisions_2b,

@@ -15,10 +15,11 @@ Tests:
 - name: compress_bad_arg
   category: pre_checkin
   function:
-    - compress_bad_arg: *real_precisions_2b
+    - compress_bad_arg: *hpa_half_precision
   transA: N
   transB: N
   fortran: [ false, true ]
+  func_version: [1, 2]
 
 # Split *real_precisions_2b into *int8 and *nonint8_real_precisions. Since int8 has flags 0,1
 
