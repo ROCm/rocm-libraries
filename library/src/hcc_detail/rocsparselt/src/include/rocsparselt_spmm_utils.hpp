@@ -195,10 +195,6 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
                                              rocsparselt_order          order,
                                              rocsparselt_matrix_type    matrixType)
 {
-    // handle must be valid
-    if(!check_is_init_handle(handle))
-        return rocsparselt_status_invalid_handle;
-
     if(num_rows == 0 || num_cols == 0)
     {
         hipsparselt_cerr << "row and col cannot be zero, current are " << num_rows << " and "
@@ -309,10 +305,6 @@ inline rocsparselt_status validateMatmulDescrArgs(const _rocsparselt_handle* han
                                                   rocsparselt_order          order_c,
                                                   rocsparselt_order          order_d)
 {
-    // handle must be valid
-    if(!check_is_init_handle(handle))
-        return rocsparselt_status_invalid_handle;
-
     auto is_op_valid = [](rocsparselt_operation op) {
         switch(op)
         {
