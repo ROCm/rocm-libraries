@@ -242,7 +242,12 @@ void ROBackend::dump_backend_stats() {
     total += globalStats.getStat(i);
   }
 
-  uint64_t gpu_frequency_mhz{wallClk_freq_mhz()};
+  int device_id;
+  hipDeviceProp_t device_props;
+  CHECK_HIP(hipGetDevice(&device_id));
+  int wallClockMhz;
+  CHECK_HIP(hipDeviceGetAttribute(&wallClockMhz, hipDeviceAttributeWallClockRate, device_id));
+  int gpu_frequency_mhz{wallClockMhz};
 
   uint64_t us_wait_slot{0};
   uint64_t us_pack{0};

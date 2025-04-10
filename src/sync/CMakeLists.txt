@@ -26,6 +26,5 @@
 target_sources(
   ${PROJECT_NAME}
   PRIVATE
-    spin_ebo_block_mutex.cpp
     abql_block_mutex.cpp
 )

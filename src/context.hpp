@@ -30,7 +30,6 @@
 #include "host/host.hpp"
 #include "ipc_policy.hpp"
 #include "stats.hpp"
-#include "sync/spin_ebo_block_mutex.hpp"
 #include "wf_coal_policy.hpp"
 
 namespace rocshmem {

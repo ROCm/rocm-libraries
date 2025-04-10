@@ -245,27 +245,6 @@ __device__ __forceinline__ void store_asm(uint8_t* val, uint8_t* dst,
   }
 }
 
-__device__ __forceinline__ uint64_t __read_clock() {
-  uint64_t clock{};
-#if defined(__gfx906__)
-#endif
-#if defined(__gfx908__)
-#endif
-#if defined(__gfx90a__)
-  asm volatile(
-      "s_memrealtime %0\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=s"(clock));
-#endif
-#if defined(__gfx942__)
-  asm volatile(
-      "s_memrealtime %0\n"
-      "s_waitcnt lgkmcnt(0)\n"
-      : "=s"(clock));
-#endif
-  return clock;
-}
-
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_ASSEMBLY_HPP_

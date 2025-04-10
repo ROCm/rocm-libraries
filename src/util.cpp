@@ -119,33 +119,6 @@ void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
   }
 }
 
-// TODO(kpunniya): use runtime value instead of hard-coded value
-uint64_t wallClk_freq_mhz() {
-  hipDeviceProp_t deviceProp{};
-  CHECK_HIP(hipGetDeviceProperties(&deviceProp, 0));
-// In rocm 6.x and gcnArchName is used instead of gcnArch
-#if HIP_VERSION_MAJOR >= 6
-  const auto gcnArch = std::atoi(deviceProp.gcnArchName);
-#else
-  const auto gcnArch = deviceProp.gcnArch;
-#endif
-
-  switch (gcnArch) {
-    case 900:  // MI25
-      return 27;
-    case 906:
-      return 25;  // MI50,MI60
-    case 908:
-      return 25;  // MI100
-    case 910:
-      return 25;  // MI200
-    default:
-      assert(false && "clock data unavailable");
-      return 0;
-  }
-  return 0;
-}
-
 struct rocshmem_env_config_t rocshmem_env_config;
 
 void rocshmem_env_config_init(void) {

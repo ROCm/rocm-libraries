@@ -266,9 +266,6 @@ int rocm_init();
 void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
                                     int gpu_id);
 
-// Returns clock frequency used by s_memrealtime() in Mhz
-uint64_t wallClk_freq_mhz();
-
 struct rocshmem_env_config_t {
   int ro_disable_ipc = 0;
   int ro_progress_delay = 3;

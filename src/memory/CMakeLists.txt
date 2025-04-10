@@ -27,6 +27,5 @@ target_sources(
   ${PROJECT_NAME}
   PRIVATE
     single_heap.cpp
-    slab_heap.cpp
     memory_allocator.cpp
 )
