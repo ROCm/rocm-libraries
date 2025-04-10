@@ -8,12 +8,6 @@
 Tensile API reference
 **********************
 
-This topic provides a categorywise listing of Tensile APIs.
+The Tensile API Tensile.h is written in C89 for compatibility with most software. The code behind the API is allowed to be C++14.
 
-:ref:`common-api-reference`
-
-:ref:`embeddeddata-api-reference`
-
-:ref:`tensilecreatelibrary-api-reference`
-
-:ref:`utilities-api-reference`
+For Tensile APIs, see :ref:`utilities-api-reference`.

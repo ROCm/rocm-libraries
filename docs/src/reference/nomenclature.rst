@@ -1,6 +1,6 @@
 .. meta::
   :description: Tensile is a tool for creating a benchmark-driven backend library for GEMM
-  :keywords: Tensile kernel selection, Tensile solution selection, GEMM, Tensor, ROCm
+  :keywords: Tensile kernel selection, Tensile solution selection, GEMM, Tensor, tensor, ROCm
 
 .. _nomenclature:
 
@@ -95,3 +95,23 @@ Bound indices
 -------------
 
 The bound indices are also known as summation indices. These indices are not present in tensor C but in the summation symbol (Sum[k]) and in tensors A and B. The inner products (pairwise multiply then sum) are performed along these indices.
+
+Benchmark run
+==============
+
+In a benchmark run, a set of potential solutions are generated to solve the problems defined by the parameters in the provided benchmark `config <https://github.com/ROCm/Tensile/tree/develop/Tensile/Configs>`_. The generated kernels with specified sizes or ranges are run and their performance is recorded. The best performing kernels for the given benchmark are selected and written to output as Library logic.
+
+Library logic
+==============
+
+Benchmarking output results are serialized into library logic files. Usually, one file is generated per GFX architecture per benchmark problem. These files consist of kernel metadata, mappings to problems that the set of enclosed kernels can solve, and performance data at particular sizes. Library logic files are used during the build phase to generate tuned, production-ready kernels.
+
+Solution
+=========
+
+Solutions are a parameterized representation of a kernel intended to solve a specific problem. When solving a GEMM type of problem, a solution encapsulates a set of fixed parameters that are applied to a generalized GEMM algorithm.
+
+Predicate
+==========
+
+A predicate is a test to either affirm or negate a condition.

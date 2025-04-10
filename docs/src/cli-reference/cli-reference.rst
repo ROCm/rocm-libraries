@@ -1,6 +1,6 @@
 .. meta::
   :description: Tensile documentation and API reference
-  :keywords: Tensile, GEMM, Tensor, ROCm, API, Documentation
+  :keywords: Tensile, GEMM, Tensor, tensor, ROCm, API, Documentation
 
 .. _cli-reference:
 
@@ -19,6 +19,12 @@ The Tensile project provides several command line tools. Here is the standard sy
    ``[Text inside square brackets]`` Optional arguments.
    ``{Text inside braces}``          Set of arguments. One is required.
    ================================= ==================================
+
+To see the usage of ``TensileCreateLibrary`` tool, use ``help``:
+
+.. code-block:: shell
+
+   Tensile/bin/TensileCreateLibrary --help
 
 .. warning::
    Consider undocumented command-line options experimental or deprecated.

@@ -1,6 +1,6 @@
 .. meta::
   :description: Tensile is a tool for creating a benchmark-driven backend library for GEMM
-  :keywords: Tensile, GEMM, Tensor, Tensile API documentation, Tensile create library
+  :keywords: Tensile, GEMM, Tensor, tensor, Tensile API documentation, Tensile create library
 
 .. _tensilecreatelibrary-cli-reference:
 
@@ -20,7 +20,7 @@ Syntax
 Required arguments
 -------------------
 
-Here is the list of required arguments for invoking the ``TensileCreateLibrary`` command.
+Here is the list of required arguments for invoking the ``TensileCreateLibrary`` command:
 
 .. list-table:: Required arguments
   :header-rows: 1
@@ -42,7 +42,7 @@ Here is the list of required arguments for invoking the ``TensileCreateLibrary``
 Options
 -------
 
-Here is the list of optional arguments for invoking the ``TensileCreateLibrary`` command.
+Here is the list of optional arguments for invoking the ``TensileCreateLibrary`` command:
 
 .. list-table:: Options
   :header-rows: 1
@@ -143,7 +143,7 @@ command is invoked. The runtime language is HIP.
 Usage with options
 --------------------
 
-Here is how to run ``TensileCreateLibrary`` command with options. The following example shows options with and without arguments.
+Here is how to run ``TensileCreateLibrary`` command with options. The following example shows options with and without arguments:
 
 .. code-block::
 

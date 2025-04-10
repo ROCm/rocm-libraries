@@ -1,6 +1,6 @@
 .. meta::
   :description: Tensile is a tool for creating a benchmark-driven backend library for GEMM
-  :keywords: Tensile installation, GEMM, Tensor, Build Tensile, Run benchmarks
+  :keywords: Tensile installation, GEMM, Tensor, tensor, Build Tensile, Run benchmarks
 
 .. _installation:
 
@@ -110,3 +110,14 @@ After the benchmark completes, Tensile creates the following directories:
 - **2_BenchmarkData**: Contains the raw performance results of all kernels in CSV and YAML formats.
 - **3_LibraryLogic**: Contains the winning (optimal) kernel configurations in YAML format. Typically, rocBLAS takes the YAML files from this folder.
 - **4_LibraryClient**: Contains the code objects, kernels, and library code. This is the output of running ``TensileCreateLibrary`` using the ``3_LibraryLogic`` directory as an input.
+
+The client is built at the beginning of the build and cached for future builds if the output directory and client build files are unchanged. To use the client, run:
+
+.. code-block:: shell
+
+   ./0_Build/client/tensile_client -h
+   ./0_Build/client/tensile_client --config-file=1_BenchmarkProblems/Cijk_Ailk_Bljk_SB_00/00_Final/source/ClientParameters.ini
+
+.. note::
+
+  The benchmarking module Tensile.py is written in Python3. The programs generate kernels and build all object files and C/C++ files used for benchmarking. Note that Tensile is **NOT** compatible with Python2.

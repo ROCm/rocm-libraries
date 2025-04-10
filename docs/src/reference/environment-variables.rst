@@ -1,6 +1,6 @@
 .. meta::
   :description: Tensile is a tool for creating a benchmark-driven backend library for GEMM
-  :keywords: Tensile environment variables, GEMM, Tensor
+  :keywords: Tensile environment variables, GEMM, Tensor, tensor
 
 .. _environment-variables:
 
