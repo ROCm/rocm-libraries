@@ -413,12 +413,13 @@ bool match_test_category(const Arguments& arg, const char* category)
 
 bool hipsparselt_client_global_filters(const Arguments& args)
 {
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    //printf("%s %s\n", deviceProperties.gcnArchName, args.gpu_arch);
-    if(args.gpu_arch[0] && !gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch))
+    char* archName;
+    if(hipsparseLtGetArchName(&archName) != HIPSPARSE_STATUS_SUCCESS)
         return false;
-    return true;
+    //printf("%s %s\n", deviceProperties.gcnArchName, args.gpu_arch);
+    bool match = true;
+    if(args.gpu_arch[0] && !gpu_arch_match(archName, args.gpu_arch))
+        match = false;
+    free(archName);
+    return match;
 }
