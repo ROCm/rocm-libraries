@@ -53,11 +53,11 @@ __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
         break;
       case WAVEBarrierAllTestType:
         if(wf_id == 0) {
-          rocshmem_ctx_wave_barrier_all(ctx);
+          rocshmem_ctx_barrier_all_wave(ctx);
         }
         break;
       case WGBarrierAllTestType:
-        rocshmem_ctx_wg_barrier_all(ctx);
+        rocshmem_ctx_barrier_all_wg(ctx);
         break;
       default:
         break;

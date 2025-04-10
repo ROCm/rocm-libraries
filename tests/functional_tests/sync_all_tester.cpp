@@ -53,11 +53,11 @@ __global__ void SyncAllTest(int loop, int skip, long long int *start_time,
         break;
       case WAVESyncAllTestType:
         if(wf_id == 0) {
-          rocshmem_ctx_wave_sync_all(ctx);
+          rocshmem_ctx_sync_all_wave(ctx);
         }
         break;
       case WGSyncAllTestType:
-        rocshmem_ctx_wg_sync_all(ctx);
+        rocshmem_ctx_sync_all_wg(ctx);
         break;
       default:
         break;

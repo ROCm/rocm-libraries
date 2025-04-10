@@ -45,16 +45,16 @@ __global__ void SyncTest(int loop, int skip, long long int *start_time,
     switch (type) {
       case SyncTestType:
         if(t_id == 0) {
-          rocshmem_ctx_team_sync(ctx, teams[wg_id]);
+          rocshmem_ctx_sync(ctx, teams[wg_id]);
         }
         break;
       case WAVESyncTestType:
         if(wf_id == 0) {
-          rocshmem_ctx_wave_team_sync(ctx, teams[wg_id]);
+          rocshmem_ctx_sync_wave(ctx, teams[wg_id]);
         }
         break;
       case WGSyncTestType:
-        rocshmem_ctx_wg_team_sync(ctx, teams[wg_id]);
+        rocshmem_ctx_sync_wg(ctx, teams[wg_id]);
         break;
       default:
         break;

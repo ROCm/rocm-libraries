@@ -35,7 +35,7 @@ __device__ int wg_team_reduce(rocshmem_ctx_t ctx, rocshmem_team_t, T *dest,
   __device__ int wg_team_reduce<T, Op>(rocshmem_ctx_t ctx,               \
                                        rocshmem_team_t team, T * dest,   \
                                        const T *source, int nreduce) {    \
-    return rocshmem_ctx_##TNAME##_##Op_API##_wg_reduce(ctx, team, dest,  \
+    return rocshmem_ctx_##TNAME##_##Op_API##_reduce_wg(ctx, team, dest,  \
                                                         source, nreduce); \
   }
 
@@ -93,7 +93,7 @@ __global__ void TeamReductionTest(int loop, int skip, long long int *start_time,
       start_time[wg_id] = wall_clock64();
     }
     wg_team_reduce<T1, T2>(ctx, team, r_buf, s_buf, size);
-    rocshmem_ctx_wg_barrier_all(ctx);
+    rocshmem_ctx_barrier_all_wg(ctx);
   }
 
   __syncthreads();

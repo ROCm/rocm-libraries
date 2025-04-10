@@ -32,7 +32,7 @@ __device__ void wg_team_alltoall(rocshmem_ctx_t ctx, rocshmem_team_t team,
   template <>                                                                  \
   __device__ void wg_team_alltoall<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
                                  T * dest, const T *source, int nelem) {       \
-    rocshmem_ctx_##TNAME##_wg_alltoall(ctx, team, dest, source, nelem);        \
+    rocshmem_ctx_##TNAME##_alltoall_wg(ctx, team, dest, source, nelem);        \
   }
 
 TEAM_ALLTOALL_DEF_GEN(float, float)

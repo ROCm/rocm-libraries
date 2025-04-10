@@ -453,7 +453,7 @@ __device__ void *rocshmem_ptr(const void *dest, int pe) {
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int rocshmem_wg_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team,
+__device__ int rocshmem_reduce_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
                                    T *dest, const T *source, int nreduce) {
   GPU_DPRINTF("Function: rocshmem_reduce\n");
 
@@ -461,7 +461,7 @@ __device__ int rocshmem_wg_reduce(rocshmem_ctx_t ctx, rocshmem_team_t team,
 }
 
 template <typename T>
-__device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx,
+__device__ void rocshmem_broadcast_wg(rocshmem_ctx_t ctx,
                                        rocshmem_team_t team, T *dest,
                                        const T *source, int nelem,
                                        int pe_root) {
@@ -471,7 +471,7 @@ __device__ void rocshmem_wg_broadcast(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
-__device__ void rocshmem_wg_alltoall(rocshmem_ctx_t ctx,
+__device__ void rocshmem_alltoall_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,
                                       const T *source, int nelem) {
   GPU_DPRINTF("Function: rocshmem_alltoall\n");
@@ -480,7 +480,7 @@ __device__ void rocshmem_wg_alltoall(rocshmem_ctx_t ctx,
 }
 
 template <typename T>
-__device__ void rocshmem_wg_fcollect(rocshmem_ctx_t ctx,
+__device__ void rocshmem_fcollect_wg(rocshmem_ctx_t ctx,
                                       rocshmem_team_t team, T *dest,
                                       const T *source, int nelem) {
   GPU_DPRINTF("Function: rocshmem_fcollect\n");
@@ -576,14 +576,14 @@ __device__ void rocshmem_ctx_barrier_all(rocshmem_ctx_t ctx) {
   get_internal_ctx(ctx)->barrier_all();
 }
 
-__device__ void rocshmem_ctx_wave_barrier_all(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_wave_barrier_all\n");
+__device__ void rocshmem_ctx_barrier_all_wave(rocshmem_ctx_t ctx) {
+  GPU_DPRINTF("Function: rocshmem_ctx_barrier_all_wave\n");
 
   get_internal_ctx(ctx)->barrier_all_wave();
 }
 
-__device__ void rocshmem_ctx_wg_barrier_all(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_wg_barrier_all\n");
+__device__ void rocshmem_ctx_barrier_all_wg(rocshmem_ctx_t ctx) {
+  GPU_DPRINTF("Function: rocshmem_ctx_barrier_all_wg\n");
 
   get_internal_ctx(ctx)->barrier_all_wg();
 }
@@ -594,14 +594,14 @@ __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
   get_internal_ctx(ctx)->barrier(team);
 }
 
-__device__ void rocshmem_ctx_wave_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_wave_barrier\n");
+__device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_barrier_wave\n");
 
   get_internal_ctx(ctx)->barrier_wave(team);
 }
 
-__device__ void rocshmem_ctx_wg_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_wg_barrier\n");
+__device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team) {
+  GPU_DPRINTF("Function: rocshmem_barrier_wg\n");
 
   get_internal_ctx(ctx)->barrier_wg(team);
 }
@@ -612,35 +612,35 @@ __device__ void rocshmem_ctx_sync_all(rocshmem_ctx_t ctx) {
   get_internal_ctx(ctx)->sync_all();
 }
 
-__device__ void rocshmem_ctx_wave_sync_all(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_wave_sync_all\n");
+__device__ void rocshmem_ctx_sync_all_wave(rocshmem_ctx_t ctx) {
+  GPU_DPRINTF("Function: rocshmem_ctx_sync_all_wave\n");
 
   get_internal_ctx(ctx)->sync_all_wave();
 }
 
-__device__ void rocshmem_ctx_wg_sync_all(rocshmem_ctx_t ctx) {
-  GPU_DPRINTF("Function: rocshmem_ctx_wg_sync_all\n");
+__device__ void rocshmem_ctx_sync_all_wg(rocshmem_ctx_t ctx) {
+  GPU_DPRINTF("Function: rocshmem_ctx_sync_all_wg\n");
 
   get_internal_ctx(ctx)->sync_all_wg();
 }
 
-__device__ void rocshmem_ctx_team_sync(rocshmem_ctx_t ctx,
+__device__ void rocshmem_ctx_sync(rocshmem_ctx_t ctx,
                                            rocshmem_team_t team) {
-  GPU_DPRINTF("Function: rocshmem_ctx_sync_all\n");
+  GPU_DPRINTF("Function: rocshmem_ctx_sync\n");
 
   get_internal_ctx(ctx)->sync_wg(team);
 }
 
-__device__ void rocshmem_ctx_wave_team_sync(rocshmem_ctx_t ctx,
+__device__ void rocshmem_ctx_sync_wave(rocshmem_ctx_t ctx,
   rocshmem_team_t team) {
-GPU_DPRINTF("Function: rocshmem_ctx_wave_sync_all\n");
+GPU_DPRINTF("Function: rocshmem_ctx_sync_wave\n");
 
 get_internal_ctx(ctx)->sync_wg(team);
 }
 
-__device__ void rocshmem_ctx_wg_team_sync(rocshmem_ctx_t ctx,
+__device__ void rocshmem_ctx_sync_wg(rocshmem_ctx_t ctx,
   rocshmem_team_t team) {
-GPU_DPRINTF("Function: rocshmem_ctx_wg_sync_all\n");
+GPU_DPRINTF("Function: rocshmem_ctx_sync_wg\n");
 
 get_internal_ctx(ctx)->sync_wg(team);
 }
@@ -981,7 +981,7 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
  * Template generator for reductions
  */
 #define REDUCTION_GEN(T, Op)                                                   \
-  template __device__ int rocshmem_wg_reduce<T, Op>(                           \
+  template __device__ int rocshmem_reduce_wg<T, Op>(                           \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nreduce);
 
@@ -1011,13 +1011,13 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
   template __device__ void rocshmem_get_nbi<T>(T * dest, const T *source,      \
                                                 size_t nelems, int pe);        \
   template __device__ T rocshmem_g<T>(const T *source, int pe);                \
-  template __device__ void rocshmem_wg_broadcast<T>(                           \
+  template __device__ void rocshmem_broadcast_wg<T>(                           \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelem, int pe_root);                                                 \
-  template __device__ void rocshmem_wg_alltoall<T>(                            \
+  template __device__ void rocshmem_alltoall_wg<T>(                            \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelem);                                                              \
-  template __device__ void rocshmem_wg_fcollect<T>(                            \
+  template __device__ void rocshmem_fcollect_wg<T>(                            \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,     \
       int nelem);                                                              \
   template __device__ void rocshmem_put_wave<T>(                               \
@@ -1189,10 +1189,10 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
  **/
 
 #define REDUCTION_DEF_GEN(T, TNAME, Op_API, Op)                               \
-  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_wg_reduce(                 \
+  __device__ int rocshmem_ctx_##TNAME##_##Op_API##_reduce_wg(                 \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nreduce) {                                                          \
-    return rocshmem_wg_reduce<T, Op>(ctx, team, dest, source, nreduce);       \
+    return rocshmem_reduce_wg<T, Op>(ctx, team, dest, source, nreduce);       \
   }
 
 #define ARITH_REDUCTION_DEF_GEN(T, TNAME)         \
@@ -1323,20 +1323,20 @@ __device__ int rocshmem_team_translate_pe(rocshmem_team_t src_team,
                                                  size_t nelems, int pe) {     \
     rocshmem_get_nbi_wg<T>(dest, source, nelems, pe);                         \
   }                                                                           \
-  __device__ void rocshmem_ctx_##TNAME##_wg_broadcast(                        \
+  __device__ void rocshmem_ctx_##TNAME##_broadcast_wg(                        \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelem, int pe_root) {                                               \
-    rocshmem_wg_broadcast<T>(ctx, team, dest, source, nelem, pe_root);        \
+    rocshmem_broadcast_wg<T>(ctx, team, dest, source, nelem, pe_root);        \
   }                                                                           \
-  __device__ void rocshmem_ctx_##TNAME##_wg_alltoall(                         \
+  __device__ void rocshmem_ctx_##TNAME##_alltoall_wg(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelem) {                                                            \
-    rocshmem_wg_alltoall<T>(ctx, team, dest, source, nelem);                  \
+    rocshmem_alltoall_wg<T>(ctx, team, dest, source, nelem);                  \
   }                                                                           \
-  __device__ void rocshmem_ctx_##TNAME##_wg_fcollect(                         \
+  __device__ void rocshmem_ctx_##TNAME##_fcollect_wg(                         \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T *dest, const T *source,     \
       int nelem) {                                                            \
-    rocshmem_wg_fcollect<T>(ctx, team, dest, source, nelem);                  \
+    rocshmem_fcollect_wg<T>(ctx, team, dest, source, nelem);                  \
   }
 
 #define AMO_STANDARD_DEF_GEN(T, TNAME)                                        \

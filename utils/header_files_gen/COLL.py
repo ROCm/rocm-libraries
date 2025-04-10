@@ -43,7 +43,7 @@ types = [
 
 def alltoall_api(T, TNAME):
     return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_wg_alltoall(\n"
+        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems);\n\n"
     )
@@ -75,7 +75,7 @@ def generate_alltoall_api():
 
 def broadcast_api(T, TNAME):
     return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_wg_broadcast(\n"
+        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_broadcast_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems, int pe_root);\n"
         f"__host__ void rocshmem_ctx_{TNAME}_broadcast(\n"
@@ -120,7 +120,7 @@ def generate_broadcast_api():
 
 def fcollect_api(T, TNAME):
     return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_wg_fcollect(\n"
+        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_fcollect_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
         f"    const {T} *source, int nelems);\n\n"
     )
@@ -152,7 +152,7 @@ def generate_fcollect_api():
 
 def reduction_api(T, TNAME, Op_API):
     return (
-        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_wg_reduce(\n"
+        f"__device__ ATTR_NO_INLINE int rocshmem_ctx_{TNAME}_{Op_API}_reduce_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest, const {T} *source,\n"
         f"    int nreduce);\n"
         f"__host__ int rocshmem_ctx_{TNAME}_{Op_API}_reduce(\n"

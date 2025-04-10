@@ -34,7 +34,7 @@ __device__ void wg_team_broadcast(rocshmem_ctx_t ctx, rocshmem_team_t team,
   __device__ void wg_team_broadcast<T>(                                       \
       rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
       int nelem, int pe_root) {                                               \
-    rocshmem_ctx_##TNAME##_wg_broadcast(ctx, team, dest, source, nelem,       \
+    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelem,       \
                                          pe_root);                            \
   }
 

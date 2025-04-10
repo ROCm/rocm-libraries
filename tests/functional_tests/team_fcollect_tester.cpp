@@ -32,7 +32,7 @@ __device__ void wg_team_fcollect(rocshmem_ctx_t ctx, rocshmem_team_t team,
   template <>                                                                  \
   __device__ void wg_team_fcollect<T>(rocshmem_ctx_t ctx, rocshmem_team_t team,\
                                       T * dest, const T *source, int nelem) {  \
-    rocshmem_ctx_##TNAME##_wg_fcollect(ctx, team, dest, source, nelem);        \
+    rocshmem_ctx_##TNAME##_fcollect_wg(ctx, team, dest, source, nelem);        \
   }
 
 TEAM_FCOLLECT_DEF_GEN(float, float)

@@ -37,7 +37,7 @@ __global__ void alltoall_test(int *source, int *dest, size_t nelem,
     rocshmem_wg_ctx_create(ctx_type, &ctx);
     int num_pes = rocshmem_ctx_n_pes(ctx);
 
-    rocshmem_ctx_int_wg_alltoall(ctx, team, dest, source, nelem);
+    rocshmem_ctx_int_alltoall_wg(ctx, team, dest, source, nelem);
 
     rocshmem_ctx_quiet(ctx);
     __syncthreads();
